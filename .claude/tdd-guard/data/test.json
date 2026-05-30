@@ -1,0 +1,236 @@
+{
+  "testModules": [
+    {
+      "moduleId": "/home/jamesthelivingplanet/dev/flotilla/electron/services/statusDetector.test.ts",
+      "tests": [
+        {
+          "name": "removes CSI color sequences",
+          "fullName": "stripAnsi > removes CSI color sequences",
+          "state": "passed"
+        },
+        {
+          "name": "removes cursor movement sequences",
+          "fullName": "stripAnsi > removes cursor movement sequences",
+          "state": "passed"
+        },
+        {
+          "name": "leaves plain text untouched",
+          "fullName": "stripAnsi > leaves plain text untouched",
+          "state": "passed"
+        },
+        {
+          "name": "matches [y/n] variants",
+          "fullName": "looksLikeQuestion > matches [y/n] variants",
+          "state": "passed"
+        },
+        {
+          "name": "matches \"Should I\"",
+          "fullName": "looksLikeQuestion > matches \"Should I\"",
+          "state": "passed"
+        },
+        {
+          "name": "matches \"Do you want\"",
+          "fullName": "looksLikeQuestion > matches \"Do you want\"",
+          "state": "passed"
+        },
+        {
+          "name": "matches \"Continue?\" / \"Proceed?\"",
+          "fullName": "looksLikeQuestion > matches \"Continue?\" / \"Proceed?\"",
+          "state": "passed"
+        },
+        {
+          "name": "matches trailing ? (with whitespace)",
+          "fullName": "looksLikeQuestion > matches trailing ? (with whitespace)",
+          "state": "passed"
+        },
+        {
+          "name": "matches trailing prompt glyph ❯",
+          "fullName": "looksLikeQuestion > matches trailing prompt glyph ❯",
+          "state": "passed"
+        },
+        {
+          "name": "matches trailing prompt glyph >",
+          "fullName": "looksLikeQuestion > matches trailing prompt glyph >",
+          "state": "passed"
+        },
+        {
+          "name": "matches \"Press enter\"",
+          "fullName": "looksLikeQuestion > matches \"Press enter\"",
+          "state": "passed"
+        },
+        {
+          "name": "does NOT match plain progress output",
+          "fullName": "looksLikeQuestion > does NOT match plain progress output",
+          "state": "passed"
+        },
+        {
+          "name": "strips ANSI before matching",
+          "fullName": "looksLikeQuestion > strips ANSI before matching",
+          "state": "passed"
+        },
+        {
+          "name": "returns running while output is recent",
+          "fullName": "StatusDetector > fresh output → running > returns running while output is recent",
+          "state": "passed"
+        },
+        {
+          "name": "returns running immediately after construction (no output yet)",
+          "fullName": "StatusDetector > fresh output → running > returns running immediately after construction (no output yet)",
+          "state": "passed"
+        },
+        {
+          "name": "returns needs when output goes idle and tail looks like a question",
+          "fullName": "StatusDetector > idle + question tail → needs > returns needs when output goes idle and tail looks like a question",
+          "state": "passed"
+        },
+        {
+          "name": "returns needs for [y/n] prompt after idle",
+          "fullName": "StatusDetector > idle + question tail → needs > returns needs for [y/n] prompt after idle",
+          "state": "passed"
+        },
+        {
+          "name": "returns needs for trailing ❯ glyph after idle",
+          "fullName": "StatusDetector > idle + question tail → needs > returns needs for trailing ❯ glyph after idle",
+          "state": "passed"
+        },
+        {
+          "name": "returns running when output is idle but tail is not a question",
+          "fullName": "StatusDetector > idle + plain tail → still running > returns running when output is idle but tail is not a question",
+          "state": "passed"
+        },
+        {
+          "name": "returns done on exit code 0",
+          "fullName": "StatusDetector > markExit > returns done on exit code 0",
+          "state": "passed"
+        },
+        {
+          "name": "returns errored on non-zero exit code",
+          "fullName": "StatusDetector > markExit > returns errored on non-zero exit code",
+          "state": "passed"
+        },
+        {
+          "name": "exit takes priority over idle inspection",
+          "fullName": "StatusDetector > markExit > exit takes priority over idle inspection",
+          "state": "passed"
+        },
+        {
+          "name": "strips ANSI before idle inspection so patterns still fire",
+          "fullName": "StatusDetector > ANSI in stream > strips ANSI before idle inspection so patterns still fire",
+          "state": "passed"
+        },
+        {
+          "name": "does not blow up with very large output",
+          "fullName": "StatusDetector > buffer bounding > does not blow up with very large output",
+          "state": "passed"
+        },
+        {
+          "name": "still detects question in tail after large output",
+          "fullName": "StatusDetector > buffer bounding > still detects question in tail after large output",
+          "state": "passed"
+        },
+        {
+          "name": "is a non-empty array of RegExp",
+          "fullName": "StatusDetector > NEEDS_PATTERNS export > is a non-empty array of RegExp",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/dev/flotilla/electron/services/worktreeManager.test.ts",
+      "tests": [
+        {
+          "name": "returns false for empty output (clean)",
+          "fullName": "parsePorcelainDirty > returns false for empty output (clean)",
+          "state": "passed"
+        },
+        {
+          "name": "returns true when there are changed files",
+          "fullName": "parsePorcelainDirty > returns true when there are changed files",
+          "state": "passed"
+        },
+        {
+          "name": "parses behind\tahead correctly",
+          "fullName": "parseRevListCount > parses behind\tahead correctly",
+          "state": "passed"
+        },
+        {
+          "name": "handles zero values",
+          "fullName": "parseRevListCount > handles zero values",
+          "state": "passed"
+        },
+        {
+          "name": "handles spaces instead of tabs (robustness)",
+          "fullName": "parseRevListCount > handles spaces instead of tabs (robustness)",
+          "state": "passed"
+        },
+        {
+          "name": "defaults to 0 on garbage input",
+          "fullName": "parseRevListCount > defaults to 0 on garbage input",
+          "state": "passed"
+        },
+        {
+          "name": "parses a full shortstat line",
+          "fullName": "parseShortstat > parses a full shortstat line",
+          "state": "passed"
+        },
+        {
+          "name": "parses insertions-only output",
+          "fullName": "parseShortstat > parses insertions-only output",
+          "state": "passed"
+        },
+        {
+          "name": "parses deletions-only output",
+          "fullName": "parseShortstat > parses deletions-only output",
+          "state": "passed"
+        },
+        {
+          "name": "returns zeros for empty output (no diff)",
+          "fullName": "parseShortstat > returns zeros for empty output (no diff)",
+          "state": "passed"
+        },
+        {
+          "name": "parses all stanzas",
+          "fullName": "parsePorcelainWorktreeList > parses all stanzas",
+          "state": "passed"
+        },
+        {
+          "name": "strips refs/heads/ prefix from branch names",
+          "fullName": "parsePorcelainWorktreeList > strips refs/heads/ prefix from branch names",
+          "state": "passed"
+        },
+        {
+          "name": "captures the correct paths",
+          "fullName": "parsePorcelainWorktreeList > captures the correct paths",
+          "state": "passed"
+        },
+        {
+          "name": "returns empty array for empty input",
+          "fullName": "parsePorcelainWorktreeList > returns empty array for empty input",
+          "state": "passed"
+        },
+        {
+          "name": "ignores detached HEAD stanzas (no branch line)",
+          "fullName": "parsePorcelainWorktreeList > ignores detached HEAD stanzas (no branch line)",
+          "state": "passed"
+        },
+        {
+          "name": "produces the correct path",
+          "fullName": "pathFor > produces the correct path",
+          "state": "passed"
+        },
+        {
+          "name": "is pure — same inputs, same output",
+          "fullName": "pathFor > is pure — same inputs, same output",
+          "state": "passed"
+        },
+        {
+          "name": "uses org-name as the intermediate directory",
+          "fullName": "pathFor > uses org-name as the intermediate directory",
+          "state": "passed"
+        }
+      ]
+    }
+  ],
+  "unhandledErrors": [],
+  "reason": "passed"
+}
