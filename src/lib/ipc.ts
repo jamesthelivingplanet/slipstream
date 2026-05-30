@@ -1,0 +1,85 @@
+/**
+ * Renderer-side IPC client.
+ *
+ * `hasBackend` is true only inside Electron (window.flotilla is present).
+ * When false (plain browser / Vite dev without Electron), all read calls
+ * resolve to empty arrays and write calls are no-ops, so the renderer still
+ * renders without crashing.
+ */
+import type {
+  RepoDTO,
+  SessionDTO,
+  TicketDTO,
+  SessionStatus,
+} from '../../electron/shared/contract.js'
+
+export const hasBackend =
+  typeof window !== 'undefined' && !!window.flotilla
+
+// ── Repos ──────────────────────────────────────────────────────────────────
+
+export function listRepos(): Promise<RepoDTO[]> {
+  return hasBackend ? window.flotilla.listRepos() : Promise.resolve([])
+}
+
+export function registerRepo(absPath: string): Promise<RepoDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.flotilla.registerRepo(absPath)
+}
+
+// ── Tickets ────────────────────────────────────────────────────────────────
+
+export function listTickets(): Promise<TicketDTO[]> {
+  return hasBackend ? window.flotilla.listTickets() : Promise.resolve([])
+}
+
+// ── Sessions ───────────────────────────────────────────────────────────────
+
+export function startSession(input: {
+  tid: string
+  title: string
+  prompt: string
+  repoId: string
+}): Promise<SessionDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.flotilla.startSession(input)
+}
+
+export function writeSession(id: string, data: string): void {
+  if (hasBackend) window.flotilla.writeSession(id, data)
+}
+
+export function resizeSession(id: string, cols: number, rows: number): void {
+  if (hasBackend) window.flotilla.resizeSession(id, cols, rows)
+}
+
+export function killSession(id: string): Promise<void> {
+  return hasBackend ? window.flotilla.killSession(id) : Promise.resolve()
+}
+
+export function cleanupSession(
+  id: string,
+  opts?: { force?: boolean },
+): Promise<{ removed: boolean; reason?: string }> {
+  return hasBackend
+    ? window.flotilla.cleanupSession(id, opts)
+    : Promise.resolve({ removed: false, reason: 'no backend' })
+}
+
+// ── Push event subscriptions ───────────────────────────────────────────────
+
+/** Subscribe to PTY data chunks. Returns an unsubscribe fn. */
+export function onSessionData(
+  cb: (id: string, data: string) => void,
+): () => void {
+  if (!hasBackend) return () => {}
+  return window.flotilla.onSessionData(cb)
+}
+
+/** Subscribe to session status transitions. Returns an unsubscribe fn. */
+export function onSessionStatus(
+  cb: (id: string, status: SessionStatus) => void,
+): () => void {
+  if (!hasBackend) return () => {}
+  return window.flotilla.onSessionStatus(cb)
+}
