@@ -17,6 +17,7 @@ export interface Ticket {
 }
 
 export interface Session {
+  id?: string           // backend SessionDTO UUID; absent on mock sessions
   tid: string
   src: Source
   status: Status

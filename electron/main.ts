@@ -29,6 +29,9 @@ function createWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
+      // ESM (.mjs) preload scripts require the sandbox to be disabled; otherwise
+      // the preload silently fails to load and window.flotilla is never exposed.
+      sandbox: false,
     },
   })
 

@@ -3,11 +3,11 @@
   import { Terminal, type IDisposable } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
-  import { repoOf } from '../mock'
+  import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession } from '../stores'
+  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, killSession, cleanupSession } from '../ipc'
   import { mode } from '../theme'
-  import { select, resolveNeedsInput } from '../stores'
   import { icons } from '../icons'
-  import type { Session } from '../types'
+  import type { Session, Status } from '../types'
 
   export let session: Session
 
@@ -19,11 +19,20 @@
   let needsInput = false
   let alertMsg = ''
 
-  $: r = repoOf(session.repo)
+  // Unsubscribe fns for backend push listeners
+  let offData: (() => void) | null = null
+  let offStatus: (() => void) | null = null
+
+  $: r = repoById(session.repo)
   $: dot =
     session.status === 'idle'
       ? 'hsl(var(--muted-foreground))'
       : `hsl(var(--st-${session.status === 'needs' ? 'needs' : session.status === 'running' ? 'run' : session.status === 'done' ? 'done' : 'error'}))`
+
+  // Use the live backend PTY whenever a backend is present. The session.id
+  // arrives asynchronously (after startSession resolves), so we must not gate
+  // on it here — data/status callbacks filter by id once it's set.
+  $: liveMode = hasBackend
 
   onMount(() => {
     term = new Terminal({
@@ -34,7 +43,12 @@
     term.loadAddon(fit)
     term.open(mountEl)
     try { fit.fit() } catch {}
-    run()
+
+    if (liveMode) {
+      startLive()
+    } else {
+      runSimulation()
+    }
 
     const onResize = () => { try { fit.fit() } catch {} }
     window.addEventListener('resize', onResize)
@@ -43,16 +57,66 @@
     return () => { window.removeEventListener('resize', onResize); unsub() }
   })
 
-  onDestroy(() => { cleanup(); term?.dispose() })
+  onDestroy(() => {
+    cleanupListeners()
+    cleanupSimulation()
+    term?.dispose()
+  })
 
-  function cleanup() {
+  // ── Live PTY mode ─────────────────────────────────────────────────────────
+
+  let ro: ResizeObserver | null = null
+  let offResize: (() => void) | null = null
+
+  function startLive() {
+    term.reset()
+    setTimeout(() => { try { fit.fit() } catch {}; term.focus() }, 40)
+
+    // Pipe PTY output into xterm (filtered to this session once id is known).
+    offData = onSessionData((sid, chunk) => {
+      if (sid === session.id) term.write(chunk)
+    })
+
+    // Forward keypresses to the PTY.
+    term.onData((d) => {
+      if (session.id) writeSession(session.id, d)
+    })
+
+    // Keep the PTY sized to the panel (window + element resizes).
+    const sendResize = () => {
+      try { fit.fit() } catch {}
+      if (session.id) resizeSession(session.id, term.cols, term.rows)
+    }
+    if (typeof ResizeObserver !== 'undefined' && mountEl) {
+      ro = new ResizeObserver(sendResize)
+      ro.observe(mountEl)
+    }
+    window.addEventListener('resize', sendResize)
+    offResize = () => window.removeEventListener('resize', sendResize)
+
+    // Reflect backend status transitions into the store.
+    offStatus = onSessionStatus((sid, status) => {
+      if (sid === session.id) setSessionStatus(sid, status as Status)
+    })
+  }
+
+  function cleanupListeners() {
+    if (offData) { offData(); offData = null }
+    if (offStatus) { offStatus(); offStatus = null }
+    if (offResize) { offResize(); offResize = null }
+    if (ro) { ro.disconnect(); ro = null }
+  }
+
+  // ── Simulation mode ───────────────────────────────────────────────────────
+
+  function cleanupSimulation() {
     if (timer) { clearTimeout(timer); timer = null }
     if (askSub) { askSub.dispose(); askSub = null }
     needsInput = false
   }
 
-  function run() {
-    cleanup()
+  function runSimulation() {
+    cleanupSimulation()
     term.reset()
     setTimeout(() => { try { fit.fit() } catch {}; term.focus() }, 40)
     if (!r) return
@@ -93,6 +157,29 @@
       }
     })
   }
+
+  // ── Toolbar actions ───────────────────────────────────────────────────────
+
+  async function handleCleanup() {
+    if (liveMode && session.id) {
+      await killSession(session.id)
+      const result = await cleanupSession(session.id, { force: false })
+      if (result.removed) {
+        removeSession(session.id)
+        select(null)
+      } else {
+        // Dirty/unmerged — force-remove after confirmation.
+        if (confirm(`Worktree not clean: ${result.reason ?? 'unknown reason'}. Force remove?`)) {
+          await cleanupSession(session.id, { force: true })
+          removeSession(session.id)
+          select(null)
+        }
+      }
+    } else {
+      // Mock: just deselect.
+      select(null)
+    }
+  }
 </script>
 
 <div class="term-head">
@@ -110,7 +197,7 @@
   <button class="btn btn-outline btn-sm" on:click={() => alert('Opens the worktree in your editor (Phase 1)')}>
     {@html icons.externalLink} Editor
   </button>
-  <button class="btn btn-outline btn-sm btn-danger" on:click={() => alert('git worktree remove — guarded if dirty/unmerged (Phase 1)')}>
+  <button class="btn btn-outline btn-sm btn-danger" on:click={handleCleanup}>
     {@html icons.trash} Clean up
   </button>
 </div>

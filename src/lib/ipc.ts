@@ -27,6 +27,11 @@ export function registerRepo(absPath: string): Promise<RepoDTO> {
   return window.flotilla.registerRepo(absPath)
 }
 
+/** Opens a native folder picker and registers the chosen repo. Resolves null if cancelled or no backend. */
+export function pickAndRegisterRepo(): Promise<RepoDTO | null> {
+  return hasBackend ? window.flotilla.pickAndRegisterRepo() : Promise.resolve(null)
+}
+
 // ── Tickets ────────────────────────────────────────────────────────────────
 
 export function listTickets(): Promise<TicketDTO[]> {

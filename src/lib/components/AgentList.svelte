@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { visible, counts, filter, query, selectedId, select } from '../stores'
-  import { repoOf } from '../mock'
+  import { visible, counts, filter, query, selectedId, select, repoById } from '../stores'
   import { STATUS_LABEL, type Filter } from '../types'
   import { icons } from '../icons'
 
@@ -55,7 +54,7 @@
           {#if s.status === 'idle'}
             <span class="muted">draft · pick a repo to start</span>
           {:else}
-            {@const r = repoOf(s.repo)}
+            {@const r = repoById(s.repo)}
             <span class="b mono">{@html icons.folder}<span class="br">{r?.org}/{r?.name}</span></span>
             <span class="b mono">{@html icons.gitBranch}<span class="br">{s.branch?.replace(s.tid + '-', '')}</span></span>
             <span class="diff mono"><span class="add">+{s.add}</span><span class="del">−{s.del}</span></span>

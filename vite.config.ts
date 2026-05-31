@@ -21,11 +21,11 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
-        vite: { build: { rollupOptions: { external } } },
+        vite: { build: { rollupOptions: { external, output: { format: 'es' } } } },
       },
       preload: {
         input: 'electron/preload.ts',
-        vite: { build: { rollupOptions: { external } } },
+        vite: { build: { rollupOptions: { external, output: { format: 'es' } } } },
       },
       renderer: {},
     }),

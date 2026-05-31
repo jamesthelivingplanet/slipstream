@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow } from 'electron'
 import type {
   IRepoRegistry,
   IWorktreeManager,
@@ -41,6 +41,15 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
   ipcMain.handle(IPC.registerRepo, (_e, absPath: string) =>
     deps.repos.register(absPath),
   )
+
+  ipcMain.handle(IPC.pickRepo, async () => {
+    const res = await dialog.showOpenDialog(win, {
+      title: 'Add a repository',
+      properties: ['openDirectory'],
+    })
+    if (res.canceled || !res.filePaths[0]) return null
+    return deps.repos.register(res.filePaths[0])
+  })
 
   // ── Tickets ────────────────────────────────────────────────────────────────
 

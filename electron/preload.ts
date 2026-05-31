@@ -6,6 +6,7 @@ const api: FlotillaApi = {
   // ── Repos ────────────────────────────────────────────────────────────────
   listRepos: () => ipcRenderer.invoke(IPC.listRepos),
   registerRepo: (absPath) => ipcRenderer.invoke(IPC.registerRepo, absPath),
+  pickAndRegisterRepo: () => ipcRenderer.invoke(IPC.pickRepo),
 
   // ── Tickets ──────────────────────────────────────────────────────────────
   listTickets: () => ipcRenderer.invoke(IPC.listTickets),

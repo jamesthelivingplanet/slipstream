@@ -1,11 +1,16 @@
 <script lang="ts">
-  import { selected, dialogOpen } from './lib/stores'
+  import { onMount } from 'svelte'
+  import { selected, dialogOpen, initFromBackend, registerRepo } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
   import TerminalView from './lib/components/TerminalView.svelte'
   import NewAgentDialog from './lib/components/NewAgentDialog.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
+
+  onMount(() => {
+    initFromBackend()
+  })
 </script>
 
 <div class="app">
@@ -17,6 +22,9 @@
     </div>
     <div class="spacer"></div>
     <ThemeMenu />
+    <button class="btn btn-outline btn-sm" on:click={() => registerRepo()}>
+      {@html icons.plus} Add repo
+    </button>
     <button class="btn btn-primary btn-sm" on:click={() => dialogOpen.set(true)}>
       {@html icons.plus} New agent
     </button>

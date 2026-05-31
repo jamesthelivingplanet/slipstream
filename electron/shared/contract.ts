@@ -123,6 +123,8 @@ export interface ITicketProvider {
 export interface FlotillaApi {
   listRepos(): Promise<RepoDTO[]>
   registerRepo(absPath: string): Promise<RepoDTO>
+  /** Opens a native folder picker, registers the chosen repo. null if cancelled. */
+  pickAndRegisterRepo(): Promise<RepoDTO | null>
   listTickets(): Promise<TicketDTO[]>
 
   /** Creates the worktree, claims a port, spawns claude. Returns the session. */
@@ -140,6 +142,7 @@ export interface FlotillaApi {
 export const IPC = {
   listRepos: 'repos:list',
   registerRepo: 'repos:register',
+  pickRepo: 'repos:pick',
   listTickets: 'tickets:list',
   startSession: 'session:start',
   writeSession: 'session:write',

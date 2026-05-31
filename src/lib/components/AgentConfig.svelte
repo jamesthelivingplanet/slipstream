@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { repos, repoOf, branchFor } from '../mock'
-  import { startAgent } from '../stores'
+  import { repos, repoById, startAgent } from '../stores'
+  import { branchFor } from '../mock'
   import { icons } from '../icons'
   import type { Session } from '../types'
 
@@ -18,7 +18,7 @@
     menuOpen = false
   }
 
-  $: chosen = repoChoice ? repoOf(repoChoice) : undefined
+  $: chosen = repoChoice ? repoById(repoChoice) : undefined
   $: branch = branchFor(session.tid, session.title)
 
   function start() {
@@ -56,7 +56,7 @@
         </button>
         {#if menuOpen}
           <div class="sel-menu">
-            {#each repos as r}
+            {#each $repos as r}
               <button type="button" class="opt" class:sel={repoChoice === r.id} on:click={() => { repoChoice = r.id; menuOpen = false }}>
                 <span><span class="muted">{r.org}/</span>{r.name}</span>
                 <span class="badge mono" style="margin-left:8px">{r.base}</span>

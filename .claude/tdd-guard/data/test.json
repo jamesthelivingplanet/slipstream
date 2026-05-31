@@ -1,6 +1,16 @@
 {
   "testModules": [
     {
+      "moduleId": "/home/jamesthelivingplanet/dev/flotilla/electron/preload-esm.test.ts",
+      "tests": [
+        {
+          "name": "is valid ESM — no bare require() calls",
+          "fullName": "preload build output > is valid ESM — no bare require() calls",
+          "state": "passed"
+        }
+      ]
+    },
+    {
       "moduleId": "/home/jamesthelivingplanet/dev/flotilla/electron/services/statusDetector.test.ts",
       "tests": [
         {
