@@ -1,17 +1,35 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { join, dirname } from 'node:path'
 import Database from 'better-sqlite3'
 import type { RepoDTO, SessionDTO } from '../shared/contract.js'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
+// Inlined (not read from schema.sql) so the bundled main.js has no runtime
+// dependency on a sibling file the bundler doesn't copy.
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS repos (
+  id    TEXT PRIMARY KEY,
+  org   TEXT NOT NULL,
+  name  TEXT NOT NULL,
+  base  TEXT NOT NULL,
+  path  TEXT NOT NULL
+);
 
-/** Open (or create) a SQLite database at `file` and apply schema.sql. */
+CREATE TABLE IF NOT EXISTS sessions (
+  id        TEXT PRIMARY KEY,
+  tid       TEXT NOT NULL,
+  title     TEXT NOT NULL,
+  prompt    TEXT NOT NULL,
+  repoId    TEXT NOT NULL,
+  branch    TEXT NOT NULL,
+  status    TEXT NOT NULL DEFAULT 'idle',
+  port      INTEGER,
+  createdAt INTEGER NOT NULL
+);
+`
+
+/** Open (or create) a SQLite database at `file` and apply the schema. */
 export function openDb(file: string): Database.Database {
   const db = new Database(file)
   db.pragma('journal_mode = WAL')
-  const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf8')
-  db.exec(schema)
+  db.exec(SCHEMA)
   return db
 }
 
