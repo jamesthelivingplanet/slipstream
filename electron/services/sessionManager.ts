@@ -17,6 +17,7 @@ import type {
   StartSessionInput,
 } from '../shared/contract.js'
 import { StatusDetector } from './statusDetector.js'
+import { trustDirectory } from './claudeTrust.js'
 
 // ─── Internal session record ──────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ export function createSessionManager(): ISessionManager {
 
     const detector = new StatusDetector()
 
+    trustDirectory(input.cwd)
     const proc = pty.spawn(
       'claude',
       ['--dangerously-skip-permissions', input.prompt],

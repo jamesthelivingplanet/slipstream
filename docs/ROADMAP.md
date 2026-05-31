@@ -31,22 +31,25 @@ _Last updated: 2026-05-31._
   (title + prompt, no ticket); ticket picker appears only when a provider supplies tickets.
 
 **Verification**
-- 50 tests: `statusDetector` (26), `worktreeManager` pure (18) + real-git integration (5),
-  `preload-esm` build guard (1).
+- 56 tests: `statusDetector` (26), `worktreeManager` pure (18) + real-git integration (5),
+  `preload-esm` build guard (1), `claudeTrust` (6).
 - Playwright drivers in `scripts/e2e/` exercise add-repo, settings/repos, and blank-agent
   flows against the built app (verified via screenshots).
 
+**Live PTY streaming verified**
+- Confirmed end-to-end: Start → real `claude` (PTY) → live xterm streaming, via a manual run.
+- Folder-trust dialog removed for autonomous Start: `sessionManager` now pre-seeds
+  `hasTrustDialogAccepted` for the worktree dir in `~/.claude.json` (new `claudeTrust.ts`,
+  atomic write, best-effort) before spawning, so a fresh worktree no longer prompts.
+  Test count is now 56 (6 new `claudeTrust` unit tests).
+
 ## Next 🔜
 
-1. **Verify live PTY streaming end-to-end** — the last unproven core link (Start → real
-   `claude` → xterm). Plan: a `FLOTILLA_AGENT_CMD` seam in `sessionManager` so e2e can
-   drive Start with a benign command and assert/screenshot streamed output without running
-   an autonomous agent.
-2. **Early-output buffer** — the first PTY bytes can race the terminal's subscription;
+1. **Early-output buffer** — the first PTY bytes can race the terminal's subscription;
    buffer-and-replay in `sessionManager` so nothing is lost.
-3. **Real ticket provider** — Linear and/or Jira behind `ITicketProvider` (replacing
+2. **Real ticket provider** — Linear and/or Jira behind `ITicketProvider` (replacing
    `emptyProvider`); the New-agent ticket picker is already wired for when tickets exist.
-4. **Status-detection hardening** — tune `statusDetector` against real `claude` TUI output
+3. **Status-detection hardening** — tune `statusDetector` against real `claude` TUI output
    (the "needs you" patterns are coarse stubs today).
 
 ## Later 🗓️
