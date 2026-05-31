@@ -1,0 +1,95 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createWorktreeManager } from './worktreeManager.js'
+import type { RepoDTO } from '../shared/contract.js'
+
+/**
+ * Exercises the worktree lifecycle against a REAL temp git repo — the core of
+ * the live "start agent" / "clean up" flow. No native modules, so it runs under
+ * plain node/vitest.
+ */
+const git = (cwd: string, ...args: string[]) =>
+  execFileSync('git', args, { cwd, encoding: 'utf8' })
+
+let root: string
+let repo: RepoDTO
+let wm: ReturnType<typeof createWorktreeManager>
+
+beforeAll(() => {
+  root = mkdtempSync(join(tmpdir(), 'flotilla-wt-'))
+  const repoPath = join(root, 'source')
+  execFileSync('git', ['init', '-b', 'main', repoPath], { encoding: 'utf8' })
+  git(repoPath, 'config', 'user.email', 'test@flotilla.dev')
+  git(repoPath, 'config', 'user.name', 'Flotilla Test')
+  writeFileSync(join(repoPath, 'README.md'), '# demo\n')
+  git(repoPath, 'add', '-A')
+  git(repoPath, 'commit', '-m', 'init')
+
+  repo = { id: 'acme-demo', org: 'acme', name: 'demo', base: 'main', path: repoPath }
+  wm = createWorktreeManager(root)
+})
+
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+describe('worktreeManager (real git)', () => {
+  it('creates a worktree under .worktrees/<org>-<name>/<branch>, clean', async () => {
+    const info = await wm.create(repo, 'feat-clean')
+    expect(info.path).toBe(join(root, '.worktrees', 'acme-demo', 'feat-clean'))
+    expect(existsSync(info.path)).toBe(true)
+    expect(info.dirty).toBe(false)
+    expect(info.ahead).toBe(0)
+    expect(info.behind).toBe(0)
+  })
+
+  it('removes a clean, unmerged-free worktree without force', async () => {
+    const res = await wm.remove(repo, 'feat-clean')
+    expect(res.removed).toBe(true)
+    expect(existsSync(join(root, '.worktrees', 'acme-demo', 'feat-clean'))).toBe(false)
+  })
+
+  it('detects a dirty worktree and refuses removal without force', async () => {
+    const info = await wm.create(repo, 'feat-dirty')
+    writeFileSync(join(info.path, 'scratch.txt'), 'uncommitted\n')
+
+    const status = await wm.status(repo, 'feat-dirty')
+    expect(status.dirty).toBe(true)
+
+    const refused = await wm.remove(repo, 'feat-dirty')
+    expect(refused.removed).toBe(false)
+    expect(refused.reason).toMatch(/uncommitted/i)
+
+    const forced = await wm.remove(repo, 'feat-dirty', { force: true })
+    expect(forced.removed).toBe(true)
+  })
+
+  it('reports ahead count and refuses removal of an unmerged branch', async () => {
+    const info = await wm.create(repo, 'feat-ahead')
+    writeFileSync(join(info.path, 'feature.txt'), 'work\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'feature work')
+
+    const status = await wm.status(repo, 'feat-ahead')
+    expect(status.ahead).toBe(1)
+    expect(status.dirty).toBe(false)
+
+    const refused = await wm.remove(repo, 'feat-ahead')
+    expect(refused.removed).toBe(false)
+    expect(refused.reason).toMatch(/not merged/i)
+
+    const forced = await wm.remove(repo, 'feat-ahead', { force: true })
+    expect(forced.removed).toBe(true)
+  })
+
+  it('lists active worktrees (excluding the main checkout)', async () => {
+    await wm.create(repo, 'feat-list')
+    const list = await wm.list(repo)
+    expect(list.some((w) => w.branch === 'feat-list')).toBe(true)
+    expect(list.some((w) => w.path === repo.path)).toBe(false)
+    await wm.remove(repo, 'feat-list', { force: true })
+  })
+})
