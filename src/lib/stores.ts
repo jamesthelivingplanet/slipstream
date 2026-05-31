@@ -6,8 +6,18 @@ import {
   listRepos,
   listTickets,
   pickAndRegisterRepo,
+  removeRepo,
   startSession,
 } from './ipc'
+import { pushToast } from './toast'
+
+function cleanError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e)
+  return msg
+    .replace(/^Error invoking remote method '[^']*':\s*/, '')
+    .replace(/^(Uncaught\s+)?Error:\s*/, '')
+    .trim() || 'Something went wrong'
+}
 
 export const repos = writable<Repo[]>([...mockRepos])
 export const sessions = writable<Session[]>([...initialSessions])
@@ -16,6 +26,7 @@ export const selectedId = writable<string | null>(null)
 export const filter = writable<Filter>('all')
 export const query = writable<string>('')
 export const dialogOpen = writable<boolean>(false)
+export const settingsOpen = writable<boolean>(false)
 
 export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
   $id ? $sessions.find((s) => s.tid === $id) ?? null : null,
@@ -84,12 +95,24 @@ export async function initFromBackend(): Promise<void> {
 
 /** Open the native folder picker and register the chosen repo. */
 export async function registerRepo(): Promise<void> {
-  const dto = await pickAndRegisterRepo()
-  if (!dto) return
-  repos.update(($r) => [
-    ...$r,
-    { id: dto.id, org: dto.org, name: dto.name, base: dto.base },
-  ])
+  try {
+    const dto = await pickAndRegisterRepo()
+    if (!dto) return
+    repos.update(($r) => [...$r, { id: dto.id, org: dto.org, name: dto.name, base: dto.base }])
+    pushToast('success', `Imported ${dto.org}/${dto.name} · ${dto.base}`)
+  } catch (e) {
+    pushToast('error', cleanError(e))
+  }
+}
+
+export async function removeRepoById(id: string): Promise<void> {
+  try {
+    await removeRepo(id)
+    repos.update(($r) => $r.filter((r) => r.id !== id))
+    pushToast('success', 'Removed repository')
+  } catch (e) {
+    pushToast('error', cleanError(e))
+  }
 }
 
 export function createAgentFromTicket(ticket: Ticket, prompt: string) {

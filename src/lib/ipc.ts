@@ -32,6 +32,10 @@ export function pickAndRegisterRepo(): Promise<RepoDTO | null> {
   return hasBackend ? window.flotilla.pickAndRegisterRepo() : Promise.resolve(null)
 }
 
+export function removeRepo(id: string): Promise<void> {
+  return hasBackend ? window.flotilla.removeRepo(id) : Promise.resolve()
+}
+
 // ── Tickets ────────────────────────────────────────────────────────────────
 
 export function listTickets(): Promise<TicketDTO[]> {

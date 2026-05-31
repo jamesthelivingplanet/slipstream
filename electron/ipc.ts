@@ -48,8 +48,10 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
       properties: ['openDirectory'],
     })
     if (res.canceled || !res.filePaths[0]) return null
-    return deps.repos.register(res.filePaths[0])
+    return await deps.repos.register(res.filePaths[0])
   })
+
+  ipcMain.handle(IPC.removeRepo, (_e, id: string) => deps.repos.remove(id))
 
   // ── Tickets ────────────────────────────────────────────────────────────────
 

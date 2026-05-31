@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { selected, dialogOpen, initFromBackend, registerRepo } from './lib/stores'
+  import { selected, dialogOpen, settingsOpen, initFromBackend } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
   import TerminalView from './lib/components/TerminalView.svelte'
   import NewAgentDialog from './lib/components/NewAgentDialog.svelte'
+  import SettingsModal from './lib/components/SettingsModal.svelte'
+  import Toasts from './lib/components/Toasts.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
 
   onMount(() => {
@@ -22,8 +24,8 @@
     </div>
     <div class="spacer"></div>
     <ThemeMenu />
-    <button class="btn btn-outline btn-sm" on:click={() => registerRepo()}>
-      {@html icons.plus} Add repo
+    <button class="btn btn-outline btn-icon btn-sm" title="Settings" on:click={() => settingsOpen.set(true)}>
+      {@html icons.settings}
     </button>
     <button class="btn btn-primary btn-sm" on:click={() => dialogOpen.set(true)}>
       {@html icons.plus} New agent
@@ -53,4 +55,6 @@
   </div>
 
   <NewAgentDialog />
+  <SettingsModal />
+  <Toasts />
 </div>

@@ -57,8 +57,10 @@ export interface TicketDTO {
 
 export interface IRepoRegistry {
   list(): Promise<RepoDTO[]>
+  /** Validates absPath is a git work tree with commits; throws on failure. Idempotent. */
   register(absPath: string): Promise<RepoDTO>
   get(id: string): Promise<RepoDTO | undefined>
+  remove(id: string): Promise<void>
 }
 
 export interface IWorktreeManager {
@@ -123,8 +125,10 @@ export interface ITicketProvider {
 export interface FlotillaApi {
   listRepos(): Promise<RepoDTO[]>
   registerRepo(absPath: string): Promise<RepoDTO>
-  /** Opens a native folder picker, registers the chosen repo. null if cancelled. */
+  /** Opens a native folder picker, registers the chosen repo. null if cancelled.
+   *  Rejects with a descriptive Error if the folder isn't a valid git repo. */
   pickAndRegisterRepo(): Promise<RepoDTO | null>
+  removeRepo(id: string): Promise<void>
   listTickets(): Promise<TicketDTO[]>
 
   /** Creates the worktree, claims a port, spawns claude. Returns the session. */
@@ -143,6 +147,7 @@ export const IPC = {
   listRepos: 'repos:list',
   registerRepo: 'repos:register',
   pickRepo: 'repos:pick',
+  removeRepo: 'repos:remove',
   listTickets: 'tickets:list',
   startSession: 'session:start',
   writeSession: 'session:write',

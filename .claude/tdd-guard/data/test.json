@@ -11,6 +11,36 @@
       ]
     },
     {
+      "moduleId": "/home/jamesthelivingplanet/dev/flotilla/electron/services/worktreeManager.integration.test.ts",
+      "tests": [
+        {
+          "name": "creates a worktree under .worktrees/<org>-<name>/<branch>, clean",
+          "fullName": "worktreeManager (real git) > creates a worktree under .worktrees/<org>-<name>/<branch>, clean",
+          "state": "passed"
+        },
+        {
+          "name": "removes a clean, unmerged-free worktree without force",
+          "fullName": "worktreeManager (real git) > removes a clean, unmerged-free worktree without force",
+          "state": "passed"
+        },
+        {
+          "name": "detects a dirty worktree and refuses removal without force",
+          "fullName": "worktreeManager (real git) > detects a dirty worktree and refuses removal without force",
+          "state": "passed"
+        },
+        {
+          "name": "reports ahead count and refuses removal of an unmerged branch",
+          "fullName": "worktreeManager (real git) > reports ahead count and refuses removal of an unmerged branch",
+          "state": "passed"
+        },
+        {
+          "name": "lists active worktrees (excluding the main checkout)",
+          "fullName": "worktreeManager (real git) > lists active worktrees (excluding the main checkout)",
+          "state": "passed"
+        }
+      ]
+    },
+    {
       "moduleId": "/home/jamesthelivingplanet/dev/flotilla/electron/services/statusDetector.test.ts",
       "tests": [
         {
@@ -141,36 +171,6 @@
         {
           "name": "is a non-empty array of RegExp",
           "fullName": "StatusDetector > NEEDS_PATTERNS export > is a non-empty array of RegExp",
-          "state": "passed"
-        }
-      ]
-    },
-    {
-      "moduleId": "/home/jamesthelivingplanet/dev/flotilla/electron/services/worktreeManager.integration.test.ts",
-      "tests": [
-        {
-          "name": "creates a worktree under .worktrees/<org>-<name>/<branch>, clean",
-          "fullName": "worktreeManager (real git) > creates a worktree under .worktrees/<org>-<name>/<branch>, clean",
-          "state": "passed"
-        },
-        {
-          "name": "removes a clean, unmerged-free worktree without force",
-          "fullName": "worktreeManager (real git) > removes a clean, unmerged-free worktree without force",
-          "state": "passed"
-        },
-        {
-          "name": "detects a dirty worktree and refuses removal without force",
-          "fullName": "worktreeManager (real git) > detects a dirty worktree and refuses removal without force",
-          "state": "passed"
-        },
-        {
-          "name": "reports ahead count and refuses removal of an unmerged branch",
-          "fullName": "worktreeManager (real git) > reports ahead count and refuses removal of an unmerged branch",
-          "state": "passed"
-        },
-        {
-          "name": "lists active worktrees (excluding the main checkout)",
-          "fullName": "worktreeManager (real git) > lists active worktrees (excluding the main checkout)",
           "state": "passed"
         }
       ]
