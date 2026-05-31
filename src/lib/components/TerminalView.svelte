@@ -36,7 +36,7 @@
 
   onMount(() => {
     term = new Terminal({
-      fontFamily: "'Geist Mono', monospace", fontSize: 13, lineHeight: 1.5,
+      fontFamily: "'Geist Mono', monospace", fontSize: 13, lineHeight: 1.0,
       cursorBlink: true, cursorStyle: 'bar', theme: terminalTheme(),
     })
     fit = new FitAddon()
