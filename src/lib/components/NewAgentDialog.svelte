@@ -1,14 +1,16 @@
 <script lang="ts">
-  import { dialogOpen, tickets, createAgentFromTicket } from '../stores'
+  import { dialogOpen, tickets, createAgentFromTicket, createBlankAgent } from '../stores'
   import { icons } from '../icons'
   import type { Ticket } from '../types'
 
   let picked: Ticket | null = null
+  let title = ''
   let prompt = ''
   let wasOpen = false
 
   $: if ($dialogOpen && !wasOpen) {
     picked = null
+    title = ''
     prompt = ''
     wasOpen = true
   }
@@ -16,12 +18,17 @@
 
   function pick(t: Ticket) {
     picked = t
+    title = t.title
     prompt = `${t.tid}: ${t.title}.\n\nInvestigate and implement a fix. Add tests, then open a PR.`
   }
 
   function create() {
-    if (!picked) return
-    createAgentFromTicket(picked, prompt)
+    if (!title.trim()) return
+    if (picked) {
+      createAgentFromTicket(picked, prompt)
+    } else {
+      createBlankAgent(title.trim(), prompt)
+    }
   }
 </script>
 
@@ -30,26 +37,30 @@
   <div class="dialog">
     <div class="dlg-head">
       <h2>New agent</h2>
-      <p>Create an agent from a ticket. You'll pick the repo and start it next.</p>
+      <p>Create a blank agent or pick a ticket. You'll choose a repo and start it next.</p>
     </div>
 
     <div class="dlg-body">
       <div>
-        <span class="lbl-f">From ticket</span>
-        <div class="ticket-pick">
-          {#each $tickets as t (t.tid)}
-            <button type="button" class="tk" class:sel={picked?.tid === t.tid} on:click={() => pick(t)}>
-              <span class="badge {t.src}" style="border:none;padding:1px 6px">{t.src}</span>
-              <span class="tk-id">{t.tid}</span>
-              <span class="tk-t">{t.title}</span>
-              <span class="check">{@html icons.check}</span>
-            </button>
-          {/each}
-          {#if $tickets.length === 0}
-            <div class="tk-empty">No queued tickets — every ticket already has an agent.</div>
-          {/if}
-        </div>
+        <label class="lbl-f" for="dTitle">Title</label>
+        <input id="dTitle" type="text" bind:value={title} placeholder="What should this agent work on?" />
       </div>
+
+      {#if $tickets.length > 0}
+        <div>
+          <span class="lbl-f">From ticket</span>
+          <div class="ticket-pick">
+            {#each $tickets as t (t.tid)}
+              <button type="button" class="tk" class:sel={picked?.tid === t.tid} on:click={() => pick(t)}>
+                <span class="badge {t.src}" style="border:none;padding:1px 6px">{t.src}</span>
+                <span class="tk-id">{t.tid}</span>
+                <span class="tk-t">{t.title}</span>
+                <span class="check">{@html icons.check}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
       <div>
         <label class="lbl-f" for="dPrompt">Initial prompt</label>
@@ -59,7 +70,7 @@
 
     <div class="dlg-foot">
       <button class="btn btn-ghost" on:click={() => dialogOpen.set(false)}>Cancel</button>
-      <button class="btn btn-primary" on:click={create}>{@html icons.plus} Create agent</button>
+      <button class="btn btn-primary" disabled={!title.trim()} on:click={create}>{@html icons.plus} Create agent</button>
     </div>
   </div>
 {/if}

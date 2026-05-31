@@ -6,7 +6,7 @@ import { createRepoRegistry } from './services/repoRegistry.js'
 import { createWorktreeManager } from './services/worktreeManager.js'
 import { createSessionManager } from './services/sessionManager.js'
 import { createPortBroker } from './services/portBroker.js'
-import { createMockProvider } from './tickets/mockProvider.js'
+import { createEmptyProvider } from './tickets/emptyProvider.js'
 import { registerIpc } from './ipc.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -49,7 +49,7 @@ function createWindow() {
     worktrees: createWorktreeManager(root),
     sessions: createSessionManager(),
     ports: createPortBroker(),
-    tickets: createMockProvider(),
+    tickets: createEmptyProvider(),
   })
 }
 

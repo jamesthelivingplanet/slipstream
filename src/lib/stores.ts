@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store'
 import type { Filter, Repo, Session, Status, Ticket } from './types'
-import { branchFor, initialSessions, initialTickets, repos as mockRepos } from './mock'
+import { branchFor } from './branch'
 import {
   hasBackend,
   listRepos,
@@ -19,9 +19,9 @@ function cleanError(e: unknown): string {
     .trim() || 'Something went wrong'
 }
 
-export const repos = writable<Repo[]>([...mockRepos])
-export const sessions = writable<Session[]>([...initialSessions])
-export const tickets = writable<Ticket[]>([...initialTickets])
+export const repos = writable<Repo[]>([])
+export const sessions = writable<Session[]>([])
+export const tickets = writable<Ticket[]>([])
 export const selectedId = writable<string | null>(null)
 export const filter = writable<Filter>('all')
 export const query = writable<string>('')
@@ -127,6 +127,17 @@ export function createAgentFromTicket(ticket: Ticket, prompt: string) {
   ])
   dialogOpen.set(false)
   select(ticket.tid)
+}
+
+export function createBlankAgent(title: string, prompt: string) {
+  const tid = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`
+  sessions.update(($s) => [
+    { tid, src: 'jira', status: 'idle', title, repo: null, branch: null,
+      add: 0, del: 0, ago: 'draft', prompt, activity: { text: 'Not started.' } },
+    ...$s,
+  ])
+  dialogOpen.set(false)
+  select(tid)
 }
 
 export async function startAgent(tid: string, repoId: string, prompt: string) {

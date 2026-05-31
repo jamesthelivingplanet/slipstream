@@ -1,6 +1,6 @@
 <script lang="ts">
   import { repos, repoById, startAgent } from '../stores'
-  import { branchFor } from '../mock'
+  import { branchFor } from '../branch'
   import { icons } from '../icons'
   import type { Session } from '../types'
 
