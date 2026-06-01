@@ -3,6 +3,9 @@
   import { STATUS_LABEL, type Filter } from '../types'
   import { icons } from '../icons'
 
+  /** On mobile, controlled by parent to show/hide as drawer overlay. */
+  export let mobileOpen: boolean = true
+
   const segs: { f: Filter; label: string }[] = [
     { f: 'all', label: 'All' },
     { f: 'needs', label: 'Needs you' },
@@ -11,7 +14,7 @@
   ]
 </script>
 
-<aside class="list-pane">
+<aside class="list-pane" class:open={mobileOpen}>
   <div class="list-top">
     <div class="row1">
       <h2>Agents</h2>

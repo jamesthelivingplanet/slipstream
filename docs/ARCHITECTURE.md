@@ -66,6 +66,88 @@ Renderer (Svelte)  ──window.flotilla──▶  preload  ──ipcRenderer─
 - **Branches**: always cut from the repo's base branch.
 - Repos are referenced **in place** by absolute path (we don't relocate them).
 
+## Web mode (headless server)
+
+The same Svelte renderer can run in a plain browser (e.g. a phone over Tailscale) by
+replacing the Electron IPC transport with a WebSocket. The process model:
+
+```
+Browser (Svelte)  ──window.flotilla──▶  wsApi  ──WebSocket /rpc──▶  server.ts
+   xterm, stores     (createWsApi)       ws://host:7421              createRpc → same services
+        ▲                                                                  │
+        └──────────────── session:data / session:status (push) ───────────┘
+```
+
+### Refactored seams
+
+- **`electron/core/services.ts`** — `createServices(root)` extracts service wiring from
+  `main.ts` so both the Electron entry and the headless server share one factory.
+  `resolveDataDir()` reproduces `app.getPath('userData')` in plain Node (no Electron API):
+  honors `FLOTILLA_DATA_DIR`, else `~/.config/flotilla` on Linux (XDG), macOS Library, or
+  `%APPDATA%` on Windows. `createServices` calls `mkdirSync(root, {recursive:true})` so a
+  fresh data directory never crashes on first run.
+- **`electron/core/rpc.ts`** — `createRpc(deps, emit)`: transport-free request router
+  containing all channel-dispatch logic. The Electron IPC adapter (`electron/ipc.ts`) and
+  the WS server both call it. `emit` is a callback the caller provides to forward push
+  events (`session:data`, `session:status`) to the appropriate transport. Unit-testable in
+  plain Node.
+
+### Wire protocol (`electron/shared/wire.ts`)
+
+Three envelope types over a single WebSocket at `/rpc`:
+
+| Type | Direction | Shape |
+|------|-----------|-------|
+| `WireReq` | client → server | `{t:'req', id, channel, args[]}` |
+| `WireRes` | server → client | `{t:'res', id, ok, result\|error}` |
+| `WirePush` | server → client | `{t:'push', channel, args[]}` |
+
+`channel` values are the `IPC.*` constants from `contract.ts`. Requests correlate with
+responses by `id` (UUID). Pushes are unsolicited (PTY data/status events).
+
+### `createServer` (`electron/server/server.ts`)
+
+HTTP serves the built `dist/` SPA (with SPA fallback) + `GET /healthz`.  
+WebSocket at `/rpc` authenticates on upgrade via `?token=` query param or
+`Authorization: Bearer` header against `FLOTILLA_TOKEN`; rejects with HTTP 401 before the
+upgrade completes (close code 4001 on the client). Refuses to start with no token.
+
+Env vars:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FLOTILLA_TOKEN` | — (required) | Bearer secret; server exits if unset |
+| `FLOTILLA_BIND` | `127.0.0.1` | Bind address (set to Tailscale IP to expose on tailnet) |
+| `FLOTILLA_PORT` | `7421` | Listen port |
+| `FLOTILLA_DATA_DIR` | platform userData | Override data directory |
+
+### Renderer web boot (`src/main.ts` + `src/lib/wsApi.ts`)
+
+`src/main.ts` detects the absence of `window.flotilla` (no preload) and runs `bootWeb()`:
+resolves a token from `?token=` query param (stored in localStorage, stripped from URL) or
+shows a `TokenGate` login component. Once a token is in hand, `createWsApi({url, token})`
+constructs the WS-backed `FlotillaApi` — with pre-open request queueing, per-request 30 s
+timeout, and exponential auto-reconnect. `window.flotilla` and `window.__flotillaWeb=true`
+are assigned **before** `App.svelte` is dynamically imported, so `ipc.ts`'s module-level
+`hasBackend = !!window.flotilla` evaluates `true`. `pickAndRegisterRepo` returns `null` on
+web (no native dialog); the Settings → Repositories tab shows an "add by absolute path"
+input instead, gated by `window.__flotillaWeb`.
+
+### Access model
+
+Intended to be reached over a **Tailscale** tailnet (`FLOTILLA_BIND` = tailnet IP).
+Tailscale encrypts the tunnel, so the server speaks plain HTTP — no TLS needed.
+The bearer token provides application-layer authentication on top.
+
+> Not intended for public internet exposure.
+
+### Session locality
+
+PTY sessions live in whichever process spawned them. The standalone server (`pnpm serve`)
+is its own backend and does **not** share live sessions with a separately-running desktop
+app. Unifying them (desktop app as thin client of one daemon) is the "background daemon"
+item on the ROADMAP.
+
 ## Key decisions
 
 - **Electron + Svelte** over Tauri — `node-pty` is the proven path for many concurrent
