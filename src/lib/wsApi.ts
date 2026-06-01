@@ -29,7 +29,7 @@ type PendingReq = {
   timer: ReturnType<typeof setTimeout>
 }
 
-type DataCb = (id: string, data: string) => void
+type DataCb = (id: string, data: string, seq: number) => void
 type StatusCb = (id: string, status: SessionStatus) => void
 
 export function createWsApi(opts: WsApiOpts): FlotillaApi {
@@ -91,8 +91,8 @@ export function createWsApi(opts: WsApiOpts): FlotillaApi {
         }
       } else if (msg.t === 'push') {
         if (msg.channel === IPC.sessionData) {
-          const [id, chunk] = msg.args as [string, string]
-          for (const cb of dataListeners) cb(id, chunk)
+          const [id, chunk, seq] = msg.args as [string, string, number]
+          for (const cb of dataListeners) cb(id, chunk, seq)
         } else if (msg.channel === IPC.sessionStatus) {
           const [id, status] = msg.args as [string, SessionStatus]
           for (const cb of statusListeners) cb(id, status)
@@ -204,6 +204,10 @@ export function createWsApi(opts: WsApiOpts): FlotillaApi {
 
     cleanupSession(id: string, opts?: { force?: boolean }): Promise<{ removed: boolean; reason?: string }> {
       return request(IPC.cleanupSession, [id, opts]) as Promise<{ removed: boolean; reason?: string }>
+    },
+
+    getSessionBuffer(id: string): Promise<{ data: string; seq: number }> {
+      return request(IPC.getSessionBuffer, [id]) as Promise<{ data: string; seq: number }>
     },
 
     onSessionData(cb: DataCb): () => void {

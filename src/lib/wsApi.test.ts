@@ -165,15 +165,15 @@ describe('wsApi', () => {
   })
 
   describe('push frames', () => {
-    it('delivers session:data to onSessionData callbacks', () => {
+    it('delivers session:data to onSessionData callbacks (with seq)', () => {
       const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
       const ws = openWs()
 
-      const received: [string, string][] = []
-      api.onSessionData((id, data) => received.push([id, data]))
+      const received: [string, string, number][] = []
+      api.onSessionData((id, data, seq) => received.push([id, data, seq]))
 
-      ws.simulateMessage({ t: 'push', channel: IPC.sessionData, args: ['sess-1', 'hello\r\n'] })
-      expect(received).toEqual([['sess-1', 'hello\r\n']])
+      ws.simulateMessage({ t: 'push', channel: IPC.sessionData, args: ['sess-1', 'hello\r\n', 7] })
+      expect(received).toEqual([['sess-1', 'hello\r\n', 7]])
     })
 
     it('delivers session:status to onSessionStatus callbacks', () => {
@@ -192,11 +192,11 @@ describe('wsApi', () => {
       const ws = openWs()
 
       const received: string[] = []
-      const unsub = api.onSessionData((id, _data) => received.push(id))
+      const unsub = api.onSessionData((id, _data, _seq) => received.push(id))
 
-      ws.simulateMessage({ t: 'push', channel: IPC.sessionData, args: ['s1', 'a'] })
+      ws.simulateMessage({ t: 'push', channel: IPC.sessionData, args: ['s1', 'a', 1] })
       unsub()
-      ws.simulateMessage({ t: 'push', channel: IPC.sessionData, args: ['s1', 'b'] })
+      ws.simulateMessage({ t: 'push', channel: IPC.sessionData, args: ['s1', 'b', 2] })
 
       expect(received).toEqual(['s1']) // only first delivery
     })
@@ -210,9 +210,24 @@ describe('wsApi', () => {
       api.onSessionData((id) => a.push(id))
       api.onSessionData((id) => b.push(id))
 
-      ws.simulateMessage({ t: 'push', channel: IPC.sessionData, args: ['s1', 'x'] })
+      ws.simulateMessage({ t: 'push', channel: IPC.sessionData, args: ['s1', 'x', 1] })
       expect(a).toEqual(['s1'])
       expect(b).toEqual(['s1'])
+    })
+
+    it('getSessionBuffer sends a request on session:buffer and resolves result', async () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      const promise = api.getSessionBuffer('sess-abc')
+      const req = lastSent(ws)
+      expect(req.t).toBe('req')
+      expect(req.channel).toBe(IPC.getSessionBuffer)
+      expect(req.args).toEqual(['sess-abc'])
+
+      ws.simulateMessage({ t: 'res', id: req.id, ok: true, result: { data: 'prior output', seq: 12 } })
+      const result = await promise
+      expect(result).toEqual({ data: 'prior output', seq: 12 })
     })
   })
 

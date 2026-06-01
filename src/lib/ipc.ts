@@ -79,10 +79,19 @@ export function cleanupSession(
 
 /** Subscribe to PTY data chunks. Returns an unsubscribe fn. */
 export function onSessionData(
-  cb: (id: string, data: string) => void,
+  cb: (id: string, data: string, seq: number) => void,
 ): () => void {
   if (!hasBackend) return () => {}
   return window.flotilla.onSessionData(cb)
+}
+
+/** Fetch the buffered output snapshot for a session. */
+export function getSessionBuffer(
+  id: string,
+): Promise<{ data: string; seq: number }> {
+  return hasBackend
+    ? window.flotilla.getSessionBuffer(id)
+    : Promise.resolve({ data: '', seq: 0 })
 }
 
 /** Subscribe to session status transitions. Returns an unsubscribe fn. */

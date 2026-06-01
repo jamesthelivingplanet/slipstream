@@ -24,12 +24,14 @@ const api: FlotillaApi = {
     ipcRenderer.invoke(IPC.cleanupSession, id, opts),
 
   // ── Push events (main → renderer) ────────────────────────────────────────
-  onSessionData(cb: (id: string, data: string) => void): () => void {
-    const listener = (_e: Electron.IpcRendererEvent, id: string, data: string) =>
-      cb(id, data)
+  onSessionData(cb: (id: string, data: string, seq: number) => void): () => void {
+    const listener = (_e: Electron.IpcRendererEvent, id: string, data: string, seq: number) =>
+      cb(id, data, seq)
     ipcRenderer.on(IPC.sessionData, listener)
     return () => ipcRenderer.removeListener(IPC.sessionData, listener)
   },
+
+  getSessionBuffer: (id) => ipcRenderer.invoke(IPC.getSessionBuffer, id),
 
   onSessionStatus(cb: (id: string, status: SessionStatus) => void): () => void {
     const listener = (

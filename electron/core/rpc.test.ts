@@ -48,6 +48,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
+    getBuffer: vi.fn().mockReturnValue({ data: 'buffered output', seq: 15 }),
     on(event: string, listener: Listener) {
       listeners[event] ??= []
       listeners[event].push(listener)
@@ -188,9 +189,15 @@ describe('createRpc', () => {
     await expect(rpc.handle('unknown:channel', [])).rejects.toThrow(/Unknown channel/)
   })
 
-  it('forwards session data events to emit', () => {
-    deps._emit('data', 's1', 'some output')
-    expect(emitted).toEqual([[IPC.sessionData, 's1', 'some output']])
+  it('forwards session data events to emit (3-arg form with seq)', () => {
+    deps._emit('data', 's1', 'some output', 42)
+    expect(emitted).toEqual([[IPC.sessionData, 's1', 'some output', 42]])
+  })
+
+  it('routes getSessionBuffer to sessions.getBuffer', async () => {
+    const result = await rpc.handle(IPC.getSessionBuffer, ['s1'])
+    expect(deps.sessions.getBuffer).toHaveBeenCalledWith('s1')
+    expect(result).toEqual({ data: 'buffered output', seq: 15 })
   })
 
   it('forwards session status events to emit', () => {

@@ -17,6 +17,7 @@ import type {
   StartSessionInput,
 } from '../shared/contract.js'
 import { StatusDetector } from './statusDetector.js'
+import { OutputBuffer } from './outputBuffer.js'
 import { trustDirectory } from './claudeTrust.js'
 
 // ─── Internal session record ──────────────────────────────────────────────────
@@ -24,6 +25,7 @@ import { trustDirectory } from './claudeTrust.js'
 interface SessionRecord {
   pty: pty.IPty
   detector: StatusDetector
+  buffer: OutputBuffer
   dto: SessionDTO
 }
 
@@ -47,6 +49,7 @@ export function createSessionManager(): ISessionManager {
     const id = randomUUID()
 
     const detector = new StatusDetector()
+    const buffer = new OutputBuffer()
 
     trustDirectory(input.cwd)
     const proc = pty.spawn(
@@ -72,12 +75,13 @@ export function createSessionManager(): ISessionManager {
       createdAt: Date.now(),
     }
 
-    sessions.set(id, { pty: proc, detector, dto })
+    sessions.set(id, { pty: proc, detector, buffer, dto })
 
-    // Wire PTY data → detector + consumers
+    // Wire PTY data → buffer + detector + consumers
     proc.onData((chunk: string) => {
+      const seq = buffer.push(chunk)
       detector.push(chunk)
-      emit('data', id, chunk)
+      emit('data', id, chunk, seq)
       const s = detector.status()
       dto.status = s
       emit('status', id, s)
@@ -125,5 +129,11 @@ export function createSessionManager(): ISessionManager {
     emitter.on(event, listener as (...args: unknown[]) => void)
   }
 
-  return { start, write, resize, kill, on }
+  function getBuffer(sessionId: string): { data: string; seq: number } {
+    const rec = sessions.get(sessionId)
+    if (!rec) return { data: '', seq: 0 }
+    return rec.buffer.snapshot()
+  }
+
+  return { start, write, resize, kill, on, getBuffer }
 }

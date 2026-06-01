@@ -4,7 +4,7 @@
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
   import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession } from '../stores'
-  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, killSession, cleanupSession } from '../ipc'
+  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, killSession, cleanupSession, getSessionBuffer } from '../ipc'
   import { mode } from '../theme'
   import { icons } from '../icons'
   import type { Session, Status } from '../types'
@@ -68,14 +68,23 @@
   let ro: ResizeObserver | null = null
   let offResize: (() => void) | null = null
 
-  function startLive() {
+  async function startLive() {
     term.reset()
     setTimeout(() => { try { fit.fit() } catch {}; term.focus() }, 40)
 
-    // Pipe PTY output into xterm (filtered to this session once id is known).
-    offData = onSessionData((sid, chunk) => {
-      if (sid === session.id) term.write(chunk)
+    // Subscribe first, hold pre-backlog chunks, then replay snapshot, then flush held.
+    let snapSeq = -1
+    const held: Array<[string, number]> = []
+    offData = onSessionData((sid, chunk, seq) => {
+      if (sid !== session.id) return
+      if (snapSeq < 0) { held.push([chunk, seq]); return }
+      term.write(chunk)
     })
+    const snap = await getSessionBuffer(session.id ?? '')
+    term.write(snap.data)
+    for (const [chunk, seq] of held) { if (seq > snap.seq) term.write(chunk) }
+    held.length = 0
+    snapSeq = snap.seq
 
     // Forward keypresses to the PTY.
     term.onData((d) => {

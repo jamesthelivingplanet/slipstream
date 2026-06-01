@@ -2,7 +2,7 @@
 
 Living doc: where Flotilla is and where it's going. Update it as phases land.
 
-_Last updated: 2026-05-31._
+_Last updated: 2026-06-01._
 
 ## Done ✅
 
@@ -43,13 +43,22 @@ _Last updated: 2026-05-31._
   atomic write, best-effort) before spawning, so a fresh worktree no longer prompts.
   Test count is now 56 (6 new `claudeTrust` unit tests).
 
+**Headless web mode**
+- WS server (`pnpm serve`, `FLOTILLA_TOKEN`-gated) + `wsApi` client so the same UI runs
+  in a browser/mobile against a remote backend.
+
+**Early-output buffer**
+- Authoritative bounded per-session `OutputBuffer` in `sessionManager` (last 256 KB +
+  monotonic `seq`). Consumers replay on attach (subscribe-first → `getSessionBuffer` →
+  write backlog → flush live chunks with `seq` past the snapshot), so the first PTY bytes
+  and mid-session web joins lose nothing. Exact dedup: PTY chunks emit atomically, so each
+  is wholly before or after the snapshot. +8 `OutputBuffer` unit tests (103 total).
+
 ## Next 🔜
 
-1. **Early-output buffer** — the first PTY bytes can race the terminal's subscription;
-   buffer-and-replay in `sessionManager` so nothing is lost.
-2. **Real ticket provider** — Linear and/or Jira behind `ITicketProvider` (replacing
+1. **Real ticket provider** — Linear and/or Jira behind `ITicketProvider` (replacing
    `emptyProvider`); the New-agent ticket picker is already wired for when tickets exist.
-3. **Status-detection hardening** — tune `statusDetector` against real `claude` TUI output
+2. **Status-detection hardening** — tune `statusDetector` against real `claude` TUI output
    (the "needs you" patterns are coarse stubs today).
 
 ## Later 🗓️

@@ -74,7 +74,7 @@ export interface IWorktreeManager {
 }
 
 export interface SessionEvents {
-  data: (sessionId: string, chunk: string) => void
+  data: (sessionId: string, chunk: string, seq: number) => void
   status: (sessionId: string, status: SessionStatus) => void
   exit: (sessionId: string, code: number) => void
 }
@@ -96,6 +96,7 @@ export interface ISessionManager {
   resize(sessionId: string, cols: number, rows: number): void
   kill(sessionId: string): void
   on<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void
+  getBuffer(sessionId: string): { data: string; seq: number }
 }
 
 /**
@@ -139,8 +140,9 @@ export interface FlotillaApi {
   cleanupSession(id: string, opts?: { force?: boolean }): Promise<{ removed: boolean; reason?: string }>
 
   /** Returns an unsubscribe fn. */
-  onSessionData(cb: (id: string, data: string) => void): () => void
+  onSessionData(cb: (id: string, data: string, seq: number) => void): () => void
   onSessionStatus(cb: (id: string, status: SessionStatus) => void): () => void
+  getSessionBuffer(id: string): Promise<{ data: string; seq: number }>
 }
 
 export const IPC = {
@@ -156,6 +158,7 @@ export const IPC = {
   cleanupSession: 'session:cleanup',
   sessionData: 'session:data',     // main → renderer
   sessionStatus: 'session:status', // main → renderer
+  getSessionBuffer: 'session:buffer',
 } as const
 
 declare global {

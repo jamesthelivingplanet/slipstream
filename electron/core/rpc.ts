@@ -29,8 +29,8 @@ export function createRpc(
   // Tracks which repo+branch each session owns so cleanup can remove the worktree.
   const sessionMeta = new Map<string, { repo: RepoDTO; branch: string }>()
 
-  function onData(sessionId: string, chunk: string): void {
-    emit(IPC.sessionData, sessionId, chunk)
+  function onData(sessionId: string, chunk: string, seq: number): void {
+    emit(IPC.sessionData, sessionId, chunk, seq)
   }
   function onStatus(sessionId: string, status: string): void {
     emit(IPC.sessionStatus, sessionId, status)
@@ -107,6 +107,9 @@ export function createRpc(
         if (result.removed) sessionMeta.delete(id)
         return result
       }
+
+      case IPC.getSessionBuffer:
+        return deps.sessions.getBuffer(args[0] as string)
 
       case IPC.pickRepo:
         throw new Error('pickRepo is not supported without a desktop window')
