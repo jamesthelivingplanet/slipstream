@@ -37,6 +37,7 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
     IPC.startSession,
     IPC.killSession,
     IPC.cleanupSession,
+    IPC.getSessionBuffer,
   ] as const
 
   for (const channel of requestChannels) {
