@@ -1,8 +1,34 @@
 <script lang="ts">
-  import { settingsOpen, repos, registerRepo, removeRepoById } from '../stores'
+  import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath } from '../stores'
   import { icons } from '../icons'
+  import { hasBackend } from '../ipc'
 
   let activeTab = 'repositories'
+
+  // Web mode: show a text-input for adding repos by absolute path.
+  // We detect web mode by checking the explicit marker set in main.ts on the
+  // WS boot path. The Electron preload never sets this marker, so isWeb is
+  // false on desktop even though window.electron is also absent there.
+  const isWeb = hasBackend && (window as unknown as { __flotillaWeb?: boolean }).__flotillaWeb === true
+
+  let pathInput = ''
+  let pathPending = false
+
+  async function addByPath() {
+    const p = pathInput.trim()
+    if (!p) return
+    pathPending = true
+    try {
+      await registerRepoByPath(p)
+      pathInput = ''
+    } finally {
+      pathPending = false
+    }
+  }
+
+  function pathKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') addByPath()
+  }
 </script>
 
 {#if $settingsOpen}
@@ -28,10 +54,32 @@
         {#if activeTab === 'repositories'}
           <div class="tab-header">
             <span class="tab-title">Repositories</span>
-            <button class="btn btn-outline btn-sm" on:click={() => registerRepo()}>
-              {@html icons.plus} Add repository
-            </button>
+            {#if !isWeb}
+              <button class="btn btn-outline btn-sm" on:click={() => registerRepo()}>
+                {@html icons.plus} Add repository
+              </button>
+            {/if}
           </div>
+
+          {#if isWeb}
+            <div class="path-add">
+              <input
+                type="text"
+                class="path-input"
+                placeholder="Absolute path, e.g. /home/user/projects/my-repo"
+                bind:value={pathInput}
+                on:keydown={pathKeydown}
+                disabled={pathPending}
+              />
+              <button
+                class="btn btn-outline btn-sm"
+                on:click={addByPath}
+                disabled={!pathInput.trim() || pathPending}
+              >
+                {@html icons.plus} Add
+              </button>
+            </div>
+          {/if}
 
           {#if $repos.length === 0}
             <div class="repo-empty">
@@ -172,5 +220,29 @@
     padding: 32px 0;
     text-align: center;
     line-height: 1.5;
+  }
+
+  .path-add {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .path-input {
+    flex: 1;
+    height: 34px;
+    background: hsl(var(--background));
+    border: 1px solid hsl(var(--input));
+    border-radius: var(--radius);
+    color: inherit;
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    padding: 0 10px;
+  }
+
+  .path-input:focus {
+    outline: none;
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.12);
   }
 </style>

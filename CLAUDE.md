@@ -7,9 +7,10 @@ Notes for Claude Code (and humans) working in this repo. Read
 
 ```sh
 pnpm dev        # Vite + Electron (auto-opens DevTools in dev)
-pnpm build      # renderer + electron main + preload
+pnpm build      # renderer + electron main + preload + dist-electron/server.js
 pnpm test       # vitest (unit + real-git integration)
 pnpm check      # svelte-check typecheck (run before committing)
+FLOTILLA_TOKEN=<secret> pnpm serve   # headless WS server (web/mobile access)
 ```
 
 Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm/yarn).
@@ -41,6 +42,19 @@ Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm
   real-git integration instead.
 - **vitest uses `vitest.config.ts`** (not the Vite config) so tests don't run through the
   Electron plugin (which rewrites `child_process` into a require-shim that breaks ESM).
+- **`ELECTRON_RUN_AS_NODE` + native ABI**: `pnpm serve` runs
+  `ELECTRON_RUN_AS_NODE=1 electron dist-electron/server.js`. This reuses Electron's Node
+  binary so `better-sqlite3` and `node-pty` (built for Electron's ABI) load without a
+  separate rebuild. In `ELECTRON_RUN_AS_NODE` mode the Electron `app` API is unavailable
+  — which is why `resolveDataDir()` in `electron/core/services.ts` derives the data path
+  from `os.homedir()` / env vars rather than `app.getPath('userData')`.
+- **`window.flotilla` must be set before `App`/`ipc.ts` loads**: in web mode `src/main.ts`
+  assigns `window.flotilla` and `window.__flotillaWeb = true` and only _then_ does
+  `await import('./App.svelte')`. This is intentional — `ipc.ts` has a module-level
+  `hasBackend = !!window.flotilla`. If App is imported first (or the order changes),
+  `hasBackend` is `false` and all backend calls silently no-op.
+- **`FLOTILLA_TOKEN` is required**: the headless server refuses to start if the env var is
+  unset. Without it there is no authentication on the WebSocket endpoint.
 
 ## Troubleshooting native setup
 

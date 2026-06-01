@@ -6,6 +6,7 @@ import {
   listRepos,
   listTickets,
   pickAndRegisterRepo,
+  registerRepo as ipcRegisterRepo,
   removeRepo,
   startSession,
 } from './ipc'
@@ -98,6 +99,17 @@ export async function registerRepo(): Promise<void> {
   try {
     const dto = await pickAndRegisterRepo()
     if (!dto) return
+    repos.update(($r) => [...$r, { id: dto.id, org: dto.org, name: dto.name, base: dto.base }])
+    pushToast('success', `Imported ${dto.org}/${dto.name} · ${dto.base}`)
+  } catch (e) {
+    pushToast('error', cleanError(e))
+  }
+}
+
+/** Web fallback: register a repo by typing an absolute path directly. */
+export async function registerRepoByPath(absPath: string): Promise<void> {
+  try {
+    const dto = await ipcRegisterRepo(absPath)
     repos.update(($r) => [...$r, { id: dto.id, org: dto.org, name: dto.name, base: dto.base }])
     pushToast('success', `Imported ${dto.org}/${dto.name} · ${dto.base}`)
   } catch (e) {

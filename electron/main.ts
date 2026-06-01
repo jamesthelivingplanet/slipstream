@@ -1,13 +1,8 @@
 import { app, BrowserWindow } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { openDb } from './db/db.js'
-import { createRepoRegistry } from './services/repoRegistry.js'
-import { createWorktreeManager } from './services/worktreeManager.js'
-import { createSessionManager } from './services/sessionManager.js'
-import { createPortBroker } from './services/portBroker.js'
-import { createEmptyProvider } from './tickets/emptyProvider.js'
 import { registerIpc } from './ipc.js'
+import { createServices } from './core/services.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -42,15 +37,7 @@ function createWindow() {
   }
 
   // ── wire the backend services and expose them over IPC ──
-  const root = app.getPath('userData')
-  const db = openDb(path.join(root, 'flotilla.db'))
-  registerIpc(win, {
-    repos: createRepoRegistry(db, root),
-    worktrees: createWorktreeManager(root),
-    sessions: createSessionManager(),
-    ports: createPortBroker(),
-    tickets: createEmptyProvider(),
-  })
+  registerIpc(win, createServices(app.getPath('userData')))
 }
 
 app.whenReady().then(createWindow)
