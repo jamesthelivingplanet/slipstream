@@ -2,7 +2,7 @@
 
 Living doc: where Flotilla is and where it's going. Update it as phases land.
 
-_Last updated: 2026-06-01._
+_Last updated: 2026-06-21._
 
 ## Done ✅
 
@@ -54,12 +54,20 @@ _Last updated: 2026-06-01._
   and mid-session web joins lose nothing. Exact dedup: PTY chunks emit atomically, so each
   is wholly before or after the snapshot. +8 `OutputBuffer` unit tests (103 total).
 
+**Real ticket provider — Linear**
+- `linearProvider` (behind `ITicketProvider`) replaces `emptyProvider`. Personal API key
+  entered in a new Settings → **Integrations** tab, persisted in a SQLite `config` table
+  (`configStore`); the provider reads it lazily and queries Linear's GraphQL over `fetch`
+  (no new dependency). The query returns issues assigned to the viewer **or** unassigned,
+  excluding completed/canceled. The New-agent picker re-fetches on dialog open (was
+  startup-only). Verified end-to-end against a real workspace. +6 `linearProvider` tests
+  (109 total).
+
 ## Next 🔜
 
-1. **Real ticket provider** — Linear and/or Jira behind `ITicketProvider` (replacing
-   `emptyProvider`); the New-agent ticket picker is already wired for when tickets exist.
-2. **Status-detection hardening** — tune `statusDetector` against real `claude` TUI output
+1. **Status-detection hardening** — tune `statusDetector` against real `claude` TUI output
    (the "needs you" patterns are coarse stubs today).
+2. **Jira ticket provider** — second `ITicketProvider` alongside Linear, if needed.
 
 ## Later 🗓️
 
