@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dialogOpen, tickets, createAgentFromTicket, createBlankAgent } from '../stores'
+  import { dialogOpen, tickets, createAgentFromTicket, createBlankAgent, refreshTickets } from '../stores'
   import { icons } from '../icons'
   import type { Ticket } from '../types'
 
@@ -7,12 +7,16 @@
   let title = ''
   let prompt = ''
   let wasOpen = false
+  let loadingTickets = false
 
   $: if ($dialogOpen && !wasOpen) {
     picked = null
     title = ''
     prompt = ''
     wasOpen = true
+    // refresh tickets when dialog opens
+    loadingTickets = true
+    refreshTickets().finally(() => { loadingTickets = false })
   }
   $: if (!$dialogOpen) wasOpen = false
 
@@ -46,19 +50,23 @@
         <input id="dTitle" type="text" bind:value={title} placeholder="What should this agent work on?" />
       </div>
 
-      {#if $tickets.length > 0}
+      {#if loadingTickets || $tickets.length > 0}
         <div>
           <span class="lbl-f">From ticket</span>
-          <div class="ticket-pick">
-            {#each $tickets as t (t.tid)}
-              <button type="button" class="tk" class:sel={picked?.tid === t.tid} on:click={() => pick(t)}>
-                <span class="badge {t.src}" style="border:none;padding:1px 6px">{t.src}</span>
-                <span class="tk-id">{t.tid}</span>
-                <span class="tk-t">{t.title}</span>
-                <span class="check">{@html icons.check}</span>
-              </button>
-            {/each}
-          </div>
+          {#if loadingTickets}
+            <p class="muted" style="font-size: 0.85em;">Loading tickets…</p>
+          {:else}
+            <div class="ticket-pick">
+              {#each $tickets as t (t.tid)}
+                <button type="button" class="tk" class:sel={picked?.tid === t.tid} on:click={() => pick(t)}>
+                  <span class="badge {t.src}" style="border:none;padding:1px 6px">{t.src}</span>
+                  <span class="tk-id">{t.tid}</span>
+                  <span class="tk-t">{t.title}</span>
+                  <span class="check">{@html icons.check}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
 

@@ -13,6 +13,7 @@ import type {
   ITicketProvider,
   SessionStatus,
 } from '../shared/contract.js'
+import type { IConfigStore } from '../services/configStore.js'
 
 // ── Fake deps ─────────────────────────────────────────────────────────────────
 
@@ -90,12 +91,18 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     listTickets: vi.fn().mockResolvedValue([]),
   }
 
+  const config: IConfigStore = {
+    get: vi.fn().mockReturnValue(undefined),
+    set: vi.fn(),
+  }
+
   return {
     repos,
     worktrees,
     sessions,
     ports,
     tickets,
+    config,
     _emit(event: string, ...args: unknown[]) {
       for (const l of listeners[event] ?? []) l(...args)
     },

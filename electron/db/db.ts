@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   port      INTEGER,
   createdAt INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `
 
 /** Open (or create) a SQLite database at `file` and apply the schema. */
