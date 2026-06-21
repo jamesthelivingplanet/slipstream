@@ -6,7 +6,8 @@ import { createRepoRegistry } from '../services/repoRegistry.js'
 import { createWorktreeManager } from '../services/worktreeManager.js'
 import { createSessionManager } from '../services/sessionManager.js'
 import { createPortBroker } from '../services/portBroker.js'
-import { createEmptyProvider } from '../tickets/emptyProvider.js'
+import { createConfigStore } from '../services/configStore.js'
+import { createLinearProvider } from '../tickets/linearProvider.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -32,11 +33,13 @@ export function resolveDataDir(): string {
 export function createServices(root: string): IpcDeps {
   fs.mkdirSync(root, { recursive: true })
   const db = openDb(path.join(root, 'flotilla.db'))
+  const configStore = createConfigStore(db)
   return {
     repos: createRepoRegistry(db, root),
     worktrees: createWorktreeManager(root),
     sessions: createSessionManager(),
     ports: createPortBroker(),
-    tickets: createEmptyProvider(),
+    tickets: createLinearProvider(configStore),
+    config: configStore,
   }
 }

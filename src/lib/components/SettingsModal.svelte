@@ -2,8 +2,37 @@
   import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath } from '../stores'
   import { icons } from '../icons'
   import { hasBackend } from '../ipc'
+  import { pushToast } from '../toast'
 
   let activeTab = 'repositories'
+
+  let linearKey = ''
+  let linearPending = false
+
+  async function loadLinearKey() {
+    if (!hasBackend) return
+    try {
+      const stored = await window.flotilla.getLinearKey()
+      if (stored) linearKey = stored
+    } catch {
+      // ignore
+    }
+  }
+
+  async function saveLinearKey() {
+    if (!hasBackend) return
+    linearPending = true
+    try {
+      await window.flotilla.setLinearKey(linearKey.trim())
+      pushToast('success', 'Linear API key saved')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save key')
+    } finally {
+      linearPending = false
+    }
+  }
+
+  $: if ($settingsOpen && activeTab === 'integrations') loadLinearKey()
 
   // Web mode: show a text-input for adding repos by absolute path.
   // We detect web mode by checking the explicit marker set in main.ts on the
@@ -47,6 +76,14 @@
           on:click={() => (activeTab = 'repositories')}
         >
           Repositories
+        </button>
+        <button
+          type="button"
+          class="tab-item"
+          class:active={activeTab === 'integrations'}
+          on:click={() => { activeTab = 'integrations'; loadLinearKey() }}
+        >
+          Integrations
         </button>
       </nav>
 
@@ -104,6 +141,35 @@
               {/each}
             </div>
           {/if}
+        {/if}
+
+        {#if activeTab === 'integrations'}
+          <div class="tab-header">
+            <span class="tab-title">Integrations</span>
+          </div>
+          <div>
+            <span class="lbl-f">Linear API Key</span>
+            <p class="integration-hint">Personal API key from Linear → Settings → API → Personal API keys.</p>
+            <div class="path-add">
+              <input
+                type="password"
+                class="path-input"
+                placeholder="lin_api_••••••••••••••••••••••••••••••••"
+                bind:value={linearKey}
+                disabled={linearPending || !hasBackend}
+              />
+              <button
+                class="btn btn-outline btn-sm"
+                on:click={saveLinearKey}
+                disabled={!linearKey.trim() || linearPending || !hasBackend}
+              >
+                Save
+              </button>
+            </div>
+            {#if !hasBackend}
+              <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+            {/if}
+          </div>
         {/if}
       </div>
     </div>
@@ -244,5 +310,20 @@
     outline: none;
     border-color: hsl(var(--ring));
     box-shadow: 0 0 0 3px hsl(var(--ring) / 0.12);
+  }
+
+  .lbl-f {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: hsl(var(--muted-foreground));
+    margin-bottom: 6px;
+  }
+
+  .integration-hint {
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+    margin: 0 0 8px;
+    line-height: 1.5;
   }
 </style>

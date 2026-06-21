@@ -111,6 +111,13 @@ export function createRpc(
       case IPC.getSessionBuffer:
         return deps.sessions.getBuffer(args[0] as string)
 
+      case IPC.getLinearKey:
+        return deps.config.get('linear.apiKey') ?? null
+
+      case IPC.setLinearKey:
+        deps.config.set('linear.apiKey', args[0] as string)
+        return undefined
+
       case IPC.pickRepo:
         throw new Error('pickRepo is not supported without a desktop window')
 

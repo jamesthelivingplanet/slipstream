@@ -13,6 +13,7 @@ import type {
 import { IPC } from '../shared/contract.js'
 import { WebSocket } from 'ws'
 import type { WireReq, WireRes } from '../shared/wire.js'
+import type { IConfigStore } from '../services/configStore.js'
 
 // ── Fake deps (no native modules) ────────────────────────────────────────────
 
@@ -65,7 +66,12 @@ function makeFakeDeps(): IpcDeps {
     listTickets: vi.fn().mockResolvedValue([]),
   }
 
-  return { repos, worktrees, sessions, ports, tickets }
+  const config: IConfigStore = {
+    get: vi.fn().mockReturnValue(undefined),
+    set: vi.fn(),
+  }
+
+  return { repos, worktrees, sessions, ports, tickets, config }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

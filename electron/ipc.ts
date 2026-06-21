@@ -8,6 +8,7 @@ import type {
 } from './shared/contract.js'
 import { IPC } from './shared/contract.js'
 import { createRpc } from './core/rpc.js'
+import type { IConfigStore } from './services/configStore.js'
 
 export interface IpcDeps {
   repos: IRepoRegistry
@@ -15,6 +16,7 @@ export interface IpcDeps {
   sessions: ISessionManager
   ports: IPortBroker
   tickets: ITicketProvider
+  config: IConfigStore
 }
 
 /**
@@ -38,6 +40,8 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
     IPC.killSession,
     IPC.cleanupSession,
     IPC.getSessionBuffer,
+    IPC.getLinearKey,
+    IPC.setLinearKey,
   ] as const
 
   for (const channel of requestChannels) {

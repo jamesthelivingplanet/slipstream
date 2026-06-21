@@ -131,6 +131,8 @@ export interface FlotillaApi {
   pickAndRegisterRepo(): Promise<RepoDTO | null>
   removeRepo(id: string): Promise<void>
   listTickets(): Promise<TicketDTO[]>
+  getLinearKey(): Promise<string | null>
+  setLinearKey(key: string): Promise<void>
 
   /** Creates the worktree, claims a port, spawns claude. Returns the session. */
   startSession(input: { tid: string; title: string; prompt: string; repoId: string }): Promise<SessionDTO>
@@ -159,6 +161,8 @@ export const IPC = {
   sessionData: 'session:data',     // main → renderer
   sessionStatus: 'session:status', // main → renderer
   getSessionBuffer: 'session:buffer',
+  getLinearKey: 'config:getLinearKey',
+  setLinearKey: 'config:setLinearKey',
 } as const
 
 declare global {

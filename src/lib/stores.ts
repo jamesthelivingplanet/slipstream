@@ -12,6 +12,15 @@ import {
 } from './ipc'
 import { pushToast } from './toast'
 
+function dtoToTickets(dtos: { tid: string; src: string; title: string; repoHint?: string }[]): Ticket[] {
+  return dtos.map((d) => ({
+    tid: d.tid,
+    src: d.src as 'jira' | 'linear',
+    title: d.title,
+    repo: d.repoHint ?? '',
+  }))
+}
+
 function cleanError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e)
   return msg
@@ -81,17 +90,20 @@ export async function initFromBackend(): Promise<void> {
     })),
   )
 
-  tickets.set(
-    ticketDTOs.map((d) => ({
-      tid: d.tid,
-      src: d.src as 'jira' | 'linear',
-      title: d.title,
-      repo: d.repoHint ?? '',
-    })),
-  )
+  tickets.set(dtoToTickets(ticketDTOs))
 
   // Real sessions start empty; they are created via startAgent.
   sessions.set([])
+}
+
+export async function refreshTickets(): Promise<void> {
+  if (!hasBackend) return
+  try {
+    const dtos = await listTickets()
+    tickets.set(dtoToTickets(dtos))
+  } catch (e) {
+    pushToast('error', cleanError(e))
+  }
 }
 
 /** Open the native folder picker and register the chosen repo. */
