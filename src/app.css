@@ -155,6 +155,8 @@ html[data-mode="light"] .seg.on { background: #fff; }
 .done .a-status { color: hsl(var(--st-done)); }
 .errored .stat-dot { background: hsl(var(--st-error)); }
 .errored .a-status { color: hsl(var(--st-error)); }
+.detached .stat-dot { background: hsl(var(--muted-foreground)); }
+.detached .a-status { color: hsl(var(--muted-foreground)); }
 .idle .stat-dot { background: hsl(var(--muted-foreground)); }
 .idle .a-status { color: hsl(var(--muted-foreground)); }
 .a-id { margin-left: auto; font-size: 11px; color: hsl(var(--muted-foreground)); }
