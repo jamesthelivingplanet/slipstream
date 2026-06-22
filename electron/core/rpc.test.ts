@@ -11,6 +11,7 @@ import type {
   ISessionManager,
   IPortBroker,
   ITicketProvider,
+  ISessionStore,
   SessionStatus,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
@@ -44,17 +45,21 @@ type Listener = (...args: unknown[]) => void
 function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) => void } {
   const listeners: Record<string, Listener[]> = {}
 
-  const sessions: ISessionManager = {
+  const sessions = {
     start: vi.fn().mockReturnValue(makeSession()),
+    resume: vi.fn().mockReturnValue(makeSession()),
+    attachRemoteControl: vi.fn().mockReturnValue(makeSession()),
+    has: vi.fn().mockReturnValue(false),
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
+    killAll: vi.fn(),
     getBuffer: vi.fn().mockReturnValue({ data: 'buffered output', seq: 15 }),
     on(event: string, listener: Listener) {
       listeners[event] ??= []
       listeners[event].push(listener)
     },
-  }
+  } as unknown as ISessionManager
   // add removeListener so dispose() works
   ;(sessions as unknown as { removeListener(e: string, l: Listener): void }).removeListener = (
     event: string,
@@ -96,6 +101,14 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     set: vi.fn(),
   }
 
+  const sessionStoreMap = new Map<string, SessionDTO>()
+  const sessionStore: ISessionStore = {
+    list() { return Array.from(sessionStoreMap.values()) },
+    get(id) { return sessionStoreMap.get(id) },
+    upsert(s) { sessionStoreMap.set(s.id, s) },
+    delete(id) { sessionStoreMap.delete(id) },
+  }
+
   return {
     repos,
     worktrees,
@@ -103,6 +116,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     ports,
     tickets,
     config,
+    sessionStore,
     _emit(event: string, ...args: unknown[]) {
       for (const l of listeners[event] ?? []) l(...args)
     },
@@ -216,5 +230,62 @@ describe('createRpc', () => {
     rpc.dispose()
     deps._emit('data', 's1', 'after dispose')
     expect(emitted).toHaveLength(0)
+  })
+
+  it('startSession persists session to sessionStore', async () => {
+    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    expect(deps.sessionStore.list()).toHaveLength(1)
+    expect(deps.sessionStore.list()[0].id).toBe('s1')
+  })
+
+  it('listSessions returns persisted rows', async () => {
+    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    const result = await rpc.handle(IPC.listSessions, [])
+    expect(result).toHaveLength(1)
+  })
+
+  it('resumeSession respawns a missing session (not in has())', async () => {
+    deps.sessionStore.upsert(makeSession())
+    ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
+
+    const result = await rpc.handle(IPC.resumeSession, ['s1']) as SessionDTO
+    expect(deps.sessions.resume).toHaveBeenCalled()
+    expect(result.id).toBe('s1')
+  })
+
+  it('resumeSession is a no-op when has() is true', async () => {
+    deps.sessionStore.upsert(makeSession())
+    ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(true)
+
+    await rpc.handle(IPC.resumeSession, ['s1'])
+    expect(deps.sessions.resume).not.toHaveBeenCalled()
+  })
+
+  it('cleanupSession deletes from sessionStore after worktree removed', async () => {
+    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    expect(deps.sessionStore.list()).toHaveLength(1)
+    await rpc.handle(IPC.cleanupSession, ['s1'])
+    expect(deps.sessionStore.list()).toHaveLength(0)
+  })
+
+  it('cleanupSession works post-restart when sessionMeta is cleared', async () => {
+    deps.sessionStore.upsert(makeSession({ id: 's1', repoId: 'r1', branch: 't-1-fix-bug' }))
+    const result = await rpc.handle(IPC.cleanupSession, ['s1'])
+    expect(deps.worktrees.remove).toHaveBeenCalled()
+    expect(result).toEqual({ removed: true })
+    expect(deps.sessionStore.list()).toHaveLength(0)
+  })
+
+  it('attachRemoteControl calls sessions.attachRemoteControl and upserts status running', async () => {
+    deps.sessionStore.upsert(makeSession())
+
+    const result = await rpc.handle(IPC.attachRemoteControl, ['s1']) as SessionDTO & { port?: number }
+    expect(deps.sessions.attachRemoteControl).toHaveBeenCalled()
+    expect(result.id).toBe('s1')
+    expect(deps.sessionStore.get('s1')?.status).toBe('running')
+  })
+
+  it('attachRemoteControl throws when session is not in store', async () => {
+    await expect(rpc.handle(IPC.attachRemoteControl, ['missing'])).rejects.toThrow('Session not found: missing')
   })
 })

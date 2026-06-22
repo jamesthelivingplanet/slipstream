@@ -5,6 +5,7 @@ import type {
   ISessionManager,
   IPortBroker,
   ITicketProvider,
+  ISessionStore,
 } from './shared/contract.js'
 import { IPC } from './shared/contract.js'
 import { createRpc } from './core/rpc.js'
@@ -17,6 +18,7 @@ export interface IpcDeps {
   ports: IPortBroker
   tickets: ITicketProvider
   config: IConfigStore
+  sessionStore: ISessionStore
 }
 
 /**
@@ -39,6 +41,9 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
     IPC.startSession,
     IPC.killSession,
     IPC.cleanupSession,
+    IPC.listSessions,
+    IPC.resumeSession,
+    IPC.attachRemoteControl,
     IPC.getSessionBuffer,
     IPC.getLinearKey,
     IPC.setLinearKey,

@@ -1,15 +1,7 @@
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { RepoDTO } from '../shared/contract.js'
-
-/** Convert a ticket title to a branch-safe slug, e.g. "Dark mode flickers" → "dark-mode-flickers" */
-function slug(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48)
-}
+import type { RepoDTO, ISessionStore, SessionStatus } from '../shared/contract.js'
+import { branchFor } from '../shared/branch.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -29,11 +21,23 @@ export function createRpc(
   // Tracks which repo+branch each session owns so cleanup can remove the worktree.
   const sessionMeta = new Map<string, { repo: RepoDTO; branch: string }>()
 
+  // Tracks persisted status to avoid redundant DB writes on every data chunk.
+  const persistedStatus = new Map<string, string>()
+
   function onData(sessionId: string, chunk: string, seq: number): void {
     emit(IPC.sessionData, sessionId, chunk, seq)
   }
   function onStatus(sessionId: string, status: string): void {
     emit(IPC.sessionStatus, sessionId, status)
+    // Persist status change to DB (only when it actually changes)
+    const prev = persistedStatus.get(sessionId)
+    if (prev !== undefined && prev !== status) {
+      const persisted = deps.sessionStore.get(sessionId)
+      if (persisted) {
+        deps.sessionStore.upsert({ ...persisted, status: status as SessionStatus })
+        persistedStatus.set(sessionId, status)
+      }
+    }
   }
 
   deps.sessions.on('data', onData)
@@ -60,7 +64,7 @@ export function createRpc(
         const repo = await deps.repos.get(repoId)
         if (!repo) throw new Error(`Unknown repo: ${repoId}`)
 
-        const branch = `${tid}-${slug(title)}`
+        const branch = branchFor(tid, title)
         await deps.worktrees.create(repo, branch)
         const cwd = deps.worktrees.pathFor(repo, branch)
 
@@ -82,6 +86,8 @@ export function createRpc(
         })
 
         sessionMeta.set(session.id, { repo, branch })
+        deps.sessionStore.upsert({ ...session, port })
+        persistedStatus.set(session.id, 'running')
 
         return { ...session, port }
       }
@@ -101,11 +107,60 @@ export function createRpc(
       case IPC.cleanupSession: {
         const id = args[0] as string
         const opts = args[1] as { force?: boolean } | undefined
-        const meta = sessionMeta.get(id)
-        if (!meta) return { removed: false, reason: 'session not found' }
+        let meta = sessionMeta.get(id)
+        if (!meta) {
+          // Post-restart: try to reconstruct from sessionStore
+          const persisted = deps.sessionStore.get(id)
+          if (!persisted) return { removed: false, reason: 'session not found' }
+          const repo = await deps.repos.get(persisted.repoId)
+          if (!repo) return { removed: false, reason: 'session not found' }
+          meta = { repo, branch: persisted.branch }
+        }
         const result = await deps.worktrees.remove(meta.repo, meta.branch, opts)
-        if (result.removed) sessionMeta.delete(id)
+        if (result.removed) {
+          sessionMeta.delete(id)
+          deps.sessionStore.delete(id)
+          persistedStatus.delete(id)
+        }
         return result
+      }
+
+      case IPC.listSessions:
+        return deps.sessionStore.list()
+
+      case IPC.resumeSession: {
+        const id = args[0] as string
+        if (deps.sessions.has(id)) {
+          return deps.sessionStore.get(id) ?? { id, status: 'running' }
+        }
+        const persisted = deps.sessionStore.get(id)
+        if (!persisted) throw new Error(`Session not found: ${id}`)
+        const repo = await deps.repos.get(persisted.repoId)
+        if (!repo) throw new Error(`Repo not found: ${persisted.repoId}`)
+        const cwd = deps.worktrees.pathFor(repo, persisted.branch)
+        let port: number | undefined
+        try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }
+        const dto = deps.sessions.resume({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined })
+        sessionMeta.set(id, { repo, branch: persisted.branch })
+        persistedStatus.set(id, 'running')
+        deps.sessionStore.upsert({ ...dto, port })
+        return { ...dto, port }
+      }
+
+      case IPC.attachRemoteControl: {
+        const id = args[0] as string
+        const persisted = deps.sessionStore.get(id)
+        if (!persisted) throw new Error(`Session not found: ${id}`)
+        const repo = await deps.repos.get(persisted.repoId)
+        if (!repo) throw new Error(`Repo not found: ${persisted.repoId}`)
+        const cwd = deps.worktrees.pathFor(repo, persisted.branch)
+        let port: number | undefined
+        try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }
+        const dto = deps.sessions.attachRemoteControl({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined })
+        sessionMeta.set(id, { repo, branch: persisted.branch })
+        persistedStatus.set(id, 'running')
+        deps.sessionStore.upsert({ ...dto, port })
+        return { ...dto, port }
       }
 
       case IPC.getSessionBuffer:

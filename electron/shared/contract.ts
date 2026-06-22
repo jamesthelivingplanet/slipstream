@@ -89,14 +89,31 @@ export interface StartSessionInput {
   env?: Record<string, string>
 }
 
+export interface ResumeSessionInput {
+  session: SessionDTO
+  cwd: string
+  env?: Record<string, string>
+}
+
+export interface ISessionStore {
+  list(): SessionDTO[]
+  get(id: string): SessionDTO | undefined
+  upsert(s: SessionDTO): void
+  delete(id: string): void
+}
+
 /** Owns node-pty processes. Extends Node's EventEmitter (typed via SessionEvents). */
 export interface ISessionManager {
   start(input: StartSessionInput): SessionDTO
+  resume(input: ResumeSessionInput): SessionDTO
+  has(sessionId: string): boolean
   write(sessionId: string, data: string): void
   resize(sessionId: string, cols: number, rows: number): void
   kill(sessionId: string): void
+  killAll(): void
   on<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void
   getBuffer(sessionId: string): { data: string; seq: number }
+  attachRemoteControl(input: ResumeSessionInput): SessionDTO
 }
 
 /**
@@ -140,6 +157,9 @@ export interface FlotillaApi {
   resizeSession(id: string, cols: number, rows: number): void
   killSession(id: string): Promise<void>
   cleanupSession(id: string, opts?: { force?: boolean }): Promise<{ removed: boolean; reason?: string }>
+  listSessions(): Promise<SessionDTO[]>
+  resumeSession(id: string): Promise<SessionDTO>
+  attachRemoteControl(id: string): Promise<SessionDTO>
 
   /** Returns an unsubscribe fn. */
   onSessionData(cb: (id: string, data: string, seq: number) => void): () => void
@@ -158,6 +178,9 @@ export const IPC = {
   resizeSession: 'session:resize',
   killSession: 'session:kill',
   cleanupSession: 'session:cleanup',
+  listSessions: 'session:list',
+  resumeSession: 'session:resume',
+  attachRemoteControl: 'session:attachRemoteControl',
   sessionData: 'session:data',     // main → renderer
   sessionStatus: 'session:status', // main → renderer
   getSessionBuffer: 'session:buffer',

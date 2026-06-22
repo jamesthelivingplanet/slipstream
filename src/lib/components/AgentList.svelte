@@ -54,7 +54,7 @@
         </div>
         <div class="a-title">{s.title}</div>
         <div class="a-meta">
-          {#if s.status === 'idle'}
+          {#if !s.repo}
             <span class="muted">draft · pick a repo to start</span>
           {:else}
             {@const r = repoById(s.repo)}
