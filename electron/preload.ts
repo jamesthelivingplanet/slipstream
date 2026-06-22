@@ -18,6 +18,9 @@ const api: FlotillaApi = {
 
   // ── Sessions ─────────────────────────────────────────────────────────────
   startSession: (input) => ipcRenderer.invoke(IPC.startSession, input),
+  listSessions: () => ipcRenderer.invoke(IPC.listSessions),
+  resumeSession: (id: string) => ipcRenderer.invoke(IPC.resumeSession, id),
+  attachRemoteControl: (id: string) => ipcRenderer.invoke(IPC.attachRemoteControl, id),
 
   writeSession: (id, data) => ipcRenderer.send(IPC.writeSession, id, data),
   resizeSession: (id, cols, rows) =>

@@ -101,3 +101,17 @@ export function onSessionStatus(
   if (!hasBackend) return () => {}
   return window.flotilla.onSessionStatus(cb)
 }
+
+export function listSessions(): Promise<SessionDTO[]> {
+  return hasBackend ? window.flotilla.listSessions() : Promise.resolve([])
+}
+
+export function resumeSession(id: string): Promise<SessionDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.flotilla.resumeSession(id)
+}
+
+export function attachRemoteControl(id: string): Promise<SessionDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.flotilla.attachRemoteControl(id)
+}

@@ -4,7 +4,8 @@
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
   import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession } from '../stores'
-  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, killSession, cleanupSession, getSessionBuffer } from '../ipc'
+  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, killSession, cleanupSession, getSessionBuffer, resumeSession, attachRemoteControl } from '../ipc'
+  import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
   import type { Session, Status } from '../types'
@@ -67,8 +68,15 @@
 
   let ro: ResizeObserver | null = null
   let offResize: (() => void) | null = null
+  const resumedIds = new Set<string>()
 
   async function startLive() {
+    // Lazily respawn a detached session when the user opens it.
+    if (session.id && !resumedIds.has(session.id)) {
+      resumedIds.add(session.id)
+      try { await resumeSession(session.id) } catch { /* already live or not found */ }
+    }
+
     term.reset()
     setTimeout(() => { try { fit.fit() } catch {}; term.focus() }, 40)
 
@@ -169,6 +177,20 @@
 
   // ── Toolbar actions ───────────────────────────────────────────────────────
 
+  async function handleRemoteControl() {
+    if (!hasBackend || !session.id) return
+    try {
+      await attachRemoteControl(session.id)
+      setSessionStatus(session.id, 'running')
+      term.reset()
+      const snap = await getSessionBuffer(session.id)
+      term.write(snap.data)
+      pushToast('success', 'Remote control attached.')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']*':\s*/, '') : String(e))
+    }
+  }
+
   async function handleCleanup() {
     if (liveMode && session.id) {
       await killSession(session.id)
@@ -203,6 +225,7 @@
     </div>
   </div>
   <div class="spacer"></div>
+  <button class="btn btn-outline btn-sm" title="Relaunch this agent with Claude Code Remote Control" disabled={!hasBackend || !session.id} on:click={handleRemoteControl}>{@html icons.remote} Remote control</button>
   <button class="btn btn-outline btn-sm" on:click={() => alert('Opens the worktree in your editor (Phase 1)')}>
     {@html icons.externalLink} Editor
   </button>

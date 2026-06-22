@@ -214,6 +214,18 @@ export function createWsApi(opts: WsApiOpts): FlotillaApi {
       return request(IPC.cleanupSession, [id, opts]) as Promise<{ removed: boolean; reason?: string }>
     },
 
+    listSessions(): Promise<SessionDTO[]> {
+      return request(IPC.listSessions, []) as Promise<SessionDTO[]>
+    },
+
+    resumeSession(id: string): Promise<SessionDTO> {
+      return request(IPC.resumeSession, [id]) as Promise<SessionDTO>
+    },
+
+    attachRemoteControl(id: string): Promise<SessionDTO> {
+      return request(IPC.attachRemoteControl, [id]) as Promise<SessionDTO>
+    },
+
     getSessionBuffer(id: string): Promise<{ data: string; seq: number }> {
       return request(IPC.getSessionBuffer, [id]) as Promise<{ data: string; seq: number }>
     },
