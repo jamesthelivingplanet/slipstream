@@ -1,4 +1,4 @@
-export type Status = 'idle' | 'running' | 'needs' | 'done' | 'errored'
+export type Status = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'detached'
 export type Source = 'jira' | 'linear'
 export type Filter = 'all' | 'needs' | 'running' | 'done'
 
@@ -29,6 +29,7 @@ export interface Session {
   del: number
   ago: string
   prompt?: string
+  port?: number
   activity: { text: string; q?: boolean }
 }
 
@@ -38,4 +39,5 @@ export const STATUS_LABEL: Record<Status, string> = {
   running: 'Running',
   done: 'Done',
   errored: 'Errored',
+  detached: 'Detached',
 }

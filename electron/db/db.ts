@@ -77,6 +77,14 @@ export function allSessions(db: Database.Database): SessionDTO[] {
   return db.prepare('SELECT * FROM sessions').all() as SessionDTO[]
 }
 
+export function getSession(db: Database.Database, id: string): SessionDTO | undefined {
+  return db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as SessionDTO | undefined
+}
+
+export function deleteSession(db: Database.Database, id: string): void {
+  db.prepare('DELETE FROM sessions WHERE id = ?').run(id)
+}
+
 export function deleteRepo(db: Database.Database, id: string): void {
   db.prepare('DELETE FROM repos WHERE id = ?').run(id)
 }

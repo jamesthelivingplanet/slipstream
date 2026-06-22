@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { registerIpc } from './ipc.js'
 import { createServices } from './core/services.js'
+import type { IpcDeps } from './ipc.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -12,6 +13,7 @@ const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 
 let win: BrowserWindow | null = null
+let services: IpcDeps | null = null
 
 function createWindow() {
   win = new BrowserWindow({
@@ -37,7 +39,8 @@ function createWindow() {
   }
 
   // ── wire the backend services and expose them over IPC ──
-  registerIpc(win, createServices(app.getPath('userData')))
+  services = createServices(app.getPath('userData'))
+  registerIpc(win, services)
 }
 
 app.whenReady().then(createWindow)
@@ -47,6 +50,10 @@ app.on('window-all-closed', () => {
     app.quit()
     win = null
   }
+})
+
+app.on('before-quit', () => {
+  services?.sessions.killAll()
 })
 
 app.on('activate', () => {

@@ -8,6 +8,7 @@ import { createSessionManager } from '../services/sessionManager.js'
 import { createPortBroker } from '../services/portBroker.js'
 import { createConfigStore } from '../services/configStore.js'
 import { createLinearProvider } from '../tickets/linearProvider.js'
+import { createSessionStore } from '../services/sessionStore.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -34,6 +35,7 @@ export function createServices(root: string): IpcDeps {
   fs.mkdirSync(root, { recursive: true })
   const db = openDb(path.join(root, 'flotilla.db'))
   const configStore = createConfigStore(db)
+  const sessionStore = createSessionStore(db)
   return {
     repos: createRepoRegistry(db, root),
     worktrees: createWorktreeManager(root),
@@ -41,5 +43,6 @@ export function createServices(root: string): IpcDeps {
     ports: createPortBroker(),
     tickets: createLinearProvider(configStore),
     config: configStore,
+    sessionStore,
   }
 }

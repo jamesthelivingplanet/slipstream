@@ -5,6 +5,7 @@ import {
   hasBackend,
   listRepos,
   listTickets,
+  listSessions,
   pickAndRegisterRepo,
   registerRepo as ipcRegisterRepo,
   removeRepo,
@@ -92,8 +93,24 @@ export async function initFromBackend(): Promise<void> {
 
   tickets.set(dtoToTickets(ticketDTOs))
 
-  // Real sessions start empty; they are created via startAgent.
-  sessions.set([])
+  const sessionDTOs = await listSessions()
+  sessions.set(
+    sessionDTOs.map((dto) => ({
+      id: dto.id,
+      tid: dto.tid,
+      src: 'jira' as const,
+      status: (dto.status === 'running' || dto.status === 'needs') ? 'detached' : dto.status,
+      title: dto.title,
+      repo: dto.repoId,
+      branch: dto.branch,
+      add: 0,
+      del: 0,
+      ago: '',
+      prompt: dto.prompt,
+      port: dto.port,
+      activity: { text: 'Detached — open to resume.' },
+    }))
+  )
 }
 
 export async function refreshTickets(): Promise<void> {

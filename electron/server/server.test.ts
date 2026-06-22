@@ -9,6 +9,7 @@ import type {
   ISessionManager,
   IPortBroker,
   ITicketProvider,
+  ISessionStore,
 } from '../shared/contract.js'
 import { IPC } from '../shared/contract.js'
 import { WebSocket } from 'ws'
@@ -26,9 +27,13 @@ function makeFakeDeps(): IpcDeps {
 
   const sessions: ISessionManager = {
     start: vi.fn(),
+    resume: vi.fn(),
+    attachRemoteControl: vi.fn(),
+    has: vi.fn().mockReturnValue(false),
     write: vi.fn(),
     resize: vi.fn(),
     kill: vi.fn(),
+    killAll: vi.fn(),
     getBuffer: vi.fn().mockReturnValue({ data: '', seq: 0 }),
     on(event: string, listener: (...args: unknown[]) => void) {
       sessionListeners[event] ??= []
@@ -71,7 +76,15 @@ function makeFakeDeps(): IpcDeps {
     set: vi.fn(),
   }
 
-  return { repos, worktrees, sessions, ports, tickets, config }
+  const sessionStoreMap = new Map()
+  const sessionStore: ISessionStore = {
+    list() { return Array.from(sessionStoreMap.values()) },
+    get(id) { return sessionStoreMap.get(id) },
+    upsert(s) { sessionStoreMap.set(s.id, s) },
+    delete(id) { sessionStoreMap.delete(id) },
+  }
+
+  return { repos, worktrees, sessions, ports, tickets, config, sessionStore }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
