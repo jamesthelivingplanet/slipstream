@@ -53,6 +53,7 @@ html[data-mode="light"][data-accent="zinc"] { --primary: 240 6% 10%; --primary-f
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #app { height: 100%; }
+html { height: 100dvh; }
 body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
@@ -85,7 +86,7 @@ button {
 }
 
 /* ───────── layout ───────── */
-.app { display: flex; flex-direction: column; height: 100vh; }
+.app { display: flex; flex-direction: column; height: 100%; }
 
 header.bar {
   height: 52px; flex: 0 0 52px;
@@ -385,6 +386,29 @@ body {
 
   /* Dialog: full-width on small screens. */
   .dialog { width: 96vw; max-width: 96vw; }
+
+  /* Terminal toolbar: tighten and drop button text → icon-only actions so the
+     three action buttons + back button fit a phone without horizontal scroll. */
+  .term-head {
+    height: 48px;
+    flex: 0 0 48px;
+    gap: 6px;
+    padding: 0 8px;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+  }
+  .term-head .btn-label { display: none; }
+  .term-head .btn { padding: 0; width: 36px; }
+  .term-head .th-title .t { font-size: 12.5px; }
+  /* Repo/branch badges are redundant with the list on mobile — hide to save room. */
+  .term-head .th-title .m { display: none; }
+  .term-wrap { padding: 8px; }
+
+  /* App header: tighter gap so the controls never overflow on narrow phones. */
+  header.bar { gap: 8px; }
+
+  /* Idle agent-config view: smaller padding so it isn't cramped/over-scrolled. */
+  .config { padding: 20px 14px 28px; }
 }
 
 /* Tablet-ish: narrower sidebar but still side-by-side. */
