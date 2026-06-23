@@ -45,7 +45,7 @@ type Listener = (...args: unknown[]) => void
 function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) => void } {
   const listeners: Record<string, Listener[]> = {}
 
-  const sessions = {
+  const sessions: ISessionManager = {
     start: vi.fn().mockReturnValue(makeSession()),
     resume: vi.fn().mockReturnValue(makeSession()),
     attachRemoteControl: vi.fn().mockReturnValue(makeSession()),
@@ -59,16 +59,12 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
       listeners[event] ??= []
       listeners[event].push(listener)
     },
+    off(event: string, listener: Listener) {
+      if (listeners[event]) {
+        listeners[event] = listeners[event].filter((l) => l !== listener)
+      }
+    },
   } as unknown as ISessionManager
-  // add removeListener so dispose() works
-  ;(sessions as unknown as { removeListener(e: string, l: Listener): void }).removeListener = (
-    event: string,
-    listener: Listener,
-  ) => {
-    if (listeners[event]) {
-      listeners[event] = listeners[event].filter((l) => l !== listener)
-    }
-  }
 
   const repo = makeRepo()
 
@@ -230,6 +226,17 @@ describe('createRpc', () => {
     rpc.dispose()
     deps._emit('data', 's1', 'after dispose')
     expect(emitted).toHaveLength(0)
+  })
+
+  it('dispose() does not throw (regression: sessions.off must exist)', () => {
+    expect(() => rpc.dispose()).not.toThrow()
+  })
+
+  it('dispose() calls sessions.off for data and status', () => {
+    const offSpy = vi.spyOn(deps.sessions, 'off')
+    rpc.dispose()
+    expect(offSpy).toHaveBeenCalledWith('data', expect.any(Function))
+    expect(offSpy).toHaveBeenCalledWith('status', expect.any(Function))
   })
 
   it('startSession persists session to sessionStore', async () => {

@@ -112,6 +112,7 @@ export interface ISessionManager {
   kill(sessionId: string): void
   killAll(): void
   on<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void
+  off<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void
   getBuffer(sessionId: string): { data: string; seq: number }
   attachRemoteControl(input: ResumeSessionInput): SessionDTO
 }
