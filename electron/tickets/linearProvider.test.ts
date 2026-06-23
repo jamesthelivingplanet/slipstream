@@ -134,3 +134,83 @@ describe('createLinearProvider', () => {
     expect(result[0].repoHint).toBeUndefined()
   })
 })
+
+describe('completeTicket', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('throws when no API key', async () => {
+    const provider = createLinearProvider(makeConfigStore(undefined))
+    await expect(provider.completeTicket('FLO-9')).rejects.toThrow('Linear API key not configured')
+  })
+
+  it('happy path: marks the ticket done with the first completed state', async () => {
+    const issueNode = {
+      id: 'issue-uuid-flo9',
+      state: { id: 'state-started' },
+      team: {
+        states: {
+          nodes: [
+            { id: 'state-completed-1', type: 'completed', position: 2 },
+            { id: 'state-completed-2', type: 'completed', position: 1 },
+            { id: 'state-started', type: 'started', position: 0 },
+          ],
+        },
+      },
+    }
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { issues: { nodes: [issueNode] } } }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { issueUpdate: { success: true } } }),
+      } as Response)
+
+    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+    await expect(provider.completeTicket('FLO-9')).resolves.toBeUndefined()
+
+    // Second call (mutation) should use the completed state with lowest position (state-completed-2)
+    expect(vi.mocked(fetch).mock.calls[1][1]).toMatchObject({
+      body: expect.stringContaining('state-completed-2'),
+    })
+  })
+
+  it('throws Ticket not found when issues query returns no nodes', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { issues: { nodes: [] } } }),
+    } as Response)
+
+    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+    await expect(provider.completeTicket('FLO-9')).rejects.toThrow('Ticket not found: FLO-9')
+  })
+
+  it('throws when no completed state exists', async () => {
+    const issueNode = {
+      id: 'issue-uuid-flo9',
+      state: { id: 'state-started' },
+      team: {
+        states: {
+          nodes: [
+            { id: 'state-started', type: 'started', position: 0 },
+            { id: 'state-backlog', type: 'backlog', position: 1 },
+          ],
+        },
+      },
+    }
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { issues: { nodes: [issueNode] } } }),
+    } as Response)
+
+    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+    await expect(provider.completeTicket('FLO-9')).rejects.toThrow('No completed workflow state found for this team')
+  })
+})

@@ -141,6 +141,7 @@ export interface IPortBroker {
 export interface ITicketProvider {
   readonly id: string
   listTickets(): Promise<TicketDTO[]>
+  completeTicket(tid: string): Promise<void>
 }
 
 /* ───────── IPC: renderer-facing bridge (window.flotilla) ───────── */
@@ -153,6 +154,7 @@ export interface FlotillaApi {
   pickAndRegisterRepo(): Promise<RepoDTO | null>
   removeRepo(id: string): Promise<void>
   listTickets(): Promise<TicketDTO[]>
+  completeTicket(tid: string): Promise<void>
   getLinearKey(): Promise<string | null>
   setLinearKey(key: string): Promise<void>
 
@@ -178,6 +180,7 @@ export const IPC = {
   pickRepo: 'repos:pick',
   removeRepo: 'repos:remove',
   listTickets: 'tickets:list',
+  completeTicket: 'tickets:complete',
   startSession: 'session:start',
   writeSession: 'session:write',
   resizeSession: 'session:resize',

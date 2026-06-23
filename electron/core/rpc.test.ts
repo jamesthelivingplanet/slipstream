@@ -90,6 +90,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
   const tickets: ITicketProvider = {
     id: 'test',
     listTickets: vi.fn().mockResolvedValue([]),
+    completeTicket: vi.fn().mockResolvedValue(undefined),
   }
 
   const config: IConfigStore = {

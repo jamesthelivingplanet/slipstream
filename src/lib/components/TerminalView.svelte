@@ -3,7 +3,7 @@
   import { Terminal, type IDisposable } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
-  import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession, cleanupAgent } from '../stores'
+  import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession, cleanupAgent, finishAgent } from '../stores'
   import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
@@ -194,6 +194,10 @@
   async function handleCleanup() {
     await cleanupAgent(session, { auto: false })
   }
+
+  async function handleFinish() {
+    await finishAgent(session)
+  }
 </script>
 
 <div class="term-head">
@@ -211,6 +215,9 @@
   <button class="btn btn-outline btn-sm" title="Relaunch this agent with Claude Code Remote Control" disabled={!hasBackend || !session.id} on:click={handleRemoteControl}>{@html icons.remote} <span class="btn-label">Remote control</span></button>
   <button class="btn btn-outline btn-sm" on:click={() => alert('Opens the worktree in your editor (Phase 1)')}>
     {@html icons.externalLink} <span class="btn-label">Editor</span>
+  </button>
+  <button class="btn btn-outline btn-sm" title="Mark this ticket Done on Linear and remove the session" disabled={!hasBackend || !session.id} on:click={handleFinish}>
+    {@html icons.check} <span class="btn-label">Mark Done & Finish</span>
   </button>
   <button class="btn btn-outline btn-sm btn-danger" on:click={handleCleanup}>
     {@html icons.trash} <span class="btn-label">Clean up</span>

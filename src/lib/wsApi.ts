@@ -183,6 +183,10 @@ export function createWsApi(opts: WsApiOpts): FlotillaApi {
       return request(IPC.listTickets, []) as Promise<TicketDTO[]>
     },
 
+    completeTicket(tid: string): Promise<void> {
+      return request(IPC.completeTicket, [tid]) as Promise<void>
+    },
+
     getLinearKey(): Promise<string | null> {
       return request(IPC.getLinearKey, []) as Promise<string | null>
     },

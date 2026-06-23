@@ -11,6 +11,7 @@ const api: FlotillaApi = {
 
   // ── Tickets ──────────────────────────────────────────────────────────────
   listTickets: () => ipcRenderer.invoke(IPC.listTickets),
+  completeTicket: (tid: string) => ipcRenderer.invoke(IPC.completeTicket, tid),
 
   // ── Config / Integrations ────────────────────────────────────────────────
   getLinearKey: () => ipcRenderer.invoke(IPC.getLinearKey),

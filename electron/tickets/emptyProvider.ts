@@ -6,5 +6,6 @@ export function createEmptyProvider(): ITicketProvider {
     async listTickets(): Promise<TicketDTO[]> {
       return []
     },
+    async completeTicket(_tid: string): Promise<void> {},
   }
 }

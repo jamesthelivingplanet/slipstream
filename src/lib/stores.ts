@@ -12,6 +12,7 @@ import {
   startSession,
   killSession,
   cleanupSession,
+  completeTicket,
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
@@ -276,6 +277,21 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
     pushToast('error', cleanError(e))
     return false
   }
+}
+
+export async function finishAgent(s: Session): Promise<boolean> {
+  if (!hasBackend || !s.id) {
+    // No backend: just local teardown
+    return cleanupAgent(s, { auto: true })
+  }
+  try {
+    await completeTicket(s.tid)
+  } catch (e) {
+    pushToast('error', cleanError(e))
+    return false
+  }
+  // On success, tear down the session (cleanupAgent already toasts "Cleaned up X")
+  return cleanupAgent(s, { auto: true })
 }
 
 /** Pull latest tickets, refresh the sidebar list, and tear down agents whose ticket is now Done. */

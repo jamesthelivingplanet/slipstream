@@ -58,6 +58,9 @@ export function createRpc(
       case IPC.listTickets:
         return deps.tickets.listTickets()
 
+      case IPC.completeTicket:
+        return deps.tickets.completeTicket(args[0] as string)
+
       case IPC.startSession: {
         const input = args[0] as { tid: string; title: string; prompt: string; repoId: string; description?: string }
         const { tid, title, prompt, repoId, description } = input

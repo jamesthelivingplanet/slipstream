@@ -42,6 +42,11 @@ export function listTickets(): Promise<TicketDTO[]> {
   return hasBackend ? window.flotilla.listTickets() : Promise.resolve([])
 }
 
+export function completeTicket(tid: string): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.flotilla.completeTicket(tid)
+}
+
 // ── Sessions ───────────────────────────────────────────────────────────────
 
 export function startSession(input: {
