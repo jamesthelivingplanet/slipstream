@@ -7,7 +7,7 @@ import { hasTranscript } from './transcripts.js'
 let projectsDir: string
 
 beforeEach(() => {
-  projectsDir = mkdtempSync(join(tmpdir(), 'flotilla-transcripts-'))
+  projectsDir = mkdtempSync(join(tmpdir(), 'slipstream-transcripts-'))
 })
 
 afterEach(() => {
@@ -29,6 +29,6 @@ describe('hasTranscript', () => {
   })
 
   it('returns false when projectsDir does not exist', () => {
-    expect(hasTranscript('any-id', '/tmp/flotilla-does-not-exist-xyz')).toBe(false)
+    expect(hasTranscript('any-id', '/tmp/slipstream-does-not-exist-xyz')).toBe(false)
   })
 })

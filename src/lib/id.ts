@@ -1,6 +1,6 @@
 /**
  * crypto.randomUUID() only exists in a secure context (HTTPS or localhost).
- * Flotilla web is served over plain HTTP across a Tailscale tailnet, so we
+ * Slipstream web is served over plain HTTP across a Tailscale tailnet, so we
  * need a fallback. These ids only correlate WS requests/responses — they
  * don't need to be cryptographically strong.
  */

@@ -19,11 +19,11 @@ let repo: RepoDTO
 let wm: ReturnType<typeof createWorktreeManager>
 
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), 'flotilla-wt-'))
+  root = mkdtempSync(join(tmpdir(), 'slipstream-wt-'))
   const repoPath = join(root, 'source')
   execFileSync('git', ['init', '-b', 'main', repoPath], { encoding: 'utf8' })
-  git(repoPath, 'config', 'user.email', 'test@flotilla.dev')
-  git(repoPath, 'config', 'user.name', 'Flotilla Test')
+  git(repoPath, 'config', 'user.email', 'test@slipstream.dev')
+  git(repoPath, 'config', 'user.name', 'Slipstream Test')
   writeFileSync(join(repoPath, 'README.md'), '# demo\n')
   git(repoPath, 'add', '-A')
   git(repoPath, 'commit', '-m', 'init')

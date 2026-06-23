@@ -1,13 +1,13 @@
 /**
- * WebSocket-backed FlotillaApi client.
+ * WebSocket-backed SlipstreamApi client.
  *
- * createWsApi({ url, token }) returns a FlotillaApi that talks to the headless
+ * createWsApi({ url, token }) returns a SlipstreamApi that talks to the headless
  * WebSocket server via the wire protocol defined in electron/shared/wire.ts.
  *
  * Framework-free (plain TS) — unit-testable against a fake WebSocket.
  */
 
-import type { FlotillaApi, RepoDTO, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo } from '../../electron/shared/contract.js'
+import type { SlipstreamApi, RepoDTO, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
 import { genId } from './id.js'
@@ -33,7 +33,7 @@ type PendingReq = {
 type DataCb = (id: string, data: string, seq: number) => void
 type StatusCb = (id: string, status: SessionStatus) => void
 
-export function createWsApi(opts: WsApiOpts): FlotillaApi {
+export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   const WS = opts.WebSocketCtor ?? WebSocket
   const fullUrl = `${opts.url}?token=${encodeURIComponent(opts.token)}`
 
@@ -159,7 +159,7 @@ export function createWsApi(opts: WsApiOpts): FlotillaApi {
   // Boot the connection
   connect()
 
-  // ── FlotillaApi implementation ────────────────────────────────────────────
+  // ── SlipstreamApi implementation ────────────────────────────────────────────
 
   return {
     listRepos(): Promise<RepoDTO[]> {

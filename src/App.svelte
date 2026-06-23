@@ -49,8 +49,8 @@
       </button>
     {/if}
     <div class="logo">
-      <div class="glyph">F</div>
-      <b>Flotilla</b>
+      <div class="glyph">S</div>
+      <b>Slipstream</b>
       {#if !isMobile}<span class="badge mono">dangerous mode</span>{/if}
     </div>
     <div class="spacer"></div>

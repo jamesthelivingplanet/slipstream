@@ -1,6 +1,6 @@
 # Roadmap & status
 
-Living doc: where Flotilla is and where it's going. Update it as phases land.
+Living doc: where Slipstream is and where it's going. Update it as phases land.
 
 _Last updated: 2026-06-21._
 
@@ -18,7 +18,7 @@ _Last updated: 2026-06-21._
   (heuristics), `portBroker` (floo), typed IPC bridge (preload + `registerIpc`).
 
 **Phase 1 — Renderer wiring**
-- `window.flotilla` bridge live; repos as a store; backend-driven data on startup.
+- `window.slipstream` bridge live; repos as a store; backend-driven data on startup.
 - Native folder-picker import; real `startSession` (worktree + claude PTY);
   `TerminalView` streams the live PTY (data/input/resize/status); kill + guarded cleanup.
 
@@ -44,7 +44,7 @@ _Last updated: 2026-06-21._
   Test count is now 56 (6 new `claudeTrust` unit tests).
 
 **Headless web mode**
-- WS server (`pnpm serve`, `FLOTILLA_TOKEN`-gated) + `wsApi` client so the same UI runs
+- WS server (`pnpm serve`, `SLIPSTREAM_TOKEN`-gated) + `wsApi` client so the same UI runs
   in a browser/mobile against a remote backend.
 
 **Early-output buffer**

@@ -1,4 +1,4 @@
-# Flotilla
+# Slipstream
 
 A desktop console for running and watching **many Claude Code agents at once** — one
 agent per task, each `claude --dangerously-skip-permissions` running in its own git
@@ -12,7 +12,7 @@ worktree. Start them, watch them, and jump to whichever one needs you.
 
 Two-pane desktop app: a list of **agents** on the left, the selected agent's **terminal**
 on the right. You import git repos, create an agent (blank or from a ticket), pick a repo,
-and **Start** — Flotilla cuts a worktree, assigns a sticky dev port, and streams the live
+and **Start** — Slipstream cuts a worktree, assigns a sticky dev port, and streams the live
 `claude` PTY into the terminal. Built to manage a fleet of them concurrently.
 
 ## Stack
@@ -45,9 +45,9 @@ If a fresh machine has trouble with native modules / the Electron binary, see th
 ```
 electron/                 main process
   main.ts                 window + service wiring
-  preload.ts              contextBridge → window.flotilla (ESM)
+  preload.ts              contextBridge → window.slipstream (ESM)
   ipc.ts                  registerIpc(): ipcMain handlers
-  shared/contract.ts      types, service interfaces, IPC channels, FlotillaApi  (the seam)
+  shared/contract.ts      types, service interfaces, IPC channels, SlipstreamApi  (the seam)
   services/               repoRegistry, worktreeManager, sessionManager, statusDetector, portBroker
   db/db.ts                better-sqlite3 (schema inlined)
   tickets/                ITicketProvider impls (emptyProvider; real providers TBD)

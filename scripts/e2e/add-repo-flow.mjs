@@ -8,8 +8,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const repoToAdd = root // the Flotilla repo itself is a real git repo
-const userDataDir = '/tmp/flotilla-e2e'
+const repoToAdd = root // the Slipstream repo itself is a real git repo
+const userDataDir = '/tmp/slipstream-e2e'
 
 const shot = (win, name) => win.screenshot({ path: `/tmp/e2e-${name}.png` })
 
@@ -22,10 +22,10 @@ const win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
 await win.waitForTimeout(1000)
 
-const hasBridge = await win.evaluate(() => !!window.flotilla)
-console.log('window.flotilla present:', hasBridge)
+const hasBridge = await win.evaluate(() => !!window.slipstream)
+console.log('window.slipstream present:', hasBridge)
 
-const reposBefore = await win.evaluate(() => window.flotilla.listRepos())
+const reposBefore = await win.evaluate(() => window.slipstream.listRepos())
 console.log('repos before:', JSON.stringify(reposBefore))
 await shot(win, '1-home')
 
@@ -37,7 +37,7 @@ await app.evaluate(async ({ dialog }, p) => {
 await win.getByRole('button', { name: /add repo/i }).click()
 await win.waitForTimeout(1200)
 
-const reposAfter = await win.evaluate(() => window.flotilla.listRepos())
+const reposAfter = await win.evaluate(() => window.slipstream.listRepos())
 console.log('repos after add:', JSON.stringify(reposAfter))
 await shot(win, '2-after-add')
 

@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const userDataDir = '/tmp/flotilla-e2e-settings'
+const userDataDir = '/tmp/slipstream-e2e-settings'
 const shot = (win, name) => win.screenshot({ path: `/tmp/e2e-${name}.png` })
 const stubDialog = (app, p) =>
   app.evaluate(async ({ dialog }, p) => {
@@ -32,7 +32,7 @@ await shot(win, 's2-settings-empty')
 await stubDialog(app, root)
 await win.getByRole('button', { name: /add repository/i }).click()
 await win.waitForTimeout(700)
-console.log('repos:', JSON.stringify(await win.evaluate(() => window.flotilla.listRepos())))
+console.log('repos:', JSON.stringify(await win.evaluate(() => window.slipstream.listRepos())))
 await shot(win, 's3-repo-added')
 
 // error: a non-git folder
@@ -44,7 +44,7 @@ await shot(win, 's4-error-toast')
 // remove the repo
 await win.locator('.repo-row button[title="Remove repository"]').first().click()
 await win.waitForTimeout(600)
-console.log('repos after remove:', JSON.stringify(await win.evaluate(() => window.flotilla.listRepos())))
+console.log('repos after remove:', JSON.stringify(await win.evaluate(() => window.slipstream.listRepos())))
 await shot(win, 's5-after-remove')
 
 await app.close()
