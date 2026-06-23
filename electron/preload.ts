@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { FlotillaApi, SessionStatus } from './shared/contract.js'
+import type { SlipstreamApi, SessionStatus } from './shared/contract.js'
 import { IPC } from './shared/contract.js'
 
-const api: FlotillaApi = {
+const api: SlipstreamApi = {
   // ── Repos ────────────────────────────────────────────────────────────────
   listRepos: () => ipcRenderer.invoke(IPC.listRepos),
   registerRepo: (absPath) => ipcRenderer.invoke(IPC.registerRepo, absPath),
@@ -54,4 +54,4 @@ const api: FlotillaApi = {
   },
 }
 
-contextBridge.exposeInMainWorld('flotilla', api)
+contextBridge.exposeInMainWorld('slipstream', api)

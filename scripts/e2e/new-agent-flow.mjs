@@ -6,7 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const userDataDir = '/tmp/flotilla-e2e-newagent'
+const userDataDir = '/tmp/slipstream-e2e-newagent'
 const shot = (win, name) => win.screenshot({ path: `/tmp/e2e-${name}.png` })
 
 const app = await electron.launch({
@@ -17,7 +17,7 @@ const win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
 await win.waitForTimeout(1000)
 
-console.log('tickets:', JSON.stringify(await win.evaluate(() => window.flotilla.listTickets())))
+console.log('tickets:', JSON.stringify(await win.evaluate(() => window.slipstream.listTickets())))
 await shot(win, 'n1-home')
 
 await win.getByRole('button', { name: /new agent/i }).click()
@@ -33,6 +33,6 @@ await win.getByRole('button', { name: /create agent/i }).click()
 await win.waitForTimeout(600)
 await shot(win, 'n4-created')
 
-console.log('sessions:', JSON.stringify(await win.evaluate(() => window.flotilla.listRepos())))
+console.log('sessions:', JSON.stringify(await win.evaluate(() => window.slipstream.listRepos())))
 await app.close()
 console.log('done')

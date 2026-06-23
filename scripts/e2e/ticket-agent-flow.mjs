@@ -16,7 +16,7 @@ const win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
 await win.waitForTimeout(1200)
 
-console.log('tickets:', JSON.stringify(await win.evaluate(() => window.flotilla.listTickets())))
+console.log('tickets:', JSON.stringify(await win.evaluate(() => window.slipstream.listTickets())))
 
 await win.getByRole('button', { name: /new agent/i }).click()
 await win.waitForTimeout(800)

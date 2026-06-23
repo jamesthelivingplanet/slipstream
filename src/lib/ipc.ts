@@ -1,7 +1,7 @@
 /**
  * Renderer-side IPC client.
  *
- * `hasBackend` is true only inside Electron (window.flotilla is present).
+ * `hasBackend` is true only inside Electron (window.slipstream is present).
  * When false (plain browser / Vite dev without Electron), all read calls
  * resolve to empty arrays and write calls are no-ops, so the renderer still
  * renders without crashing.
@@ -16,41 +16,41 @@ import type {
 } from '../../electron/shared/contract.js'
 
 export const hasBackend =
-  typeof window !== 'undefined' && !!window.flotilla
+  typeof window !== 'undefined' && !!window.slipstream
 
 // ── Repos ──────────────────────────────────────────────────────────────────
 
 export function listRepos(): Promise<RepoDTO[]> {
-  return hasBackend ? window.flotilla.listRepos() : Promise.resolve([])
+  return hasBackend ? window.slipstream.listRepos() : Promise.resolve([])
 }
 
 export function registerRepo(absPath: string): Promise<RepoDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.flotilla.registerRepo(absPath)
+  return window.slipstream.registerRepo(absPath)
 }
 
 /** Opens a native folder picker and registers the chosen repo. Resolves null if cancelled or no backend. */
 export function pickAndRegisterRepo(): Promise<RepoDTO | null> {
-  return hasBackend ? window.flotilla.pickAndRegisterRepo() : Promise.resolve(null)
+  return hasBackend ? window.slipstream.pickAndRegisterRepo() : Promise.resolve(null)
 }
 
 export function removeRepo(id: string): Promise<void> {
-  return hasBackend ? window.flotilla.removeRepo(id) : Promise.resolve()
+  return hasBackend ? window.slipstream.removeRepo(id) : Promise.resolve()
 }
 
 // ── Tickets ────────────────────────────────────────────────────────────────
 
 export function listTickets(): Promise<TicketDTO[]> {
-  return hasBackend ? window.flotilla.listTickets() : Promise.resolve([])
+  return hasBackend ? window.slipstream.listTickets() : Promise.resolve([])
 }
 
 export function getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
-  return hasBackend ? window.flotilla.getTicketStatus(tid) : Promise.resolve({ current: null, available: [] })
+  return hasBackend ? window.slipstream.getTicketStatus(tid) : Promise.resolve({ current: null, available: [] })
 }
 
 export function setTicketStatus(tid: string, stateId: string): Promise<WorkflowState> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.flotilla.setTicketStatus(tid, stateId)
+  return window.slipstream.setTicketStatus(tid, stateId)
 }
 
 // ── Sessions ───────────────────────────────────────────────────────────────
@@ -63,19 +63,19 @@ export function startSession(input: {
   description?: string
 }): Promise<SessionDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.flotilla.startSession(input)
+  return window.slipstream.startSession(input)
 }
 
 export function writeSession(id: string, data: string): void {
-  if (hasBackend) window.flotilla.writeSession(id, data)
+  if (hasBackend) window.slipstream.writeSession(id, data)
 }
 
 export function resizeSession(id: string, cols: number, rows: number): void {
-  if (hasBackend) window.flotilla.resizeSession(id, cols, rows)
+  if (hasBackend) window.slipstream.resizeSession(id, cols, rows)
 }
 
 export function killSession(id: string): Promise<void> {
-  return hasBackend ? window.flotilla.killSession(id) : Promise.resolve()
+  return hasBackend ? window.slipstream.killSession(id) : Promise.resolve()
 }
 
 export function cleanupSession(
@@ -83,7 +83,7 @@ export function cleanupSession(
   opts?: { force?: boolean },
 ): Promise<{ removed: boolean; reason?: string }> {
   return hasBackend
-    ? window.flotilla.cleanupSession(id, opts)
+    ? window.slipstream.cleanupSession(id, opts)
     : Promise.resolve({ removed: false, reason: 'no backend' })
 }
 
@@ -94,7 +94,7 @@ export function onSessionData(
   cb: (id: string, data: string, seq: number) => void,
 ): () => void {
   if (!hasBackend) return () => {}
-  return window.flotilla.onSessionData(cb)
+  return window.slipstream.onSessionData(cb)
 }
 
 /** Fetch the buffered output snapshot for a session. */
@@ -102,7 +102,7 @@ export function getSessionBuffer(
   id: string,
 ): Promise<{ data: string; seq: number }> {
   return hasBackend
-    ? window.flotilla.getSessionBuffer(id)
+    ? window.slipstream.getSessionBuffer(id)
     : Promise.resolve({ data: '', seq: 0 })
 }
 
@@ -111,25 +111,25 @@ export function onSessionStatus(
   cb: (id: string, status: SessionStatus) => void,
 ): () => void {
   if (!hasBackend) return () => {}
-  return window.flotilla.onSessionStatus(cb)
+  return window.slipstream.onSessionStatus(cb)
 }
 
 export function listSessions(): Promise<SessionDTO[]> {
-  return hasBackend ? window.flotilla.listSessions() : Promise.resolve([])
+  return hasBackend ? window.slipstream.listSessions() : Promise.resolve([])
 }
 
 export function resumeSession(id: string): Promise<SessionDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.flotilla.resumeSession(id)
+  return window.slipstream.resumeSession(id)
 }
 
 export function attachRemoteControl(id: string): Promise<SessionDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.flotilla.attachRemoteControl(id)
+  return window.slipstream.attachRemoteControl(id)
 }
 
 export function worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo> {
   return hasBackend
-    ? window.flotilla.worktreeStatus(repoId, branch)
+    ? window.slipstream.worktreeStatus(repoId, branch)
     : Promise.resolve({ branch, path: '', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 })
 }

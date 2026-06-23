@@ -10,7 +10,7 @@ const preloadPath = path.join(root, 'dist-electron', 'preload.mjs')
 /**
  * The preload is emitted as preload.mjs and loaded by Electron as ESM. If the
  * bundler emits CommonJS `require(...)` into it, Electron fails with
- * "require is not defined in ES module scope" and window.flotilla never loads.
+ * "require is not defined in ES module scope" and window.slipstream never loads.
  * This guards against that regression.
  */
 describe('preload build output', () => {

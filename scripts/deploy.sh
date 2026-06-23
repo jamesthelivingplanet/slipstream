@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# deploy.sh — build Flotilla and restart the headless server via systemd
+# deploy.sh — build Slipstream and restart the headless server via systemd
 #
 # Usage:
 #   pnpm deploy                  # full quality-gate + build + restart + healthcheck
 #   SKIP_CHECKS=1 pnpm deploy    # skip pnpm check / pnpm test
 #   pnpm deploy --skip-checks    # same via CLI flag
 #
-# Environment (optional, sourced from ~/.config/flotilla/server.env):
-#   FLOTILLA_BIND   bind address for the server   (default: 127.0.0.1)
-#   FLOTILLA_PORT   port the server listens on     (default: 7421)
+# Environment (optional, sourced from ~/.config/slipstream/server.env):
+#   SLIPSTREAM_BIND   bind address for the server   (default: 127.0.0.1)
+#   SLIPSTREAM_PORT   port the server listens on     (default: 7421)
 
 set -euo pipefail
 
@@ -54,14 +54,14 @@ pnpm build
 # ---------------------------------------------------------------------------
 # Phase 3: Restart the systemd user service
 # ---------------------------------------------------------------------------
-echo "▶ Restarting flotilla.service…"
-if ! systemctl --user restart flotilla.service 2>/dev/null; then
+echo "▶ Restarting slipstream.service…"
+if ! systemctl --user restart slipstream.service 2>/dev/null; then
   echo ""
-  echo "✗ 'systemctl --user restart flotilla.service' failed."
+  echo "✗ 'systemctl --user restart slipstream.service' failed."
   echo "  This is expected if the systemd service is not set up on this machine."
-  echo "  To set it up, create ~/.config/systemd/user/flotilla.service and run:"
+  echo "  To set it up, create ~/.config/systemd/user/slipstream.service and run:"
   echo "    systemctl --user daemon-reload"
-  echo "    systemctl --user enable flotilla.service"
+  echo "    systemctl --user enable slipstream.service"
   exit 1
 fi
 
@@ -70,14 +70,14 @@ fi
 # ---------------------------------------------------------------------------
 
 # Source optional server config to pick up bind/port
-SERVER_ENV_FILE="${HOME}/.config/flotilla/server.env"
+SERVER_ENV_FILE="${HOME}/.config/slipstream/server.env"
 if [[ -f "$SERVER_ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$SERVER_ENV_FILE"
 fi
 
-BIND="${FLOTILLA_BIND:-127.0.0.1}"
-PORT="${FLOTILLA_PORT:-7421}"
+BIND="${SLIPSTREAM_BIND:-127.0.0.1}"
+PORT="${SLIPSTREAM_PORT:-7421}"
 HEALTH_URL="http://${BIND}:${PORT}/healthz"
 
 echo "▶ Waiting for server at ${HEALTH_URL}…"
@@ -103,7 +103,7 @@ done
 
 if [[ "$success" == "1" ]]; then
   echo ""
-  echo "✔ Flotilla is up and healthy!"
+  echo "✔ Slipstream is up and healthy!"
   echo "  Health URL : ${HEALTH_URL}"
   echo "  Access URL : http://${BIND}:${PORT}/"
   echo ""
@@ -114,7 +114,7 @@ else
   echo "✗ Server did not become healthy after ${MAX_ATTEMPTS} attempts."
   echo "  Recent service logs:"
   echo ""
-  journalctl --user -u flotilla -n 30 --no-pager 2>/dev/null || \
+  journalctl --user -u slipstream -n 30 --no-pager 2>/dev/null || \
     echo "  (journalctl unavailable — check service logs manually)"
   exit 1
 fi

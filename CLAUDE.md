@@ -10,8 +10,8 @@ pnpm dev        # Vite + Electron (auto-opens DevTools in dev)
 pnpm build      # renderer + electron main + preload + dist-electron/server.js
 pnpm test       # vitest (unit + real-git integration)
 pnpm check      # svelte-check typecheck (run before committing)
-FLOTILLA_TOKEN=<secret> pnpm serve   # headless WS server (web/mobile access)
-pnpm deploy     # build + restart systemd flotilla.service + healthz check
+SLIPSTREAM_TOKEN=<secret> pnpm serve   # headless WS server (web/mobile access)
+pnpm deploy     # build + restart systemd slipstream.service + healthz check
 ```
 
 Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm/yarn).
@@ -19,7 +19,7 @@ Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm
 ## Conventions
 
 - **The contract is the seam.** `electron/shared/contract.ts` defines all DTOs, service
-  interfaces, IPC channels, and `FlotillaApi`. Implement against it; coordinate any change
+  interfaces, IPC channels, and `SlipstreamApi`. Implement against it; coordinate any change
   to it. Services never import each other — they're wired only in `electron/main.ts`.
 - **Guard backend calls** in the renderer with `hasBackend` (from `src/lib/ipc.ts`) so the
   UI still runs in a plain browser for design work.
@@ -32,7 +32,7 @@ Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm
 
 - **ESM preload**: `preload.ts` builds to `preload.mjs`. It only loads with
   `sandbox: false` (set in `main.ts`) **and** ESM output — `vite.config.ts` forces
-  `output.format: 'es'`. Symptom if broken: `window.flotilla` is `undefined`,
+  `output.format: 'es'`. Symptom if broken: `window.slipstream` is `undefined`,
   `Add repo`/everything silently no-ops (falls back to mock-less empty state).
 - **Bundled main has no sibling files.** Anything `main.js` needs at runtime must be
   inlined or bundled — e.g. the DB schema is a `SCHEMA` string in `db.ts`, not a `.sql`
@@ -49,12 +49,12 @@ Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm
   separate rebuild. In `ELECTRON_RUN_AS_NODE` mode the Electron `app` API is unavailable
   — which is why `resolveDataDir()` in `electron/core/services.ts` derives the data path
   from `os.homedir()` / env vars rather than `app.getPath('userData')`.
-- **`window.flotilla` must be set before `App`/`ipc.ts` loads**: in web mode `src/main.ts`
-  assigns `window.flotilla` and `window.__flotillaWeb = true` and only _then_ does
+- **`window.slipstream` must be set before `App`/`ipc.ts` loads**: in web mode `src/main.ts`
+  assigns `window.slipstream` and `window.__slipstreamWeb = true` and only _then_ does
   `await import('./App.svelte')`. This is intentional — `ipc.ts` has a module-level
-  `hasBackend = !!window.flotilla`. If App is imported first (or the order changes),
+  `hasBackend = !!window.slipstream`. If App is imported first (or the order changes),
   `hasBackend` is `false` and all backend calls silently no-op.
-- **`FLOTILLA_TOKEN` is required**: the headless server refuses to start if the env var is
+- **`SLIPSTREAM_TOKEN` is required**: the headless server refuses to start if the env var is
   unset. Without it there is no authentication on the WebSocket endpoint.
 
 ## Troubleshooting native setup
