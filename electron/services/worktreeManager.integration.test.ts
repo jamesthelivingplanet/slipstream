@@ -85,6 +85,26 @@ describe('worktreeManager (real git)', () => {
     expect(forced.removed).toBe(true)
   })
 
+  it('removes worktree, prunes stale entries, and deletes the branch', async () => {
+    await wm.create(repo, 'feat-teardown')
+    const wtPath = join(root, '.worktrees', 'acme-demo', 'feat-teardown')
+    expect(existsSync(wtPath)).toBe(true)
+
+    const res = await wm.remove(repo, 'feat-teardown')
+    expect(res.removed).toBe(true)
+
+    // worktree dir no longer exists
+    expect(existsSync(wtPath)).toBe(false)
+
+    // branch is gone
+    const branchList = git(repo.path, 'branch', '--list', 'feat-teardown')
+    expect(branchList.trim()).toBe('')
+
+    // worktree list does not contain feat-teardown
+    const worktreeList = git(repo.path, 'worktree', 'list')
+    expect(worktreeList).not.toContain('feat-teardown')
+  })
+
   it('lists active worktrees (excluding the main checkout)', async () => {
     await wm.create(repo, 'feat-list')
     const list = await wm.list(repo)

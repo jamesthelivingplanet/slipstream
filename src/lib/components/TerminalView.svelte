@@ -3,8 +3,8 @@
   import { Terminal, type IDisposable } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
-  import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession } from '../stores'
-  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, killSession, cleanupSession, getSessionBuffer, resumeSession, attachRemoteControl } from '../ipc'
+  import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession, cleanupAgent } from '../stores'
+  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
@@ -192,24 +192,7 @@
   }
 
   async function handleCleanup() {
-    if (liveMode && session.id) {
-      await killSession(session.id)
-      const result = await cleanupSession(session.id, { force: false })
-      if (result.removed) {
-        removeSession(session.id)
-        select(null)
-      } else {
-        // Dirty/unmerged — force-remove after confirmation.
-        if (confirm(`Worktree not clean: ${result.reason ?? 'unknown reason'}. Force remove?`)) {
-          await cleanupSession(session.id, { force: true })
-          removeSession(session.id)
-          select(null)
-        }
-      }
-    } else {
-      // Mock: just deselect.
-      select(null)
-    }
+    await cleanupAgent(session, { auto: false })
   }
 </script>
 

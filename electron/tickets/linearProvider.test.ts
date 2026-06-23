@@ -15,6 +15,7 @@ const mockNode = {
   title: 'Fix the bug',
   description: 'Some details',
   team: { key: 'ENG' },
+  state: { type: 'started' },
 }
 
 const mockResponse = {
@@ -57,6 +58,7 @@ describe('createLinearProvider', () => {
         src: 'linear',
         title: 'Fix the bug',
         description: 'Some details',
+        done: false,
         repoHint: 'ENG',
       },
     ])
@@ -100,6 +102,24 @@ describe('createLinearProvider', () => {
 
     const provider = createLinearProvider(makeConfigStore('lin_api_bad'))
     await expect(provider.listTickets()).rejects.toThrow('Linear GraphQL error: Not authenticated')
+  })
+
+  it('maps a completed node to done: true', async () => {
+    const completedNode = {
+      id: 'issue-uuid-completed',
+      identifier: 'ENG-789',
+      title: 'Completed task',
+      team: { key: 'ENG' },
+      state: { type: 'completed' },
+    }
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { issues: { nodes: [completedNode] } } }),
+    } as Response)
+
+    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+    const result = await provider.listTickets()
+    expect(result[0].done).toBe(true)
   })
 
   it('handles missing team gracefully (repoHint undefined)', async () => {

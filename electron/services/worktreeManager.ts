@@ -142,6 +142,21 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       removeArgs.push(wt)
 
       git(removeArgs)
+
+      // Prune stale admin entries (safety net)
+      try {
+        git(['-C', repo.path, 'worktree', 'prune'])
+      } catch {
+        // prune failure does not fail the removal
+      }
+
+      // Delete the branch
+      try {
+        git(['-C', repo.path, 'branch', '-D', branch])
+      } catch {
+        // deleting an already-gone branch doesn't fail removal
+      }
+
       return { removed: true }
     },
 
