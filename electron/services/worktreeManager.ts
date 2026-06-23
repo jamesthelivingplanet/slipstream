@@ -178,11 +178,12 @@ export function createWorktreeManager(root: string): IWorktreeManager {
         ;({ ahead, behind } = parseRevListCount(rl))
       } catch { /* defaults */ }
 
-      // added / deleted lines vs base
+      // added / deleted lines vs branch point (merge-base of base and HEAD)
       let added = 0
       let deleted = 0
       try {
-        const stat = git(['-C', wt, 'diff', '--shortstat', repo.base])
+        const mergeBase = git(['-C', wt, 'merge-base', repo.base, 'HEAD']).trim()
+        const stat = git(['-C', wt, 'diff', '--shortstat', mergeBase])
         ;({ added, deleted } = parseShortstat(stat))
       } catch { /* defaults */ }
 

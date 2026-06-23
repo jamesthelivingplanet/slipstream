@@ -12,6 +12,7 @@ import {
   startSession,
   killSession,
   cleanupSession,
+  worktreeStatus,
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
@@ -117,6 +118,23 @@ export async function initFromBackend(): Promise<void> {
       port: dto.port,
       activity: { text: 'Detached — open to resume.' },
     }))
+  )
+  await refreshDiffStats().catch(() => {})
+}
+
+/** Fetch real worktree diff stats for every started agent and update its +add/-del badge. */
+export async function refreshDiffStats(): Promise<void> {
+  if (!hasBackend) return
+  const started = get(sessions).filter((s) => s.id && s.repo && s.branch)
+  await Promise.all(
+    started.map(async (s) => {
+      try {
+        const info = await worktreeStatus(s.repo as string, s.branch as string)
+        patchById(s.id as string, (x) => ({ ...x, add: info.added, del: info.deleted }))
+      } catch {
+        // leave existing values on failure
+      }
+    }),
   )
 }
 
@@ -293,5 +311,6 @@ export async function refreshAndReconcile(): Promise<void> {
   for (const s of sessionsToReconcile(get(sessions), dtos)) {
     await cleanupAgent(s, { auto: true })
   }
+  await refreshDiffStats().catch(() => {})
 }
 
