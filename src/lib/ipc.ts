@@ -12,6 +12,7 @@ import type {
   TicketDTO,
   SessionStatus,
   WorkflowState,
+  WorktreeInfo,
 } from '../../electron/shared/contract.js'
 
 export const hasBackend =
@@ -125,4 +126,10 @@ export function resumeSession(id: string): Promise<SessionDTO> {
 export function attachRemoteControl(id: string): Promise<SessionDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.flotilla.attachRemoteControl(id)
+}
+
+export function worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo> {
+  return hasBackend
+    ? window.flotilla.worktreeStatus(repoId, branch)
+    : Promise.resolve({ branch, path: '', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 })
 }

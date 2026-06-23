@@ -45,6 +45,7 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
     IPC.resumeSession,
     IPC.attachRemoteControl,
     IPC.getSessionBuffer,
+    IPC.worktreeStatus,
     IPC.getLinearKey,
     IPC.setLinearKey,
     IPC.getTicketStatus,

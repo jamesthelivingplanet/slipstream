@@ -112,4 +112,16 @@ describe('worktreeManager (real git)', () => {
     expect(list.some((w) => w.path === repo.path)).toBe(false)
     await wm.remove(repo, 'feat-list', { force: true })
   })
+
+  it('reports added/deleted > 0 after committing changes in a worktree', async () => {
+    const info = await wm.create(repo, 'feat-diffstat')
+    writeFileSync(join(info.path, 'newfile.txt'), 'hello\nworld\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'add newfile')
+
+    const status = await wm.status(repo, 'feat-diffstat')
+    expect(status.added).toBeGreaterThan(0)
+
+    await wm.remove(repo, 'feat-diffstat', { force: true })
+  })
 })

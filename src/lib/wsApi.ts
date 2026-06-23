@@ -7,7 +7,7 @@
  * Framework-free (plain TS) — unit-testable against a fake WebSocket.
  */
 
-import type { FlotillaApi, RepoDTO, SessionDTO, TicketDTO, SessionStatus, WorkflowState } from '../../electron/shared/contract.js'
+import type { FlotillaApi, RepoDTO, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
 import { genId } from './id.js'
@@ -233,6 +233,10 @@ export function createWsApi(opts: WsApiOpts): FlotillaApi {
 
     attachRemoteControl(id: string): Promise<SessionDTO> {
       return request(IPC.attachRemoteControl, [id]) as Promise<SessionDTO>
+    },
+
+    worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo> {
+      return request(IPC.worktreeStatus, [repoId, branch]) as Promise<WorktreeInfo>
     },
 
     getSessionBuffer(id: string): Promise<{ data: string; seq: number }> {

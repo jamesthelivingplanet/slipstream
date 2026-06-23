@@ -170,6 +170,14 @@ export function createRpc(
       case IPC.getSessionBuffer:
         return deps.sessions.getBuffer(args[0] as string)
 
+      case IPC.worktreeStatus: {
+        const repoId = args[0] as string
+        const branch = args[1] as string
+        const repo = await deps.repos.get(repoId)
+        if (!repo) throw new Error(`Unknown repo: ${repoId}`)
+        return deps.worktrees.status(repo, branch)
+      }
+
       case IPC.getLinearKey:
         return deps.config.get('linear.apiKey') ?? null
 
