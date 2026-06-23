@@ -46,6 +46,22 @@ export interface SessionDTO {
   createdAt: number
 }
 
+export interface WorkflowState {
+  id: string
+  name: string
+  type?: string   // linear: backlog|unstarted|started|completed|canceled
+}
+export interface TicketTeam {
+  id: string
+  key: string
+  name: string
+}
+export interface CreateTicketInput {
+  title: string
+  description?: string
+  teamId: string
+}
+
 export interface TicketDTO {
   id: string
   tid: string
@@ -54,6 +70,7 @@ export interface TicketDTO {
   description?: string
   done: boolean       // ticket's workflow state is completed
   repoHint?: string   // repo id this ticket likely maps to
+  status?: WorkflowState
 }
 
 /* ───────── main-process service interfaces ───────── */
@@ -141,6 +158,11 @@ export interface IPortBroker {
 export interface ITicketProvider {
   readonly id: string
   listTickets(): Promise<TicketDTO[]>
+  listTeams(): Promise<TicketTeam[]>
+  createTicket(input: CreateTicketInput): Promise<TicketDTO>
+  /** tid is the human identifier e.g. "FLO-17". */
+  getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
+  setTicketStatus(tid: string, stateId: string): Promise<WorkflowState>
 }
 
 /* ───────── IPC: renderer-facing bridge (window.flotilla) ───────── */
@@ -153,6 +175,10 @@ export interface FlotillaApi {
   pickAndRegisterRepo(): Promise<RepoDTO | null>
   removeRepo(id: string): Promise<void>
   listTickets(): Promise<TicketDTO[]>
+  listTicketTeams(): Promise<TicketTeam[]>
+  createTicket(input: CreateTicketInput): Promise<TicketDTO>
+  getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
+  setTicketStatus(tid: string, stateId: string): Promise<WorkflowState>
   getLinearKey(): Promise<string | null>
   setLinearKey(key: string): Promise<void>
 
@@ -178,6 +204,10 @@ export const IPC = {
   pickRepo: 'repos:pick',
   removeRepo: 'repos:remove',
   listTickets: 'tickets:list',
+  listTicketTeams: 'tickets:teams',
+  createTicket: 'tickets:create',
+  getTicketStatus: 'tickets:status',
+  setTicketStatus: 'tickets:setStatus',
   startSession: 'session:start',
   writeSession: 'session:write',
   resizeSession: 'session:resize',

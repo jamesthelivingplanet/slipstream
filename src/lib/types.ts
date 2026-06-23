@@ -9,12 +9,16 @@ export interface Repo {
   base: string
 }
 
+export interface WorkflowState { id: string; name: string; type?: string }
+export interface TicketTeam { id: string; key: string; name: string }
+
 export interface Ticket {
   tid: string
   src: Source
   title: string
   repo: string
   description?: string
+  status?: WorkflowState
   done: boolean
 }
 

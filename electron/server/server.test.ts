@@ -66,6 +66,10 @@ function makeFakeDeps(): IpcDeps {
   const tickets: ITicketProvider = {
     id: 'test',
     listTickets: vi.fn().mockResolvedValue([]),
+    listTeams: vi.fn().mockResolvedValue([]),
+    createTicket: vi.fn().mockRejectedValue(new Error('not implemented')),
+    getTicketStatus: vi.fn().mockResolvedValue({ current: null, available: [] }),
+    setTicketStatus: vi.fn().mockRejectedValue(new Error('not implemented')),
   }
 
   const config: IConfigStore = {

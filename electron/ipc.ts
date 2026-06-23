@@ -47,6 +47,10 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
     IPC.getSessionBuffer,
     IPC.getLinearKey,
     IPC.setLinearKey,
+    IPC.listTicketTeams,
+    IPC.createTicket,
+    IPC.getTicketStatus,
+    IPC.setTicketStatus,
   ] as const
 
   for (const channel of requestChannels) {

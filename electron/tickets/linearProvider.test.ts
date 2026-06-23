@@ -15,7 +15,7 @@ const mockNode = {
   title: 'Fix the bug',
   description: 'Some details',
   team: { key: 'ENG' },
-  state: { type: 'started' },
+  state: { id: 'state-1', name: 'In Progress', type: 'started' },
 }
 
 const mockResponse = {
@@ -60,6 +60,7 @@ describe('createLinearProvider', () => {
         description: 'Some details',
         done: false,
         repoHint: 'ENG',
+        status: { id: 'state-1', name: 'In Progress', type: 'started' },
       },
     ])
   })
@@ -110,7 +111,7 @@ describe('createLinearProvider', () => {
       identifier: 'ENG-789',
       title: 'Completed task',
       team: { key: 'ENG' },
-      state: { type: 'completed' },
+      state: { id: 'state-done', name: 'Done', type: 'completed' },
     }
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
@@ -120,6 +121,7 @@ describe('createLinearProvider', () => {
     const provider = createLinearProvider(makeConfigStore('lin_api_test'))
     const result = await provider.listTickets()
     expect(result[0].done).toBe(true)
+    expect(result[0].status).toEqual({ id: 'state-done', name: 'Done', type: 'completed' })
   })
 
   it('handles missing team gracefully (repoHint undefined)', async () => {
@@ -132,5 +134,134 @@ describe('createLinearProvider', () => {
     const provider = createLinearProvider(makeConfigStore('lin_api_test'))
     const result = await provider.listTickets()
     expect(result[0].repoHint).toBeUndefined()
+    expect(result[0].status).toBeUndefined()
+  })
+
+  it('listTeams maps team nodes', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { teams: { nodes: [{ id: 'team-1', key: 'ENG', name: 'Engineering' }] } } }),
+    } as Response)
+
+    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+    const result = await provider.listTeams()
+    expect(result).toEqual([{ id: 'team-1', key: 'ENG', name: 'Engineering' }])
+  })
+
+  it('createTicket posts issueCreate and maps the returned issue', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          issueCreate: {
+            success: true,
+            issue: {
+              id: 'new-issue-uuid',
+              identifier: 'ENG-999',
+              title: 'New ticket',
+              description: 'A description',
+              team: { key: 'ENG' },
+              state: { id: 'state-backlog', name: 'Backlog', type: 'backlog' },
+            },
+          },
+        },
+      }),
+    } as Response)
+
+    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+    const result = await provider.createTicket({ title: 'New ticket', description: 'A description', teamId: 'team-1' })
+
+    expect(result).toEqual({
+      id: 'new-issue-uuid',
+      tid: 'ENG-999',
+      src: 'linear',
+      title: 'New ticket',
+      description: 'A description',
+      done: false,
+      repoHint: 'ENG',
+      status: { id: 'state-backlog', name: 'Backlog', type: 'backlog' },
+    })
+  })
+
+  it('getTicketStatus resolves issue then returns current + available states', async () => {
+    // First call: resolveIssue
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          issues: {
+            nodes: [{
+              id: 'issue-uuid-1',
+              identifier: 'ENG-123',
+              team: { id: 'team-1', key: 'ENG' },
+              state: { id: 'state-1', name: 'In Progress', type: 'started' },
+            }],
+          },
+        },
+      }),
+    } as Response)
+    // Second call: workflowStates
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          workflowStates: {
+            nodes: [
+              { id: 'state-backlog', name: 'Backlog', type: 'backlog', position: 0 },
+              { id: 'state-1', name: 'In Progress', type: 'started', position: 1 },
+              { id: 'state-done', name: 'Done', type: 'completed', position: 2 },
+            ],
+          },
+        },
+      }),
+    } as Response)
+
+    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+    const result = await provider.getTicketStatus('ENG-123')
+
+    expect(result.current).toEqual({ id: 'state-1', name: 'In Progress', type: 'started' })
+    expect(result.available).toEqual([
+      { id: 'state-backlog', name: 'Backlog', type: 'backlog' },
+      { id: 'state-1', name: 'In Progress', type: 'started' },
+      { id: 'state-done', name: 'Done', type: 'completed' },
+    ])
+  })
+
+  it('setTicketStatus resolves issue then updates with issueUpdate', async () => {
+    // First call: resolveIssue
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          issues: {
+            nodes: [{
+              id: 'issue-uuid-1',
+              identifier: 'ENG-123',
+              team: { id: 'team-1', key: 'ENG' },
+              state: { id: 'state-1', name: 'In Progress', type: 'started' },
+            }],
+          },
+        },
+      }),
+    } as Response)
+    // Second call: issueUpdate
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        data: {
+          issueUpdate: {
+            success: true,
+            issue: {
+              state: { id: 'state-done', name: 'Done', type: 'completed' },
+            },
+          },
+        },
+      }),
+    } as Response)
+
+    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+    const result = await provider.setTicketStatus('ENG-123', 'state-done')
+
+    expect(result).toEqual({ id: 'state-done', name: 'Done', type: 'completed' })
   })
 })

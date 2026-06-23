@@ -11,6 +11,10 @@ const api: FlotillaApi = {
 
   // ── Tickets ──────────────────────────────────────────────────────────────
   listTickets: () => ipcRenderer.invoke(IPC.listTickets),
+  listTicketTeams: () => ipcRenderer.invoke(IPC.listTicketTeams),
+  createTicket: (input) => ipcRenderer.invoke(IPC.createTicket, input),
+  getTicketStatus: (tid) => ipcRenderer.invoke(IPC.getTicketStatus, tid),
+  setTicketStatus: (tid, stateId) => ipcRenderer.invoke(IPC.setTicketStatus, tid, stateId),
 
   // ── Config / Integrations ────────────────────────────────────────────────
   getLinearKey: () => ipcRenderer.invoke(IPC.getLinearKey),

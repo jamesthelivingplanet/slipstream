@@ -1,4 +1,4 @@
-import type { ITicketProvider, TicketDTO } from '../shared/contract.js'
+import type { ITicketProvider, TicketDTO, TicketTeam, WorkflowState, CreateTicketInput } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 
 interface LinearNode {
@@ -6,16 +6,12 @@ interface LinearNode {
   identifier: string
   title: string
   description?: string
-  team?: { key: string }
-  state?: { type: string }
+  team?: { id?: string; key: string }
+  state?: { id?: string; name?: string; type?: string }
 }
 
 interface LinearResponse {
-  data?: {
-    issues?: {
-      nodes: LinearNode[]
-    }
-  }
+  data?: Record<string, unknown>
   errors?: Array<{ message: string }>
 }
 
@@ -31,39 +27,74 @@ const QUERY = `
         title
         description
         team { key }
-        state { type }
+        state { id name type }
       }
     }
   }
 `
 
 export function createLinearProvider(config: IConfigStore): ITicketProvider {
+  async function gql(key: string, query: string, variables?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const res = await fetch('https://api.linear.app/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': key,
+      },
+      body: JSON.stringify({ query, variables }),
+    })
+
+    if (!res.ok) {
+      throw new Error(`Linear API error: ${res.status} ${res.statusText}`)
+    }
+
+    const json = await res.json() as LinearResponse
+
+    if (json.errors?.length) {
+      throw new Error(`Linear GraphQL error: ${json.errors.map(e => e.message).join(', ')}`)
+    }
+
+    return (json.data ?? {}) as Record<string, unknown>
+  }
+
+  async function resolveIssue(tid: string): Promise<LinearNode> {
+    const lastDash = tid.lastIndexOf('-')
+    if (lastDash <= 0 || lastDash === tid.length - 1) {
+      throw new Error(`Invalid ticket id: ${tid}`)
+    }
+    const key = tid.slice(0, lastDash)
+    const number = Number(tid.slice(lastDash + 1))
+    if (isNaN(number)) {
+      throw new Error(`Invalid ticket id: ${tid}`)
+    }
+
+    const apiKey = config.get('linear.apiKey')
+    if (!apiKey) throw new Error('Linear API key not set')
+
+    const data = await gql(apiKey, `
+      query($key:String!,$number:Float!){
+        issues(filter:{ team:{ key:{ eq:$key } }, number:{ eq:$number } }, first:1){
+          nodes{ id identifier team{ id key } state{ id name type } }
+        }
+      }
+    `, { key, number })
+
+    const issues = data.issues as { nodes: LinearNode[] } | undefined
+    const node = issues?.nodes?.[0]
+    if (!node) throw new Error(`Ticket not found: ${tid}`)
+    return node
+  }
+
   return {
     id: 'linear',
+
     async listTickets(): Promise<TicketDTO[]> {
-      const key = config.get('linear.apiKey')
-      if (!key) return []
+      const apiKey = config.get('linear.apiKey')
+      if (!apiKey) return []
 
-      const res = await fetch('https://api.linear.app/graphql', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': key,
-        },
-        body: JSON.stringify({ query: QUERY }),
-      })
-
-      if (!res.ok) {
-        throw new Error(`Linear API error: ${res.status} ${res.statusText}`)
-      }
-
-      const json = await res.json() as LinearResponse
-
-      if (json.errors?.length) {
-        throw new Error(`Linear GraphQL error: ${json.errors.map(e => e.message).join(', ')}`)
-      }
-
-      const nodes = json.data?.issues?.nodes ?? []
+      const data = await gql(apiKey, QUERY)
+      const issues = data.issues as { nodes: LinearNode[] } | undefined
+      const nodes = issues?.nodes ?? []
       return nodes.map((node): TicketDTO => ({
         id: node.id,
         tid: node.identifier,
@@ -72,7 +103,87 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
         description: node.description,
         done: node.state?.type === 'completed',
         repoHint: node.team?.key,
+        status: node.state?.id ? { id: node.state.id, name: node.state.name ?? '', type: node.state.type } : undefined,
       }))
+    },
+
+    async listTeams(): Promise<TicketTeam[]> {
+      const apiKey = config.get('linear.apiKey')
+      if (!apiKey) throw new Error('Linear API key not set')
+
+      const data = await gql(apiKey, `{ teams { nodes { id key name } } }`)
+      const teams = data.teams as { nodes: TicketTeam[] } | undefined
+      return teams?.nodes ?? []
+    },
+
+    async createTicket(input: CreateTicketInput): Promise<TicketDTO> {
+      const apiKey = config.get('linear.apiKey')
+      if (!apiKey) throw new Error('Linear API key not set')
+
+      const data = await gql(apiKey, `
+        mutation($input: IssueCreateInput!){
+          issueCreate(input:$input){ success issue { id identifier title description team { key } state { id name type } } }
+        }
+      `, { input: { teamId: input.teamId, title: input.title, description: input.description } })
+
+      const result = data.issueCreate as { success: boolean; issue: LinearNode } | undefined
+      if (!result?.success) throw new Error('Failed to create ticket')
+
+      const issue = result.issue
+      return {
+        id: issue.id,
+        tid: issue.identifier,
+        src: 'linear',
+        title: issue.title,
+        description: issue.description,
+        done: issue.state?.type === 'completed',
+        repoHint: issue.team?.key,
+        status: issue.state?.id ? { id: issue.state.id, name: issue.state.name ?? '', type: issue.state.type } : undefined,
+      }
+    },
+
+    async getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
+      const apiKey = config.get('linear.apiKey')
+      if (!apiKey) throw new Error('Linear API key not set')
+
+      const node = await resolveIssue(tid)
+      const teamId = node.team?.id
+      if (!teamId) throw new Error(`No team found for ticket: ${tid}`)
+
+      const data = await gql(apiKey, `
+        query($teamId:String!){
+          workflowStates(filter:{ team:{ id:{ eq:$teamId } } }, first:100){
+            nodes{ id name type position }
+          }
+        }
+      `, { teamId })
+
+      const statesData = data.workflowStates as { nodes: Array<{ id: string; name: string; type?: string; position?: number }> } | undefined
+      const available = (statesData?.nodes ?? [])
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+        .map(s => ({ id: s.id, name: s.name, type: s.type }))
+
+      const current = node.state?.id ? { id: node.state.id, name: node.state.name ?? '', type: node.state.type } : null
+
+      return { current, available }
+    },
+
+    async setTicketStatus(tid: string, stateId: string): Promise<WorkflowState> {
+      const apiKey = config.get('linear.apiKey')
+      if (!apiKey) throw new Error('Linear API key not set')
+
+      const node = await resolveIssue(tid)
+
+      const data = await gql(apiKey, `
+        mutation($id:String!,$stateId:String!){
+          issueUpdate(id:$id, input:{ stateId:$stateId }){ success issue { state { id name type } } }
+        }
+      `, { id: node.id, stateId })
+
+      const result = data.issueUpdate as { success: boolean; issue: { state: { id: string; name: string; type?: string } } } | undefined
+      if (!result?.success) throw new Error('Failed to update ticket status')
+
+      return result.issue.state
     },
   }
 }
