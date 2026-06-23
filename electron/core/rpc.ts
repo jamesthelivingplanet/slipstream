@@ -1,6 +1,6 @@
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { RepoDTO, ISessionStore, SessionStatus, CreateTicketInput } from '../shared/contract.js'
+import type { RepoDTO, ISessionStore, SessionStatus } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 
@@ -176,12 +176,6 @@ export function createRpc(
       case IPC.setLinearKey:
         deps.config.set('linear.apiKey', args[0] as string)
         return undefined
-
-      case IPC.listTicketTeams:
-        return deps.tickets.listTeams()
-
-      case IPC.createTicket:
-        return deps.tickets.createTicket(args[0] as CreateTicketInput)
 
       case IPC.getTicketStatus:
         return deps.tickets.getTicketStatus(args[0] as string)

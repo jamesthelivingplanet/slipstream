@@ -12,7 +12,6 @@ import {
   startSession,
   killSession,
   cleanupSession,
-  createTicket,
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
@@ -46,7 +45,6 @@ export const filter = writable<Filter>('all')
 export const query = writable<string>('')
 export const dialogOpen = writable<boolean>(false)
 export const settingsOpen = writable<boolean>(false)
-export const ticketDialogOpen = writable<boolean>(false)
 
 export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
   $id ? $sessions.find((s) => s.tid === $id) ?? null : null,
@@ -297,26 +295,3 @@ export async function refreshAndReconcile(): Promise<void> {
   }
 }
 
-export async function createTicketAction(title: string, description: string, teamId: string): Promise<void> {
-  try {
-    const dto = await createTicket({ title, description: description || undefined, teamId })
-    if (!dto.done) {
-      tickets.update(($t) => [
-        {
-          tid: dto.tid,
-          src: dto.src as 'jira' | 'linear',
-          title: dto.title,
-          repo: dto.repoHint ?? '',
-          description: dto.description,
-          status: dto.status,
-          done: dto.done,
-        },
-        ...$t,
-      ])
-    }
-    pushToast('success', `Created ${dto.tid}`)
-    ticketDialogOpen.set(false)
-  } catch (e) {
-    pushToast('error', cleanError(e))
-  }
-}

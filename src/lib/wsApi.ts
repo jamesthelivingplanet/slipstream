@@ -7,7 +7,7 @@
  * Framework-free (plain TS) — unit-testable against a fake WebSocket.
  */
 
-import type { FlotillaApi, RepoDTO, SessionDTO, TicketDTO, SessionStatus, TicketTeam, WorkflowState, CreateTicketInput } from '../../electron/shared/contract.js'
+import type { FlotillaApi, RepoDTO, SessionDTO, TicketDTO, SessionStatus, WorkflowState } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
 import { genId } from './id.js'
@@ -181,14 +181,6 @@ export function createWsApi(opts: WsApiOpts): FlotillaApi {
 
     listTickets(): Promise<TicketDTO[]> {
       return request(IPC.listTickets, []) as Promise<TicketDTO[]>
-    },
-
-    listTicketTeams(): Promise<TicketTeam[]> {
-      return request(IPC.listTicketTeams, []) as Promise<TicketTeam[]>
-    },
-
-    createTicket(input: CreateTicketInput): Promise<TicketDTO> {
-      return request(IPC.createTicket, [input]) as Promise<TicketDTO>
     },
 
     getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
