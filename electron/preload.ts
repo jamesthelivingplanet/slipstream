@@ -41,6 +41,7 @@ const api: FlotillaApi = {
   },
 
   getSessionBuffer: (id) => ipcRenderer.invoke(IPC.getSessionBuffer, id),
+  worktreeStatus: (repoId, branch) => ipcRenderer.invoke(IPC.worktreeStatus, repoId, branch),
 
   onSessionStatus(cb: (id: string, status: SessionStatus) => void): () => void {
     const listener = (
