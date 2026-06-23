@@ -17,8 +17,8 @@ let win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
 await win.waitForTimeout(1200)
 
-console.log('sessions:', JSON.stringify(await win.evaluate(() => window.flotilla.listSessions())))
-console.log('repos:', JSON.stringify(await win.evaluate(() => window.flotilla.listRepos())))
+console.log('sessions:', JSON.stringify(await win.evaluate(() => window.slipstream.listSessions())))
+console.log('repos:', JSON.stringify(await win.evaluate(() => window.slipstream.listRepos())))
 
 await win.getByRole('button', { name: /new agent/i }).click()
 await win.waitForTimeout(800)
@@ -59,7 +59,7 @@ await win.getByRole('button', { name: /start agent/i }).click()
 let found = false
 for (let i = 0; i < 30; i++) {
   await win.waitForTimeout(1000)
-  const ss = await win.evaluate(() => window.flotilla.listSessions())
+  const ss = await win.evaluate(() => window.slipstream.listSessions())
   if (ss.length >= 1) {
     console.log('session:', JSON.stringify(ss))
     found = true
@@ -81,7 +81,7 @@ win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
 await win.waitForTimeout(1500)
 
-const persisted = await win.evaluate(() => window.flotilla.listSessions())
+const persisted = await win.evaluate(() => window.slipstream.listSessions())
 console.log('persisted sessions:', JSON.stringify(persisted))
 
 await shot(win, 'start-3-after-restart')

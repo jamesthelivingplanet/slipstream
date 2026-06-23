@@ -114,9 +114,9 @@ describe('pathFor', () => {
   const repo: RepoDTO = { id: 'acme-api', org: 'acme', name: 'api', base: 'main', path: '/repos/api' }
 
   it('produces the correct path', () => {
-    const mgr = createWorktreeManager('/home/user/flotilla-data')
+    const mgr = createWorktreeManager('/home/user/slipstream-data')
     expect(mgr.pathFor(repo, 'feature-x')).toBe(
-      '/home/user/flotilla-data/.worktrees/acme-api/feature-x',
+      '/home/user/slipstream-data/.worktrees/acme-api/feature-x',
     )
   })
 

@@ -12,7 +12,7 @@
   async function loadLinearKey() {
     if (!hasBackend) return
     try {
-      const stored = await window.flotilla.getLinearKey()
+      const stored = await window.slipstream.getLinearKey()
       if (stored) linearKey = stored
     } catch {
       // ignore
@@ -23,7 +23,7 @@
     if (!hasBackend) return
     linearPending = true
     try {
-      await window.flotilla.setLinearKey(linearKey.trim())
+      await window.slipstream.setLinearKey(linearKey.trim())
       pushToast('success', 'Linear API key saved')
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Failed to save key')
@@ -38,7 +38,7 @@
   // We detect web mode by checking the explicit marker set in main.ts on the
   // WS boot path. The Electron preload never sets this marker, so isWeb is
   // false on desktop even though window.electron is also absent there.
-  const isWeb = hasBackend && (window as unknown as { __flotillaWeb?: boolean }).__flotillaWeb === true
+  const isWeb = hasBackend && (window as unknown as { __slipstreamWeb?: boolean }).__slipstreamWeb === true
 
   let pathInput = ''
   let pathPending = false

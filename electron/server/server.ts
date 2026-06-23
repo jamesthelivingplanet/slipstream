@@ -149,8 +149,8 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
   })
 
   httpServer.listen(port, bind, () => {
-    console.log(`[flotilla-server] Listening on http://${bind}:${port}`)
-    console.log(`[flotilla-server] WebSocket RPC at ws://${bind}:${port}/rpc  (token required)`)
+    console.log(`[slipstream-server] Listening on http://${bind}:${port}`)
+    console.log(`[slipstream-server] WebSocket RPC at ws://${bind}:${port}/rpc  (token required)`)
   })
 
   return httpServer
@@ -160,9 +160,9 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
 
 // Only bootstrap when run as a script, not when imported by tests.
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const token = process.env.FLOTILLA_TOKEN
+  const token = process.env.SLIPSTREAM_TOKEN
   if (!token) {
-    console.error('[flotilla-server] FLOTILLA_TOKEN is required but not set. Exiting.')
+    console.error('[slipstream-server] SLIPSTREAM_TOKEN is required but not set. Exiting.')
     process.exit(1)
   }
 
@@ -173,7 +173,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
 
   createServer(deps, {
     token,
-    bind: process.env.FLOTILLA_BIND ?? '127.0.0.1',
-    port: process.env.FLOTILLA_PORT ? Number(process.env.FLOTILLA_PORT) : 7421,
+    bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1',
+    port: process.env.SLIPSTREAM_PORT ? Number(process.env.SLIPSTREAM_PORT) : 7421,
   })
 }
