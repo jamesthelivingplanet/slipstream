@@ -116,7 +116,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
       if (!teamId) throw new Error(`No team found for ticket: ${tid}`)
 
       const data = await gql(apiKey, `
-        query($teamId:String!){
+        query($teamId:ID!){
           workflowStates(filter:{ team:{ id:{ eq:$teamId } } }, first:100){
             nodes{ id name type position }
           }
