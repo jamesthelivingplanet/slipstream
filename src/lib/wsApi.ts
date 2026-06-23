@@ -10,6 +10,7 @@
 import type { FlotillaApi, RepoDTO, SessionDTO, TicketDTO, SessionStatus } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
+import { genId } from './id.js'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const RECONNECT_DELAYS = [500, 1000, 2000, 5000, 10000]
@@ -145,7 +146,7 @@ export function createWsApi(opts: WsApiOpts): FlotillaApi {
 
   function request(channel: string, args: unknown[]): Promise<unknown> {
     return new Promise((resolve, reject) => {
-      const id = crypto.randomUUID()
+      const id = genId()
       const timer = setTimeout(() => {
         pending.delete(id)
         reject(new Error(`Request timed out: ${channel}`))
@@ -196,13 +197,13 @@ export function createWsApi(opts: WsApiOpts): FlotillaApi {
 
     writeSession(id: string, data: string): void {
       // Fire-and-forget: send but don't await
-      const req: WireReq = { t: 'req', id: crypto.randomUUID(), channel: IPC.writeSession, args: [id, data] }
+      const req: WireReq = { t: 'req', id: genId(), channel: IPC.writeSession, args: [id, data] }
       send(req)
     },
 
     resizeSession(id: string, cols: number, rows: number): void {
       // Fire-and-forget
-      const req: WireReq = { t: 'req', id: crypto.randomUUID(), channel: IPC.resizeSession, args: [id, cols, rows] }
+      const req: WireReq = { t: 'req', id: genId(), channel: IPC.resizeSession, args: [id, cols, rows] }
       send(req)
     },
 

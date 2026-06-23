@@ -211,6 +211,13 @@ export function createSessionManager(): ISessionManager {
     emitter.on(event, listener as (...args: unknown[]) => void)
   }
 
+  function off<E extends keyof SessionEvents>(
+    event: E,
+    listener: SessionEvents[E]
+  ): void {
+    emitter.removeListener(event, listener as (...args: unknown[]) => void)
+  }
+
   function getBuffer(sessionId: string): { data: string; seq: number } {
     const rec = sessions.get(sessionId)
     if (!rec) return { data: '', seq: 0 }
@@ -225,5 +232,5 @@ export function createSessionManager(): ISessionManager {
     sessions.clear()
   }
 
-  return { start, resume, attachRemoteControl, has, write, resize, kill, killAll, on, getBuffer }
+  return { start, resume, attachRemoteControl, has, write, resize, kill, killAll, on, off, getBuffer }
 }
