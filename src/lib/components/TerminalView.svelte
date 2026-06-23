@@ -225,12 +225,12 @@
     </div>
   </div>
   <div class="spacer"></div>
-  <button class="btn btn-outline btn-sm" title="Relaunch this agent with Claude Code Remote Control" disabled={!hasBackend || !session.id} on:click={handleRemoteControl}>{@html icons.remote} Remote control</button>
+  <button class="btn btn-outline btn-sm" title="Relaunch this agent with Claude Code Remote Control" disabled={!hasBackend || !session.id} on:click={handleRemoteControl}>{@html icons.remote} <span class="btn-label">Remote control</span></button>
   <button class="btn btn-outline btn-sm" on:click={() => alert('Opens the worktree in your editor (Phase 1)')}>
-    {@html icons.externalLink} Editor
+    {@html icons.externalLink} <span class="btn-label">Editor</span>
   </button>
   <button class="btn btn-outline btn-sm btn-danger" on:click={handleCleanup}>
-    {@html icons.trash} Clean up
+    {@html icons.trash} <span class="btn-label">Clean up</span>
   </button>
 </div>
 
