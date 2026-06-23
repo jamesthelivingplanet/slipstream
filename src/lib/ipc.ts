@@ -11,9 +11,7 @@ import type {
   SessionDTO,
   TicketDTO,
   SessionStatus,
-  TicketTeam,
   WorkflowState,
-  CreateTicketInput,
 } from '../../electron/shared/contract.js'
 
 export const hasBackend =
@@ -43,15 +41,6 @@ export function removeRepo(id: string): Promise<void> {
 
 export function listTickets(): Promise<TicketDTO[]> {
   return hasBackend ? window.flotilla.listTickets() : Promise.resolve([])
-}
-
-export function listTicketTeams(): Promise<TicketTeam[]> {
-  return hasBackend ? window.flotilla.listTicketTeams() : Promise.resolve([])
-}
-
-export function createTicket(input: CreateTicketInput): Promise<TicketDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.flotilla.createTicket(input)
 }
 
 export function getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {

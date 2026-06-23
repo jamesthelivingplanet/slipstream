@@ -137,52 +137,6 @@ describe('createLinearProvider', () => {
     expect(result[0].status).toBeUndefined()
   })
 
-  it('listTeams maps team nodes', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      json: async () => ({ data: { teams: { nodes: [{ id: 'team-1', key: 'ENG', name: 'Engineering' }] } } }),
-    } as Response)
-
-    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
-    const result = await provider.listTeams()
-    expect(result).toEqual([{ id: 'team-1', key: 'ENG', name: 'Engineering' }])
-  })
-
-  it('createTicket posts issueCreate and maps the returned issue', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        data: {
-          issueCreate: {
-            success: true,
-            issue: {
-              id: 'new-issue-uuid',
-              identifier: 'ENG-999',
-              title: 'New ticket',
-              description: 'A description',
-              team: { key: 'ENG' },
-              state: { id: 'state-backlog', name: 'Backlog', type: 'backlog' },
-            },
-          },
-        },
-      }),
-    } as Response)
-
-    const provider = createLinearProvider(makeConfigStore('lin_api_test'))
-    const result = await provider.createTicket({ title: 'New ticket', description: 'A description', teamId: 'team-1' })
-
-    expect(result).toEqual({
-      id: 'new-issue-uuid',
-      tid: 'ENG-999',
-      src: 'linear',
-      title: 'New ticket',
-      description: 'A description',
-      done: false,
-      repoHint: 'ENG',
-      status: { id: 'state-backlog', name: 'Backlog', type: 'backlog' },
-    })
-  })
-
   it('getTicketStatus resolves issue then returns current + available states', async () => {
     // First call: resolveIssue
     vi.mocked(fetch).mockResolvedValueOnce({

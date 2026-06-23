@@ -1,4 +1,4 @@
-import type { ITicketProvider, TicketDTO, TicketTeam, WorkflowState, CreateTicketInput } from '../shared/contract.js'
+import type { ITicketProvider, TicketDTO, WorkflowState } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 
 interface LinearNode {
@@ -105,41 +105,6 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
         repoHint: node.team?.key,
         status: node.state?.id ? { id: node.state.id, name: node.state.name ?? '', type: node.state.type } : undefined,
       }))
-    },
-
-    async listTeams(): Promise<TicketTeam[]> {
-      const apiKey = config.get('linear.apiKey')
-      if (!apiKey) throw new Error('Linear API key not set')
-
-      const data = await gql(apiKey, `{ teams { nodes { id key name } } }`)
-      const teams = data.teams as { nodes: TicketTeam[] } | undefined
-      return teams?.nodes ?? []
-    },
-
-    async createTicket(input: CreateTicketInput): Promise<TicketDTO> {
-      const apiKey = config.get('linear.apiKey')
-      if (!apiKey) throw new Error('Linear API key not set')
-
-      const data = await gql(apiKey, `
-        mutation($input: IssueCreateInput!){
-          issueCreate(input:$input){ success issue { id identifier title description team { key } state { id name type } } }
-        }
-      `, { input: { teamId: input.teamId, title: input.title, description: input.description } })
-
-      const result = data.issueCreate as { success: boolean; issue: LinearNode } | undefined
-      if (!result?.success) throw new Error('Failed to create ticket')
-
-      const issue = result.issue
-      return {
-        id: issue.id,
-        tid: issue.identifier,
-        src: 'linear',
-        title: issue.title,
-        description: issue.description,
-        done: issue.state?.type === 'completed',
-        repoHint: issue.team?.key,
-        status: issue.state?.id ? { id: issue.state.id, name: issue.state.name ?? '', type: issue.state.type } : undefined,
-      }
     },
 
     async getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {

@@ -10,7 +10,6 @@ export interface Repo {
 }
 
 export interface WorkflowState { id: string; name: string; type?: string }
-export interface TicketTeam { id: string; key: string; name: string }
 
 export interface Ticket {
   tid: string

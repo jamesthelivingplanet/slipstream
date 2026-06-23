@@ -9,7 +9,8 @@
 
   let current: WorkflowState | null = null
   let available: WorkflowState[] = []
-  let hidden = false
+  let loading = false
+  let error: string | null = null
   let menuOpen = false
   let lastTid = ''
 
@@ -18,21 +19,21 @@
 
   $: if (shouldShow && session.tid !== lastTid) {
     lastTid = session.tid
-    hidden = false
+    loading = true
+    error = null
     current = null
     available = []
     menuOpen = false
     getTicketStatus(session.tid)
       .then((res) => {
-        if (res.available.length === 0) {
-          hidden = true
-        } else {
-          current = res.current
-          available = res.available
-        }
+        current = res.current
+        available = res.available
       })
-      .catch(() => {
-        hidden = true
+      .catch((e) => {
+        error = e instanceof Error ? e.message : 'Failed to load status'
+      })
+      .finally(() => {
+        loading = false
       })
   }
 
@@ -52,34 +53,55 @@
   function onWindowClick(e: MouseEvent) {
     if (menuOpen && !(e.target as HTMLElement).closest('#ticketStatusSel')) menuOpen = false
   }
+
+  function onTriggerClick() {
+    if (!loading && !error && available.length > 0) menuOpen = !menuOpen
+  }
 </script>
 
 <svelte:window on:click={onWindowClick} />
 
-{#if shouldShow && !hidden && available.length > 0}
+{#if shouldShow}
   <div class="status-bar">
     <span class="ticket-id mono">{session.tid}</span>
     <span class="ticket-title">{session.title}</span>
     <div class="spacer"></div>
     <div class="select" id="ticketStatusSel">
-      <button class="sel-trigger status-trigger" type="button" on:click|stopPropagation={() => (menuOpen = !menuOpen)}>
-        <span>{current?.name ?? 'Set status'}</span>
-        <span class="chev">{@html icons.chevronDown}</span>
-      </button>
-      {#if menuOpen}
-        <div class="sel-menu sel-menu-right">
-          {#each available as state (state.id)}
-            <button
-              type="button"
-              class="opt"
-              class:sel={current?.id === state.id}
-              on:click={() => selectState(state)}
-            >
-              <span>{state.name}</span>
-              <span class="check">{@html icons.check}</span>
-            </button>
-          {/each}
-        </div>
+      {#if loading}
+        <button class="sel-trigger status-trigger" type="button" disabled>
+          <span class="muted">Loading…</span>
+          <span class="chev">{@html icons.chevronDown}</span>
+        </button>
+      {:else if error}
+        <button class="sel-trigger status-trigger" type="button" disabled title={error}>
+          <span class="muted">Status unavailable</span>
+          <span class="chev">{@html icons.chevronDown}</span>
+        </button>
+      {:else if available.length === 0}
+        <button class="sel-trigger status-trigger" type="button" disabled>
+          <span class="muted">{current?.name ?? 'No statuses'}</span>
+          <span class="chev">{@html icons.chevronDown}</span>
+        </button>
+      {:else}
+        <button class="sel-trigger status-trigger" type="button" on:click|stopPropagation={onTriggerClick}>
+          <span>{current?.name ?? 'Set status'}</span>
+          <span class="chev">{@html icons.chevronDown}</span>
+        </button>
+        {#if menuOpen}
+          <div class="sel-menu sel-menu-right">
+            {#each available as state (state.id)}
+              <button
+                type="button"
+                class="opt"
+                class:sel={current?.id === state.id}
+                on:click={() => selectState(state)}
+              >
+                <span>{state.name}</span>
+                <span class="check">{@html icons.check}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       {/if}
     </div>
   </div>
@@ -122,5 +144,8 @@
     left: auto;
     right: 0;
     min-width: 160px;
+  }
+  .muted {
+    color: hsl(var(--muted-foreground));
   }
 </style>
