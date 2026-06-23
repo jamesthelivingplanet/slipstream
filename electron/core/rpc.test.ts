@@ -295,4 +295,13 @@ describe('createRpc', () => {
   it('attachRemoteControl throws when session is not in store', async () => {
     await expect(rpc.handle(IPC.attachRemoteControl, ['missing'])).rejects.toThrow('Session not found: missing')
   })
+
+  it('startSession passes systemPrompt containing the ticket id to sessions.start', async () => {
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
+    expect(deps.sessions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ systemPrompt: expect.stringContaining('T-1') })
+    )
+  })
 })
