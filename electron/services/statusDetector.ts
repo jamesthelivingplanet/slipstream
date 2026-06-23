@@ -8,6 +8,7 @@
  */
 
 import type { IStatusDetector, SessionStatus } from '../shared/contract.js'
+import { NEEDS_INPUT_MARKER, DONE_MARKER } from '../shared/promptComposer.js'
 
 // ─── ANSI stripping ─────────────────────────────────────────────────────────
 
@@ -46,6 +47,31 @@ export const NEEDS_PATTERNS: RegExp[] = [
 export function looksLikeQuestion(tail: string): boolean {
   const t = stripAnsi(tail).trim()
   return NEEDS_PATTERNS.some(re => re.test(t))
+}
+
+/**
+ * Inspect the (ANSI-stripped) tail for an explicit state marker emitted by the
+ * agent. A marker only counts when it is effectively the LAST thing in the
+ * output — i.e. nothing alphanumeric follows it (trailing whitespace, box-draw
+ * chars, or a prompt glyph are fine). This is what makes the signal transient:
+ * once the user replies and the agent emits new output, the marker is no longer
+ * at the tail and the agent returns to 'running'.
+ *
+ * Returns 'needs' | 'done' for a trailing marker, or null otherwise.
+ */
+export function tailSignal(tail: string): 'needs' | 'done' | null {
+  const t = stripAnsi(tail)
+  const candidates: [string, 'needs' | 'done'][] = [
+    [NEEDS_INPUT_MARKER, 'needs'],
+    [DONE_MARKER, 'done'],
+  ]
+  for (const [marker, status] of candidates) {
+    const idx = t.lastIndexOf(marker)
+    if (idx === -1) continue
+    const after = t.slice(idx + marker.length)
+    if (!/[A-Za-z0-9]/.test(after)) return status
+  }
+  return null
 }
 
 // ─── Buffer constants ────────────────────────────────────────────────────────
@@ -99,14 +125,19 @@ export class StatusDetector implements IStatusDetector {
       return this.exitCode === 0 ? 'done' : 'errored'
     }
 
+    // Explicit marker emitted by the agent takes precedence and is not
+    // idle-gated: as soon as it appears at the tail we trust it.
+    const tail = this.buffer.slice(-512)
+    const signal = tailSignal(tail)
+    if (signal) return signal
+
     const elapsed = this.now() - this.lastOutputAt
     if (elapsed < this.idleMs) {
       // Output is still flowing; don't bother inspecting content yet.
       return 'running'
     }
 
-    // Output has gone quiet — inspect the tail for interactive prompts.
-    const tail = this.buffer.slice(-512) // last 512 chars is plenty for a prompt
+    // Output has gone quiet — fall back to coarse interactive-prompt heuristics.
     return looksLikeQuestion(tail) ? 'needs' : 'running'
   }
 }
