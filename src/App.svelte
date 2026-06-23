@@ -9,13 +9,14 @@
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import Toasts from './lib/components/Toasts.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
+  import { MOBILE_MEDIA_QUERY } from './lib/responsive'
 
   // Mobile drawer state — the sidebar is an overlay on narrow viewports.
   let listOpen = false
   let isMobile = false
 
   function checkMobile() {
-    isMobile = window.matchMedia('(max-width: 700px)').matches
+    isMobile = window.matchMedia(MOBILE_MEDIA_QUERY).matches
   }
 
   onMount(() => {
