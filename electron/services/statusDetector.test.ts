@@ -8,8 +8,10 @@ import {
   StatusDetector,
   looksLikeQuestion,
   stripAnsi,
+  tailSignal,
   NEEDS_PATTERNS,
 } from './statusDetector.js'
+import { NEEDS_INPUT_MARKER, DONE_MARKER } from '../shared/promptComposer.js'
 
 // ─── Fake clock helpers ───────────────────────────────────────────────────────
 
@@ -235,5 +237,86 @@ describe('StatusDetector', () => {
       expect(NEEDS_PATTERNS.length).toBeGreaterThan(0)
       NEEDS_PATTERNS.forEach(p => expect(p).toBeInstanceOf(RegExp))
     })
+  })
+})
+
+// ─── tailSignal / explicit markers ───────────────────────────────────────────
+
+describe('tailSignal / explicit markers', () => {
+  it('returns "needs" when tail ends with NEEDS_INPUT_MARKER', () => {
+    expect(tailSignal(`Some output\n${NEEDS_INPUT_MARKER}`)).toBe('needs')
+  })
+
+  it('returns "needs" when tail ends with NEEDS_INPUT_MARKER followed by trailing newline', () => {
+    expect(tailSignal(`Some output\n${NEEDS_INPUT_MARKER}\n`)).toBe('needs')
+  })
+
+  it('returns "needs" when tail ends with NEEDS_INPUT_MARKER followed by trailing whitespace', () => {
+    expect(tailSignal(`Some output\n${NEEDS_INPUT_MARKER}   `)).toBe('needs')
+  })
+
+  it('returns "needs" when tail ends with NEEDS_INPUT_MARKER followed by a trailing ❯ glyph', () => {
+    expect(tailSignal(`Some output\n${NEEDS_INPUT_MARKER}\n❯ `)).toBe('needs')
+  })
+
+  it('returns "done" when tail ends with DONE_MARKER', () => {
+    expect(tailSignal(`All done.\n${DONE_MARKER}`)).toBe('done')
+  })
+
+  it('returns "done" when tail ends with DONE_MARKER followed by trailing whitespace', () => {
+    expect(tailSignal(`All done.\n${DONE_MARKER}\n`)).toBe('done')
+  })
+
+  it('returns null when alphanumeric output follows the marker (marker not at tail)', () => {
+    expect(tailSignal(`${NEEDS_INPUT_MARKER} more text here`)).toBeNull()
+  })
+
+  it('returns null when alphanumeric follows DONE_MARKER', () => {
+    expect(tailSignal(`${DONE_MARKER} additional output`)).toBeNull()
+  })
+
+  it('returns null for plain output with no marker', () => {
+    expect(tailSignal('Installing packages...\nAll done.')).toBeNull()
+  })
+
+  it('strips ANSI before matching (marker wrapped in color codes)', () => {
+    const colored = `\x1B[32m${NEEDS_INPUT_MARKER}\x1B[0m`
+    expect(tailSignal(colored)).toBe('needs')
+  })
+
+  it('StatusDetector.status() returns "needs" immediately after pushing a NEEDS_INPUT_MARKER tail WITHOUT advancing the clock', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    // Push the marker without advancing the clock — proves it is NOT idle-gated
+    d.push(`Working on it...\n${NEEDS_INPUT_MARKER}`)
+    // Do NOT advance the clock
+    expect(d.status()).toBe('needs')
+  })
+
+  it('StatusDetector.status() returns "done" for a DONE_MARKER tail without exit', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.push(`PR opened successfully.\n${DONE_MARKER}`)
+    // Do NOT advance the clock
+    expect(d.status()).toBe('done')
+  })
+
+  it('after a needs marker, pushing further normal output returns "running" (within idle window)', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.push(`I need your input.\n${NEEDS_INPUT_MARKER}`)
+    expect(d.status()).toBe('needs')
+    // User replies and agent emits new output
+    d.push('\nOk, continuing with the implementation...')
+    clock.advance(100) // still within idle window
+    expect(d.status()).toBe('running')
+  })
+
+  it('markExit still takes priority (exit code 0 → "done" even if NEEDS marker is in the tail)', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.push(`Waiting for input.\n${NEEDS_INPUT_MARKER}`)
+    d.markExit(0)
+    expect(d.status()).toBe('done')
   })
 })

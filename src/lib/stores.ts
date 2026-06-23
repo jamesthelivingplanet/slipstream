@@ -235,7 +235,34 @@ export async function startAgent(tid: string, repoId: string, prompt: string) {
 
 /** Update the status of the session identified by its backend UUID. */
 export function setSessionStatus(id: string, status: Status) {
-  patchById(id, (s) => ({ ...s, status }))
+  let prev: Status | undefined
+  let title: string | undefined
+  sessions.update(($s) =>
+    $s.map((s) => {
+      if (s.id !== id) return s
+      prev = s.status
+      title = s.title
+      return { ...s, status }
+    }),
+  )
+  if (prev !== status && (status === 'needs' || status === 'done')) {
+    notifyTransition(status, title)
+  }
+}
+
+/** Best-effort desktop notification; silently no-ops if unavailable/denied. */
+function notifyTransition(status: 'needs' | 'done', title?: string) {
+  try {
+    if (typeof Notification === 'undefined') return
+    if (Notification.permission !== 'granted') {
+      if (Notification.permission !== 'denied') void Notification.requestPermission()
+      return
+    }
+    const heading = status === 'needs' ? 'Agent needs you' : 'Agent finished'
+    new Notification(heading, { body: title ?? '' })
+  } catch {
+    /* notifications unsupported — ignore */
+  }
 }
 
 /** Remove a session by its backend UUID from the store. */
