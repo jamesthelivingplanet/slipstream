@@ -52,6 +52,7 @@ export interface TicketDTO {
   src: TicketSource
   title: string
   description?: string
+  done: boolean       // ticket's workflow state is completed
   repoHint?: string   // repo id this ticket likely maps to
 }
 

@@ -15,6 +15,7 @@ export interface Ticket {
   title: string
   repo: string
   description?: string
+  done: boolean
 }
 
 export interface Session {
