@@ -13,7 +13,7 @@
 
   $: if (session && session.tid !== lastTid) {
     lastTid = session.tid
-    prompt = session.prompt ?? `${session.tid}: ${session.title}.`
+    prompt = session.prompt ?? `Begin implementing ${session.tid}.`
     repoChoice = session.repo ?? session.suggestedRepo ?? null
     menuOpen = false
   }
@@ -39,8 +39,9 @@
 <div class="config">
   <div class="config-inner">
     <div>
-      <label class="lbl-f" for="cfgPrompt">Prompt</label>
+      <label class="lbl-f" for="cfgPrompt">Kickoff prompt</label>
       <textarea id="cfgPrompt" bind:value={prompt} placeholder="Describe the task for this agent…"></textarea>
+      <p class="cfg-hint">Full ticket details are sent to the agent automatically as context. This is the opening message you can tweak.</p>
     </div>
 
     <div>

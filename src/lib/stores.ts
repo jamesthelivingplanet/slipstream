@@ -13,12 +13,13 @@ import {
 } from './ipc'
 import { pushToast } from './toast'
 
-function dtoToTickets(dtos: { tid: string; src: string; title: string; repoHint?: string }[]): Ticket[] {
+function dtoToTickets(dtos: { tid: string; src: string; title: string; repoHint?: string; description?: string }[]): Ticket[] {
   return dtos.map((d) => ({
     tid: d.tid,
     src: d.src as 'jira' | 'linear',
     title: d.title,
     repo: d.repoHint ?? '',
+    description: d.description,
   }))
 }
 
@@ -162,7 +163,7 @@ export function createAgentFromTicket(ticket: Ticket, prompt: string) {
     {
       tid: ticket.tid, src: ticket.src, status: 'idle' as Status, title: ticket.title,
       repo: null, suggestedRepo: ticket.repo, branch: null, add: 0, del: 0, ago: 'draft',
-      prompt, activity: { text: 'Not started.' },
+      prompt, description: ticket.description, activity: { text: 'Not started.' },
     },
     ...$s,
   ])
@@ -196,7 +197,7 @@ export async function startAgent(tid: string, repoId: string, prompt: string) {
       activity: { text: 'Creating worktree & starting claude…' },
     }))
     try {
-      const dto = await startSession({ tid, title: s.title, prompt, repoId })
+      const dto = await startSession({ tid, title: s.title, prompt, repoId, description: s.description })
       patch(tid, (s) => ({
         ...s,
         id: dto.id,

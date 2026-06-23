@@ -42,6 +42,7 @@ export interface SessionDTO {
   branch: string
   status: SessionStatus
   port?: number       // assigned by floo on start
+  systemPrompt?: string
   createdAt: number
 }
 
@@ -50,6 +51,7 @@ export interface TicketDTO {
   tid: string
   src: TicketSource
   title: string
+  description?: string
   repoHint?: string   // repo id this ticket likely maps to
 }
 
@@ -87,6 +89,7 @@ export interface StartSessionInput {
   branch: string
   cwd: string         // worktree path (created by caller before start)
   env?: Record<string, string>
+  systemPrompt?: string
 }
 
 export interface ResumeSessionInput {
@@ -153,7 +156,7 @@ export interface FlotillaApi {
   setLinearKey(key: string): Promise<void>
 
   /** Creates the worktree, claims a port, spawns claude. Returns the session. */
-  startSession(input: { tid: string; title: string; prompt: string; repoId: string }): Promise<SessionDTO>
+  startSession(input: { tid: string; title: string; prompt: string; repoId: string; description?: string }): Promise<SessionDTO>
   writeSession(id: string, data: string): void
   resizeSession(id: string, cols: number, rows: number): void
   killSession(id: string): Promise<void>

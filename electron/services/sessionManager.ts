@@ -21,6 +21,7 @@ import { StatusDetector } from './statusDetector.js'
 import { OutputBuffer } from './outputBuffer.js'
 import { trustDirectory } from './claudeTrust.js'
 import { hasTranscript } from './transcripts.js'
+import { deliverPrompt } from '../shared/promptComposer.js'
 
 // ─── Internal session record ──────────────────────────────────────────────────
 
@@ -78,9 +79,10 @@ export function createSessionManager(): ISessionManager {
     const buffer = new OutputBuffer()
 
     trustDirectory(input.cwd)
+    const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system: input.systemPrompt ?? '', user: input.prompt })
     const proc = pty.spawn(
       'claude',
-      ['--dangerously-skip-permissions', '--session-id', id, input.prompt],
+      ['--dangerously-skip-permissions', ...systemArgs, '--session-id', id, userPrompt],
       {
         name: 'xterm-color',
         cols: 80,
@@ -98,6 +100,7 @@ export function createSessionManager(): ISessionManager {
       repoId: input.repo.id,
       branch: input.branch,
       status: 'running',
+      systemPrompt: input.systemPrompt,
       createdAt: Date.now(),
     }
 
@@ -121,9 +124,13 @@ export function createSessionManager(): ISessionManager {
     const buffer = new OutputBuffer()
 
     trustDirectory(input.cwd)
-    const args = hasTranscript(id)
-      ? ['--dangerously-skip-permissions', '--resume', id]
-      : ['--dangerously-skip-permissions', '--session-id', id, input.session.prompt]
+    let args: string[]
+    if (hasTranscript(id)) {
+      args = ['--dangerously-skip-permissions', '--resume', id]
+    } else {
+      const { systemArgs: resumeSystemArgs, userPrompt: resumeUserPrompt } = deliverPrompt('claude-code', { system: input.session.systemPrompt ?? '', user: input.session.prompt })
+      args = ['--dangerously-skip-permissions', ...resumeSystemArgs, '--session-id', id, resumeUserPrompt]
+    }
     const proc = pty.spawn(
       'claude',
       args,
@@ -158,9 +165,13 @@ export function createSessionManager(): ISessionManager {
     const buffer = new OutputBuffer()
 
     trustDirectory(input.cwd)
-    const args = hasTranscript(id)
-      ? ['--dangerously-skip-permissions', '--remote-control', '--resume', id]
-      : ['--dangerously-skip-permissions', '--remote-control', '--session-id', id, input.session.prompt]
+    let args: string[]
+    if (hasTranscript(id)) {
+      args = ['--dangerously-skip-permissions', '--remote-control', '--resume', id]
+    } else {
+      const { systemArgs: rcSystemArgs, userPrompt: rcUserPrompt } = deliverPrompt('claude-code', { system: input.session.systemPrompt ?? '', user: input.session.prompt })
+      args = ['--dangerously-skip-permissions', '--remote-control', ...rcSystemArgs, '--session-id', id, rcUserPrompt]
+    }
     const proc = pty.spawn(
       'claude',
       args,

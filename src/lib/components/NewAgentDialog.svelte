@@ -23,7 +23,7 @@
   function pick(t: Ticket) {
     picked = t
     title = t.title
-    prompt = `${t.tid}: ${t.title}.\n\nInvestigate and implement a fix. Add tests, then open a PR.`
+    prompt = `Begin implementing ${t.tid}.`
   }
 
   function create() {
@@ -71,8 +71,9 @@
       {/if}
 
       <div>
-        <label class="lbl-f" for="dPrompt">Initial prompt</label>
+        <label class="lbl-f" for="dPrompt">Kickoff prompt</label>
         <textarea id="dPrompt" bind:value={prompt} placeholder="Describe the task for this agent…"></textarea>
+        <p class="cfg-hint">Full ticket details are sent to the agent automatically as context. This is just the opening message you can tweak.</p>
       </div>
     </div>
 

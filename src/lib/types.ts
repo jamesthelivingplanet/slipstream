@@ -14,6 +14,7 @@ export interface Ticket {
   src: Source
   title: string
   repo: string
+  description?: string
 }
 
 export interface Session {
@@ -29,6 +30,7 @@ export interface Session {
   del: number
   ago: string
   prompt?: string
+  description?: string
   port?: number
   activity: { text: string; q?: boolean }
 }

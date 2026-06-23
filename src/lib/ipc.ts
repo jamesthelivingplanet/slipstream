@@ -49,6 +49,7 @@ export function startSession(input: {
   title: string
   prompt: string
   repoId: string
+  description?: string
 }): Promise<SessionDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.flotilla.startSession(input)

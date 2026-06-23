@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   branch    TEXT NOT NULL,
   status    TEXT NOT NULL DEFAULT 'idle',
   port      INTEGER,
+  systemPrompt TEXT,
   createdAt INTEGER NOT NULL
 );
 
@@ -32,6 +33,10 @@ export function openDb(file: string): Database.Database {
   const db = new Database(file)
   db.pragma('journal_mode = WAL')
   db.exec(SCHEMA)
+  const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
+  if (!cols.some((c) => c.name === 'systemPrompt')) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN systemPrompt TEXT`)
+  }
   return db
 }
 
@@ -59,18 +64,19 @@ export function getRepo(db: Database.Database, id: string): RepoDTO | undefined 
 
 export function upsertSession(db: Database.Database, session: SessionDTO): void {
   db.prepare(`
-    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, createdAt)
-    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @createdAt)
+    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, createdAt)
+    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @createdAt)
     ON CONFLICT(id) DO UPDATE SET
-      tid       = excluded.tid,
-      title     = excluded.title,
-      prompt    = excluded.prompt,
-      repoId    = excluded.repoId,
-      branch    = excluded.branch,
-      status    = excluded.status,
-      port      = excluded.port,
-      createdAt = excluded.createdAt
-  `).run({ ...session, port: session.port ?? null })
+      tid          = excluded.tid,
+      title        = excluded.title,
+      prompt       = excluded.prompt,
+      repoId       = excluded.repoId,
+      branch       = excluded.branch,
+      status       = excluded.status,
+      port         = excluded.port,
+      systemPrompt = excluded.systemPrompt,
+      createdAt    = excluded.createdAt
+  `).run({ ...session, port: session.port ?? null, systemPrompt: session.systemPrompt ?? null })
 }
 
 export function allSessions(db: Database.Database): SessionDTO[] {
