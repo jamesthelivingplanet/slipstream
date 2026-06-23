@@ -12,8 +12,8 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const userDataDir = '/tmp/flotilla-e2e-persist'
-const repoDir = '/tmp/flotilla-e2e-persist-repo'
+const userDataDir = '/tmp/slipstream-e2e-persist'
+const repoDir = '/tmp/slipstream-e2e-persist-repo'
 const shot = (win, name) => win.screenshot({ path: `/tmp/e2e-persist-${name}.png` })
 
 // Fresh, isolated state.
@@ -34,10 +34,10 @@ let win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
 await win.waitForTimeout(800)
 
-const repo = await win.evaluate((p) => window.flotilla.registerRepo(p), repoDir)
+const repo = await win.evaluate((p) => window.slipstream.registerRepo(p), repoDir)
 console.log('registered repo:', JSON.stringify(repo))
 const dto = await win.evaluate(
-  (rid) => window.flotilla.startSession({ tid: 'TASK-PERSIST', title: 'Persisted agent demo', prompt: 'print a short hello', repoId: rid }),
+  (rid) => window.slipstream.startSession({ tid: 'TASK-PERSIST', title: 'Persisted agent demo', prompt: 'print a short hello', repoId: rid }),
   repo.id,
 )
 console.log('started session:', JSON.stringify(dto))
@@ -50,7 +50,7 @@ app = await launch()
 win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
 await win.waitForTimeout(1500)
-const persisted = await win.evaluate(() => window.flotilla.listSessions())
+const persisted = await win.evaluate(() => window.slipstream.listSessions())
 console.log('persisted after restart:', JSON.stringify(persisted))
 await shot(win, '2-after-restart')
 await app.close()

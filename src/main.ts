@@ -4,16 +4,16 @@ import '@xterm/xterm/css/xterm.css'
 /**
  * Boot sequence.
  *
- * Electron: window.flotilla is already set by the preload. We just mount App.
+ * Electron: window.slipstream is already set by the preload. We just mount App.
  *
- * Web/browser: window.flotilla is absent. We must:
+ * Web/browser: window.slipstream is absent. We must:
  *   1. Determine the WS URL + token.
  *   2. If no token → show TokenGate; wait for user to supply one.
- *   3. Create the WS-backed FlotillaApi and assign window.flotilla BEFORE
+ *   3. Create the WS-backed SlipstreamApi and assign window.slipstream BEFORE
  *      importing App (and therefore ipc.ts), so `hasBackend` evaluates true.
  *
  * The dynamic import() approach guarantees that ipc.ts runs its module-level
- * `hasBackend = !!window.flotilla` AFTER we set window.flotilla.
+ * `hasBackend = !!window.slipstream` AFTER we set window.slipstream.
  */
 
 const target = document.getElementById('app')!
@@ -34,7 +34,7 @@ async function bootWeb() {
   const params = new URLSearchParams(location.search)
   const paramToken = params.get('token')
   if (paramToken) {
-    localStorage.setItem('flotilla_token', paramToken)
+    localStorage.setItem('slipstream_token', paramToken)
     // Strip the token from the URL bar (cosmetic + security)
     params.delete('token')
     const clean = params.toString()
@@ -42,7 +42,7 @@ async function bootWeb() {
     history.replaceState(null, '', newUrl)
   }
 
-  const storedToken = localStorage.getItem('flotilla_token')
+  const storedToken = localStorage.getItem('slipstream_token')
 
   if (!storedToken) {
     // No token at all — show gate immediately
@@ -68,18 +68,18 @@ async function connectWithToken(
       onAuthError: async () => {
         if (authFailed) return
         authFailed = true
-        localStorage.removeItem('flotilla_token')
+        localStorage.removeItem('slipstream_token')
         await showTokenGate(wsUrl, 'Token rejected. Please enter a valid token.')
         resolve()
       },
     })
 
     // Assign before any import of App/ipc.ts
-    ;(window as Window & { flotilla?: typeof api }).flotilla = api
+    ;(window as Window & { slipstream?: typeof api }).slipstream = api
     // Mark as web mode so components can distinguish from Electron
-    ;(window as unknown as { __flotillaWeb?: boolean }).__flotillaWeb = true
+    ;(window as unknown as { __slipstreamWeb?: boolean }).__slipstreamWeb = true
 
-    // Mount the app — ipc.ts will see window.flotilla = truthy
+    // Mount the app — ipc.ts will see window.slipstream = truthy
     mountApp().then(resolve)
   })
 }
@@ -95,7 +95,7 @@ async function showTokenGate(wsUrl: string, errorMsg: string): Promise<void> {
         error: errorMsg,
         onSubmit: async (token: string) => {
           gate.$destroy()
-          localStorage.setItem('flotilla_token', token)
+          localStorage.setItem('slipstream_token', token)
           const { createWsApi } = await import('./lib/wsApi.js')
           await connectWithToken(wsUrl, token, createWsApi)
           resolve()
@@ -107,8 +107,8 @@ async function showTokenGate(wsUrl: string, errorMsg: string): Promise<void> {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-if (typeof window !== 'undefined' && window.flotilla) {
-  // Electron — preload already set window.flotilla; boot straight to App.
+if (typeof window !== 'undefined' && window.slipstream) {
+  // Electron — preload already set window.slipstream; boot straight to App.
   mountApp()
 } else {
   bootWeb()

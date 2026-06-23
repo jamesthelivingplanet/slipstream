@@ -22,12 +22,12 @@ function createWindow() {
     minWidth: 960,
     minHeight: 600,
     backgroundColor: '#09090b',
-    title: 'Flotilla',
+    title: 'Slipstream',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       // ESM (.mjs) preload scripts require the sandbox to be disabled; otherwise
-      // the preload silently fails to load and window.flotilla is never exposed.
+      // the preload silently fails to load and window.slipstream is never exposed.
       sandbox: false,
     },
   })

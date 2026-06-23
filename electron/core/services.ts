@@ -13,27 +13,27 @@ import type { IpcDeps } from '../ipc.js'
 
 /**
  * Resolve the data directory without touching the Electron `app` API.
- * Matches app.getPath('userData') for appName 'flotilla'.
- * Override via FLOTILLA_DATA_DIR env var (shared DB between desktop + server).
+ * Matches app.getPath('userData') for appName 'slipstream'.
+ * Override via SLIPSTREAM_DATA_DIR env var (shared DB between desktop + server).
  */
 export function resolveDataDir(): string {
-  if (process.env.FLOTILLA_DATA_DIR) return process.env.FLOTILLA_DATA_DIR
+  if (process.env.SLIPSTREAM_DATA_DIR) return process.env.SLIPSTREAM_DATA_DIR
 
   switch (process.platform) {
     case 'darwin':
-      return path.join(os.homedir(), 'Library', 'Application Support', 'flotilla')
+      return path.join(os.homedir(), 'Library', 'Application Support', 'slipstream')
     case 'win32':
-      return path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'flotilla')
+      return path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'slipstream')
     default:
       // Linux / XDG
-      return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'flotilla')
+      return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'slipstream')
   }
 }
 
 /** Construct all backend services wired to the given data root. */
 export function createServices(root: string): IpcDeps {
   fs.mkdirSync(root, { recursive: true })
-  const db = openDb(path.join(root, 'flotilla.db'))
+  const db = openDb(path.join(root, 'slipstream.db'))
   const configStore = createConfigStore(db)
   const sessionStore = createSessionStore(db)
   return {

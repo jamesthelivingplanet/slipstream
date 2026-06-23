@@ -1,5 +1,5 @@
 /**
- * Flotilla — shared contract (single source of truth for Phase 1).
+ * Slipstream — shared contract (single source of truth for Phase 1).
  *
  * Every main-process service and the renderer bridge implement the interfaces
  * defined here. Do NOT change this file in a service PR — if a signature needs
@@ -159,9 +159,9 @@ export interface ITicketProvider {
   startTicket(tid: string): Promise<WorkflowState | null>
 }
 
-/* ───────── IPC: renderer-facing bridge (window.flotilla) ───────── */
+/* ───────── IPC: renderer-facing bridge (window.slipstream) ───────── */
 
-export interface FlotillaApi {
+export interface SlipstreamApi {
   listRepos(): Promise<RepoDTO[]>
   registerRepo(absPath: string): Promise<RepoDTO>
   /** Opens a native folder picker, registers the chosen repo. null if cancelled.
@@ -217,6 +217,6 @@ export const IPC = {
 
 declare global {
   interface Window {
-    flotilla: FlotillaApi
+    slipstream: SlipstreamApi
   }
 }

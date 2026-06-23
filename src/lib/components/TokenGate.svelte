@@ -25,11 +25,11 @@
 <div class="gate-bg">
   <div class="gate-card">
     <div class="gate-logo">
-      <div class="glyph">F</div>
-      <b>Flotilla</b>
+      <div class="glyph">S</div>
+      <b>Slipstream</b>
     </div>
     <h2>Access token required</h2>
-    <p class="gate-hint">Enter the token configured on the Flotilla server.</p>
+    <p class="gate-hint">Enter the token configured on the Slipstream server.</p>
 
     {#if error}
       <div class="gate-error">{error}</div>

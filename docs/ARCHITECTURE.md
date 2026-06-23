@@ -1,6 +1,6 @@
 # Architecture
 
-Flotilla is an Electron app with a clear split: a **main process** that owns everything
+Slipstream is an Electron app with a clear split: a **main process** that owns everything
 privileged (PTYs, git, SQLite, ticket sources) and a **Svelte renderer** that talks to it
 only through a typed bridge. The single source of truth for that boundary is
 [`electron/shared/contract.ts`](../electron/shared/contract.ts).
@@ -8,13 +8,13 @@ only through a typed bridge. The single source of truth for that boundary is
 ## Process model
 
 ```
-Renderer (Svelte)  ──window.flotilla──▶  preload  ──ipcRenderer──▶  main (ipcMain)
+Renderer (Svelte)  ──window.slipstream──▶  preload  ──ipcRenderer──▶  main (ipcMain)
    xterm, stores                          (contextBridge)            services + node-pty
         ▲                                                                  │
         └────────────── session:data / session:status (push) ─────────────┘
 ```
 
-- **`preload.ts`** exposes `window.flotilla` (the `FlotillaApi`) via `contextBridge`,
+- **`preload.ts`** exposes `window.slipstream` (the `SlipstreamApi`) via `contextBridge`,
   forwarding to `ipcRenderer.invoke/send` keyed by the `IPC` channel constants.
 - **`ipc.ts` / `registerIpc(win, deps)`** registers the `ipcMain` handlers and forwards
   PTY `data`/`status` events to the renderer with `win.webContents.send(...)`.
@@ -50,7 +50,7 @@ Renderer (Svelte)  ──window.flotilla──▶  preload  ──ipcRenderer─
   `settingsOpen`/`dialogOpen`. `initFromBackend()` fills repos+tickets from the backend and
   clears sessions (real sessions start empty). Actions: `registerRepo`, `removeRepoById`,
   `createBlankAgent`, `createAgentFromTicket`, `startAgent`, `setSessionStatus`, etc.
-- **`lib/ipc.ts`**: thin `hasBackend`-guarded wrappers over `window.flotilla`, so the UI
+- **`lib/ipc.ts`**: thin `hasBackend`-guarded wrappers over `window.slipstream`, so the UI
   still renders in a plain browser (no backend) for design work.
 - **`TerminalView.svelte`**: in `liveMode` (`hasBackend`) it pipes `onSessionData → term`,
   `term.onData → writeSession`, resize → `resizeSession`, and `onSessionStatus →
@@ -61,7 +61,7 @@ Renderer (Svelte)  ──window.flotilla──▶  preload  ──ipcRenderer─
 
 ## Filesystem conventions
 
-- **Root** = Electron `app.getPath('userData')`. DB at `root/flotilla.db`.
+- **Root** = Electron `app.getPath('userData')`. DB at `root/slipstream.db`.
 - **Worktrees**: `root/.worktrees/<org>-<name>/<branch>`.
 - **Branches**: always cut from the repo's base branch.
 - Repos are referenced **in place** by absolute path (we don't relocate them).
@@ -72,7 +72,7 @@ The same Svelte renderer can run in a plain browser (e.g. a phone over Tailscale
 replacing the Electron IPC transport with a WebSocket. The process model:
 
 ```
-Browser (Svelte)  ──window.flotilla──▶  wsApi  ──WebSocket /rpc──▶  server.ts
+Browser (Svelte)  ──window.slipstream──▶  wsApi  ──WebSocket /rpc──▶  server.ts
    xterm, stores     (createWsApi)       ws://host:7421              createRpc → same services
         ▲                                                                  │
         └──────────────── session:data / session:status (push) ───────────┘
@@ -83,7 +83,7 @@ Browser (Svelte)  ──window.flotilla──▶  wsApi  ──WebSocket /rpc─
 - **`electron/core/services.ts`** — `createServices(root)` extracts service wiring from
   `main.ts` so both the Electron entry and the headless server share one factory.
   `resolveDataDir()` reproduces `app.getPath('userData')` in plain Node (no Electron API):
-  honors `FLOTILLA_DATA_DIR`, else `~/.config/flotilla` on Linux (XDG), macOS Library, or
+  honors `SLIPSTREAM_DATA_DIR`, else `~/.config/slipstream` on Linux (XDG), macOS Library, or
   `%APPDATA%` on Windows. `createServices` calls `mkdirSync(root, {recursive:true})` so a
   fresh data directory never crashes on first run.
 - **`electron/core/rpc.ts`** — `createRpc(deps, emit)`: transport-free request router
@@ -109,33 +109,33 @@ responses by `id` (UUID). Pushes are unsolicited (PTY data/status events).
 
 HTTP serves the built `dist/` SPA (with SPA fallback) + `GET /healthz`.  
 WebSocket at `/rpc` authenticates on upgrade via `?token=` query param or
-`Authorization: Bearer` header against `FLOTILLA_TOKEN`; rejects with HTTP 401 before the
+`Authorization: Bearer` header against `SLIPSTREAM_TOKEN`; rejects with HTTP 401 before the
 upgrade completes (close code 4001 on the client). Refuses to start with no token.
 
 Env vars:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `FLOTILLA_TOKEN` | — (required) | Bearer secret; server exits if unset |
-| `FLOTILLA_BIND` | `127.0.0.1` | Bind address (set to Tailscale IP to expose on tailnet) |
-| `FLOTILLA_PORT` | `7421` | Listen port |
-| `FLOTILLA_DATA_DIR` | platform userData | Override data directory |
+| `SLIPSTREAM_TOKEN` | — (required) | Bearer secret; server exits if unset |
+| `SLIPSTREAM_BIND` | `127.0.0.1` | Bind address (set to Tailscale IP to expose on tailnet) |
+| `SLIPSTREAM_PORT` | `7421` | Listen port |
+| `SLIPSTREAM_DATA_DIR` | platform userData | Override data directory |
 
 ### Renderer web boot (`src/main.ts` + `src/lib/wsApi.ts`)
 
-`src/main.ts` detects the absence of `window.flotilla` (no preload) and runs `bootWeb()`:
+`src/main.ts` detects the absence of `window.slipstream` (no preload) and runs `bootWeb()`:
 resolves a token from `?token=` query param (stored in localStorage, stripped from URL) or
 shows a `TokenGate` login component. Once a token is in hand, `createWsApi({url, token})`
-constructs the WS-backed `FlotillaApi` — with pre-open request queueing, per-request 30 s
-timeout, and exponential auto-reconnect. `window.flotilla` and `window.__flotillaWeb=true`
+constructs the WS-backed `SlipstreamApi` — with pre-open request queueing, per-request 30 s
+timeout, and exponential auto-reconnect. `window.slipstream` and `window.__slipstreamWeb=true`
 are assigned **before** `App.svelte` is dynamically imported, so `ipc.ts`'s module-level
-`hasBackend = !!window.flotilla` evaluates `true`. `pickAndRegisterRepo` returns `null` on
+`hasBackend = !!window.slipstream` evaluates `true`. `pickAndRegisterRepo` returns `null` on
 web (no native dialog); the Settings → Repositories tab shows an "add by absolute path"
-input instead, gated by `window.__flotillaWeb`.
+input instead, gated by `window.__slipstreamWeb`.
 
 ### Access model
 
-Intended to be reached over a **Tailscale** tailnet (`FLOTILLA_BIND` = tailnet IP).
+Intended to be reached over a **Tailscale** tailnet (`SLIPSTREAM_BIND` = tailnet IP).
 Tailscale encrypts the tunnel, so the server speaks plain HTTP — no TLS needed.
 The bearer token provides application-layer authentication on top.
 
