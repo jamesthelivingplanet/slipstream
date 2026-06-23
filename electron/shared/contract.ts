@@ -150,6 +150,13 @@ export interface ITicketProvider {
   /** tid is the human identifier e.g. "FLO-17". */
   getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
   setTicketStatus(tid: string, stateId: string): Promise<WorkflowState>
+  /**
+   * Transition the ticket to this provider's "in progress" / started state
+   * (e.g. Linear "In Progress"). Best-effort and idempotent: returns the new
+   * state, or null when no transition applies (no provider configured, no
+   * started state exists, or the ticket is already in a started state).
+   */
+  startTicket(tid: string): Promise<WorkflowState | null>
 }
 
 /* ───────── IPC: renderer-facing bridge (window.flotilla) ───────── */

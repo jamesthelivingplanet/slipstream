@@ -150,5 +150,43 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
 
       return result.issue.state
     },
+
+    async startTicket(tid: string): Promise<WorkflowState | null> {
+      const apiKey = config.get('linear.apiKey')
+      if (!apiKey) throw new Error('Linear API key not set')
+
+      const node = await resolveIssue(tid)
+
+      if (node.state?.type === 'started') return null
+
+      const teamId = node.team?.id
+      if (!teamId) throw new Error(`No team found for ticket: ${tid}`)
+
+      const data = await gql(apiKey, `
+        query($teamId:ID!){
+          workflowStates(filter:{ team:{ id:{ eq:$teamId } } }, first:100){
+            nodes{ id name type position }
+          }
+        }
+      `, { teamId })
+
+      const statesData = data.workflowStates as { nodes: Array<{ id: string; name: string; type?: string; position?: number }> } | undefined
+      const startedState = (statesData?.nodes ?? [])
+        .filter(s => s.type === 'started')
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0]
+
+      if (!startedState) return null
+
+      const mutData = await gql(apiKey, `
+        mutation($id:String!,$stateId:String!){
+          issueUpdate(id:$id, input:{ stateId:$stateId }){ success issue { state { id name type } } }
+        }
+      `, { id: node.id, stateId: startedState.id })
+
+      const result = mutData.issueUpdate as { success: boolean; issue: { state: { id: string; name: string; type?: string } } } | undefined
+      if (!result?.success) throw new Error('Failed to update ticket status')
+
+      return result.issue.state
+    },
   }
 }
