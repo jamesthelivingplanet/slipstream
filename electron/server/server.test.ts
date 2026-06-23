@@ -39,14 +39,11 @@ function makeFakeDeps(): IpcDeps {
       sessionListeners[event] ??= []
       sessionListeners[event].push(listener)
     },
-  }
-  ;(sessions as unknown as { removeListener(e: string, l: unknown): void }).removeListener = (
-    event: string,
-    listener: unknown,
-  ) => {
-    if (sessionListeners[event]) {
-      sessionListeners[event] = sessionListeners[event].filter((l) => l !== listener)
-    }
+    off(event: string, listener: (...args: unknown[]) => void) {
+      if (sessionListeners[event]) {
+        sessionListeners[event] = sessionListeners[event].filter((l) => l !== listener)
+      }
+    },
   }
 
   const repos: IRepoRegistry = {
