@@ -93,6 +93,16 @@ export function createRpc(
         deps.sessionStore.upsert({ ...session, port })
         persistedStatus.set(session.id, 'running')
 
+        // FLO-26: move the linked ticket to the provider's "In Progress" state
+        // when the agent starts. Best-effort — a ticket-API failure must not
+        // break the agent launch. Follow-up: handle stop/complete/error
+        // transitions (out of scope for FLO-26).
+        try {
+          await deps.tickets.startTicket(tid)
+        } catch {
+          // ignore: ticket provider unavailable or transition not applicable
+        }
+
         return { ...session, port }
       }
 

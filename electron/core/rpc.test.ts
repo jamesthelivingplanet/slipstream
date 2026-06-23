@@ -92,6 +92,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     listTickets: vi.fn().mockResolvedValue([]),
     getTicketStatus: vi.fn().mockResolvedValue({ current: null, available: [] }),
     setTicketStatus: vi.fn().mockRejectedValue(new Error('not implemented')),
+    startTicket: vi.fn().mockResolvedValue(null),
   }
 
   const config: IConfigStore = {
@@ -317,5 +318,20 @@ describe('createRpc', () => {
     expect(deps.sessions.start).toHaveBeenCalledWith(
       expect.objectContaining({ systemPrompt: expect.stringContaining('T-1') })
     )
+  })
+
+  it('startSession transitions the linked ticket to in-progress (startTicket)', async () => {
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
+    expect(deps.tickets.startTicket).toHaveBeenCalledWith('T-1')
+  })
+
+  it('startSession still succeeds when startTicket rejects', async () => {
+    ;(deps.tickets.startTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('linear down'))
+    const result = await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ]) as SessionDTO
+    expect(result.id).toBe('s1')
   })
 })
