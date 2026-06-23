@@ -11,6 +11,7 @@ pnpm build      # renderer + electron main + preload + dist-electron/server.js
 pnpm test       # vitest (unit + real-git integration)
 pnpm check      # svelte-check typecheck (run before committing)
 FLOTILLA_TOKEN=<secret> pnpm serve   # headless WS server (web/mobile access)
+pnpm deploy     # build + restart systemd flotilla.service + healthz check
 ```
 
 Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm/yarn).
