@@ -13,6 +13,7 @@ const mockNode = {
   id: 'issue-uuid-1',
   identifier: 'ENG-123',
   title: 'Fix the bug',
+  description: 'Some details',
   team: { key: 'ENG' },
 }
 
@@ -55,6 +56,7 @@ describe('createLinearProvider', () => {
         tid: 'ENG-123',
         src: 'linear',
         title: 'Fix the bug',
+        description: 'Some details',
         repoHint: 'ENG',
       },
     ])

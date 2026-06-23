@@ -5,6 +5,7 @@ interface LinearNode {
   id: string
   identifier: string
   title: string
+  description?: string
   team?: { key: string }
 }
 
@@ -27,6 +28,7 @@ const QUERY = `
         id
         identifier
         title
+        description
         team { key }
       }
     }
@@ -65,6 +67,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
         tid: node.identifier,
         src: 'linear',
         title: node.title,
+        description: node.description,
         repoHint: node.team?.key,
       }))
     },
