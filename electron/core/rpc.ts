@@ -2,6 +2,7 @@ import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
 import type { RepoDTO, ISessionStore, SessionStatus } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
+import { buildSystemPrompt } from '../shared/promptComposer.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -58,8 +59,8 @@ export function createRpc(
         return deps.tickets.listTickets()
 
       case IPC.startSession: {
-        const input = args[0] as { tid: string; title: string; prompt: string; repoId: string }
-        const { tid, title, prompt, repoId } = input
+        const input = args[0] as { tid: string; title: string; prompt: string; repoId: string; description?: string }
+        const { tid, title, prompt, repoId, description } = input
 
         const repo = await deps.repos.get(repoId)
         if (!repo) throw new Error(`Unknown repo: ${repoId}`)
@@ -75,6 +76,8 @@ export function createRpc(
           port = undefined
         }
 
+        const systemPrompt = buildSystemPrompt({ tid, title, description })
+
         const session = deps.sessions.start({
           tid,
           title,
@@ -83,6 +86,7 @@ export function createRpc(
           branch,
           cwd,
           env: port !== undefined ? { PORT: String(port) } : undefined,
+          systemPrompt,
         })
 
         sessionMeta.set(session.id, { repo, branch })
