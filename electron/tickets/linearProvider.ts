@@ -7,6 +7,7 @@ interface LinearNode {
   title: string
   description?: string
   team?: { key: string }
+  state?: { type: string }
 }
 
 interface LinearResponse {
@@ -21,15 +22,16 @@ interface LinearResponse {
 const QUERY = `
   query {
     issues(filter: { and: [
-      { state: { type: { nin: ["completed","canceled"] } } },
+      { state: { type: { neq: "canceled" } } },
       { or: [ { assignee: { isMe: { eq: true } } }, { assignee: { null: true } } ] }
-    ] }, first: 50) {
+    ] }, orderBy: updatedAt, first: 50) {
       nodes {
         id
         identifier
         title
         description
         team { key }
+        state { type }
       }
     }
   }
@@ -68,6 +70,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
         src: 'linear',
         title: node.title,
         description: node.description,
+        done: node.state?.type === 'completed',
         repoHint: node.team?.key,
       }))
     },

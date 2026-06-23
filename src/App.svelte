@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { selected, dialogOpen, settingsOpen, initFromBackend } from './lib/stores'
+  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
@@ -20,7 +20,7 @@
   }
 
   onMount(() => {
-    initFromBackend()
+    initFromBackend().then(() => refreshAndReconcile())
     checkMobile()
     window.addEventListener('resize', checkMobile)
     window.addEventListener('orientationchange', checkMobile)
@@ -54,6 +54,9 @@
     </div>
     <div class="spacer"></div>
     <ThemeMenu />
+    <button class="btn btn-outline btn-icon btn-sm" title="Refresh tickets" on:click={refreshAndReconcile}>
+      {@html icons.refresh}
+    </button>
     <button class="btn btn-outline btn-icon btn-sm" title="Settings" on:click={() => settingsOpen.set(true)}>
       {@html icons.settings}
     </button>
