@@ -182,13 +182,8 @@ export function createRpc(
   }
 
   function dispose(): void {
-    // EventEmitter doesn't expose typed removeListener on the contract interface,
-    // so we cast to access the standard Node EventEmitter API.
-    const em = deps.sessions as unknown as {
-      removeListener(event: string, listener: (...a: unknown[]) => void): void
-    }
-    em.removeListener('data', onData as (...a: unknown[]) => void)
-    em.removeListener('status', onStatus as (...a: unknown[]) => void)
+    deps.sessions.off('data', onData)
+    deps.sessions.off('status', onStatus)
   }
 
   return { handle, dispose }
