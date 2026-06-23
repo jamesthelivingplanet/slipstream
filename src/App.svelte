@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile } from './lib/stores'
+  import NewTicketDialog from './lib/components/NewTicketDialog.svelte'
+  import TicketStatusBar from './lib/components/TicketStatusBar.svelte'
+  import { selected, dialogOpen, settingsOpen, ticketDialogOpen, initFromBackend, refreshAndReconcile } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
@@ -60,6 +62,9 @@
     <button class="btn btn-outline btn-icon btn-sm" title="Settings" on:click={() => settingsOpen.set(true)}>
       {@html icons.settings}
     </button>
+    <button class="btn btn-outline btn-sm" on:click={() => ticketDialogOpen.set(true)}>
+      {@html icons.plus} {isMobile ? '' : 'New ticket'}
+    </button>
     <button class="btn btn-primary btn-sm" on:click={() => dialogOpen.set(true)}>
       {@html icons.plus} {isMobile ? '' : 'New agent'}
     </button>
@@ -86,17 +91,21 @@
             <p>Pick an agent on the left to view its terminal, or start a new one.</p>
           </div>
         </div>
-      {:else if $selected.status === 'idle'}
-        <AgentConfig session={$selected} />
       {:else}
-        {#key $selected.tid}
-          <TerminalView session={$selected} />
-        {/key}
+        <TicketStatusBar session={$selected} />
+        {#if $selected.status === 'idle'}
+          <AgentConfig session={$selected} />
+        {:else}
+          {#key $selected.tid}
+            <TerminalView session={$selected} />
+          {/key}
+        {/if}
       {/if}
     </section>
   </div>
 
   <NewAgentDialog />
+  <NewTicketDialog />
   <SettingsModal />
   <Toasts />
 </div>
