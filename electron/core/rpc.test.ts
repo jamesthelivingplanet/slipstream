@@ -298,6 +298,18 @@ describe('createRpc', () => {
     await expect(rpc.handle(IPC.attachRemoteControl, ['missing'])).rejects.toThrow('Session not found: missing')
   })
 
+  it('routes worktreeStatus to worktrees.status with resolved repo and branch', async () => {
+    const result = await rpc.handle(IPC.worktreeStatus, ['r1', 't-1-fix-bug'])
+    expect(deps.repos.get).toHaveBeenCalledWith('r1')
+    expect(deps.worktrees.status).toHaveBeenCalledWith(makeRepo(), 't-1-fix-bug')
+    expect(result).toEqual(makeWorktreeInfo())
+  })
+
+  it('worktreeStatus throws for unknown repo', async () => {
+    ;(deps.repos as unknown as { get: ReturnType<typeof vi.fn> }).get.mockResolvedValueOnce(undefined)
+    await expect(rpc.handle(IPC.worktreeStatus, ['unknown', 'branch'])).rejects.toThrow('Unknown repo: unknown')
+  })
+
   it('startSession passes systemPrompt containing the ticket id to sessions.start', async () => {
     await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },

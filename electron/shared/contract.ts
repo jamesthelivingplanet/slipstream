@@ -176,6 +176,7 @@ export interface FlotillaApi {
   listSessions(): Promise<SessionDTO[]>
   resumeSession(id: string): Promise<SessionDTO>
   attachRemoteControl(id: string): Promise<SessionDTO>
+  worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo>
 
   /** Returns an unsubscribe fn. */
   onSessionData(cb: (id: string, data: string, seq: number) => void): () => void
@@ -202,6 +203,7 @@ export const IPC = {
   sessionData: 'session:data',     // main → renderer
   sessionStatus: 'session:status', // main → renderer
   getSessionBuffer: 'session:buffer',
+  worktreeStatus: 'worktree:status',
   getLinearKey: 'config:getLinearKey',
   setLinearKey: 'config:setLinearKey',
 } as const
