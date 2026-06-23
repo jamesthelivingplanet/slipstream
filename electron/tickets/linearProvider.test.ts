@@ -218,4 +218,119 @@ describe('createLinearProvider', () => {
 
     expect(result).toEqual({ id: 'state-done', name: 'Done', type: 'completed' })
   })
+
+  describe('startTicket', () => {
+    it('transitions to started state when issue is not yet started', async () => {
+      // fetch #1: resolveIssue
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            issues: {
+              nodes: [{
+                id: 'issue-uuid-1',
+                identifier: 'ENG-123',
+                team: { id: 'team-1', key: 'ENG' },
+                state: { id: 'state-backlog', name: 'Backlog', type: 'unstarted' },
+              }],
+            },
+          },
+        }),
+      } as Response)
+      // fetch #2: workflowStates
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            workflowStates: {
+              nodes: [
+                { id: 'state-backlog', name: 'Backlog', type: 'backlog', position: 0 },
+                { id: 'state-1', name: 'In Progress', type: 'started', position: 1 },
+              ],
+            },
+          },
+        }),
+      } as Response)
+      // fetch #3: issueUpdate
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            issueUpdate: {
+              success: true,
+              issue: { state: { id: 'state-1', name: 'In Progress', type: 'started' } },
+            },
+          },
+        }),
+      } as Response)
+
+      const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+      const result = await provider.startTicket('ENG-123')
+
+      expect(result).toEqual({ id: 'state-1', name: 'In Progress', type: 'started' })
+    })
+
+    it('returns null when issue is already in a started state', async () => {
+      // fetch #1: resolveIssue — already started
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            issues: {
+              nodes: [{
+                id: 'issue-uuid-1',
+                identifier: 'ENG-123',
+                team: { id: 'team-1', key: 'ENG' },
+                state: { id: 'state-1', name: 'In Progress', type: 'started' },
+              }],
+            },
+          },
+        }),
+      } as Response)
+
+      const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+      const result = await provider.startTicket('ENG-123')
+
+      expect(result).toBeNull()
+      expect(fetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('returns null when no started state exists in the team workflow', async () => {
+      // fetch #1: resolveIssue
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            issues: {
+              nodes: [{
+                id: 'issue-uuid-1',
+                identifier: 'ENG-123',
+                team: { id: 'team-1', key: 'ENG' },
+                state: { id: 'state-backlog', name: 'Backlog', type: 'unstarted' },
+              }],
+            },
+          },
+        }),
+      } as Response)
+      // fetch #2: workflowStates — no started states
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            workflowStates: {
+              nodes: [
+                { id: 'state-backlog', name: 'Backlog', type: 'backlog', position: 0 },
+                { id: 'state-done', name: 'Done', type: 'completed', position: 2 },
+              ],
+            },
+          },
+        }),
+      } as Response)
+
+      const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+      const result = await provider.startTicket('ENG-123')
+
+      expect(result).toBeNull()
+    })
+  })
 })
