@@ -10,16 +10,21 @@ import {
   registerRepo as ipcRegisterRepo,
   removeRepo,
   startSession,
+  killSession,
+  cleanupSession,
 } from './ipc'
 import { pushToast } from './toast'
+import { sessionsToReconcile } from './reconcile'
+export { sessionsToReconcile } from './reconcile'
 
-function dtoToTickets(dtos: { tid: string; src: string; title: string; repoHint?: string; description?: string }[]): Ticket[] {
+function dtoToTickets(dtos: { tid: string; src: string; title: string; repoHint?: string; description?: string; done: boolean }[]): Ticket[] {
   return dtos.map((d) => ({
     tid: d.tid,
     src: d.src as 'jira' | 'linear',
     title: d.title,
     repo: d.repoHint ?? '',
     description: d.description,
+    done: d.done,
   }))
 }
 
@@ -92,7 +97,7 @@ export async function initFromBackend(): Promise<void> {
     })),
   )
 
-  tickets.set(dtoToTickets(ticketDTOs))
+  tickets.set(dtoToTickets(ticketDTOs).filter((t) => !t.done))
 
   const sessionDTOs = await listSessions()
   sessions.set(
@@ -118,7 +123,7 @@ export async function refreshTickets(): Promise<void> {
   if (!hasBackend) return
   try {
     const dtos = await listTickets()
-    tickets.set(dtoToTickets(dtos))
+    tickets.set(dtoToTickets(dtos).filter((t) => !t.done))
   } catch (e) {
     pushToast('error', cleanError(e))
   }
@@ -239,4 +244,52 @@ export function removeSession(id: string) {
 
 export function resolveNeedsInput(tid: string) {
   patch(tid, (s) => ({ ...s, status: 'running', activity: { text: 'Applying decision, writing the fix…' } }))
+}
+
+/**
+ * Shared agent teardown: kill the PTY, remove worktree+branch via the backend,
+ * and drop it from the sidebar. `auto` (refresh-driven) force-removes without
+ * prompting; the manual trash path confirms before forcing a dirty/unmerged tree.
+ */
+export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promise<boolean> {
+  if (!hasBackend || !s.id) {
+    sessions.update(($s) => $s.filter((x) => x.tid !== s.tid))
+    if (get(selectedId) === s.tid) select(null)
+    return true
+  }
+  try {
+    await killSession(s.id)
+    let result = await cleanupSession(s.id, { force: false })
+    if (!result.removed) {
+      const force = opts?.auto || confirm(`Worktree not clean: ${result.reason ?? 'unknown reason'}. Force remove?`)
+      if (!force) return false
+      result = await cleanupSession(s.id, { force: true })
+    }
+    if (result.removed) {
+      removeSession(s.id)
+      if (get(selectedId) === s.tid) select(null)
+      pushToast('success', `Cleaned up ${s.tid}`)
+      return true
+    }
+    return false
+  } catch (e) {
+    pushToast('error', cleanError(e))
+    return false
+  }
+}
+
+/** Pull latest tickets, refresh the sidebar list, and tear down agents whose ticket is now Done. */
+export async function refreshAndReconcile(): Promise<void> {
+  if (!hasBackend) return
+  let dtos
+  try {
+    dtos = await listTickets()
+  } catch (e) {
+    pushToast('error', cleanError(e))
+    return
+  }
+  tickets.set(dtoToTickets(dtos).filter((t) => !t.done))
+  for (const s of sessionsToReconcile(get(sessions), dtos)) {
+    await cleanupAgent(s, { auto: true })
+  }
 }
