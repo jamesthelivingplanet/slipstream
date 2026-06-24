@@ -17,6 +17,9 @@ const api: SlipstreamApi = {
   // ── Config / Integrations ────────────────────────────────────────────────
   getLinearKey: () => ipcRenderer.invoke(IPC.getLinearKey),
   setLinearKey: (key: string) => ipcRenderer.invoke(IPC.setLinearKey, key),
+  getEditorConfig: () => ipcRenderer.invoke(IPC.getEditorConfig),
+  setEditorConfig: (cfg) => ipcRenderer.invoke(IPC.setEditorConfig, cfg),
+  openInEditor: (input) => ipcRenderer.invoke(IPC.openInEditor, input),
 
   // ── Sessions ─────────────────────────────────────────────────────────────
   startSession: (input) => ipcRenderer.invoke(IPC.startSession, input),

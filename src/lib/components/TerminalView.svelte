@@ -4,10 +4,11 @@
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
   import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession, cleanupAgent } from '../stores'
-  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl } from '../ipc'
+  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl, openInEditor } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
+  import { MOBILE_MEDIA_QUERY } from '../responsive'
   import type { Session, Status } from '../types'
 
   export let session: Session
@@ -194,6 +195,20 @@
   async function handleCleanup() {
     await cleanupAgent(session, { auto: false })
   }
+
+  async function handleOpenEditor() {
+    if (!hasBackend || !session.repo || !session.branch) return
+    const mobile = typeof window !== 'undefined' && window.matchMedia(MOBILE_MEDIA_QUERY).matches
+    try {
+      await openInEditor({ repoId: session.repo, branch: session.branch, mobile })
+      pushToast('success', 'Opening in editor…')
+    } catch (e) {
+      const msg = e instanceof Error
+        ? e.message.replace(/^Error invoking remote method '[^']*':\s*/, '')
+        : String(e)
+      pushToast('error', msg)
+    }
+  }
 </script>
 
 <div class="term-head">
@@ -209,7 +224,7 @@
   </div>
   <div class="spacer"></div>
   <button class="btn btn-outline btn-sm" title="Relaunch this agent with Claude Code Remote Control" disabled={!hasBackend || !session.id} on:click={handleRemoteControl}>{@html icons.remote} <span class="btn-label">Remote control</span></button>
-  <button class="btn btn-outline btn-sm" on:click={() => alert('Opens the worktree in your editor (Phase 1)')}>
+  <button class="btn btn-outline btn-sm" title="Open the worktree in your configured editor" disabled={!hasBackend || !session.repo || !session.branch} on:click={handleOpenEditor}>
     {@html icons.externalLink} <span class="btn-label">Editor</span>
   </button>
   <button class="btn btn-outline btn-sm btn-danger" on:click={handleCleanup}>

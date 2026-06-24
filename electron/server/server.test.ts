@@ -76,6 +76,8 @@ function makeFakeDeps(): IpcDeps {
     set: vi.fn(),
   }
 
+  const editor = { open: vi.fn().mockResolvedValue(undefined) }
+
   const sessionStoreMap = new Map()
   const sessionStore: ISessionStore = {
     list() { return Array.from(sessionStoreMap.values()) },
@@ -84,7 +86,7 @@ function makeFakeDeps(): IpcDeps {
     delete(id) { sessionStoreMap.delete(id) },
   }
 
-  return { repos, worktrees, sessions, ports, tickets, config, sessionStore }
+  return { repos, worktrees, sessions, ports, tickets, config, sessionStore, editor }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
