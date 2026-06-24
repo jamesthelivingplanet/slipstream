@@ -9,6 +9,7 @@
   import NewAgentDialog from './lib/components/NewAgentDialog.svelte'
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import Toasts from './lib/components/Toasts.svelte'
+  import InstallNudge from './lib/components/InstallNudge.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
   import { MOBILE_MEDIA_QUERY } from './lib/responsive'
 
@@ -125,6 +126,7 @@
   <NewAgentDialog />
   <SettingsModal />
   <Toasts />
+  <InstallNudge />
 </div>
 
 <style>

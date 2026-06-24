@@ -128,6 +128,23 @@ function registerServiceWorker(): void {
   })
 }
 
+// ── PWA Install prompt capture ────────────────────────────────────────────────
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>
+  readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault()
+  ;(window as unknown as { __deferredInstallPrompt?: BeforeInstallPromptEvent }).__deferredInstallPrompt = e as BeforeInstallPromptEvent
+  window.dispatchEvent(new Event('slipstream:installable'))
+})
+window.addEventListener('appinstalled', () => {
+  ;(window as unknown as { __deferredInstallPrompt?: BeforeInstallPromptEvent | null }).__deferredInstallPrompt = null
+  window.dispatchEvent(new Event('slipstream:installed'))
+})
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 if (typeof window !== 'undefined' && window.slipstream) {
