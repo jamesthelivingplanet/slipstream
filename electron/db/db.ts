@@ -32,6 +32,16 @@ CREATE TABLE IF NOT EXISTS repo_settings (
   installCmd TEXT NOT NULL DEFAULT '',
   startCmd   TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint   TEXT PRIMARY KEY,
+  p256dh     TEXT NOT NULL,
+  auth       TEXT NOT NULL,
+  needs      INTEGER NOT NULL DEFAULT 1,
+  done       INTEGER NOT NULL DEFAULT 1,
+  running    INTEGER NOT NULL DEFAULT 0,
+  createdAt  INTEGER NOT NULL
+);
 `
 
 /** Open (or create) a SQLite database at `file` and apply the schema. */
@@ -115,4 +125,52 @@ export function setRepoSettings(db: Database.Database, repoId: string, s: RepoSe
       installCmd = excluded.installCmd,
       startCmd   = excluded.startCmd
   `).run(repoId, s.installCmd, s.startCmd)
+}
+
+export interface PushSubscriptionRow {
+  endpoint: string
+  p256dh: string
+  auth: string
+  needs: number
+  done: number
+  running: number
+  createdAt: number
+}
+
+export function upsertPushSubscription(
+  db: Database.Database,
+  sub: { endpoint: string; keys: { p256dh: string; auth: string } },
+  prefs: { needs: boolean; done: boolean; running: boolean },
+  now: number
+): void {
+  db.prepare(`
+    INSERT INTO push_subscriptions (endpoint, p256dh, auth, needs, done, running, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(endpoint) DO UPDATE SET
+      p256dh   = excluded.p256dh,
+      auth     = excluded.auth,
+      needs    = excluded.needs,
+      done     = excluded.done,
+      running  = excluded.running
+  `).run(
+    sub.endpoint,
+    sub.keys.p256dh,
+    sub.keys.auth,
+    prefs.needs ? 1 : 0,
+    prefs.done ? 1 : 0,
+    prefs.running ? 1 : 0,
+    now
+  )
+}
+
+export function allPushSubscriptions(db: Database.Database): PushSubscriptionRow[] {
+  return db.prepare('SELECT * FROM push_subscriptions').all() as PushSubscriptionRow[]
+}
+
+export function getPushSubscription(db: Database.Database, endpoint: string): PushSubscriptionRow | undefined {
+  return db.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get(endpoint) as PushSubscriptionRow | undefined
+}
+
+export function deletePushSubscription(db: Database.Database, endpoint: string): void {
+  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint)
 }

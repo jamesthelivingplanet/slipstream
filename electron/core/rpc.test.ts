@@ -16,6 +16,7 @@ import type {
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 import type { IEditorLauncher } from '../services/editorLauncher.js'
+import type { IPushService } from '../services/pushService.js'
 
 // ── Fake deps ─────────────────────────────────────────────────────────────────
 
@@ -116,6 +117,13 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     run: vi.fn().mockResolvedValue({ pid: 1234 }),
   }
 
+  const push: IPushService = {
+    getVapidPublicKey: vi.fn().mockResolvedValue('test-vapid-key'),
+    savePushSubscription: vi.fn().mockResolvedValue(undefined),
+    deletePushSubscription: vi.fn().mockResolvedValue(undefined),
+    getPushPrefs: vi.fn().mockResolvedValue(null),
+  }
+
   return {
     repos,
     worktrees,
@@ -126,6 +134,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     sessionStore,
     editor,
     appRunner,
+    push,
     _emit(event: string, ...args: unknown[]) {
       for (const l of listeners[event] ?? []) l(...args)
     },

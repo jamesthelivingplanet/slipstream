@@ -12,6 +12,7 @@ import { IPC } from './shared/contract.js'
 import { createRpc } from './core/rpc.js'
 import type { IConfigStore } from './services/configStore.js'
 import type { IEditorLauncher } from './services/editorLauncher.js'
+import type { IPushService } from './services/pushService.js'
 
 export interface IpcDeps {
   repos: IRepoRegistry
@@ -23,6 +24,7 @@ export interface IpcDeps {
   sessionStore: ISessionStore
   editor: IEditorLauncher
   appRunner: IAppRunner
+  push: IPushService
 }
 
 /**
@@ -60,6 +62,10 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
     IPC.getRepoSettings,
     IPC.setRepoSettings,
     IPC.runApp,
+    IPC.getVapidPublicKey,
+    IPC.savePushSubscription,
+    IPC.deletePushSubscription,
+    IPC.getPushPrefs,
   ] as const
 
   for (const channel of requestChannels) {

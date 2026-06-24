@@ -58,6 +58,12 @@ const api: SlipstreamApi = {
   getRepoSettings: (id) => ipcRenderer.invoke(IPC.getRepoSettings, id),
   setRepoSettings: (id, settings) => ipcRenderer.invoke(IPC.setRepoSettings, id, settings),
   runApp: (input) => ipcRenderer.invoke(IPC.runApp, input),
+
+  // ── Push notifications ───────────────────────────────────────────────────────
+  getVapidPublicKey: () => ipcRenderer.invoke(IPC.getVapidPublicKey),
+  savePushSubscription: (sub, prefs) => ipcRenderer.invoke(IPC.savePushSubscription, sub, prefs),
+  deletePushSubscription: (endpoint) => ipcRenderer.invoke(IPC.deletePushSubscription, endpoint),
+  getPushPrefs: (endpoint) => ipcRenderer.invoke(IPC.getPushPrefs, endpoint),
 }
 
 contextBridge.exposeInMainWorld('slipstream', api)

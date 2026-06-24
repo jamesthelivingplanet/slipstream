@@ -11,6 +11,7 @@ import { createLinearProvider } from '../tickets/linearProvider.js'
 import { createSessionStore } from '../services/sessionStore.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
+import { createPushService, createDbPushStore } from '../services/pushService.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -38,15 +39,23 @@ export function createServices(root: string): IpcDeps {
   const db = openDb(path.join(root, 'slipstream.db'))
   const configStore = createConfigStore(db)
   const sessionStore = createSessionStore(db)
+  const sessions = createSessionManager()
+  const push = createPushService({
+    config: configStore,
+    store: createDbPushStore(db),
+    sessions,
+    sessionStore,
+  })
   return {
     repos: createRepoRegistry(db, root),
     worktrees: createWorktreeManager(root),
-    sessions: createSessionManager(),
+    sessions,
     ports: createPortBroker(),
     tickets: createLinearProvider(configStore),
     config: configStore,
     sessionStore,
     editor: createEditorLauncher(),
     appRunner: createAppRunner(),
+    push,
   }
 }
