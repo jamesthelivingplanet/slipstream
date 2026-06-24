@@ -25,7 +25,7 @@
 <div class="gate-bg">
   <div class="gate-card">
     <div class="gate-logo">
-      <div class="glyph">S</div>
+      <img src="/icons/icon.svg" alt="Slipstream" class="glyph" />
       <b>Slipstream</b>
     </div>
     <h2>Access token required</h2>
@@ -84,12 +84,7 @@
     width: 26px;
     height: 26px;
     border-radius: 7px;
-    background: hsl(var(--primary));
-    color: hsl(var(--primary-foreground));
-    display: grid;
-    place-items: center;
-    font-weight: 700;
-    font-size: 14px;
+    object-fit: contain;
   }
 
   .gate-logo b {

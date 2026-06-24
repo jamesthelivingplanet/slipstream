@@ -96,9 +96,10 @@ header.bar {
 }
 .logo { display: flex; align-items: center; gap: 9px; }
 .logo .glyph {
-  width: 26px; height: 26px; border-radius: 7px;
-  background: hsl(var(--primary)); color: hsl(var(--primary-foreground));
-  display: grid; place-items: center; font-weight: 700; font-size: 14px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  object-fit: contain;
 }
 .logo b { font-weight: 600; font-size: 14.5px; letter-spacing: -.01em; }
 header .spacer { flex: 1; }

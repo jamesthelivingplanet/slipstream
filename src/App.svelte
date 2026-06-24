@@ -71,7 +71,7 @@
       </button>
     {/if}
     <div class="logo">
-      <div class="glyph">S</div>
+      <img src="/icons/icon.svg" alt="Slipstream" class="glyph" />
       <b>Slipstream</b>
       {#if !isMobile}<span class="badge mono">dangerous mode</span>{/if}
     </div>
