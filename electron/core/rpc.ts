@@ -1,6 +1,6 @@
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { RepoDTO, ISessionStore, SessionStatus, EditorConfig } from '../shared/contract.js'
+import type { RepoDTO, ISessionStore, SessionStatus, EditorConfig, RepoSettings } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 
@@ -225,6 +225,25 @@ export function createRpc(
         if (!command.trim()) throw new Error('No editor configured. Set one in Settings → Behavior.')
         await deps.editor.open(command, cwd)
         return undefined
+      }
+
+      case IPC.getRepoSettings:
+        return deps.repos.getSettings(args[0] as string)
+
+      case IPC.setRepoSettings:
+        return deps.repos.setSettings(args[0] as string, args[1] as RepoSettings)
+
+      case IPC.runApp: {
+        const { repoId, branch } = args[0] as { repoId: string; branch: string }
+        const repo = await deps.repos.get(repoId)
+        if (!repo) throw new Error(`Unknown repo: ${repoId}`)
+        const settings = await deps.repos.getSettings(repoId)
+        if (!settings.startCmd.trim()) return { started: false, reason: 'no-start-command' }
+        const cwd = deps.worktrees.pathFor(repo, branch)
+        let port: number | undefined
+        try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }
+        await deps.appRunner.run(cwd, settings.startCmd, port !== undefined ? { PORT: String(port) } : undefined)
+        return { started: true, port }
       }
 
       case IPC.pickRepo:

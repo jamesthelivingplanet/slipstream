@@ -13,6 +13,7 @@ import {
   killSession,
   cleanupSession,
   worktreeStatus,
+  runApp,
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
@@ -40,6 +41,11 @@ function cleanError(e: unknown): string {
     .trim() || 'Something went wrong'
 }
 
+export function openRepoSettings(repoId: string) {
+  settingsRepoId.set(repoId)
+  settingsOpen.set(true)
+}
+
 export const repos = writable<Repo[]>([])
 export const sessions = writable<Session[]>([])
 export const tickets = writable<Ticket[]>([])
@@ -48,6 +54,7 @@ export const filter = writable<Filter>('all')
 export const query = writable<string>('')
 export const dialogOpen = writable<boolean>(false)
 export const settingsOpen = writable<boolean>(false)
+export const settingsRepoId = writable<string | null>(null)
 
 export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
   $id ? $sessions.find((s) => s.tid === $id) ?? null : null,
@@ -343,3 +350,21 @@ export async function refreshAndReconcile(): Promise<void> {
   await refreshDiffStats().catch(() => {})
 }
 
+/** Run the app for a started session via its repo's start command. Opens that
+ *  repo's settings if no start command is configured. */
+export async function runAppForSession(s: Session): Promise<void> {
+  if (!s.repo || !s.branch) return
+  try {
+    const res = await runApp({ repoId: s.repo, branch: s.branch })
+    if (res.started) {
+      pushToast('success', res.port ? `Launched app on port ${res.port}` : 'Launched app')
+    } else if (res.reason === 'no-start-command') {
+      pushToast('error', 'No start command set for this repository. Configure it in settings.')
+      openRepoSettings(s.repo)
+    } else {
+      pushToast('error', res.reason ?? 'Could not launch the app')
+    }
+  } catch (e) {
+    pushToast('error', cleanError(e))
+  }
+}
