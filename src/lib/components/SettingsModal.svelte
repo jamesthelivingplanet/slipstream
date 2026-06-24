@@ -3,8 +3,14 @@
   import { icons } from '../icons'
   import { hasBackend, getEditorConfig, setEditorConfig, getRepoSettings, setRepoSettings } from '../ipc'
   import { pushToast } from '../toast'
+  import { pushSupported, enablePush, updatePrefs, disablePush, loadPrefs } from '../push'
+  import type { NotifyPrefs } from '../../../electron/shared/contract.js'
 
   let activeTab = 'repositories'
+
+  let pushEnabled = false
+  let prefs: NotifyPrefs = { needs: true, done: true, running: false }
+  let pushLoading = false
 
   let linearKey = ''
   let linearPending = false
@@ -59,6 +65,61 @@
 
   $: if ($settingsOpen && activeTab === 'integrations') loadLinearKey()
   $: if ($settingsOpen && activeTab === 'behavior') loadEditorConfig()
+  $: if ($settingsOpen && activeTab === 'notifications') initNotifications()
+
+  async function initNotifications() {
+    if (!isWeb || !pushSupported()) return
+    try {
+      const loaded = await loadPrefs()
+      if (loaded) {
+        pushEnabled = true
+        prefs = loaded
+      } else {
+        pushEnabled = false
+        prefs = { needs: true, done: true, running: false }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleEnablePush() {
+    pushLoading = true
+    try {
+      const result = await enablePush(prefs)
+      if (result.ok) {
+        pushEnabled = true
+        pushToast('success', 'Notifications enabled')
+      } else {
+        const msg =
+          result.reason === 'unsupported' ? 'Push notifications are not supported in this browser.' :
+          result.reason === 'denied' ? 'Notification permission was denied.' :
+          result.reason ?? 'Could not enable notifications.'
+        pushToast('error', msg)
+      }
+    } finally {
+      pushLoading = false
+    }
+  }
+
+  async function handleDisablePush() {
+    pushLoading = true
+    try {
+      await disablePush()
+      pushEnabled = false
+      pushToast('success', 'Notifications disabled')
+    } catch {
+      pushToast('error', 'Failed to disable notifications.')
+    } finally {
+      pushLoading = false
+    }
+  }
+
+  async function handlePrefsChange() {
+    if (!pushEnabled) return
+    const ok = await updatePrefs(prefs)
+    if (!ok) pushToast('error', 'Failed to update notification preferences.')
+  }
 
   // Web mode: show a text-input for adding repos by absolute path.
   // We detect web mode by checking the explicit marker set in main.ts on the
@@ -171,6 +232,14 @@
           on:click={() => { activeTab = 'behavior'; loadEditorConfig() }}
         >
           Behavior
+        </button>
+        <button
+          type="button"
+          class="tab-item"
+          class:active={activeTab === 'notifications'}
+          on:click={() => (activeTab = 'notifications')}
+        >
+          Notifications
         </button>
       </nav>
 
@@ -339,6 +408,47 @@
               <p class="integration-hint muted">Backend not available in browser-only mode.</p>
             {/if}
           </div>
+        {/if}
+
+        {#if activeTab === 'notifications'}
+          <div class="tab-header">
+            <span class="tab-title">Notifications</span>
+          </div>
+          {#if !isWeb}
+            <p class="integration-hint muted">Push notifications are available in the installed web app (PWA). Open Slipstream in your mobile/desktop browser to enable them.</p>
+          {:else if !pushSupported()}
+            <p class="integration-hint muted">Push notifications are not supported in this browser.</p>
+          {:else}
+            <div class="notify-row">
+              <span class="lbl-f" style="margin-bottom:0">Enable notifications</span>
+              {#if pushEnabled}
+                <button class="btn btn-outline btn-sm" on:click={handleDisablePush} disabled={pushLoading}>
+                  Disable
+                </button>
+              {:else}
+                <button class="btn btn-primary btn-sm" on:click={handleEnablePush} disabled={pushLoading}>
+                  Enable
+                </button>
+              {/if}
+            </div>
+            {#if pushEnabled}
+              <div>
+                <span class="lbl-f">Notify me when an agent…</span>
+                <label class="notify-check">
+                  <input type="checkbox" bind:checked={prefs.needs} on:change={handlePrefsChange} />
+                  Needs attention
+                </label>
+                <label class="notify-check">
+                  <input type="checkbox" bind:checked={prefs.done} on:change={handlePrefsChange} />
+                  Is done
+                </label>
+                <label class="notify-check">
+                  <input type="checkbox" bind:checked={prefs.running} on:change={handlePrefsChange} />
+                  Starts running
+                </label>
+              </div>
+            {/if}
+          {/if}
         {/if}
       </div>
     </div>
@@ -509,5 +619,21 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .notify-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .notify-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: hsl(var(--foreground));
+    cursor: pointer;
+    padding: 4px 0;
   }
 </style>

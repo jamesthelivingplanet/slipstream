@@ -11,6 +11,7 @@ const external = [
   'electron',
   'better-sqlite3',
   'node-pty',
+  'web-push',
   ...builtinModules,
   ...builtinModules.map((m) => `node:${m}`),
 ]

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import TicketStatusBar from './lib/components/TicketStatusBar.svelte'
-  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile } from './lib/stores'
+  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
@@ -21,7 +21,29 @@
   }
 
   onMount(() => {
-    initFromBackend().then(() => refreshAndReconcile())
+    initFromBackend().then(() => {
+      return refreshAndReconcile().then(() => {
+        // Deep-link: open agent specified in ?agent= query param (set by SW notificationclick)
+        const params = new URLSearchParams(location.search)
+        const agentTid = params.get('agent')
+        if (agentTid) {
+          select(agentTid)
+          params.delete('agent')
+          const clean = params.toString()
+          history.replaceState(null, '', location.pathname + (clean ? `?${clean}` : '') + location.hash)
+        }
+      })
+    })
+
+    // SW message: focus agent when notification is clicked in an already-open window
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
+        if (e.data?.type === 'open-agent' && e.data.tid) {
+          select(e.data.tid as string)
+        }
+      })
+    }
+
     checkMobile()
     window.addEventListener('resize', checkMobile)
     window.addEventListener('orientationchange', checkMobile)

@@ -12,3 +12,32 @@ self.addEventListener('activate', (event) => {
 // A fetch handler is required for the app to be considered installable in some
 // browsers. Network-only pass-through for now (no caching).
 self.addEventListener('fetch', () => {})
+
+self.addEventListener('push', (event) => {
+  if (!event.data) return
+  const data = event.data.json()
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      tag: data.tid,
+      data: { tid: data.tid, sessionId: data.sessionId },
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+    })
+  )
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const tid = event.notification.data.tid
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      if (windowClients.length > 0) {
+        windowClients[0].focus()
+        windowClients[0].postMessage({ type: 'open-agent', tid })
+      } else {
+        return clients.openWindow('/?agent=' + encodeURIComponent(tid))
+      }
+    })
+  )
+})
