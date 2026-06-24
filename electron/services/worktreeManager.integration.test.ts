@@ -124,4 +124,39 @@ describe('worktreeManager (real git)', () => {
 
     await wm.remove(repo, 'feat-diffstat', { force: true })
   })
+
+  it('removes gracefully when the worktree directory was deleted out-of-band (detached agent)', async () => {
+    await wm.create(repo, 'feat-detached')
+    const wtPath = join(root, '.worktrees', 'acme-demo', 'feat-detached')
+    rmSync(wtPath, { recursive: true, force: true })
+
+    const res = await wm.remove(repo, 'feat-detached')
+    expect(res.removed).toBe(true)
+
+    const branchList = git(repo.path, 'branch', '--list', 'feat-detached')
+    expect(branchList.trim()).toBe('')
+
+    const worktreeList = git(repo.path, 'worktree', 'list')
+    expect(worktreeList).not.toContain('feat-detached')
+  })
+
+  it('remove is idempotent — a second remove of an already-gone worktree still succeeds', async () => {
+    await wm.create(repo, 'feat-idem')
+    await wm.remove(repo, 'feat-idem')
+
+    const res = await wm.remove(repo, 'feat-idem')
+    expect(res.removed).toBe(true)
+  })
+
+  it('status() returns +0/-0 without throwing for a missing worktree', async () => {
+    await wm.create(repo, 'feat-missingstat')
+    const wtPath = join(root, '.worktrees', 'acme-demo', 'feat-missingstat')
+    rmSync(wtPath, { recursive: true, force: true })
+
+    const st = await wm.status(repo, 'feat-missingstat')
+    expect(st.added).toBe(0)
+    expect(st.deleted).toBe(0)
+
+    await wm.remove(repo, 'feat-missingstat', { force: true })
+  })
 })
