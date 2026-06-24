@@ -13,6 +13,7 @@ export interface SpawnPrompt { systemArgs: string[]; userPrompt: string }
  */
 export const NEEDS_INPUT_MARKER = '⟦SLIPSTREAM:NEEDS_INPUT⟧'
 export const DONE_MARKER = '⟦SLIPSTREAM:DONE⟧'
+export const IN_PROGRESS_MARKER = '⟦SLIPSTREAM:IN_PROGRESS⟧'
 
 export function defaultUserPrompt(tid: string): string {
   return `Begin implementing ${tid}.`
@@ -37,8 +38,10 @@ Note: CLAUDE.md already covers repo conventions — follow it but do not duplica
 
 ## Signaling your state to the app
 
-The app tracks whether you are waiting on the user. You MUST tell it your state by printing a marker on its own line as the VERY LAST thing you output in a turn:
+The app tracks your current state. You MUST tell it your state by printing a marker on its own line as the VERY LAST thing you output in a turn. The most recently printed marker is the one the app uses.
 
+- When you begin or resume actively working on the ticket, finish your message with this exact marker alone on the final line:
+  ${IN_PROGRESS_MARKER}
 - When you need the user to answer a question, make a decision, or provide input — and you cannot make further progress without it — finish your message with this exact marker alone on the final line:
   ${NEEDS_INPUT_MARKER}
 - When you have fully completed the ticket (acceptance criteria met / PR opened) and there is nothing left to do, finish with this exact marker alone on the final line:
@@ -46,8 +49,8 @@ The app tracks whether you are waiting on the user. You MUST tell it your state 
 
 Rules:
 - Print the marker EXACTLY as shown, with no code fences, quotes, or extra characters around it, as the final line of your output.
-- Emit a marker ONLY when the condition is true. While you are still working, do not print either marker.
-- After the user replies to a ${NEEDS_INPUT_MARKER}, resume work normally; only print a marker again when you are once more blocked or done.
+- The most recently printed marker is what the app displays — if you resume work after a ${NEEDS_INPUT_MARKER}, print ${IN_PROGRESS_MARKER} to show you are running again.
+- Emit a marker ONLY when the condition is true.
 
 Ticket:
 ${tid}: ${title}
