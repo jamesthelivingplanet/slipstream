@@ -51,6 +51,8 @@ function makeFakeDeps(): IpcDeps {
     register: vi.fn().mockResolvedValue(makeRepo()),
     get: vi.fn().mockResolvedValue(makeRepo()),
     remove: vi.fn().mockResolvedValue(undefined),
+    getSettings: vi.fn().mockResolvedValue({ installCmd: '', startCmd: '' }),
+    setSettings: vi.fn().mockResolvedValue(undefined),
   }
 
   const worktrees: IWorktreeManager = {
@@ -86,7 +88,7 @@ function makeFakeDeps(): IpcDeps {
     delete(id) { sessionStoreMap.delete(id) },
   }
 
-  return { repos, worktrees, sessions, ports, tickets, config, sessionStore, editor }
+  return { repos, worktrees, sessions, ports, tickets, config, sessionStore, editor, appRunner: { run: vi.fn().mockResolvedValue({ pid: 1234 }) } }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

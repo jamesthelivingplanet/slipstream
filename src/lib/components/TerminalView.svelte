@@ -3,7 +3,7 @@
   import { Terminal, type IDisposable } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
-  import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession, cleanupAgent } from '../stores'
+  import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession, cleanupAgent, runAppForSession } from '../stores'
   import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl, openInEditor } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
@@ -223,6 +223,7 @@
     </div>
   </div>
   <div class="spacer"></div>
+  <button class="btn btn-outline btn-sm" title="Run the app using this repository's start command" disabled={!hasBackend || !session.id || !session.branch || !session.repo} on:click={() => runAppForSession(session)}>{@html icons.play} <span class="btn-label">Run</span></button>
   <button class="btn btn-outline btn-sm" title="Relaunch this agent with Claude Code Remote Control" disabled={!hasBackend || !session.id} on:click={handleRemoteControl}>{@html icons.remote} <span class="btn-label">Remote control</span></button>
   <button class="btn btn-outline btn-sm" title="Open the worktree in your configured editor" disabled={!hasBackend || !session.repo || !session.branch} on:click={handleOpenEditor}>
     {@html icons.externalLink} <span class="btn-label">Editor</span>

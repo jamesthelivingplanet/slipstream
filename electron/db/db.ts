@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import type { RepoDTO, SessionDTO } from '../shared/contract.js'
+import type { RepoDTO, SessionDTO, RepoSettings } from '../shared/contract.js'
 
 // Inlined (not read from schema.sql) so the bundled main.js has no runtime
 // dependency on a sibling file the bundler doesn't copy.
@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+CREATE TABLE IF NOT EXISTS repo_settings (
+  repoId     TEXT PRIMARY KEY,
+  installCmd TEXT NOT NULL DEFAULT '',
+  startCmd   TEXT NOT NULL DEFAULT ''
+);
 `
 
 /** Open (or create) a SQLite database at `file` and apply the schema. */
@@ -92,5 +98,21 @@ export function deleteSession(db: Database.Database, id: string): void {
 }
 
 export function deleteRepo(db: Database.Database, id: string): void {
+  db.prepare('DELETE FROM repo_settings WHERE repoId = ?').run(id)
   db.prepare('DELETE FROM repos WHERE id = ?').run(id)
+}
+
+export function getRepoSettings(db: Database.Database, repoId: string): RepoSettings {
+  const row = db.prepare('SELECT installCmd, startCmd FROM repo_settings WHERE repoId = ?').get(repoId) as RepoSettings | undefined
+  return row ?? { installCmd: '', startCmd: '' }
+}
+
+export function setRepoSettings(db: Database.Database, repoId: string, s: RepoSettings): void {
+  db.prepare(`
+    INSERT INTO repo_settings (repoId, installCmd, startCmd)
+    VALUES (?, ?, ?)
+    ON CONFLICT(repoId) DO UPDATE SET
+      installCmd = excluded.installCmd,
+      startCmd   = excluded.startCmd
+  `).run(repoId, s.installCmd, s.startCmd)
 }

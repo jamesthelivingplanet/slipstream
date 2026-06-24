@@ -6,6 +6,7 @@ import type {
   IPortBroker,
   ITicketProvider,
   ISessionStore,
+  IAppRunner,
 } from './shared/contract.js'
 import { IPC } from './shared/contract.js'
 import { createRpc } from './core/rpc.js'
@@ -21,6 +22,7 @@ export interface IpcDeps {
   config: IConfigStore
   sessionStore: ISessionStore
   editor: IEditorLauncher
+  appRunner: IAppRunner
 }
 
 /**
@@ -55,6 +57,9 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
     IPC.openInEditor,
     IPC.getTicketStatus,
     IPC.setTicketStatus,
+    IPC.getRepoSettings,
+    IPC.setRepoSettings,
+    IPC.runApp,
   ] as const
 
   for (const channel of requestChannels) {
