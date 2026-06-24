@@ -5,6 +5,13 @@
 
   /** On mobile, controlled by parent to show/hide as drawer overlay. */
   export let mobileOpen: boolean = true
+  /** Optional callback invoked after an agent is selected (e.g. to close the mobile drawer). */
+  export let onSelect: (() => void) | undefined = undefined
+
+  function choose(tid: string) {
+    select(tid)
+    onSelect?.()
+  }
 
   const segs: { f: Filter; label: string }[] = [
     { f: 'all', label: 'All' },
@@ -42,8 +49,8 @@
       <div
         class="agent {s.status}"
         class:sel={$selectedId === s.tid}
-        on:click={() => select(s.tid)}
-        on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && select(s.tid)}
+        on:click={() => choose(s.tid)}
+        on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && choose(s.tid)}
         role="button"
         tabindex="0"
       >
