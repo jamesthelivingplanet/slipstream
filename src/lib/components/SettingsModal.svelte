@@ -1,13 +1,17 @@
 <script lang="ts">
   import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath } from '../stores'
   import { icons } from '../icons'
-  import { hasBackend } from '../ipc'
+  import { hasBackend, getEditorConfig, setEditorConfig } from '../ipc'
   import { pushToast } from '../toast'
 
   let activeTab = 'repositories'
 
   let linearKey = ''
   let linearPending = false
+
+  let editorCommand = ''
+  let mobileEditorCommand = ''
+  let editorPending = false
 
   async function loadLinearKey() {
     if (!hasBackend) return
@@ -32,7 +36,29 @@
     }
   }
 
+  async function loadEditorConfig() {
+    if (!hasBackend) return
+    try {
+      const cfg = await getEditorConfig()
+      editorCommand = cfg.command
+      mobileEditorCommand = cfg.mobileCommand
+    } catch { /* ignore */ }
+  }
+  async function saveEditorConfig() {
+    if (!hasBackend) return
+    editorPending = true
+    try {
+      await setEditorConfig({ command: editorCommand.trim(), mobileCommand: mobileEditorCommand.trim() })
+      pushToast('success', 'Editor settings saved')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save editor settings')
+    } finally {
+      editorPending = false
+    }
+  }
+
   $: if ($settingsOpen && activeTab === 'integrations') loadLinearKey()
+  $: if ($settingsOpen && activeTab === 'behavior') loadEditorConfig()
 
   // Web mode: show a text-input for adding repos by absolute path.
   // We detect web mode by checking the explicit marker set in main.ts on the
@@ -84,6 +110,14 @@
           on:click={() => { activeTab = 'integrations'; loadLinearKey() }}
         >
           Integrations
+        </button>
+        <button
+          type="button"
+          class="tab-item"
+          class:active={activeTab === 'behavior'}
+          on:click={() => { activeTab = 'behavior'; loadEditorConfig() }}
+        >
+          Behavior
         </button>
       </nav>
 
@@ -162,6 +196,46 @@
                 class="btn btn-outline btn-sm"
                 on:click={saveLinearKey}
                 disabled={!linearKey.trim() || linearPending || !hasBackend}
+              >
+                Save
+              </button>
+            </div>
+            {#if !hasBackend}
+              <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+            {/if}
+          </div>
+        {/if}
+
+        {#if activeTab === 'behavior'}
+          <div class="tab-header">
+            <span class="tab-title">Behavior</span>
+          </div>
+          <div>
+            <span class="lbl-f">Editor command</span>
+            <p class="integration-hint">Command run to open a worktree in your editor, e.g. <code>code</code> (VS Code) or <code>zed</code> (Zed). The worktree path is appended as an argument.</p>
+            <input
+              type="text"
+              class="path-input"
+              placeholder="code"
+              bind:value={editorCommand}
+              disabled={editorPending || !hasBackend}
+            />
+          </div>
+          <div>
+            <span class="lbl-f">Mobile editor command (optional)</span>
+            <p class="integration-hint">Used instead when opening from the mobile layout. Leave blank to use the editor command above. Tip: a web-accessible editor such as <code>code serve-web</code> works well here.</p>
+            <div class="path-add">
+              <input
+                type="text"
+                class="path-input"
+                placeholder="code serve-web"
+                bind:value={mobileEditorCommand}
+                disabled={editorPending || !hasBackend}
+              />
+              <button
+                class="btn btn-outline btn-sm"
+                on:click={saveEditorConfig}
+                disabled={editorPending || !hasBackend}
               >
                 Save
               </button>
