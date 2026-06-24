@@ -1,20 +1,10 @@
 # CLAUDE.md
 
-Notes for Claude Code (and humans) working in this repo. Read
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/ROADMAP.md](docs/ROADMAP.md) first.
+Hard-won, non-obvious notes for this repo — start with
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## Commands
-
-```sh
-pnpm dev        # Vite + Electron (auto-opens DevTools in dev)
-pnpm build      # renderer + electron main + preload + dist-electron/server.js
-pnpm test       # vitest (unit + real-git integration)
-pnpm check      # svelte-check typecheck (run before committing)
-SLIPSTREAM_TOKEN=<secret> pnpm serve   # headless WS server (web/mobile access)
-pnpm deploy     # build + restart systemd slipstream.service + healthz check
-```
-
-Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm/yarn).
+Use **pnpm**. Run `pnpm check` (svelte-check) and `pnpm test` before committing. `pnpm deploy`
+builds, then restarts the systemd `slipstream.service` and hits a healthz check.
 
 ## Conventions
 
@@ -24,8 +14,8 @@ Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm
 - **Guard backend calls** in the renderer with `hasBackend` (from `src/lib/ipc.ts`) so the
   UI still runs in a plain browser for design work.
 - **No mock data.** The app is real-data-only; ticket sources go behind `ITicketProvider`.
-- **Svelte 4** (legacy stores, `$store`, `on:click`). Reuse the shadcn classes/tokens in
-  `src/app.css`; prefer them over ad-hoc styles.
+- **Svelte 4** (legacy stores, `$store`, `on:click`) — not Svelte 5. Reuse the shadcn
+  classes/tokens in `src/app.css` over ad-hoc styles.
 - Parallelizable work splits cleanly along `electron/` vs `src/` (disjoint dirs).
 
 ## Gotchas (hard-won)
@@ -61,20 +51,21 @@ Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm
   `await import('./App.svelte')`. This is intentional — `ipc.ts` has a module-level
   `hasBackend = !!window.slipstream`. If App is imported first (or the order changes),
   `hasBackend` is `false` and all backend calls silently no-op.
-- **`SLIPSTREAM_TOKEN` is required**: the headless server refuses to start if the env var is
-  unset. Without it there is no authentication on the WebSocket endpoint.
+- **`SLIPSTREAM_TOKEN` is required**: the headless server (`pnpm serve`) refuses to start if
+  the env var is unset. Without it there is no authentication on the WebSocket endpoint.
 
 ## Troubleshooting native setup
 
-pnpm 10 defers build scripts; they're allowlisted via `pnpm.onlyBuiltDependencies` in
-`package.json`. On a fresh/odd machine:
+pnpm 11 no longer reads the `pnpm` field in `package.json`; the build-script allowlist lives
+in `pnpm-workspace.yaml` under `allowBuilds:` (a map of `pkg: true`). On a fresh/odd machine:
 
 ```sh
 pnpm rebuild esbuild electron better-sqlite3 node-pty   # run native build scripts
-# Electron binary "failed to install": its postinstall didn't extract the zip —
-node node_modules/electron/install.js                   # re-run; if extract fails, unzip
-# the cached ~/.cache/electron/<hash>/electron-*.zip into node_modules/electron/dist/
-# and write "electron" to node_modules/electron/path.txt
+# Electron binary "failed to install": its postinstall didn't extract the zip. On Node 24,
+# install.js can exit mid-extraction (leaving only dist/locales) — pin Node 22 or, failing
+# that, manually unzip the cached ~/.cache/electron/<hash>/electron-*.zip into
+# node_modules/electron/dist/ and write "electron" to node_modules/electron/path.txt
+node node_modules/electron/install.js                   # re-run; if it no-ops, unzip manually
 pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty   # match Electron ABI
 ```
 
