@@ -8,7 +8,7 @@
  */
 
 import type { IStatusDetector, SessionStatus } from '../shared/contract.js'
-import { NEEDS_INPUT_MARKER, DONE_MARKER } from '../shared/promptComposer.js'
+import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
 
 // ─── ANSI stripping ─────────────────────────────────────────────────────────
 
@@ -51,26 +51,36 @@ export function looksLikeQuestion(tail: string): boolean {
 
 /**
  * Inspect the (ANSI-stripped) tail for an explicit state marker emitted by the
- * agent. A marker only counts when it is effectively the LAST thing in the
- * output — i.e. nothing alphanumeric follows it (trailing whitespace, box-draw
- * chars, or a prompt glyph are fine). This is what makes the signal transient:
- * once the user replies and the agent emits new output, the marker is no longer
- * at the tail and the agent returns to 'running'.
+ * agent. The LAST marker in the tail is the one that wins — this lets the agent
+ * transition between states within a single turn. A marker only counts when
+ * nothing alphanumeric follows it (trailing whitespace, box-draw chars, or a
+ * prompt glyph are fine).
  *
- * Returns 'needs' | 'done' for a trailing marker, or null otherwise.
+ * Returns 'needs' | 'done' | 'running' for a trailing marker, or null otherwise.
  */
-export function tailSignal(tail: string): 'needs' | 'done' | null {
+export function tailSignal(tail: string): 'needs' | 'done' | 'running' | null {
   const t = stripAnsi(tail)
-  const candidates: [string, 'needs' | 'done'][] = [
+  const candidates: [string, 'needs' | 'done' | 'running'][] = [
     [NEEDS_INPUT_MARKER, 'needs'],
     [DONE_MARKER, 'done'],
+    [IN_PROGRESS_MARKER, 'running'],
   ]
+  // Find which marker appears last in the tail
+  let bestIdx = -1
+  let bestStatus: 'needs' | 'done' | 'running' | null = null
   for (const [marker, status] of candidates) {
     const idx = t.lastIndexOf(marker)
     if (idx === -1) continue
-    const after = t.slice(idx + marker.length)
-    if (!/[A-Za-z0-9]/.test(after)) return status
+    if (idx > bestIdx) {
+      bestIdx = idx
+      bestStatus = status
+    }
   }
+  if (bestIdx === -1 || bestStatus === null) return null
+  // Find the marker string for the best candidate
+  const bestMarker = candidates.find(([, s]) => s === bestStatus)![0]
+  const after = t.slice(bestIdx + bestMarker.length)
+  if (!/[A-Za-z0-9]/.test(after)) return bestStatus
   return null
 }
 

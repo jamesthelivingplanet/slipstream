@@ -4,7 +4,7 @@
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
   import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession, cleanupAgent, runAppForSession } from '../stores'
-  import { hasBackend, onSessionData, onSessionStatus, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl, openInEditor } from '../ipc'
+  import { hasBackend, onSessionData, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl, openInEditor } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
@@ -23,7 +23,6 @@
 
   // Unsubscribe fns for backend push listeners
   let offData: (() => void) | null = null
-  let offStatus: (() => void) | null = null
 
   $: r = repoById(session.repo)
   $: dot =
@@ -112,15 +111,10 @@
     window.addEventListener('resize', sendResize)
     offResize = () => window.removeEventListener('resize', sendResize)
 
-    // Reflect backend status transitions into the store.
-    offStatus = onSessionStatus((sid, status) => {
-      if (sid === session.id) setSessionStatus(sid, status as Status)
-    })
   }
 
   function cleanupListeners() {
     if (offData) { offData(); offData = null }
-    if (offStatus) { offStatus(); offStatus = null }
     if (offResize) { offResize(); offResize = null }
     if (ro) { ro.disconnect(); ro = null }
   }

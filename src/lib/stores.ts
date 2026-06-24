@@ -14,6 +14,7 @@ import {
   cleanupSession,
   worktreeStatus,
   runApp,
+  onSessionStatus,
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
@@ -258,6 +259,19 @@ export async function startAgent(tid: string, repoId: string, prompt: string) {
       activity: { text: 'Creating worktree & starting claude…' },
     }))
   }
+}
+
+/**
+ * Subscribe to the backend's global session-status broadcast and mirror every
+ * transition into the store for ALL sessions (not just the selected one).
+ * This keeps the Agent list + filters live without each TerminalView needing
+ * its own per-terminal subscription. `setSessionStatus` already dedupes desktop
+ * notifications via its prev-check, so this is safe even though TerminalView no
+ * longer subscribes.
+ */
+export function subscribeSessionStatus(): () => void {
+  if (!hasBackend) return () => {}
+  return onSessionStatus((id, status) => setSessionStatus(id, status as Status))
 }
 
 /** Update the status of the session identified by its backend UUID. */

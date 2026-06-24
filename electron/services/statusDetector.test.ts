@@ -11,7 +11,7 @@ import {
   tailSignal,
   NEEDS_PATTERNS,
 } from './statusDetector.js'
-import { NEEDS_INPUT_MARKER, DONE_MARKER } from '../shared/promptComposer.js'
+import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
 
 // ─── Fake clock helpers ───────────────────────────────────────────────────────
 
@@ -318,5 +318,29 @@ describe('tailSignal / explicit markers', () => {
     d.push(`Waiting for input.\n${NEEDS_INPUT_MARKER}`)
     d.markExit(0)
     expect(d.status()).toBe('done')
+  })
+
+  it('returns "running" when tail ends with IN_PROGRESS_MARKER', () => {
+    expect(tailSignal(`Working on the implementation...\n${IN_PROGRESS_MARKER}`)).toBe('running')
+  })
+
+  it('returns "running" when tail ends with IN_PROGRESS_MARKER followed by trailing whitespace/newline', () => {
+    expect(tailSignal(`Working on the implementation...\n${IN_PROGRESS_MARKER}\n`)).toBe('running')
+  })
+
+  it('last marker wins: NEEDS_INPUT_MARKER earlier, IN_PROGRESS_MARKER at tail → "running"', () => {
+    expect(tailSignal(`${NEEDS_INPUT_MARKER}\nOk, resuming work.\n${IN_PROGRESS_MARKER}`)).toBe('running')
+  })
+
+  it('last marker wins: IN_PROGRESS_MARKER earlier, DONE_MARKER at tail → "done"', () => {
+    expect(tailSignal(`${IN_PROGRESS_MARKER}\nAll done, PR opened.\n${DONE_MARKER}`)).toBe('done')
+  })
+
+  it('StatusDetector.status() returns "running" immediately after pushing an IN_PROGRESS_MARKER tail WITHOUT advancing the clock', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.push(`Starting implementation...\n${IN_PROGRESS_MARKER}`)
+    // Do NOT advance the clock
+    expect(d.status()).toBe('running')
   })
 })
