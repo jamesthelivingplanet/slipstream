@@ -78,6 +78,8 @@ async function connectWithToken(
     ;(window as Window & { slipstream?: typeof api }).slipstream = api
     // Mark as web mode so components can distinguish from Electron
     ;(window as unknown as { __slipstreamWeb?: boolean }).__slipstreamWeb = true
+    // Web mode only, and only after window.slipstream is assigned (see above).
+    registerServiceWorker()
 
     // Mount the app — ipc.ts will see window.slipstream = truthy
     mountApp().then(resolve)
@@ -101,6 +103,27 @@ async function showTokenGate(wsUrl: string, errorMsg: string): Promise<void> {
           resolve()
         },
       },
+    })
+  })
+}
+
+// ── PWA / Service Worker ──────────────────────────────────────────────────────
+
+let swRegistered = false
+
+/**
+ * Register the service worker for PWA installability. Web mode only — called
+ * AFTER window.slipstream / __slipstreamWeb are assigned so it never races the
+ * bootstrap ordering that ipc.ts depends on. Idempotent.
+ */
+function registerServiceWorker(): void {
+  if (swRegistered) return
+  if (!('serviceWorker' in navigator)) return
+  swRegistered = true
+  // Defer to `load` so SW registration never competes with initial app boot.
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.warn('[slipstream] service worker registration failed', err)
     })
   })
 }
