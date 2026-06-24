@@ -62,6 +62,11 @@ export interface TicketDTO {
   status?: WorkflowState
 }
 
+export interface EditorConfig {
+  command: string        // desktop editor command, e.g. "code" or "zed"
+  mobileCommand: string  // optional mobile editor command; "" when unset
+}
+
 /* ───────── main-process service interfaces ───────── */
 
 export interface IRepoRegistry {
@@ -173,6 +178,10 @@ export interface SlipstreamApi {
   setTicketStatus(tid: string, stateId: string): Promise<WorkflowState>
   getLinearKey(): Promise<string | null>
   setLinearKey(key: string): Promise<void>
+  getEditorConfig(): Promise<EditorConfig>
+  setEditorConfig(cfg: EditorConfig): Promise<void>
+  /** Launch the configured editor on the session's worktree. mobile=true uses the mobile command when set. Rejects with a descriptive Error on failure. */
+  openInEditor(input: { repoId: string; branch: string; mobile?: boolean }): Promise<void>
 
   /** Creates the worktree, claims a port, spawns claude. Returns the session. */
   startSession(input: { tid: string; title: string; prompt: string; repoId: string; description?: string }): Promise<SessionDTO>
@@ -213,6 +222,9 @@ export const IPC = {
   worktreeStatus: 'worktree:status',
   getLinearKey: 'config:getLinearKey',
   setLinearKey: 'config:setLinearKey',
+  getEditorConfig: 'config:getEditorConfig',
+  setEditorConfig: 'config:setEditorConfig',
+  openInEditor: 'editor:open',
 } as const
 
 declare global {

@@ -10,6 +10,7 @@ import type {
 import { IPC } from './shared/contract.js'
 import { createRpc } from './core/rpc.js'
 import type { IConfigStore } from './services/configStore.js'
+import type { IEditorLauncher } from './services/editorLauncher.js'
 
 export interface IpcDeps {
   repos: IRepoRegistry
@@ -19,6 +20,7 @@ export interface IpcDeps {
   tickets: ITicketProvider
   config: IConfigStore
   sessionStore: ISessionStore
+  editor: IEditorLauncher
 }
 
 /**
@@ -48,6 +50,9 @@ export function registerIpc(win: BrowserWindow, deps: IpcDeps): void {
     IPC.worktreeStatus,
     IPC.getLinearKey,
     IPC.setLinearKey,
+    IPC.getEditorConfig,
+    IPC.setEditorConfig,
+    IPC.openInEditor,
     IPC.getTicketStatus,
     IPC.setTicketStatus,
   ] as const
