@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { IWorktreeManager, RepoDTO, WorktreeInfo } from '../shared/contract.js'
 
@@ -72,6 +73,16 @@ export function parsePorcelainWorktreeList(output: string): Array<{ path: string
   return results
 }
 
+/**
+ * True when a git error indicates the worktree path is missing or no longer a
+ * valid working tree (moved/deleted dir, stale admin entry). Such an agent is
+ * "detached" — treat its worktree as already gone rather than erroring.
+ */
+export function isMissingWorktreeError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /not a working tree|No such file or directory|not a git repository/i.test(msg)
+}
+
 // ── Implementation ────────────────────────────────────────────────────────────
 
 function git(args: string[], opts?: { cwd?: string }): string {
@@ -108,20 +119,24 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       opts?: { force?: boolean },
     ): Promise<{ removed: boolean; reason?: string }> {
       const wt = this.pathFor(repo, branch)
+      const present = existsSync(wt)
 
       if (!opts?.force) {
-        // Check for uncommitted changes
-        let porcelain = ''
-        try {
-          porcelain = git(['-C', wt, 'status', '--porcelain'])
-        } catch {
-          // if we can't even run git here, let worktree remove decide
-        }
-        if (parsePorcelainDirty(porcelain)) {
-          return { removed: false, reason: 'Worktree has uncommitted changes.' }
+        // Uncommitted-change guard only applies when the worktree still exists.
+        if (present) {
+          let porcelain = ''
+          try {
+            porcelain = git(['-C', wt, 'status', '--porcelain'])
+          } catch {
+            // if we can't even run git here, let worktree remove decide
+          }
+          if (parsePorcelainDirty(porcelain)) {
+            return { removed: false, reason: 'Worktree has uncommitted changes.' }
+          }
         }
 
-        // Check for unmerged commits (branch ahead of base)
+        // Unmerged-commit guard: the branch ref still exists even when the
+        // worktree directory is gone, so always honour it.
         let countOut = ''
         try {
           countOut = git(['-C', repo.path, 'rev-list', '--count', `${repo.base}..${branch}`])
@@ -137,13 +152,21 @@ export function createWorktreeManager(root: string): IWorktreeManager {
         }
       }
 
-      const removeArgs = ['-C', repo.path, 'worktree', 'remove']
-      if (opts?.force) removeArgs.push('--force')
-      removeArgs.push(wt)
+      if (present) {
+        const removeArgs = ['-C', repo.path, 'worktree', 'remove']
+        if (opts?.force) removeArgs.push('--force')
+        removeArgs.push(wt)
+        try {
+          git(removeArgs)
+        } catch (err) {
+          // A worktree that vanished underneath us (moved/deleted dir, stale admin
+          // entry) is a detached agent — treat it as already gone and fall through
+          // to prune + branch delete rather than surfacing a raw `git fatal:` error.
+          if (!isMissingWorktreeError(err)) throw err
+        }
+      }
 
-      git(removeArgs)
-
-      // Prune stale admin entries (safety net)
+      // Prune stale admin entries (also clears the record for a vanished worktree).
       try {
         git(['-C', repo.path, 'worktree', 'prune'])
       } catch {
