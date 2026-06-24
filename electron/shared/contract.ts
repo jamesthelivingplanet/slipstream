@@ -15,6 +15,12 @@
 export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored'
 export type TicketSource = 'jira' | 'linear'
 
+export interface NotifyPrefs { needs: boolean; done: boolean; running: boolean }
+export interface PushSubscriptionDTO {
+  endpoint: string
+  keys: { p256dh: string; auth: string }
+}
+
 export interface RepoDTO {
   id: string          // slug, e.g. "acme-api"
   org: string
@@ -213,6 +219,10 @@ export interface SlipstreamApi {
   getRepoSettings(id: string): Promise<RepoSettings>
   setRepoSettings(id: string, settings: RepoSettings): Promise<void>
   runApp(input: { repoId: string; branch: string }): Promise<{ started: boolean; reason?: string; port?: number }>
+  getVapidPublicKey(): Promise<string>
+  savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void>
+  deletePushSubscription(endpoint: string): Promise<void>
+  getPushPrefs(endpoint: string): Promise<NotifyPrefs | null>
 }
 
 export const IPC = {
@@ -243,6 +253,10 @@ export const IPC = {
   getRepoSettings: 'repos:getSettings',
   setRepoSettings: 'repos:setSettings',
   runApp: 'app:run',
+  getVapidPublicKey: 'push:vapidKey',
+  savePushSubscription: 'push:save',
+  deletePushSubscription: 'push:delete',
+  getPushPrefs: 'push:prefs',
 } as const
 
 declare global {

@@ -15,6 +15,8 @@ import type {
   WorkflowState,
   WorktreeInfo,
   EditorConfig,
+  NotifyPrefs,
+  PushSubscriptionDTO,
 } from '../../electron/shared/contract.js'
 
 export const hasBackend =
@@ -164,4 +166,25 @@ export function setRepoSettings(id: string, settings: RepoSettings): Promise<voi
 export function runApp(input: { repoId: string; branch: string }): Promise<{ started: boolean; reason?: string; port?: number }> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.runApp(input)
+}
+
+// ── Push notifications ─────────────────────────────────────────────────────
+
+export function getVapidPublicKey(): Promise<string> {
+  return hasBackend ? window.slipstream.getVapidPublicKey() : Promise.resolve('')
+}
+
+export function savePushSubscription(
+  sub: PushSubscriptionDTO,
+  prefs: NotifyPrefs
+): Promise<void> {
+  return hasBackend ? window.slipstream.savePushSubscription(sub, prefs) : Promise.resolve()
+}
+
+export function deletePushSubscription(endpoint: string): Promise<void> {
+  return hasBackend ? window.slipstream.deletePushSubscription(endpoint) : Promise.resolve()
+}
+
+export function getPushPrefs(endpoint: string): Promise<NotifyPrefs | null> {
+  return hasBackend ? window.slipstream.getPushPrefs(endpoint) : Promise.resolve(null)
 }
