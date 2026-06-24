@@ -5,6 +5,7 @@ import {
   parseShortstat,
   parsePorcelainWorktreeList,
   createWorktreeManager,
+  isMissingWorktreeError,
 } from './worktreeManager.js'
 import type { RepoDTO } from '../shared/contract.js'
 
@@ -131,5 +132,25 @@ describe('pathFor', () => {
     const mgr = createWorktreeManager('/root')
     const p = mgr.pathFor({ ...repo, org: 'myOrg', name: 'myRepo' }, 'br')
     expect(p).toContain('myOrg-myRepo')
+  })
+})
+
+// ── isMissingWorktreeError ────────────────────────────────────────────────────
+
+describe('isMissingWorktreeError', () => {
+  it('returns true for "not a working tree" errors', () => {
+    expect(isMissingWorktreeError(new Error("git worktree remove failed: fatal: '/x' is not a working tree"))).toBe(true)
+  })
+
+  it('returns true for "No such file or directory" errors', () => {
+    expect(isMissingWorktreeError(new Error('No such file or directory'))).toBe(true)
+  })
+
+  it('returns true for "not a git repository" errors', () => {
+    expect(isMissingWorktreeError(new Error('not a git repository'))).toBe(true)
+  })
+
+  it('returns false for other git errors', () => {
+    expect(isMissingWorktreeError(new Error('some other git failure'))).toBe(false)
   })
 })
