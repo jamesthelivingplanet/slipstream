@@ -11,8 +11,8 @@ export interface SpawnPrompt { systemArgs: string[]; userPrompt: string }
  * prompt (which tells the agent to emit them) and the status detector (which
  * reads them back). See electron/services/statusDetector.ts.
  */
-export const NEEDS_INPUT_MARKER = '⟦FLOTILLA:NEEDS_INPUT⟧'
-export const DONE_MARKER = '⟦FLOTILLA:DONE⟧'
+export const NEEDS_INPUT_MARKER = '⟦SLIPSTREAM:NEEDS_INPUT⟧'
+export const DONE_MARKER = '⟦SLIPSTREAM:DONE⟧'
 
 export function defaultUserPrompt(tid: string): string {
   return `Begin implementing ${tid}.`
