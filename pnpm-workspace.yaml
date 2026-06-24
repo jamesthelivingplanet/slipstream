@@ -1,0 +1,11 @@
+allowBuilds:
+  '@ast-grep/lang-go': true
+  '@ast-grep/lang-php': true
+  '@ast-grep/lang-python': true
+  '@ast-grep/lang-ruby': true
+  '@ast-grep/lang-rust': true
+  better-sqlite3: true
+  electron: true
+  esbuild: true
+  node-pty: true
+  svelte-preprocess: true

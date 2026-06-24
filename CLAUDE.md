@@ -41,6 +41,13 @@ Always run `pnpm check` and `pnpm test` before committing. Use **pnpm** (not npm
 - **Native modules** (`node-pty`, `better-sqlite3`) are built for **Electron's ABI**, so
   node-run tests can't import `db.ts`/`sessionManager.ts`. Tests cover pure logic +
   real-git integration instead.
+- **Rebuild natives for Electron, not Node.** `pnpm rebuild better-sqlite3 node-pty` — and
+  any change to the Node version pnpm runs scripts on (e.g. `devEngines.runtime` in
+  `package.json`) — compiles them against the *current Node's* ABI, which Electron then
+  refuses to load. Symptom: `better_sqlite3.node … compiled against … NODE_MODULE_VERSION
+  127 … requires 130` (127 = Node 22, 130 = Electron 33). That throw happens in `openDb()`,
+  so `registerIpc()` never runs → `No handler registered for 'repos:list'`. Always finish a
+  native rebuild with `pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty`.
 - **vitest uses `vitest.config.ts`** (not the Vite config) so tests don't run through the
   Electron plugin (which rewrites `child_process` into a require-shim that breaks ESM).
 - **`ELECTRON_RUN_AS_NODE` + native ABI**: `pnpm serve` runs
