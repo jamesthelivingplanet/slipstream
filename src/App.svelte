@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import TicketStatusBar from './lib/components/TicketStatusBar.svelte'
-  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select } from './lib/stores'
+  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select, subscribeSessionStatus } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
@@ -22,6 +22,8 @@
   }
 
   onMount(() => {
+    const offStatus = subscribeSessionStatus()
+
     initFromBackend().then(() => {
       return refreshAndReconcile().then(() => {
         // Deep-link: open agent specified in ?agent= query param (set by SW notificationclick)
@@ -49,6 +51,7 @@
     window.addEventListener('resize', checkMobile)
     window.addEventListener('orientationchange', checkMobile)
     return () => {
+      offStatus()
       window.removeEventListener('resize', checkMobile)
       window.removeEventListener('orientationchange', checkMobile)
     }
