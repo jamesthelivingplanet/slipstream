@@ -23,6 +23,11 @@ export interface RepoDTO {
   path: string        // absolute path to the repo checkout under .repositories
 }
 
+export interface RepoSettings {
+  installCmd: string   // '' when undefined
+  startCmd: string     // '' when undefined
+}
+
 export interface WorktreeInfo {
   branch: string
   path: string        // absolute path under .worktrees
@@ -75,6 +80,8 @@ export interface IRepoRegistry {
   register(absPath: string): Promise<RepoDTO>
   get(id: string): Promise<RepoDTO | undefined>
   remove(id: string): Promise<void>
+  getSettings(id: string): Promise<RepoSettings>
+  setSettings(id: string, settings: RepoSettings): Promise<void>
 }
 
 export interface IWorktreeManager {
@@ -149,6 +156,11 @@ export interface IPortBroker {
   claim(cwd: string, service: string): Promise<number>
 }
 
+export interface IAppRunner {
+  /** Spawn `command` as a detached shell process in `cwd` with `env` merged over process.env. Returns the spawned pid. */
+  run(cwd: string, command: string, env?: Record<string, string>): Promise<{ pid: number }>
+}
+
 export interface ITicketProvider {
   readonly id: string
   listTickets(): Promise<TicketDTO[]>
@@ -198,6 +210,9 @@ export interface SlipstreamApi {
   onSessionData(cb: (id: string, data: string, seq: number) => void): () => void
   onSessionStatus(cb: (id: string, status: SessionStatus) => void): () => void
   getSessionBuffer(id: string): Promise<{ data: string; seq: number }>
+  getRepoSettings(id: string): Promise<RepoSettings>
+  setRepoSettings(id: string, settings: RepoSettings): Promise<void>
+  runApp(input: { repoId: string; branch: string }): Promise<{ started: boolean; reason?: string; port?: number }>
 }
 
 export const IPC = {
@@ -225,6 +240,9 @@ export const IPC = {
   getEditorConfig: 'config:getEditorConfig',
   setEditorConfig: 'config:setEditorConfig',
   openInEditor: 'editor:open',
+  getRepoSettings: 'repos:getSettings',
+  setRepoSettings: 'repos:setSettings',
+  runApp: 'app:run',
 } as const
 
 declare global {

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath } from '../stores'
+  import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath, settingsRepoId } from '../stores'
   import { icons } from '../icons'
-  import { hasBackend, getEditorConfig, setEditorConfig } from '../ipc'
+  import { hasBackend, getEditorConfig, setEditorConfig, getRepoSettings, setRepoSettings } from '../ipc'
   import { pushToast } from '../toast'
 
   let activeTab = 'repositories'
@@ -84,10 +84,63 @@
   function pathKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') addByPath()
   }
+
+  // Per-repo settings expansion
+  let expandedRepoId: string | null = null
+  let installCmd = ''
+  let startCmd = ''
+  let settingsPending = false
+
+  async function loadSettings(repoId: string) {
+    try {
+      const s = await getRepoSettings(repoId)
+      installCmd = s.installCmd
+      startCmd = s.startCmd
+    } catch {
+      installCmd = ''
+      startCmd = ''
+    }
+  }
+
+  function toggleExpand(repoId: string) {
+    if (expandedRepoId === repoId) {
+      expandedRepoId = null
+    } else {
+      expandedRepoId = repoId
+      loadSettings(repoId)
+    }
+  }
+
+  async function saveRepoSettings(repoId: string) {
+    settingsPending = true
+    try {
+      await setRepoSettings(repoId, { installCmd: installCmd.trim(), startCmd: startCmd.trim() })
+      pushToast('success', 'Saved settings')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save settings')
+    } finally {
+      settingsPending = false
+    }
+  }
+
+  // React to focus requests from openRepoSettings()
+  $: if ($settingsOpen && $settingsRepoId) {
+    activeTab = 'repositories'
+    if (expandedRepoId !== $settingsRepoId) {
+      expandedRepoId = $settingsRepoId
+      loadSettings($settingsRepoId)
+    }
+  }
+
+  function closeModal() {
+    settingsOpen.set(false)
+    settingsRepoId.set(null)
+    expandedRepoId = null
+  }
 </script>
 
 {#if $settingsOpen}
-  <div class="overlay" on:click={() => settingsOpen.set(false)} role="presentation"></div>
+  <div class="overlay" on:click={closeModal} role="presentation"></div>
   <div class="dialog settings-dialog">
     <div class="dlg-head">
       <h2>Settings</h2>
@@ -165,6 +218,15 @@
                   <span class="muted repo-id mono">{r.id}</span>
                   <button
                     type="button"
+                    class="btn btn-ghost btn-icon btn-sm"
+                    title="Repository settings"
+                    class:active={expandedRepoId === r.id}
+                    on:click={() => toggleExpand(r.id)}
+                  >
+                    {@html icons.settings}
+                  </button>
+                  <button
+                    type="button"
                     class="btn btn-ghost btn-icon btn-sm btn-danger"
                     title="Remove repository"
                     on:click={() => removeRepoById(r.id)}
@@ -172,6 +234,39 @@
                     {@html icons.trash}
                   </button>
                 </div>
+                {#if expandedRepoId === r.id}
+                  <div class="repo-settings-panel">
+                    <div class="repo-settings-field">
+                      <label class="lbl-f" for="install-cmd-{r.id}">Install command</label>
+                      <input
+                        id="install-cmd-{r.id}"
+                        type="text"
+                        class="path-input"
+                        placeholder="pnpm install"
+                        bind:value={installCmd}
+                        disabled={settingsPending}
+                      />
+                    </div>
+                    <div class="repo-settings-field">
+                      <label class="lbl-f" for="start-cmd-{r.id}">Start command</label>
+                      <input
+                        id="start-cmd-{r.id}"
+                        type="text"
+                        class="path-input"
+                        placeholder="pnpm dev"
+                        bind:value={startCmd}
+                        disabled={settingsPending}
+                      />
+                    </div>
+                    <button
+                      class="btn btn-outline btn-sm"
+                      on:click={() => saveRepoSettings(r.id)}
+                      disabled={settingsPending}
+                    >
+                      Save
+                    </button>
+                  </div>
+                {/if}
               {/each}
             </div>
           {/if}
@@ -399,5 +494,20 @@
     color: hsl(var(--muted-foreground));
     margin: 0 0 8px;
     line-height: 1.5;
+  }
+
+  .repo-settings-panel {
+    padding: 12px 16px;
+    background: hsl(var(--background));
+    border-bottom: 1px solid hsl(var(--border));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .repo-settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 </style>

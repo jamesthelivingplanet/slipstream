@@ -74,6 +74,8 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     register: vi.fn().mockResolvedValue(repo),
     get: vi.fn().mockResolvedValue(repo),
     remove: vi.fn().mockResolvedValue(undefined),
+    getSettings: vi.fn().mockResolvedValue({ installCmd: '', startCmd: '' }),
+    setSettings: vi.fn().mockResolvedValue(undefined),
   }
 
   const worktrees: IWorktreeManager = {
@@ -110,6 +112,9 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
   }
 
   const editor = { open: vi.fn().mockResolvedValue(undefined) } as unknown as IEditorLauncher
+  const appRunner = {
+    run: vi.fn().mockResolvedValue({ pid: 1234 }),
+  }
 
   return {
     repos,
@@ -120,6 +125,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     config,
     sessionStore,
     editor,
+    appRunner,
     _emit(event: string, ...args: unknown[]) {
       for (const l of listeners[event] ?? []) l(...args)
     },
@@ -376,5 +382,30 @@ describe('createRpc', () => {
       ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined)
       await expect(rpc.handle(IPC.openInEditor, [{ repoId: 'bad', branch: 'b' }])).rejects.toThrow('Unknown repo: bad')
     })
+  })
+
+  it('getRepoSettings routes to repos.getSettings', async () => {
+    const result = await rpc.handle(IPC.getRepoSettings, ['r1'])
+    expect(deps.repos.getSettings).toHaveBeenCalledWith('r1')
+    expect(result).toEqual({ installCmd: '', startCmd: '' })
+  })
+
+  it('setRepoSettings routes to repos.setSettings with id and settings', async () => {
+    const settings = { installCmd: 'pnpm install', startCmd: 'pnpm dev' }
+    await rpc.handle(IPC.setRepoSettings, ['r1', settings])
+    expect(deps.repos.setSettings).toHaveBeenCalledWith('r1', settings)
+  })
+
+  it('runApp returns { started: false, reason: "no-start-command" } when startCmd is empty', async () => {
+    const result = await rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'main' }])
+    expect(result).toEqual({ started: false, reason: 'no-start-command' })
+    expect(deps.appRunner.run).not.toHaveBeenCalled()
+  })
+
+  it('runApp with a startCmd calls appRunner.run and returns { started: true, port }', async () => {
+    ;(deps.repos.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ installCmd: '', startCmd: 'pnpm dev' })
+    const result = await rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'main' }]) as { started: boolean; port?: number }
+    expect(deps.appRunner.run).toHaveBeenCalledWith('/wt/t-1-fix-bug', 'pnpm dev', { PORT: '3001' })
+    expect(result).toEqual({ started: true, port: 3001 })
   })
 })

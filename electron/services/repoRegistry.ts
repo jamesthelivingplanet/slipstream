@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process'
 import { basename } from 'node:path'
 import Database from 'better-sqlite3'
-import { upsertRepo, allRepos, getRepo, deleteRepo } from '../db/db.js'
-import type { IRepoRegistry, RepoDTO } from '../shared/contract.js'
+import { upsertRepo, allRepos, getRepo, deleteRepo, getRepoSettings, setRepoSettings } from '../db/db.js'
+import type { IRepoRegistry, RepoDTO, RepoSettings } from '../shared/contract.js'
 
 /** Turn an arbitrary string into a lower-kebab-case slug. */
 function slugify(s: string): string {
@@ -97,6 +97,14 @@ export function createRepoRegistry(db: Database.Database, _root: string): IRepoR
 
     async remove(id: string): Promise<void> {
       deleteRepo(db, id)
+    },
+
+    async getSettings(id: string): Promise<RepoSettings> {
+      return getRepoSettings(db, id)
+    },
+
+    async setSettings(id: string, settings: RepoSettings): Promise<void> {
+      setRepoSettings(db, id, settings)
     },
   }
 }

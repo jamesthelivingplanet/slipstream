@@ -8,6 +8,7 @@
  */
 import type {
   RepoDTO,
+  RepoSettings,
   SessionDTO,
   TicketDTO,
   SessionStatus,
@@ -151,4 +152,16 @@ export function setEditorConfig(cfg: EditorConfig): Promise<void> {
 export function openInEditor(input: { repoId: string; branch: string; mobile?: boolean }): Promise<void> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.openInEditor(input)
+}
+
+export function getRepoSettings(id: string): Promise<RepoSettings> {
+  return hasBackend ? window.slipstream.getRepoSettings(id) : Promise.resolve({ installCmd: '', startCmd: '' })
+}
+export function setRepoSettings(id: string, settings: RepoSettings): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.setRepoSettings(id, settings)
+}
+export function runApp(input: { repoId: string; branch: string }): Promise<{ started: boolean; reason?: string; port?: number }> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.runApp(input)
 }

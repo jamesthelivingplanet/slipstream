@@ -10,6 +10,7 @@ import { createConfigStore } from '../services/configStore.js'
 import { createLinearProvider } from '../tickets/linearProvider.js'
 import { createSessionStore } from '../services/sessionStore.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
+import { createAppRunner } from '../services/appRunner.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -46,5 +47,6 @@ export function createServices(root: string): IpcDeps {
     config: configStore,
     sessionStore,
     editor: createEditorLauncher(),
+    appRunner: createAppRunner(),
   }
 }
