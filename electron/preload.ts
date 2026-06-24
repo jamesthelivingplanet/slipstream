@@ -55,6 +55,9 @@ const api: SlipstreamApi = {
     ipcRenderer.on(IPC.sessionStatus, listener)
     return () => ipcRenderer.removeListener(IPC.sessionStatus, listener)
   },
+  getRepoSettings: (id) => ipcRenderer.invoke(IPC.getRepoSettings, id),
+  setRepoSettings: (id, settings) => ipcRenderer.invoke(IPC.setRepoSettings, id, settings),
+  runApp: (input) => ipcRenderer.invoke(IPC.runApp, input),
 }
 
 contextBridge.exposeInMainWorld('slipstream', api)
