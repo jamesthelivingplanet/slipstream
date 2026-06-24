@@ -99,7 +99,7 @@
   {/if}
 
   <div class="content">
-    <AgentList mobileOpen={!isMobile || listOpen} />
+    <AgentList mobileOpen={!isMobile || listOpen} onSelect={() => { if (isMobile) listOpen = false }} />
 
     <section class="term-pane">
       {#if !$selected}
