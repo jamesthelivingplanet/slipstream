@@ -1,6 +1,6 @@
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { RepoDTO, ISessionStore, SessionStatus } from '../shared/contract.js'
+import type { RepoDTO, ISessionStore, SessionStatus, EditorConfig } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 
@@ -200,6 +200,32 @@ export function createRpc(
 
       case IPC.setTicketStatus:
         return deps.tickets.setTicketStatus(args[0] as string, args[1] as string)
+
+      case IPC.getEditorConfig:
+        return {
+          command: deps.config.get('editor.command') ?? 'code',
+          mobileCommand: deps.config.get('editor.mobileCommand') ?? '',
+        }
+
+      case IPC.setEditorConfig: {
+        const cfg = args[0] as EditorConfig
+        deps.config.set('editor.command', cfg.command ?? '')
+        deps.config.set('editor.mobileCommand', cfg.mobileCommand ?? '')
+        return undefined
+      }
+
+      case IPC.openInEditor: {
+        const input = args[0] as { repoId: string; branch: string; mobile?: boolean }
+        const repo = await deps.repos.get(input.repoId)
+        if (!repo) throw new Error(`Unknown repo: ${input.repoId}`)
+        const cwd = deps.worktrees.pathFor(repo, input.branch)
+        const desktop = deps.config.get('editor.command') ?? 'code'
+        const mobileCmd = (deps.config.get('editor.mobileCommand') ?? '').trim()
+        const command = input.mobile && mobileCmd ? mobileCmd : desktop
+        if (!command.trim()) throw new Error('No editor configured. Set one in Settings → Behavior.')
+        await deps.editor.open(command, cwd)
+        return undefined
+      }
 
       case IPC.pickRepo:
         throw new Error('pickRepo is not supported without a desktop window')

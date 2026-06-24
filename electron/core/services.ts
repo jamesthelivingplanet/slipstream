@@ -9,6 +9,7 @@ import { createPortBroker } from '../services/portBroker.js'
 import { createConfigStore } from '../services/configStore.js'
 import { createLinearProvider } from '../tickets/linearProvider.js'
 import { createSessionStore } from '../services/sessionStore.js'
+import { createEditorLauncher } from '../services/editorLauncher.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -44,5 +45,6 @@ export function createServices(root: string): IpcDeps {
     tickets: createLinearProvider(configStore),
     config: configStore,
     sessionStore,
+    editor: createEditorLauncher(),
   }
 }

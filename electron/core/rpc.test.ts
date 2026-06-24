@@ -15,6 +15,7 @@ import type {
   SessionStatus,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
+import type { IEditorLauncher } from '../services/editorLauncher.js'
 
 // ── Fake deps ─────────────────────────────────────────────────────────────────
 
@@ -108,6 +109,8 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     delete(id) { sessionStoreMap.delete(id) },
   }
 
+  const editor = { open: vi.fn().mockResolvedValue(undefined) } as unknown as IEditorLauncher
+
   return {
     repos,
     worktrees,
@@ -116,6 +119,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     tickets,
     config,
     sessionStore,
+    editor,
     _emit(event: string, ...args: unknown[]) {
       for (const l of listeners[event] ?? []) l(...args)
     },
@@ -333,5 +337,44 @@ describe('createRpc', () => {
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ]) as SessionDTO
     expect(result.id).toBe('s1')
+  })
+
+  describe('editor config', () => {
+    it('getEditorConfig returns defaults when config.get returns undefined', async () => {
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined)
+      const result = await rpc.handle(IPC.getEditorConfig, []) as { command: string; mobileCommand: string }
+      expect(result).toEqual({ command: 'code', mobileCommand: '' })
+    })
+
+    it('setEditorConfig calls config.set for both keys', async () => {
+      await rpc.handle(IPC.setEditorConfig, [{ command: 'zed', mobileCommand: 'vim' }])
+      expect(deps.config.set).toHaveBeenCalledWith('editor.command', 'zed')
+      expect(deps.config.set).toHaveBeenCalledWith('editor.mobileCommand', 'vim')
+    })
+
+    it('openInEditor uses desktop command by default', async () => {
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
+        if (key === 'editor.command') return 'code'
+        if (key === 'editor.mobileCommand') return ''
+        return undefined
+      })
+      await rpc.handle(IPC.openInEditor, [{ repoId: 'r1', branch: 't-1-fix-bug' }])
+      expect(deps.editor.open).toHaveBeenCalledWith('code', '/wt/t-1-fix-bug')
+    })
+
+    it('openInEditor uses mobile command when mobile=true and mobileCommand is set', async () => {
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
+        if (key === 'editor.command') return 'code'
+        if (key === 'editor.mobileCommand') return 'vim'
+        return undefined
+      })
+      await rpc.handle(IPC.openInEditor, [{ repoId: 'r1', branch: 't-1-fix-bug', mobile: true }])
+      expect(deps.editor.open).toHaveBeenCalledWith('vim', '/wt/t-1-fix-bug')
+    })
+
+    it('openInEditor throws for unknown repo', async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined)
+      await expect(rpc.handle(IPC.openInEditor, [{ repoId: 'bad', branch: 'b' }])).rejects.toThrow('Unknown repo: bad')
+    })
   })
 })

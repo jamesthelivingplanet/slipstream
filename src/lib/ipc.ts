@@ -13,6 +13,7 @@ import type {
   SessionStatus,
   WorkflowState,
   WorktreeInfo,
+  EditorConfig,
 } from '../../electron/shared/contract.js'
 
 export const hasBackend =
@@ -132,4 +133,22 @@ export function worktreeStatus(repoId: string, branch: string): Promise<Worktree
   return hasBackend
     ? window.slipstream.worktreeStatus(repoId, branch)
     : Promise.resolve({ branch, path: '', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 })
+}
+
+// ── Editor ─────────────────────────────────────────────────────────────────
+
+export function getEditorConfig(): Promise<EditorConfig> {
+  return hasBackend
+    ? window.slipstream.getEditorConfig()
+    : Promise.resolve({ command: '', mobileCommand: '' })
+}
+
+export function setEditorConfig(cfg: EditorConfig): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.setEditorConfig(cfg)
+}
+
+export function openInEditor(input: { repoId: string; branch: string; mobile?: boolean }): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.openInEditor(input)
 }
