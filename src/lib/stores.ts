@@ -16,7 +16,9 @@ import {
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
+import { isStartableTicket } from './ticketFilter.js'
 export { sessionsToReconcile } from './reconcile'
+export { isStartableTicket } from './ticketFilter.js'
 
 function dtoToTickets(dtos: { tid: string; src: string; title: string; repoHint?: string; description?: string; status?: { id: string; name: string; type?: string }; done: boolean }[]): Ticket[] {
   return dtos.map((d) => ({
@@ -99,7 +101,7 @@ export async function initFromBackend(): Promise<void> {
     })),
   )
 
-  tickets.set(dtoToTickets(ticketDTOs).filter((t) => !t.done))
+  tickets.set(dtoToTickets(ticketDTOs).filter(isStartableTicket))
 
   const sessionDTOs = await listSessions()
   sessions.set(
@@ -142,7 +144,7 @@ export async function refreshTickets(): Promise<void> {
   if (!hasBackend) return
   try {
     const dtos = await listTickets()
-    tickets.set(dtoToTickets(dtos).filter((t) => !t.done))
+    tickets.set(dtoToTickets(dtos).filter(isStartableTicket))
   } catch (e) {
     pushToast('error', cleanError(e))
   }
@@ -334,7 +336,7 @@ export async function refreshAndReconcile(): Promise<void> {
     pushToast('error', cleanError(e))
     return
   }
-  tickets.set(dtoToTickets(dtos).filter((t) => !t.done))
+  tickets.set(dtoToTickets(dtos).filter(isStartableTicket))
   for (const s of sessionsToReconcile(get(sessions), dtos)) {
     await cleanupAgent(s, { auto: true })
   }
