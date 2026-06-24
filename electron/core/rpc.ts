@@ -1,6 +1,6 @@
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { RepoDTO, ISessionStore, SessionStatus, EditorConfig, RepoSettings } from '../shared/contract.js'
+import type { RepoDTO, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 
@@ -245,6 +245,18 @@ export function createRpc(
         await deps.appRunner.run(cwd, settings.startCmd, port !== undefined ? { PORT: String(port) } : undefined)
         return { started: true, port }
       }
+
+      case IPC.getVapidPublicKey:
+        return deps.push.getVapidPublicKey()
+
+      case IPC.savePushSubscription:
+        return deps.push.savePushSubscription(args[0] as PushSubscriptionDTO, args[1] as NotifyPrefs)
+
+      case IPC.deletePushSubscription:
+        return deps.push.deletePushSubscription(args[0] as string)
+
+      case IPC.getPushPrefs:
+        return deps.push.getPushPrefs(args[0] as string)
 
       case IPC.pickRepo:
         throw new Error('pickRepo is not supported without a desktop window')
