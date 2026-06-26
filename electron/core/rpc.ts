@@ -172,10 +172,10 @@ export function createRpc(
       case IPC.cleanupSession: {
         const id = args[0] as string
         const opts = args[1] as { force?: boolean } | undefined
+        const persisted = deps.sessionStore.get(id)
         let meta = sessionMeta.get(id)
         if (!meta) {
           // Post-restart: try to reconstruct from sessionStore
-          const persisted = deps.sessionStore.get(id)
           if (!persisted) return { removed: false, reason: 'session not found' }
           const repo = await deps.repos.get(persisted.repoId)
           if (!repo) return { removed: false, reason: 'session not found' }
@@ -186,6 +186,18 @@ export function createRpc(
           sessionMeta.delete(id)
           deps.sessionStore.delete(id)
           persistedStatus.delete(id)
+
+          // FLO-35: move the linked ticket back to "To Do" when the agent run
+          // is deleted, so the next agent can pick it up. Best-effort — a
+          // ticket-API failure must not break the cleanup.
+          const tid = persisted?.tid
+          if (tid) {
+            try {
+              await deps.tickets.resetTicket(tid)
+            } catch {
+              // ignore: ticket provider unavailable or transition not applicable
+            }
+          }
         }
         return result
       }

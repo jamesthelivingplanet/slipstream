@@ -98,6 +98,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     getTicketStatus: vi.fn().mockResolvedValue({ current: null, available: [] }),
     setTicketStatus: vi.fn().mockRejectedValue(new Error('not implemented')),
     startTicket: vi.fn().mockResolvedValue(null),
+    resetTicket: vi.fn().mockResolvedValue(null),
   }
 
   const config: IConfigStore = {
@@ -393,6 +394,19 @@ describe('createRpc', () => {
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ]) as SessionDTO
     expect(result.id).toBe('s1')
+  })
+
+  it('cleanupSession resets the linked ticket back to to-do (resetTicket)', async () => {
+    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    await rpc.handle(IPC.cleanupSession, ['s1'])
+    expect(deps.tickets.resetTicket).toHaveBeenCalledWith('T-1')
+  })
+
+  it('cleanupSession still succeeds when resetTicket rejects', async () => {
+    ;(deps.tickets.resetTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('linear down'))
+    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    const result = await rpc.handle(IPC.cleanupSession, ['s1'])
+    expect(result).toEqual({ removed: true })
   })
 
   describe('editor config', () => {
