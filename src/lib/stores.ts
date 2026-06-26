@@ -191,7 +191,7 @@ export async function removeRepoById(id: string): Promise<void> {
   }
 }
 
-export function createAgentFromTicket(ticket: Ticket, prompt: string) {
+export function createAgentFromTicket(ticket: Ticket, prompt: string): string {
   tickets.update(($t) => $t.filter((t) => t.tid !== ticket.tid))
   sessions.update(($s) => [
     {
@@ -203,10 +203,10 @@ export function createAgentFromTicket(ticket: Ticket, prompt: string) {
   ])
   dialogOpen.set(false)
   select(ticket.tid)
+  return ticket.tid
 }
 
-export function createBlankAgent(title: string, prompt: string) {
-  const tid = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`
+export function createBlankAgent(title: string, prompt: string, tid: string = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`): string {
   sessions.update(($s) => [
     { tid, src: 'jira', status: 'idle', title, repo: null, branch: null,
       add: 0, del: 0, ago: 'draft', prompt, activity: { text: 'Not started.' } },
@@ -214,6 +214,7 @@ export function createBlankAgent(title: string, prompt: string) {
   ])
   dialogOpen.set(false)
   select(tid)
+  return tid
 }
 
 export async function startAgent(tid: string, repoId: string, prompt: string) {

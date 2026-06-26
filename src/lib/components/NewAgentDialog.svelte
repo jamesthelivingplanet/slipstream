@@ -1,18 +1,29 @@
 <script lang="ts">
-  import { dialogOpen, tickets, createAgentFromTicket, createBlankAgent, refreshTickets } from '../stores'
+  import { dialogOpen, tickets, createAgentFromTicket, createBlankAgent, startAgent, refreshTickets, repos, repoById, settingsOpen } from '../stores'
+  import { branchFor } from '../branch'
   import { icons } from '../icons'
   import type { Ticket } from '../types'
 
   let picked: Ticket | null = null
   let title = ''
   let prompt = ''
+  let repoChoice: string | null = null
+  let menuOpen = false
+  let draftTid = ''
   let wasOpen = false
   let loadingTickets = false
+
+  $: chosen = repoChoice ? repoById(repoChoice) : undefined
+  $: previewTid = picked ? picked.tid : draftTid
+  $: branch = previewTid ? branchFor(previewTid, title.trim() || 'task') : ''
 
   $: if ($dialogOpen && !wasOpen) {
     picked = null
     title = ''
     prompt = ''
+    repoChoice = null
+    menuOpen = false
+    draftTid = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`
     wasOpen = true
     // refresh tickets when dialog opens
     loadingTickets = true
@@ -24,24 +35,32 @@
     picked = t
     title = t.title
     prompt = `Begin implementing ${t.tid}.`
+    // Pre-select the ticket's suggested repo when it matches a registered repo.
+    repoChoice = t.repo || null
+    menuOpen = false
   }
 
-  function create() {
-    if (!title.trim()) return
-    if (picked) {
-      createAgentFromTicket(picked, prompt)
-    } else {
-      createBlankAgent(title.trim(), prompt)
-    }
+  async function start() {
+    if (!title.trim() || !repoChoice) return
+    const tid = picked
+      ? createAgentFromTicket(picked, prompt)
+      : createBlankAgent(title.trim(), prompt, draftTid)
+    await startAgent(tid, repoChoice as string, prompt)
+  }
+
+  function onWindowClick(e: MouseEvent) {
+    if (menuOpen && !(e.target as HTMLElement).closest('#dlgRepoSel')) menuOpen = false
   }
 </script>
+
+<svelte:window on:click={onWindowClick} />
 
 {#if $dialogOpen}
   <div class="overlay" on:click={() => dialogOpen.set(false)} role="presentation"></div>
   <div class="dialog">
     <div class="dlg-head">
       <h2>New agent</h2>
-      <p>Create a blank agent or pick a ticket. You'll choose a repo and start it next.</p>
+      <p>Pick a ticket or start blank, choose a repo, and start it in one go.</p>
     </div>
 
     <div class="dlg-body">
@@ -75,11 +94,53 @@
         <textarea id="dPrompt" bind:value={prompt} placeholder="Describe the task for this agent…"></textarea>
         <p class="cfg-hint">Full ticket details are sent to the agent automatically as context. This is just the opening message you can tweak.</p>
       </div>
+
+      <div>
+        <span class="lbl-f">Repository</span>
+        {#if $repos.length > 0}
+          <div class="select" id="dlgRepoSel">
+            <button class="sel-trigger" type="button" on:click|stopPropagation={() => (menuOpen = !menuOpen)}>
+              {#if chosen}
+                <span><span class="muted">{chosen.org}/</span>{chosen.name}</span>
+              {:else}
+                <span class="muted">Select a repository</span>
+              {/if}
+              <span class="chev">{@html icons.chevronDown}</span>
+            </button>
+            {#if menuOpen}
+              <div class="sel-menu">
+                {#each $repos as r}
+                  <button type="button" class="opt" class:sel={repoChoice === r.id} on:click|stopPropagation={() => { repoChoice = r.id; menuOpen = false }}>
+                    <span><span class="muted">{r.org}/</span>{r.name}</span>
+                    <span class="badge mono" style="margin-left:8px">{r.base}</span>
+                    <span class="check">{@html icons.check}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+          <p class="cfg-hint">A fresh worktree is branched from this repo's base branch, and claude starts inside it.</p>
+        {:else}
+          <p class="cfg-hint">No repositories yet. <button type="button" class="link-btn" on:click={() => { dialogOpen.set(false); settingsOpen.set(true) }}>Add one in Settings</button>.</p>
+        {/if}
+      </div>
+
+      {#if chosen}
+        <div class="derive">
+          <div class="drow"><span class="k">Base branch</span><span class="v muted">{chosen.base}</span></div>
+          <div class="drow"><span class="k">New branch</span><span class="v"><b>{branch}</b></span></div>
+          <div class="drow"><span class="k">Worktree</span><span class="v muted">{`.worktrees/${chosen.org}-${chosen.name}/${branch}`}</span></div>
+        </div>
+      {/if}
     </div>
 
     <div class="dlg-foot">
       <button class="btn btn-ghost" on:click={() => dialogOpen.set(false)}>Cancel</button>
-      <button class="btn btn-primary" disabled={!title.trim()} on:click={create}>{@html icons.plus} Create agent</button>
+      <button class="btn btn-primary" disabled={!title.trim() || !repoChoice} on:click={start}>{@html icons.play} Start agent</button>
     </div>
   </div>
 {/if}
+
+<style>
+  .link-btn { color: hsl(var(--primary)); text-decoration: underline; cursor: pointer; }
+</style>
