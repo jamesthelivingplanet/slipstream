@@ -52,6 +52,27 @@ describe('worktreeManager (real git)', () => {
     expect(existsSync(join(root, '.worktrees', 'acme-demo', 'feat-clean'))).toBe(false)
   })
 
+  it('create() is idempotent on an already-registered worktree', async () => {
+    const info = await wm.create(repo, 'feat-reuse')
+    const retry = await wm.create(repo, 'feat-reuse')
+    expect(retry.path).toBe(info.path)
+    expect(existsSync(info.path)).toBe(true)
+    await wm.remove(repo, 'feat-reuse', { force: true })
+  })
+
+  it('create() checks out an existing branch whose worktree was removed', async () => {
+    const first = await wm.create(repo, 'feat-rebranch')
+    git(repo.path, 'worktree', 'remove', first.path)
+
+    // branch ref still present after worktree removal
+    const branchList = git(repo.path, 'branch', '--list', 'feat-rebranch')
+    expect(branchList.trim()).not.toBe('')
+
+    const retry = await wm.create(repo, 'feat-rebranch')
+    expect(existsSync(retry.path)).toBe(true)
+    await wm.remove(repo, 'feat-rebranch', { force: true })
+  })
+
   it('detects a dirty worktree and refuses removal without force', async () => {
     const info = await wm.create(repo, 'feat-dirty')
     writeFileSync(join(info.path, 'scratch.txt'), 'uncommitted\n')

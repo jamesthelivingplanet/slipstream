@@ -109,7 +109,32 @@ export function createWorktreeManager(root: string): IWorktreeManager {
 
     async create(repo: RepoDTO, branch: string): Promise<WorktreeInfo> {
       const wt = this.pathFor(repo, branch)
-      git(['-C', repo.path, 'worktree', 'add', wt, '-b', branch, repo.base])
+
+      // Idempotent: a failed previous attempt may have left a registered
+      // worktree and/or the branch ref behind — reuse whatever's there.
+      const existing = parsePorcelainWorktreeList(
+        git(['-C', repo.path, 'worktree', 'list', '--porcelain']),
+      )
+      if (existing.some((e) => e.path === wt)) {
+        return this.status(repo, branch)
+      }
+
+      // git() throws on non-zero exit; show-ref --quiet exits non-zero when the
+      // ref is absent, so flip a boolean in the catch.
+      let branchExists = true
+      try {
+        git(['-C', repo.path, 'show-ref', '--verify', '--quiet', 'refs/heads/' + branch])
+      } catch {
+        branchExists = false
+      }
+
+      if (branchExists) {
+        // Check out the existing branch into a new worktree (no -b).
+        git(['-C', repo.path, 'worktree', 'add', wt, branch])
+      } else {
+        git(['-C', repo.path, 'worktree', 'add', wt, '-b', branch, repo.base])
+      }
+
       return this.status(repo, branch)
     },
 

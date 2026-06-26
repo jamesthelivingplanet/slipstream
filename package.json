@@ -4,13 +4,6 @@
   "version": "0.0.0",
   "type": "module",
   "main": "dist-electron/main.js",
-  "devEngines": {
-    "runtime": {
-      "name": "node",
-      "version": "22.x",
-      "onFail": "download"
-    }
-  },
   "description": "Desktop console for managing many parallel Claude Code agents",
   "scripts": {
     "dev": "vite",
@@ -27,6 +20,7 @@
     "@xterm/xterm": "^5.5.0",
     "better-sqlite3": "^11.7.0",
     "node-pty": "^1.0.0",
+    "opencode-ai": "^1.17.11",
     "web-push": "^3.6.7",
     "ws": "^8.21.0"
   },

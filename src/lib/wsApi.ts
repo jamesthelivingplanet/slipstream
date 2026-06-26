@@ -7,7 +7,7 @@
  * Framework-free (plain TS) — unit-testable against a fake WebSocket.
  */
 
-import type { SlipstreamApi, RepoDTO, RepoSettings, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo, EditorConfig, NotifyPrefs, PushSubscriptionDTO } from '../../electron/shared/contract.js'
+import type { SlipstreamApi, RepoDTO, RepoSettings, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo, EditorConfig, NotifyPrefs, PushSubscriptionDTO, BackendKind } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
 import { genId } from './id.js'
@@ -199,7 +199,7 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.setLinearKey, [key]) as Promise<void>
     },
 
-    startSession(input: { tid: string; title: string; prompt: string; repoId: string }): Promise<SessionDTO> {
+    startSession(input: { tid: string; title: string; prompt: string; repoId: string; agentKind?: BackendKind }): Promise<SessionDTO> {
       return request(IPC.startSession, [input]) as Promise<SessionDTO>
     },
 

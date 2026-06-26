@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   status    TEXT NOT NULL DEFAULT 'idle',
   port      INTEGER,
   systemPrompt TEXT,
+  agentKind TEXT NOT NULL DEFAULT 'claude-code',
+  opencodeSid TEXT,
   createdAt INTEGER NOT NULL
 );
 
@@ -53,6 +55,12 @@ export function openDb(file: string): Database.Database {
   if (!cols.some((c) => c.name === 'systemPrompt')) {
     db.exec(`ALTER TABLE sessions ADD COLUMN systemPrompt TEXT`)
   }
+  if (!cols.some((c) => c.name === 'agentKind')) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN agentKind TEXT NOT NULL DEFAULT 'claude-code'`)
+  }
+  if (!cols.some((c) => c.name === 'opencodeSid')) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN opencodeSid TEXT`)
+  }
   return db
 }
 
@@ -80,8 +88,8 @@ export function getRepo(db: Database.Database, id: string): RepoDTO | undefined 
 
 export function upsertSession(db: Database.Database, session: SessionDTO): void {
   db.prepare(`
-    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, createdAt)
-    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @createdAt)
+    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt)
+    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt)
     ON CONFLICT(id) DO UPDATE SET
       tid          = excluded.tid,
       title        = excluded.title,
@@ -91,8 +99,10 @@ export function upsertSession(db: Database.Database, session: SessionDTO): void 
       status       = excluded.status,
       port         = excluded.port,
       systemPrompt = excluded.systemPrompt,
+      agentKind    = excluded.agentKind,
+      opencodeSid  = excluded.opencodeSid,
       createdAt    = excluded.createdAt
-  `).run({ ...session, port: session.port ?? null, systemPrompt: session.systemPrompt ?? null })
+  `).run({ ...session, port: session.port ?? null, systemPrompt: session.systemPrompt ?? null, agentKind: session.agentKind ?? 'claude-code', opencodeSid: session.opencodeSid ?? null })
 }
 
 export function allSessions(db: Database.Database): SessionDTO[] {

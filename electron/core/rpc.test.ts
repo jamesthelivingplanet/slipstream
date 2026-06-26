@@ -34,6 +34,7 @@ function makeSession(overrides: Partial<SessionDTO> = {}): SessionDTO {
     branch: 't-1-fix-bug',
     status: 'running',
     createdAt: Date.now(),
+    agentKind: 'claude-code',
     ...overrides,
   }
 }
@@ -153,7 +154,7 @@ describe('createRpc', () => {
     emitted = []
     rpc = createRpc(deps, (channel, ...args) => {
       emitted.push([channel, ...args])
-    })
+    }, { coalesceMs: 0 })
   })
 
   it('routes listRepos to repos.list()', async () => {
@@ -189,6 +190,32 @@ describe('createRpc', () => {
     expect(deps.sessions.start).toHaveBeenCalled()
     expect(result.id).toBe('s1')
     expect(result.port).toBe(3001)
+  })
+  it('startSession passes agentKind to sessions.start', async () => {
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', agentKind: 'opencode' },
+    ]) as SessionDTO & { port?: number }
+
+    expect(deps.sessions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ agentKind: 'opencode' })
+    )
+  })
+
+  it('startSession defaults agentKind to undefined when not provided', async () => {
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ]) as SessionDTO & { port?: number }
+
+    const callArgs = (deps.sessions.start as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(callArgs.agentKind).toBeUndefined()
+  })
+
+  it('startSession stores agentKind in sessionStore', async () => {
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', agentKind: 'opencode' },
+    ])
+    const stored = deps.sessionStore.get('s1')
+    expect(stored?.agentKind).toBe('opencode')
   })
 
   it('routes killSession', async () => {
@@ -231,6 +258,20 @@ describe('createRpc', () => {
   it('forwards session data events to emit (3-arg form with seq)', () => {
     deps._emit('data', 's1', 'some output', 42)
     expect(emitted).toEqual([[IPC.sessionData, 's1', 'some output', 42]])
+  })
+
+  it('coalesces session:data bursts into a single timed flush', () => {
+    vi.useFakeTimers()
+    const out: Array<[string, ...unknown[]]> = []
+    const rpc2 = createRpc(deps, (channel, ...args) => out.push([channel, ...args]), { coalesceMs: 40 })
+    deps._emit('data', 's1', 'a', 1)
+    deps._emit('data', 's1', 'b', 2)
+    deps._emit('data', 's1', 'c', 3)
+    expect(out).toEqual([])
+    vi.advanceTimersByTime(40)
+    expect(out).toEqual([[IPC.sessionData, 's1', 'abc', 3]])
+    rpc2.dispose()
+    vi.useRealTimers()
   })
 
   it('routes getSessionBuffer to sessions.getBuffer', async () => {

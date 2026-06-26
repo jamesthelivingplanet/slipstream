@@ -8,6 +8,8 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
+import { existsSync } from 'node:fs'
+import * as path from 'node:path'
 
 import type {
   ISessionManager,
@@ -21,7 +23,33 @@ import { StatusDetector } from './statusDetector.js'
 import { OutputBuffer } from './outputBuffer.js'
 import { trustDirectory } from './claudeTrust.js'
 import { hasTranscript } from './transcripts.js'
-import { deliverPrompt } from '../shared/promptComposer.js'
+import { deliverPrompt, buildAgentsMdContent } from '../shared/promptComposer.js'
+import { writeAgentsMd } from './promptWriter.js'
+
+function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<string, string>): pty.IPty {
+  return pty.spawn(cmd, args, {
+    name: 'xterm-color',
+    cols: 80,
+    rows: 30,
+    cwd,
+    env: { ...process.env, ...(env ?? {}) } as Record<string, string>,
+  })
+}
+
+const OPENCODE_BIN = (() => {
+  const local = path.join(process.cwd(), 'node_modules', '.bin', 'opencode')
+  return existsSync(local) ? local : 'opencode'
+})()
+
+function spawnOpencode(args: string[], prompt: string | null, cwd: string, env?: Record<string, string>): pty.IPty {
+  const proc = spawnAgent(OPENCODE_BIN, args, cwd, env)
+  if (prompt !== null) {
+    setTimeout(() => {
+      try { proc.write(prompt + '\r') } catch { /* process may have exited */ }
+    }, 1000)
+  }
+  return proc
+}
 
 // ─── Internal session record ──────────────────────────────────────────────────
 
@@ -79,18 +107,22 @@ export function createSessionManager(): ISessionManager {
     const buffer = new OutputBuffer()
 
     trustDirectory(input.cwd)
-    const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system: input.systemPrompt ?? '', user: input.prompt })
-    const proc = pty.spawn(
-      'claude',
-      ['--dangerously-skip-permissions', ...systemArgs, '--session-id', id, userPrompt],
-      {
-        name: 'xterm-color',
-        cols: 80,
-        rows: 30,
-        cwd: input.cwd,
-        env: { ...process.env, ...input.env } as Record<string, string>,
-      }
-    )
+
+    // Write AGENTS.md for opencode sessions (system prompt via file, not CLI arg)
+    if (input.agentKind === 'opencode' && input.systemPrompt) {
+      writeAgentsMd(input.cwd, buildAgentsMdContent(input.systemPrompt))
+    }
+
+    const agentKind = input.agentKind ?? 'claude-code'
+    let proc: pty.IPty
+    if (agentKind === 'opencode') {
+      const { userPrompt } = deliverPrompt('opencode', { system: input.systemPrompt ?? '', user: input.prompt })
+      const portArgs = input.opencodePort ? ['--port', String(input.opencodePort)] : []
+      proc = spawnOpencode(portArgs, userPrompt, input.cwd, input.env)
+    } else {
+      const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system: input.systemPrompt ?? '', user: input.prompt })
+      proc = spawnAgent('claude', ['--dangerously-skip-permissions', ...systemArgs, '--session-id', id, userPrompt], input.cwd, input.env)
+    }
 
     const dto: SessionDTO = {
       id,
@@ -101,6 +133,7 @@ export function createSessionManager(): ISessionManager {
       branch: input.branch,
       status: 'running',
       systemPrompt: input.systemPrompt,
+      agentKind: input.agentKind,
       createdAt: Date.now(),
     }
 
@@ -124,24 +157,25 @@ export function createSessionManager(): ISessionManager {
     const buffer = new OutputBuffer()
 
     trustDirectory(input.cwd)
-    let args: string[]
-    if (hasTranscript(id)) {
-      args = ['--dangerously-skip-permissions', '--resume', id]
-    } else {
-      const { systemArgs: resumeSystemArgs, userPrompt: resumeUserPrompt } = deliverPrompt('claude-code', { system: input.session.systemPrompt ?? '', user: input.session.prompt })
-      args = ['--dangerously-skip-permissions', ...resumeSystemArgs, '--session-id', id, resumeUserPrompt]
-    }
-    const proc = pty.spawn(
-      'claude',
-      args,
-      {
-        name: 'xterm-color',
-        cols: 80,
-        rows: 30,
-        cwd: input.cwd,
-        env: { ...process.env, ...input.env } as Record<string, string>,
+    const agentKind = input.session.agentKind ?? 'claude-code'
+    const { userPrompt: resumeUserPrompt, systemArgs: resumeSystemArgs } = deliverPrompt(agentKind, { system: input.session.systemPrompt ?? '', user: input.session.prompt })
+
+    let proc: pty.IPty
+    if (agentKind === 'opencode') {
+      if (input.session.systemPrompt) {
+        writeAgentsMd(input.cwd, buildAgentsMdContent(input.session.systemPrompt))
       }
-    )
+      const ocSid = input.session.opencodeSid
+      proc = spawnOpencode(ocSid ? ['--session', ocSid] : ['--continue'], null, input.cwd, input.env)
+    } else {
+      let args: string[]
+      if (hasTranscript(id)) {
+        args = ['--dangerously-skip-permissions', '--resume', id]
+      } else {
+        args = ['--dangerously-skip-permissions', ...resumeSystemArgs, '--session-id', id, resumeUserPrompt]
+      }
+      proc = spawnAgent('claude', args, input.cwd, input.env)
+    }
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
     const rec: SessionRecord = { pty: proc, detector, buffer, dto }
@@ -165,24 +199,25 @@ export function createSessionManager(): ISessionManager {
     const buffer = new OutputBuffer()
 
     trustDirectory(input.cwd)
-    let args: string[]
-    if (hasTranscript(id)) {
-      args = ['--dangerously-skip-permissions', '--remote-control', '--resume', id]
-    } else {
-      const { systemArgs: rcSystemArgs, userPrompt: rcUserPrompt } = deliverPrompt('claude-code', { system: input.session.systemPrompt ?? '', user: input.session.prompt })
-      args = ['--dangerously-skip-permissions', '--remote-control', ...rcSystemArgs, '--session-id', id, rcUserPrompt]
-    }
-    const proc = pty.spawn(
-      'claude',
-      args,
-      {
-        name: 'xterm-color',
-        cols: 80,
-        rows: 30,
-        cwd: input.cwd,
-        env: { ...process.env, ...input.env } as Record<string, string>,
+    const agentKind = input.session.agentKind ?? 'claude-code'
+    const { userPrompt: rcUserPrompt, systemArgs: rcSystemArgs } = deliverPrompt(agentKind, { system: input.session.systemPrompt ?? '', user: input.session.prompt })
+
+    let proc: pty.IPty
+    if (agentKind === 'opencode') {
+      if (input.session.systemPrompt) {
+        writeAgentsMd(input.cwd, buildAgentsMdContent(input.session.systemPrompt))
       }
-    )
+      const ocSid = input.session.opencodeSid
+      proc = spawnOpencode(ocSid ? ['--session', ocSid] : ['--continue'], null, input.cwd, input.env)
+    } else {
+      let args: string[]
+      if (hasTranscript(id)) {
+        args = ['--dangerously-skip-permissions', '--remote-control', '--resume', id]
+      } else {
+        args = ['--dangerously-skip-permissions', '--remote-control', ...rcSystemArgs, '--session-id', id, rcUserPrompt]
+      }
+      proc = spawnAgent('claude', args, input.cwd, input.env)
+    }
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
     const rec: SessionRecord = { pty: proc, detector, buffer, dto }

@@ -1,8 +1,9 @@
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { RepoDTO, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO } from '../shared/contract.js'
+import type { BackendKind, RepoDTO, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
+import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -18,15 +19,45 @@ export interface Rpc {
 export function createRpc(
   deps: IpcDeps,
   emit: (channel: string, ...args: unknown[]) => void,
+  opts: { coalesceMs?: number } = {},
 ): Rpc {
+  const coalesceMs = opts.coalesceMs ?? 40
+
   // Tracks which repo+branch each session owns so cleanup can remove the worktree.
   const sessionMeta = new Map<string, { repo: RepoDTO; branch: string }>()
 
   // Tracks persisted status to avoid redundant DB writes on every data chunk.
   const persistedStatus = new Map<string, string>()
 
+  // Per-session output coalescing: batch session:data bursts and flush on a
+  // short timer so a chatty PTY doesn't flood the transport with one message
+  // per chunk. Status events are never coalesced.
+  const pendingData = new Map<string, { parts: string[]; seq: number }>()
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+  function flushData(): void {
+    flushTimer = null
+    for (const [id, entry] of pendingData) {
+      if (entry.parts.length > 0) {
+        emit(IPC.sessionData, id, entry.parts.join(''), entry.seq)
+      }
+    }
+    pendingData.clear()
+  }
+
   function onData(sessionId: string, chunk: string, seq: number): void {
-    emit(IPC.sessionData, sessionId, chunk, seq)
+    const cur = pendingData.get(sessionId)
+    if (cur) {
+      cur.parts.push(chunk)
+      cur.seq = seq
+    } else {
+      pendingData.set(sessionId, { parts: [chunk], seq })
+    }
+    if (coalesceMs <= 0) {
+      flushData()
+    } else if (!flushTimer) {
+      flushTimer = setTimeout(flushData, coalesceMs)
+    }
   }
   function onStatus(sessionId: string, status: string): void {
     emit(IPC.sessionStatus, sessionId, status)
@@ -59,8 +90,9 @@ export function createRpc(
         return deps.tickets.listTickets()
 
       case IPC.startSession: {
-        const input = args[0] as { tid: string; title: string; prompt: string; repoId: string; description?: string }
+        const input = args[0] as { tid: string; title: string; prompt: string; repoId: string; description?: string; agentKind?: BackendKind }
         const { tid, title, prompt, repoId, description } = input
+        const agentKind = input.agentKind
 
         const repo = await deps.repos.get(repoId)
         if (!repo) throw new Error(`Unknown repo: ${repoId}`)
@@ -78,6 +110,15 @@ export function createRpc(
 
         const systemPrompt = buildSystemPrompt({ tid, title, description })
 
+        let opencodePort: number | undefined
+        if (agentKind === 'opencode') {
+          try {
+            opencodePort = await deps.ports.claim(cwd, 'opencode')
+          } catch {
+            opencodePort = undefined
+          }
+        }
+        const startedAt = Date.now()
         const session = deps.sessions.start({
           tid,
           title,
@@ -87,11 +128,21 @@ export function createRpc(
           cwd,
           env: port !== undefined ? { PORT: String(port) } : undefined,
           systemPrompt,
+          agentKind,
+          opencodePort,
         })
 
         sessionMeta.set(session.id, { repo, branch })
-        deps.sessionStore.upsert({ ...session, port })
+        deps.sessionStore.upsert({ ...session, port, agentKind: agentKind ?? 'claude-code' })
         persistedStatus.set(session.id, 'running')
+
+        if (agentKind === 'opencode' && opencodePort) {
+          void captureOpencodeSessionId(opencodePort, startedAt - 1000).then((sid) => {
+            if (!sid) return
+            const cur = deps.sessionStore.get(session.id)
+            if (cur) deps.sessionStore.upsert({ ...cur, opencodeSid: sid })
+          })
+        }
 
         // FLO-26: move the linked ticket to the provider's "In Progress" state
         // when the agent starts. Best-effort — a ticket-API failure must not
@@ -267,6 +318,11 @@ export function createRpc(
   }
 
   function dispose(): void {
+    if (flushTimer) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
+    pendingData.clear()
     deps.sessions.off('data', onData)
     deps.sessions.off('status', onStatus)
   }
