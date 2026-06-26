@@ -8,4 +8,5 @@ allowBuilds:
   electron: true
   esbuild: true
   node-pty: true
+  opencode-ai: true
   svelte-preprocess: true

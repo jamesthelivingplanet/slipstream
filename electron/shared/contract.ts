@@ -7,13 +7,14 @@
  *
  * Filesystem conventions (locked):
  *   repos      → <root>/.repositories/<id>
- *   worktrees  → <root>/.worktrees/<org>-<name>/<branch>
+ *   worktrees  → ~/.worktrees/<org>-<name>/<branch>
  *   branches   → always cut from the repo's base branch (main/master/develop)
  *   <root>     → app data dir (see paths.ts, owned by integration layer)
  */
 
 export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored'
 export type TicketSource = 'jira' | 'linear'
+export type BackendKind = 'claude-code' | 'opencode'
 
 export interface NotifyPrefs { needs: boolean; done: boolean; running: boolean }
 export interface PushSubscriptionDTO {
@@ -54,6 +55,8 @@ export interface SessionDTO {
   status: SessionStatus
   port?: number       // assigned by floo on start
   systemPrompt?: string
+  agentKind?: BackendKind
+  opencodeSid?: string
   createdAt: number
 }
 
@@ -115,6 +118,8 @@ export interface StartSessionInput {
   cwd: string         // worktree path (created by caller before start)
   env?: Record<string, string>
   systemPrompt?: string
+  agentKind?: BackendKind
+  opencodePort?: number
 }
 
 export interface ResumeSessionInput {
@@ -202,7 +207,7 @@ export interface SlipstreamApi {
   openInEditor(input: { repoId: string; branch: string; mobile?: boolean }): Promise<void>
 
   /** Creates the worktree, claims a port, spawns claude. Returns the session. */
-  startSession(input: { tid: string; title: string; prompt: string; repoId: string; description?: string }): Promise<SessionDTO>
+  startSession(input: { tid: string; title: string; prompt: string; repoId: string; description?: string; agentKind?: BackendKind }): Promise<SessionDTO>
   writeSession(id: string, data: string): void
   resizeSession(id: string, cols: number, rows: number): void
   killSession(id: string): Promise<void>
