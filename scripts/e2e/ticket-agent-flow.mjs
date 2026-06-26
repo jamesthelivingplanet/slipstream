@@ -1,5 +1,5 @@
 // Drives the ticket-agent flow: open New agent, pick the first Linear ticket,
-// create a draft agent from it, and confirm it lands in the session list.
+// pick a repo, and start the agent. Requires a registered repo.
 import { _electron as electron } from 'playwright'
 import electronPath from 'electron'
 import path from 'node:path'
@@ -36,9 +36,16 @@ await tks.first().click()
 await win.waitForTimeout(300)
 await shot(win, 'ticket-2-picked')
 
-await win.getByRole('button', { name: /create agent/i }).click()
+// Repo selection now lives in the New agent dialog (FLO-34).
+await win.locator('#dlgRepoSel .sel-trigger').click()
+await win.waitForTimeout(200)
+await win.locator('#dlgRepoSel .sel-menu .opt').first().click()
+await win.waitForTimeout(200)
+
+// NOTE: this now starts a real `claude` (see CLAUDE.md e2e warning).
+await win.getByRole('button', { name: /start agent/i }).click()
 await win.waitForTimeout(600)
-await shot(win, 'ticket-3-created')
+await shot(win, 'ticket-3-started')
 
 console.log('done')
 await app.close()
