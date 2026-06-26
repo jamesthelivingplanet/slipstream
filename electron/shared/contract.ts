@@ -185,6 +185,14 @@ export interface ITicketProvider {
    * started state exists, or the ticket is already in a started state).
    */
   startTicket(tid: string): Promise<WorkflowState | null>
+  /**
+   * Transition the ticket back to this provider's "to do" / unstarted state
+   * (e.g. Linear "To Do"). Best-effort and idempotent: returns the new
+   * state, or null when no transition applies (ticket is not currently in a
+   * started/in-progress state, no provider configured, no unstarted state
+   * exists, or the ticket is already unstarted).
+   */
+  resetTicket(tid: string): Promise<WorkflowState | null>
 }
 
 /* ───────── IPC: renderer-facing bridge (window.slipstream) ───────── */
