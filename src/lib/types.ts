@@ -1,5 +1,6 @@
 export type Status = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'detached'
 export type Source = 'jira' | 'linear'
+export type BackendKind = 'claude-code' | 'opencode'
 export type Filter = 'all' | 'needs' | 'running' | 'done'
 
 export interface Repo {
@@ -36,6 +37,7 @@ export interface Session {
   prompt?: string
   description?: string
   port?: number
+  agentKind?: BackendKind
   activity: { text: string; q?: boolean }
 }
 

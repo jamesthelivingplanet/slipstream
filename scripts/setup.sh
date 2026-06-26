@@ -17,6 +17,22 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# ---------------------------------------------------------------------------
+# Node 22 enforcement — needed for native module ABI compatibility with Electron 33
+# ---------------------------------------------------------------------------
+with_node22() {
+  if node -e "process.exit(Number(/^v22/.test(process.version))?0:1)" 2>/dev/null; then
+    "$@"
+  elif command -v mise &>/dev/null; then
+    echo "  Using Node 22 via mise…"
+    mise install node@22 2>/dev/null || true
+    mise exec node@22 -- "$@"
+  else
+    echo "✗ Node 22 is required but $(node --version 2>/dev/null || echo 'none') was detected."
+    exit 1
+  fi
+}
+
 echo ""
 echo "▶ Slipstream setup"
 echo "  Repo: $REPO_ROOT"
@@ -58,8 +74,8 @@ echo "✔ pnpm: $(pnpm --version)"
 if command -v node &>/dev/null; then
   NODE_MAJOR="$(node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))')"
   if [[ "$NODE_MAJOR" -lt 22 ]]; then
-    echo "⚠  node $(node --version) detected — Node 22+ is recommended (devEngines pins 22.x)."
-    echo "   Native modules may not build correctly on older Node versions."
+    echo "⚠  node $(node --version) detected — Node 22+ is required for native module builds."
+    echo "   The setup script will use Node 22 via mise for install steps."
   else
     echo "✔ node: $(node --version)"
   fi
@@ -148,12 +164,12 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "▶ Installing dependencies (pnpm install)…"
-pnpm install
+with_node22 pnpm install
 
 echo ""
 echo "▶ Rebuilding native modules for Electron's ABI…"
 echo "  (better-sqlite3 and node-pty must match Electron's Node ABI, not the system Node ABI)"
-pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty
+with_node22 pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty
 
 ELECTRON_BIN="$REPO_ROOT/node_modules/electron/dist/electron"
 if [[ -f "$ELECTRON_BIN" ]]; then

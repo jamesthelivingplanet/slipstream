@@ -62,7 +62,7 @@ Renderer (Svelte)  ──window.slipstream──▶  preload  ──ipcRenderer�
 ## Filesystem conventions
 
 - **Root** = Electron `app.getPath('userData')`. DB at `root/slipstream.db`.
-- **Worktrees**: `root/.worktrees/<org>-<name>/<branch>`.
+- **Worktrees**: `~/.worktrees/<org>-<name>/<branch>`.
 - **Branches**: always cut from the repo's base branch.
 - Repos are referenced **in place** by absolute path (we don't relocate them).
 

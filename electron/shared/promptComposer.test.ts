@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   defaultUserPrompt,
   buildSystemPrompt,
+  buildAgentsMdContent,
   deliverPrompt,
 } from './promptComposer.js'
 
@@ -73,8 +74,36 @@ describe('deliverPrompt', () => {
   })
 
   it('default fallback branch prepends system to user with empty systemArgs', () => {
-    const result = deliverPrompt('codex' as never, { system: 'sys', user: 'usr' })
+    const result = deliverPrompt('unknown-backend' as never, { system: 'sys', user: 'usr' })
     expect(result.systemArgs).toEqual([])
     expect(result.userPrompt.startsWith('sys')).toBe(true)
   })
 })
+
+describe('buildAgentsMdContent', () => {
+  it('returns the system prompt as-is', () => {
+    const result = buildAgentsMdContent('You are an autonomous agent.')
+    expect(result).toBe('You are an autonomous agent.')
+  })
+
+  it('handles multi-line system prompts', () => {
+    const prompt = 'Line 1\nLine 2\nLine 3'
+    const result = buildAgentsMdContent(prompt)
+    expect(result).toBe(prompt)
+  })
+})
+
+describe('deliverPrompt with opencode', () => {
+  it('returns empty systemArgs when system is present (system goes via AGENTS.md)', () => {
+    const result = deliverPrompt('opencode', { system: 'sys content', user: 'usr content' })
+    expect(result.systemArgs).toEqual([])
+    expect(result.userPrompt).toBe('usr content')
+  })
+
+  it('returns empty systemArgs when system is empty', () => {
+    const result = deliverPrompt('opencode', { system: '', user: 'usr content' })
+    expect(result.systemArgs).toEqual([])
+    expect(result.userPrompt).toBe('usr content')
+  })
+})
+

@@ -2,7 +2,7 @@
   import { dialogOpen, tickets, createAgentFromTicket, createBlankAgent, startAgent, refreshTickets, repos, repoById, settingsOpen } from '../stores'
   import { branchFor } from '../branch'
   import { icons } from '../icons'
-  import type { Ticket } from '../types'
+  import type { Ticket, BackendKind } from '../types'
 
   let picked: Ticket | null = null
   let title = ''
@@ -12,6 +12,7 @@
   let draftTid = ''
   let wasOpen = false
   let loadingTickets = false
+  let agentKind: BackendKind = 'claude-code'
 
   $: chosen = repoChoice ? repoById(repoChoice) : undefined
   $: previewTid = picked ? picked.tid : draftTid
@@ -43,9 +44,9 @@
   async function start() {
     if (!title.trim() || !repoChoice) return
     const tid = picked
-      ? createAgentFromTicket(picked, prompt)
-      : createBlankAgent(title.trim(), prompt, draftTid)
-    await startAgent(tid, repoChoice as string, prompt)
+      ? createAgentFromTicket(picked, prompt, agentKind)
+      : createBlankAgent(title.trim(), prompt, draftTid, agentKind)
+    await startAgent(tid, repoChoice as string, prompt, agentKind)
   }
 
   function onWindowClick(e: MouseEvent) {
@@ -67,6 +68,18 @@
       <div>
         <label class="lbl-f" for="dTitle">Title</label>
         <input id="dTitle" type="text" bind:value={title} placeholder="What should this agent work on?" />
+      </div>
+
+      <div>
+        <span class="lbl-f">Agent type</span>
+        <div class="agent-kind-toggle">
+          <button type="button" class="toggle-opt" class:active={agentKind === 'claude-code'} on:click={() => agentKind = 'claude-code'}>
+            Claude Code
+          </button>
+          <button type="button" class="toggle-opt" class:active={agentKind === 'opencode'} on:click={() => agentKind = 'opencode'}>
+            OpenCode
+          </button>
+        </div>
       </div>
 
       {#if loadingTickets || $tickets.length > 0}

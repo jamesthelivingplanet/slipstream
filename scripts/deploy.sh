@@ -24,6 +24,22 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
 
 # ---------------------------------------------------------------------------
+# Node 22 enforcement — needed for native module ABI compatibility with Electron 33
+# ---------------------------------------------------------------------------
+with_node22() {
+  if node -e "process.exit(Number(/^v22/.test(process.version))?0:1)" 2>/dev/null; then
+    "$@"
+  elif command -v mise &>/dev/null; then
+    echo "  Using Node 22 via mise…"
+    mise install node@22 2>/dev/null || true
+    mise exec node@22 -- "$@"
+  else
+    echo "✗ Node 22 is required but $(node --version 2>/dev/null || echo 'none') was detected."
+    exit 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Parse flags
 # ---------------------------------------------------------------------------
 SKIP_CHECKS="${SKIP_CHECKS:-0}"
@@ -53,7 +69,7 @@ fi
 # Phase 2: Build
 # ---------------------------------------------------------------------------
 echo "▶ Building (pnpm build)…"
-pnpm build
+with_node22 pnpm build
 
 # ---------------------------------------------------------------------------
 # Phase 3: Restart the service (OS-aware: systemd on Linux, launchd on macOS)
