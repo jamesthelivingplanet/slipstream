@@ -15,5 +15,8 @@ export function createEmptyProvider(): ITicketProvider {
     async startTicket(_tid: string): Promise<WorkflowState | null> {
       return null
     },
+    async resetTicket(_tid: string): Promise<WorkflowState | null> {
+      return null
+    },
   }
 }

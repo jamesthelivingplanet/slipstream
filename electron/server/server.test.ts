@@ -72,6 +72,7 @@ function makeFakeDeps(): IpcDeps {
     getTicketStatus: vi.fn().mockResolvedValue({ current: null, available: [] }),
     setTicketStatus: vi.fn().mockRejectedValue(new Error('not implemented')),
     startTicket: vi.fn().mockResolvedValue(null),
+    resetTicket: vi.fn().mockResolvedValue(null),
   }
 
   const config: IConfigStore = {
