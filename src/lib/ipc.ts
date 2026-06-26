@@ -7,6 +7,7 @@
  * renders without crashing.
  */
 import type {
+  BackendKind,
   RepoDTO,
   RepoSettings,
   SessionDTO,
@@ -65,6 +66,7 @@ export function startSession(input: {
   prompt: string
   repoId: string
   description?: string
+  agentKind?: BackendKind
 }): Promise<SessionDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.startSession(input)

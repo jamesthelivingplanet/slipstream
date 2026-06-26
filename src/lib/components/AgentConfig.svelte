@@ -2,7 +2,7 @@
   import { repos, repoById, startAgent } from '../stores'
   import { branchFor } from '../branch'
   import { icons } from '../icons'
-  import type { Session } from '../types'
+  import type { Session, BackendKind } from '../types'
 
   export let session: Session
 
@@ -11,11 +11,15 @@
   let menuOpen = false
   let lastTid = ''
 
+  let agentKind: BackendKind = 'claude-code'
+
+
   $: if (session && session.tid !== lastTid) {
     lastTid = session.tid
     prompt = session.prompt ?? `Begin implementing ${session.tid}.`
     repoChoice = session.repo ?? session.suggestedRepo ?? null
     menuOpen = false
+    agentKind = (session.agentKind as BackendKind) ?? 'claude-code'
   }
 
   $: chosen = repoChoice ? repoById(repoChoice) : undefined
@@ -26,7 +30,7 @@
       menuOpen = true
       return
     }
-    startAgent(session.tid, repoChoice, prompt)
+    startAgent(session.tid, repoChoice, prompt, agentKind)
   }
 
   function onWindowClick(e: MouseEvent) {
@@ -70,6 +74,21 @@
       <p class="cfg-hint">A fresh worktree is branched from this repo's base branch, and claude starts inside it.</p>
     </div>
 
+
+    <div>
+      <span class="lbl-f">Agent</span>
+      <div class="agent-kind-toggle">
+        <button type="button" class="toggle-opt" class:active={agentKind === 'claude-code'} on:click={() => agentKind = 'claude-code'}>
+          {#if agentKind === 'claude-code'}<span class="check-active">{@html icons.check}</span>{/if}
+          Claude Code
+        </button>
+        <button type="button" class="toggle-opt" class:active={agentKind === 'opencode'} on:click={() => agentKind = 'opencode'}>
+          {#if agentKind === 'opencode'}<span class="check-active">{@html icons.check}</span>{/if}
+          OpenCode
+        </button>
+      </div>
+      <p class="cfg-hint">{agentKind === 'claude-code' ? 'Uses claude --dangerously-skip-permissions in a git worktree.' : 'Uses opencode in a git worktree with auto-discovered AGENTS.md.'}</p>
+    </div>
     <div class="derive">
       <div class="drow"><span class="k">Base branch</span><span class="v muted">{chosen?.base ?? '—'}</span></div>
       <div class="drow"><span class="k">New branch</span><span class="v"><b>{branch}</b></span></div>

@@ -1,6 +1,7 @@
+import type { BackendKind } from './contract.js'
+
 export interface TicketContext { tid: string; title: string; description?: string }
 export interface PromptLayers { system: string; user: string }
-export type BackendKind = 'claude-code'
 export interface SpawnPrompt { systemArgs: string[]; userPrompt: string }
 
 /**
@@ -11,9 +12,9 @@ export interface SpawnPrompt { systemArgs: string[]; userPrompt: string }
  * prompt (which tells the agent to emit them) and the status detector (which
  * reads them back). See electron/services/statusDetector.ts.
  */
-export const NEEDS_INPUT_MARKER = '⟦SLIPSTREAM:NEEDS_INPUT⟧'
-export const DONE_MARKER = '⟦SLIPSTREAM:DONE⟧'
-export const IN_PROGRESS_MARKER = '⟦SLIPSTREAM:IN_PROGRESS⟧'
+export const NEEDS_INPUT_MARKER = '\u27e6SLIPSTREAM:NEEDS_INPUT\u27e7'
+export const DONE_MARKER = '\u27e6SLIPSTREAM:DONE\u27e7'
+export const IN_PROGRESS_MARKER = '\u27e6SLIPSTREAM:IN_PROGRESS\u27e7'
 
 export function defaultUserPrompt(tid: string): string {
   return `Begin implementing ${tid}.`
@@ -34,7 +35,7 @@ Process:
 - Run checks and tests until they pass.
 - Open a PR when the acceptance criteria are met.
 
-Note: CLAUDE.md already covers repo conventions — follow it but do not duplicate it here.
+Note: CLAUDE.md already covers repo conventions \u2014 follow it but do not duplicate it here.
 
 ## Signaling your state to the app
 
@@ -42,20 +43,24 @@ The app tracks your current state. You MUST tell it your state by printing a mar
 
 - When you begin or resume actively working on the ticket, finish your message with this exact marker alone on the final line:
   ${IN_PROGRESS_MARKER}
-- When you need the user to answer a question, make a decision, or provide input — and you cannot make further progress without it — finish your message with this exact marker alone on the final line:
+- When you need the user to answer a question, make a decision, or provide input \u2014 and you cannot make further progress without it \u2014 finish your message with this exact marker alone on the final line:
   ${NEEDS_INPUT_MARKER}
 - When you have fully completed the ticket (acceptance criteria met / PR opened) and there is nothing left to do, finish with this exact marker alone on the final line:
   ${DONE_MARKER}
 
 Rules:
 - Print the marker EXACTLY as shown, with no code fences, quotes, or extra characters around it, as the final line of your output.
-- The most recently printed marker is what the app displays — if you resume work after a ${NEEDS_INPUT_MARKER}, print ${IN_PROGRESS_MARKER} to show you are running again.
+- The most recently printed marker is what the app displays \u2014 if you resume work after a ${NEEDS_INPUT_MARKER}, print ${IN_PROGRESS_MARKER} to show you are running again.
 - Emit a marker ONLY when the condition is true.
 
 Ticket:
 ${tid}: ${title}
 
 ${desc}`
+}
+
+export function buildAgentsMdContent(systemPrompt: string): string {
+  return systemPrompt
 }
 
 export function deliverPrompt(kind: BackendKind, layers: PromptLayers): SpawnPrompt {
@@ -65,6 +70,9 @@ export function deliverPrompt(kind: BackendKind, layers: PromptLayers): SpawnPro
       if (system) {
         return { systemArgs: ['--append-system-prompt', system], userPrompt: user }
       }
+      return { systemArgs: [], userPrompt: user }
+
+    case 'opencode':
       return { systemArgs: [], userPrompt: user }
 
     default:

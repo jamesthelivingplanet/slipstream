@@ -118,8 +118,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
   wss.on('connection', (ws: WebSocket) => {
     const rpc = createRpc(deps, (channel, ...args) => {
       if (ws.readyState !== WebSocket.OPEN) return
-      const push: WirePush = { t: 'push', channel, args }
-      ws.send(JSON.stringify(push))
+      ws.send(JSON.stringify({ t: 'push', channel, args } as WirePush))
     })
 
     ws.on('message', (raw) => {

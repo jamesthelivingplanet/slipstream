@@ -220,6 +220,37 @@ html[data-mode="light"] .seg.on { background: #fff; }
 .opt .check { margin-left: auto; color: hsl(var(--primary)); opacity: 0; }
 .opt.sel .check { opacity: 1; }
 
+.agent-kind-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.toggle-opt {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.toggle-opt.active {
+  background: var(--accent);
+  color: #fff;
+}
+.toggle-opt:not(.active):hover {
+  background: var(--bg-hover);
+}
+.check-active {
+  display: inline-flex;
+}
+
 .derive { background: hsl(var(--muted) / .35); border: 1px solid hsl(var(--border)); border-radius: var(--radius);
   padding: 13px 14px; display: flex; flex-direction: column; gap: 9px; }
 .drow { display: flex; gap: 10px; font-size: 12px; align-items: center; }

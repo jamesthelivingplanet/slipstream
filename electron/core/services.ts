@@ -48,7 +48,7 @@ export function createServices(root: string): IpcDeps {
   })
   return {
     repos: createRepoRegistry(db, root),
-    worktrees: createWorktreeManager(root),
+    worktrees: createWorktreeManager(os.homedir()),
     sessions,
     ports: createPortBroker(),
     tickets: createLinearProvider(configStore),

@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store'
-import type { Filter, Repo, Session, Status, Ticket } from './types'
+import type { Filter, Repo, Session, Status, Ticket, BackendKind } from './types'
 import { branchFor } from './branch'
 import {
   hasBackend,
@@ -191,13 +191,13 @@ export async function removeRepoById(id: string): Promise<void> {
   }
 }
 
-export function createAgentFromTicket(ticket: Ticket, prompt: string): string {
+export function createAgentFromTicket(ticket: Ticket, prompt: string, agentKind: BackendKind = 'claude-code'): string {
   tickets.update(($t) => $t.filter((t) => t.tid !== ticket.tid))
   sessions.update(($s) => [
     {
       tid: ticket.tid, src: ticket.src, status: 'idle' as Status, title: ticket.title,
       repo: null, suggestedRepo: ticket.repo, branch: null, add: 0, del: 0, ago: 'draft',
-      prompt, description: ticket.description, activity: { text: 'Not started.' },
+      prompt, description: ticket.description, activity: { text: 'Not started.' }, agentKind,
     },
     ...$s,
   ])
@@ -206,10 +206,10 @@ export function createAgentFromTicket(ticket: Ticket, prompt: string): string {
   return ticket.tid
 }
 
-export function createBlankAgent(title: string, prompt: string, tid: string = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`): string {
+export function createBlankAgent(title: string, prompt: string, tid: string = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, agentKind: BackendKind = 'claude-code'): string {
   sessions.update(($s) => [
     { tid, src: 'jira', status: 'idle', title, repo: null, branch: null,
-      add: 0, del: 0, ago: 'draft', prompt, activity: { text: 'Not started.' } },
+      add: 0, del: 0, ago: 'draft', prompt, activity: { text: 'Not started.' }, agentKind },
     ...$s,
   ])
   dialogOpen.set(false)
@@ -217,7 +217,7 @@ export function createBlankAgent(title: string, prompt: string, tid: string = `T
   return tid
 }
 
-export async function startAgent(tid: string, repoId: string, prompt: string) {
+export async function startAgent(tid: string, repoId: string, prompt: string, agentKind?: BackendKind) {
   const s = get(sessions).find((x) => x.tid === tid)
   if (!s) return
 
@@ -232,12 +232,13 @@ export async function startAgent(tid: string, repoId: string, prompt: string) {
       activity: { text: 'Creating worktree & starting claude…' },
     }))
     try {
-      const dto = await startSession({ tid, title: s.title, prompt, repoId, description: s.description })
+      const dto = await startSession({ tid, title: s.title, prompt, repoId, description: s.description, agentKind })
       patch(tid, (s) => ({
         ...s,
         id: dto.id,
         branch: dto.branch,
-        port: dto.port,
+      port: dto.port,
+      agentKind: dto.agentKind,
         repo: repoId,
         status: dto.status,
       }))
@@ -255,6 +256,7 @@ export async function startAgent(tid: string, repoId: string, prompt: string) {
       repo: repoId,
       prompt,
       branch: branchFor(s.tid, s.title),
+      agentKind,
       status: 'running',
       ago: 'just now',
       activity: { text: 'Creating worktree & starting claude…' },
