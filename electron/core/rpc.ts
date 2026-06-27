@@ -139,6 +139,7 @@ export function createRpc(
         if (agentKind === 'opencode' && opencodePort) {
           void captureOpencodeSessionId(opencodePort, startedAt - 1000).then((sid) => {
             if (!sid) return
+            deps.sessions.setOpencodeSid(session.id, sid)
             const cur = deps.sessionStore.get(session.id)
             if (cur) deps.sessionStore.upsert({ ...cur, opencodeSid: sid })
           })
@@ -217,7 +218,11 @@ export function createRpc(
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
         let port: number | undefined
         try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }
-        const dto = deps.sessions.resume({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined })
+        let opencodePort: number | undefined
+        if (persisted.agentKind === 'opencode') {
+          try { opencodePort = await deps.ports.claim(cwd, 'opencode') } catch { opencodePort = undefined }
+        }
+        const dto = deps.sessions.resume({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined, opencodePort })
         sessionMeta.set(id, { repo, branch: persisted.branch })
         persistedStatus.set(id, 'running')
         deps.sessionStore.upsert({ ...dto, port })
@@ -233,7 +238,11 @@ export function createRpc(
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
         let port: number | undefined
         try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }
-        const dto = deps.sessions.attachRemoteControl({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined })
+        let opencodePort: number | undefined
+        if (persisted.agentKind === 'opencode') {
+          try { opencodePort = await deps.ports.claim(cwd, 'opencode') } catch { opencodePort = undefined }
+        }
+        const dto = deps.sessions.attachRemoteControl({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined, opencodePort })
         sessionMeta.set(id, { repo, branch: persisted.branch })
         persistedStatus.set(id, 'running')
         deps.sessionStore.upsert({ ...dto, port })

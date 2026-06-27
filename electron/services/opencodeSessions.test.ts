@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { selectNewestSessionSince } from './opencodeSessions.js'
-import type { OpencodeSession } from './opencodeSessions.js'
+import { selectNewestSessionSince, opencodeStatusFromText, opencodeStatusFromMessages } from './opencodeSessions.js'
+import type { OpencodeSession, OpencodeMessage } from './opencodeSessions.js'
+import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
 
 // ── selectNewestSessionSince ─────────────────────────────────────────────────
 
@@ -50,5 +51,101 @@ describe('selectNewestSessionSince', () => {
       { id: 'ses_exact', time_created: 1000 },
     ]
     expect(selectNewestSessionSince(sessions, sinceMs)).toBe('ses_exact')
+  })
+})
+
+// Helper to build an opencode message with assistant text.
+function assistantMsg(...text: string[]): OpencodeMessage {
+  return { info: { role: 'assistant' }, parts: text.map((t) => ({ type: 'text', text: t })) }
+}
+function userMsg(...text: string[]): OpencodeMessage {
+  return { info: { role: 'user' }, parts: text.map((t) => ({ type: 'text', text: t })) }
+}
+
+// ── opencodeStatusFromText ──────────────────────────────────────────────────
+
+describe('opencodeStatusFromText', () => {
+  it('returns "done" when DONE_MARKER is present', () => {
+    expect(opencodeStatusFromText(`PR opened.\n${DONE_MARKER}`)).toBe('done')
+  })
+
+  it('returns "needs" when NEEDS_INPUT_MARKER is present', () => {
+    expect(opencodeStatusFromText(`Which DB?\n${NEEDS_INPUT_MARKER}`)).toBe('needs')
+  })
+
+  it('returns "running" when only IN_PROGRESS_MARKER is present', () => {
+    expect(opencodeStatusFromText(`Working on it...\n${IN_PROGRESS_MARKER}`)).toBe('running')
+  })
+
+  it('defaults to "running" when no marker is present', () => {
+    expect(opencodeStatusFromText('Just chatting, no marker here.')).toBe('running')
+    expect(opencodeStatusFromText('')).toBe('running')
+  })
+
+  it('last marker wins (NEEDS then IN_PROGRESS → running)', () => {
+    const text = `${NEEDS_INPUT_MARKER}\nResuming work.\n${IN_PROGRESS_MARKER}`
+    expect(opencodeStatusFromText(text)).toBe('running')
+  })
+
+  it('last marker wins (IN_PROGRESS then DONE → done)', () => {
+    const text = `${IN_PROGRESS_MARKER}\nAll done, PR opened.\n${DONE_MARKER}`
+    expect(opencodeStatusFromText(text)).toBe('done')
+  })
+
+  it('last marker wins (DONE then NEEDS → needs)', () => {
+    const text = `${DONE_MARKER}\nActually I have a question.\n${NEEDS_INPUT_MARKER}`
+    expect(opencodeStatusFromText(text)).toBe('needs')
+  })
+})
+
+// ── opencodeStatusFromMessages ──────────────────────────────────────────────
+
+describe('opencodeStatusFromMessages', () => {
+  it('returns "running" for an empty message list', () => {
+    expect(opencodeStatusFromMessages([])).toBe('running')
+  })
+
+  it('ignores user messages and classifies from assistant text', () => {
+    const msgs: OpencodeMessage[] = [
+      userMsg('Implement the ticket.'),
+      assistantMsg('Opening a PR.', DONE_MARKER),
+    ]
+    expect(opencodeStatusFromMessages(msgs)).toBe('done')
+  })
+
+  it('returns "needs" when the last assistant message ends with NEEDS_INPUT_MARKER', () => {
+    const msgs: OpencodeMessage[] = [
+      userMsg('go'),
+      assistantMsg('Started.', IN_PROGRESS_MARKER),
+      assistantMsg('Which framework?', NEEDS_INPUT_MARKER),
+    ]
+    expect(opencodeStatusFromMessages(msgs)).toBe('needs')
+  })
+
+  it('honors the most recent marker across multiple assistant turns', () => {
+    const msgs: OpencodeMessage[] = [
+      assistantMsg('Waiting on you.', NEEDS_INPUT_MARKER),
+      assistantMsg('Thanks, resuming.', IN_PROGRESS_MARKER),
+    ]
+    expect(opencodeStatusFromMessages(msgs)).toBe('running')
+  })
+
+  it('ignores non-text parts', () => {
+    const msgs: OpencodeMessage[] = [
+      {
+        info: { role: 'assistant' },
+        parts: [
+          { type: 'step-start' },
+          { type: 'text', text: `Done. ${DONE_MARKER}` },
+          { type: 'step-finish' },
+        ],
+      },
+    ]
+    expect(opencodeStatusFromMessages(msgs)).toBe('done')
+  })
+
+  it('returns "running" when only user messages exist (agent has not replied yet)', () => {
+    const msgs: OpencodeMessage[] = [userMsg('Begin.')]
+    expect(opencodeStatusFromMessages(msgs)).toBe('running')
   })
 })
