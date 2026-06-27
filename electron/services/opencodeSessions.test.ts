@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { selectNewestSessionSince, opencodeStatusFromText, opencodeStatusFromMessages } from './opencodeSessions.js'
+import { selectNewestSessionSince, opencodeStatusFromText, opencodeStatusFromMessages, withOpencodePromptArg } from './opencodeSessions.js'
 import type { OpencodeSession, OpencodeMessage } from './opencodeSessions.js'
 import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
 
@@ -147,5 +147,39 @@ describe('opencodeStatusFromMessages', () => {
   it('returns "running" when only user messages exist (agent has not replied yet)', () => {
     const msgs: OpencodeMessage[] = [userMsg('Begin.')]
     expect(opencodeStatusFromMessages(msgs)).toBe('running')
+  })
+})
+
+// ── withOpencodePromptArg ────────────────────────────────────────────────────
+
+describe('withOpencodePromptArg', () => {
+  it('appends --prompt <prompt> after the base args', () => {
+    expect(withOpencodePromptArg(['--port', '4096'], 'Begin implementing FLO-38.'))
+      .toEqual(['--port', '4096', '--prompt', 'Begin implementing FLO-38.'])
+  })
+
+  it('returns args unchanged when prompt is null (resume/continue path)', () => {
+    const args = ['--continue']
+    expect(withOpencodePromptArg(args, null)).toBe(args)
+  })
+
+  it('returns args unchanged when prompt is undefined', () => {
+    expect(withOpencodePromptArg(['--port', '1'], undefined))
+      .toEqual(['--port', '1'])
+  })
+
+  it('returns args unchanged when prompt is empty (blank agent)', () => {
+    expect(withOpencodePromptArg(['--port', '1'], '')).toEqual(['--port', '1'])
+  })
+
+  it('does not mutate the input args array', () => {
+    const args = ['--port', '4096']
+    withOpencodePromptArg(args, 'do the thing')
+    expect(args).toEqual(['--port', '4096'])
+  })
+
+  it('keeps a multi-line prompt intact as a single argv value', () => {
+    const prompt = 'Line one\nLine two'
+    expect(withOpencodePromptArg([], prompt)).toEqual(['--prompt', prompt])
   })
 })
