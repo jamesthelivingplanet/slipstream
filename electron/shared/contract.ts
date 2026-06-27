@@ -126,6 +126,7 @@ export interface ResumeSessionInput {
   session: SessionDTO
   cwd: string
   env?: Record<string, string>
+  opencodePort?: number
 }
 
 export interface ISessionStore {
@@ -148,6 +149,9 @@ export interface ISessionManager {
   off<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void
   getBuffer(sessionId: string): { data: string; seq: number }
   attachRemoteControl(input: ResumeSessionInput): SessionDTO
+  /** Record the opencode server's session id so status polling can begin.
+   *  No-op for non-opencode sessions or when no port was assigned. */
+  setOpencodeSid(sessionId: string, sid: string): void
 }
 
 /**
