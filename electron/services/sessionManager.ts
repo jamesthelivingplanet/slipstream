@@ -25,7 +25,7 @@ import { trustDirectory } from './claudeTrust.js'
 import { hasTranscript } from './transcripts.js'
 import { deliverPrompt, buildAgentsMdContent } from '../shared/promptComposer.js'
 import { writeAgentsMd } from './promptWriter.js'
-import { fetchOpencodeMessages, opencodeStatusFromMessages } from './opencodeSessions.js'
+import { fetchOpencodeMessages, opencodeStatusFromMessages, withOpencodePromptArg } from './opencodeSessions.js'
 
 function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<string, string>): pty.IPty {
   return pty.spawn(cmd, args, {
@@ -43,13 +43,10 @@ const OPENCODE_BIN = (() => {
 })()
 
 function spawnOpencode(args: string[], prompt: string | null, cwd: string, env?: Record<string, string>): pty.IPty {
-  const proc = spawnAgent(OPENCODE_BIN, args, cwd, env)
-  if (prompt !== null) {
-    setTimeout(() => {
-      try { proc.write(prompt + '\r') } catch { /* process may have exited */ }
-    }, 1000)
-  }
-  return proc
+  // Hand the prompt to opencode via its `--prompt` flag so the TUI auto-starts
+  // on launch. Writing the prompt into the PTY after a delay races the TUI's
+  // startup and the keystrokes are lost — see withOpencodePromptArg.
+  return spawnAgent(OPENCODE_BIN, withOpencodePromptArg(args, prompt), cwd, env)
 }
 
 // ─── Internal session record ──────────────────────────────────────────────────

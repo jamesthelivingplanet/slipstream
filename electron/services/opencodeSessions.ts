@@ -37,6 +37,23 @@ export function selectNewestSessionSince(
 }
 
 /**
+ * Append opencode's `--prompt` flag so the TUI auto-starts on `prompt`.
+ *
+ * The TUI ignores keystrokes typed before its input box has rendered (startup
+ * takes several seconds), so feeding the prompt by writing to the PTY after a
+ * fixed delay races initialization and the run often never starts. `--prompt`
+ * submits the message on launch, independent of how long the TUI took to come
+ * up. Returns `args` unchanged when there is no prompt so the TUI opens to an
+ * empty input (the resume/continue path, which must not auto-submit).
+ */
+export function withOpencodePromptArg(
+  args: string[],
+  prompt: string | null | undefined,
+): string[] {
+  return prompt ? [...args, '--prompt', prompt] : args
+}
+
+/**
  * Fetch the session list from an opencode TUI's embedded server (launched with
  * --port). Returns [] on any error (server still starting, unreachable, etc.).
  */
