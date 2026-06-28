@@ -8,7 +8,7 @@ export default defineConfig({
     include: ['electron/**/*.test.ts', 'src/**/*.test.ts'],
     reporters: [
       'default',
-      ['tdd-guard-vitest', { projectRoot: '/home/jamesthelivingplanet/dev/flotilla' }],
+      ['tdd-guard-vitest', { projectRoot: '/home/jamesthelivingplanet/.repositories/slipstream' }],
     ],
   },
 })
