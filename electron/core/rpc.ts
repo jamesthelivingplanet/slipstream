@@ -94,8 +94,7 @@ export function createRpc(
         const { tid, title, prompt, repoId, description } = input
         const agentKind = input.agentKind
 
-        const repo = await deps.repos.get(repoId)
-        if (!repo) throw new Error(`Unknown repo: ${repoId}`)
+        const repo = await deps.repos.resolvePath(repoId)
 
         const branch = branchFor(tid, title)
         await deps.worktrees.create(repo, branch)
@@ -213,8 +212,7 @@ export function createRpc(
         }
         const persisted = deps.sessionStore.get(id)
         if (!persisted) throw new Error(`Session not found: ${id}`)
-        const repo = await deps.repos.get(persisted.repoId)
-        if (!repo) throw new Error(`Repo not found: ${persisted.repoId}`)
+        const repo = await deps.repos.resolvePath(persisted.repoId)
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
         let port: number | undefined
         try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }
@@ -233,8 +231,7 @@ export function createRpc(
         const id = args[0] as string
         const persisted = deps.sessionStore.get(id)
         if (!persisted) throw new Error(`Session not found: ${id}`)
-        const repo = await deps.repos.get(persisted.repoId)
-        if (!repo) throw new Error(`Repo not found: ${persisted.repoId}`)
+        const repo = await deps.repos.resolvePath(persisted.repoId)
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
         let port: number | undefined
         try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }

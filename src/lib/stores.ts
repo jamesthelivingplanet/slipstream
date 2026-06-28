@@ -246,8 +246,9 @@ export async function startAgent(tid: string, repoId: string, prompt: string, ag
       patch(tid, (s) => ({
         ...s,
         status: 'errored',
-        activity: { text: String(err) },
+        activity: { text: cleanError(err) },
       }))
+      pushToast('error', cleanError(err))
     }
   } else {
     // Mock path — simulate immediately.
