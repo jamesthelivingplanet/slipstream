@@ -5,11 +5,12 @@ import type { RepoDTO, SessionDTO, RepoSettings } from '../shared/contract.js'
 // dependency on a sibling file the bundler doesn't copy.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS repos (
-  id    TEXT PRIMARY KEY,
-  org   TEXT NOT NULL,
-  name  TEXT NOT NULL,
-  base  TEXT NOT NULL,
-  path  TEXT NOT NULL
+  id        TEXT PRIMARY KEY,
+  org       TEXT NOT NULL,
+  name      TEXT NOT NULL,
+  base      TEXT NOT NULL,
+  path      TEXT NOT NULL,
+  remoteUrl TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -61,6 +62,10 @@ export function openDb(file: string): Database.Database {
   if (!cols.some((c) => c.name === 'opencodeSid')) {
     db.exec(`ALTER TABLE sessions ADD COLUMN opencodeSid TEXT`)
   }
+  const repoCols = db.prepare(`PRAGMA table_info(repos)`).all() as { name: string }[]
+  if (!repoCols.some((c) => c.name === 'remoteUrl')) {
+    db.exec(`ALTER TABLE repos ADD COLUMN remoteUrl TEXT`)
+  }
   return db
 }
 
@@ -68,22 +73,23 @@ export function openDb(file: string): Database.Database {
 
 export function upsertRepo(db: Database.Database, repo: RepoDTO): void {
   db.prepare(`
-    INSERT INTO repos (id, org, name, base, path)
-    VALUES (@id, @org, @name, @base, @path)
+    INSERT INTO repos (id, org, name, base, path, remoteUrl)
+    VALUES (@id, @org, @name, @base, @path, @remoteUrl)
     ON CONFLICT(id) DO UPDATE SET
-      org  = excluded.org,
-      name = excluded.name,
-      base = excluded.base,
-      path = excluded.path
-  `).run(repo)
+      org       = excluded.org,
+      name      = excluded.name,
+      base      = excluded.base,
+      path      = excluded.path,
+      remoteUrl = excluded.remoteUrl
+  `).run({ ...repo, remoteUrl: repo.remoteUrl ?? null })
 }
 
 export function allRepos(db: Database.Database): RepoDTO[] {
-  return db.prepare('SELECT id, org, name, base, path FROM repos').all() as RepoDTO[]
+  return db.prepare('SELECT id, org, name, base, path, remoteUrl FROM repos').all() as RepoDTO[]
 }
 
 export function getRepo(db: Database.Database, id: string): RepoDTO | undefined {
-  return db.prepare('SELECT id, org, name, base, path FROM repos WHERE id = ?').get(id) as RepoDTO | undefined
+  return db.prepare('SELECT id, org, name, base, path, remoteUrl FROM repos WHERE id = ?').get(id) as RepoDTO | undefined
 }
 
 export function upsertSession(db: Database.Database, session: SessionDTO): void {

@@ -52,6 +52,7 @@ function makeFakeDeps(): IpcDeps {
     list: vi.fn().mockResolvedValue([makeRepo()]),
     register: vi.fn().mockResolvedValue(makeRepo()),
     get: vi.fn().mockResolvedValue(makeRepo()),
+    resolvePath: vi.fn().mockResolvedValue(makeRepo()),
     remove: vi.fn().mockResolvedValue(undefined),
     getSettings: vi.fn().mockResolvedValue({ installCmd: '', startCmd: '' }),
     setSettings: vi.fn().mockResolvedValue(undefined),
