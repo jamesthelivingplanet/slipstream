@@ -13,6 +13,7 @@ import { createRpc } from './core/rpc.js'
 import type { IConfigStore } from './services/configStore.js'
 import type { IEditorLauncher } from './services/editorLauncher.js'
 import type { IPushService } from './services/pushService.js'
+import type { RunLogger } from './services/runLogger.js'
 
 export interface IpcDeps {
   repos: IRepoRegistry
@@ -25,6 +26,8 @@ export interface IpcDeps {
   editor: IEditorLauncher
   appRunner: IAppRunner
   push: IPushService
+  /** Optional process-level logger for startup/uncaught errors. */
+  logger?: RunLogger
 }
 
 /**
