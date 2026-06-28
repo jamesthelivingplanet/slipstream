@@ -67,6 +67,7 @@ export function deliverPrompt(kind: BackendKind, layers: PromptLayers): SpawnPro
   const { system, user } = layers
   switch (kind) {
     case 'claude-code':
+    case 'pi':
       if (system) {
         return { systemArgs: ['--append-system-prompt', system], userPrompt: user }
       }

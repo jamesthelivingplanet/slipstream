@@ -86,8 +86,18 @@
           {#if agentKind === 'opencode'}<span class="check-active">{@html icons.check}</span>{/if}
           OpenCode
         </button>
+        <button type="button" class="toggle-opt" class:active={agentKind === 'pi'} on:click={() => agentKind = 'pi'}>
+          {#if agentKind === 'pi'}<span class="check-active">{@html icons.check}</span>{/if}
+          Pi
+        </button>
       </div>
-      <p class="cfg-hint">{agentKind === 'claude-code' ? 'Uses claude --dangerously-skip-permissions in a git worktree.' : 'Uses opencode in a git worktree with auto-discovered AGENTS.md.'}</p>
+      <p class="cfg-hint">
+        {agentKind === 'claude-code'
+          ? 'Uses claude --dangerously-skip-permissions in a git worktree.'
+          : agentKind === 'opencode'
+            ? 'Uses opencode in a git worktree with auto-discovered AGENTS.md.'
+            : 'Uses pi --approve in a git worktree with auto-discovered AGENTS.md.'}
+      </p>
     </div>
     <div class="derive">
       <div class="drow"><span class="k">Base branch</span><span class="v muted">{chosen?.base ?? '—'}</span></div>

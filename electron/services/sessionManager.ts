@@ -26,6 +26,7 @@ import { hasTranscript } from './transcripts.js'
 import { deliverPrompt, buildAgentsMdContent } from '../shared/promptComposer.js'
 import { writeAgentsMd } from './promptWriter.js'
 import { fetchOpencodeMessages, opencodeStatusFromMessages, withOpencodePromptArg } from './opencodeSessions.js'
+import { capturePiSessionFile, piSessionDirFor, readPiSessionFile, piStatusFromFileContent } from './piSessions.js'
 import type { RunLogger } from './runLogger.js'
 
 function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<string, string>): pty.IPty {
@@ -41,6 +42,11 @@ function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<strin
 const OPENCODE_BIN = (() => {
   const local = path.join(process.cwd(), 'node_modules', '.bin', 'opencode')
   return existsSync(local) ? local : 'opencode'
+})()
+
+const PI_BIN = (() => {
+  const local = path.join(process.cwd(), 'node_modules', '.bin', 'pi')
+  return existsSync(local) ? local : 'pi'
 })()
 
 function spawnOpencode(args: string[], prompt: string | null, cwd: string, env?: Record<string, string>): pty.IPty {
@@ -61,6 +67,8 @@ interface SessionRecord {
   // opencode-only: embedded server port + session id used for status polling
   opencodePort?: number
   opencodeSid?: string
+  // pi-only: path to the on-disk session JSONL used for status polling
+  piSessionFile?: string
   pollTimer?: ReturnType<typeof setInterval>
 }
 
@@ -82,10 +90,11 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
 
   function wire(id: string, rec: SessionRecord) {
     const { pty: proc, detector, buffer, dto } = rec
-    // OpenCode is a full-screen TUI: its redraws make PTY-scraped markers
-    // unreliable, so its status is driven by polling the embedded server
-    // (see setOpencodeSid / startPolling) instead of the StatusDetector.
-    const ptyDrivenStatus = dto.agentKind !== 'opencode'
+    // OpenCode and Pi are full-screen TUIs: their redraws make PTY-scraped
+    // markers unreliable, so their status is driven by polling (opencode's
+    // embedded server / pi's session file — see startPolling / startPiPolling)
+    // instead of the StatusDetector.
+    const ptyDrivenStatus = dto.agentKind !== 'opencode' && dto.agentKind !== 'pi'
     proc.onData((chunk: string) => {
       const seq = buffer.push(chunk)
       detector.push(chunk)
@@ -144,6 +153,33 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     rec.pollTimer = setInterval(() => void tick(), 2000)
   }
 
+  // ── pi status polling ──────────────────────────────────────────────────────
+
+  function startPiPolling(id: string, rec: SessionRecord, filePath: string) {
+    if (rec.pollTimer) return
+    const tick = async () => {
+      if (rec.disposed) return
+      const content = await readPiSessionFile(filePath)
+      if (rec.disposed) return
+      const s = piStatusFromFileContent(content)
+      if (rec.dto.status !== s) {
+        rec.dto.status = s
+        emit('status', id, s)
+      }
+    }
+    void tick()
+    rec.pollTimer = setInterval(() => void tick(), 2000)
+  }
+
+  /** Discover pi's session file for `cwd` and begin status polling. */
+  function captureAndPollPi(id: string, rec: SessionRecord, cwd: string) {
+    void capturePiSessionFile(piSessionDirFor(cwd)).then((file) => {
+      if (rec.disposed || !file) return
+      rec.piSessionFile = file
+      startPiPolling(id, rec, file)
+    })
+  }
+
   // ── ISessionManager implementation ─────────────────────────────────────────
 
   function start(input: StartSessionInput): SessionDTO {
@@ -169,6 +205,11 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       spawnArgs = withOpencodePromptArg(portArgs, userPrompt)
       spawnCmd = OPENCODE_BIN
       proc = spawnOpencode(portArgs, userPrompt, input.cwd, input.env)
+    } else if (agentKind === 'pi') {
+      const { systemArgs, userPrompt } = deliverPrompt('pi', { system: input.systemPrompt ?? '', user: input.prompt })
+      spawnArgs = ['--approve', ...systemArgs, userPrompt]
+      spawnCmd = PI_BIN
+      proc = spawnAgent(PI_BIN, ['--approve', ...systemArgs, userPrompt], input.cwd, input.env)
     } else {
       const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system: input.systemPrompt ?? '', user: input.prompt })
       spawnArgs = ['--dangerously-skip-permissions', ...systemArgs, '--session-id', id, userPrompt]
@@ -207,6 +248,9 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     // Emit initial running status so consumers get the first state immediately
     emit('status', id, 'running')
 
+    // Pi status is polled from its on-disk session file (async capture).
+    if (agentKind === 'pi') captureAndPollPi(id, rec, input.cwd)
+
     return { ...dto }
   }
 
@@ -232,6 +276,8 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       const portArgs = input.opencodePort ? ['--port', String(input.opencodePort)] : []
       const resumeArgs = ocSid ? ['--session', ocSid] : ['--continue']
       proc = spawnOpencode([...portArgs, ...resumeArgs], null, input.cwd, input.env)
+    } else if (agentKind === 'pi') {
+      proc = spawnAgent(PI_BIN, ['--approve', '--continue'], input.cwd, input.env)
     } else {
       let args: string[]
       if (hasTranscript(id)) {
@@ -249,6 +295,8 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     emit('status', id, 'running')
     // opencodeSid is already known on resume — begin status polling right away.
     if (agentKind === 'opencode') startPolling(id, rec)
+    // Pi re-discovers its session file on resume and polls it for status.
+    if (agentKind === 'pi') captureAndPollPi(id, rec, input.cwd)
     return { ...dto }
   }
 
@@ -278,6 +326,8 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       const portArgs = input.opencodePort ? ['--port', String(input.opencodePort)] : []
       const resumeArgs = ocSid ? ['--session', ocSid] : ['--continue']
       proc = spawnOpencode([...portArgs, ...resumeArgs], null, input.cwd, input.env)
+    } else if (agentKind === 'pi') {
+      proc = spawnAgent(PI_BIN, ['--approve', '--continue'], input.cwd, input.env)
     } else {
       let args: string[]
       if (hasTranscript(id)) {
@@ -294,6 +344,7 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     wire(id, rec)
     emit('status', id, 'running')
     if (agentKind === 'opencode') startPolling(id, rec)
+    if (agentKind === 'pi') captureAndPollPi(id, rec, input.cwd)
     return { ...dto }
   }
 

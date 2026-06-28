@@ -14,7 +14,7 @@
 
 export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored'
 export type TicketSource = 'jira' | 'linear'
-export type BackendKind = 'claude-code' | 'opencode'
+export type BackendKind = 'claude-code' | 'opencode' | 'pi'
 
 export interface NotifyPrefs { needs: boolean; done: boolean; running: boolean }
 export interface PushSubscriptionDTO {
