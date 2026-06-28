@@ -107,3 +107,17 @@ describe('deliverPrompt with opencode', () => {
   })
 })
 
+describe('deliverPrompt with pi', () => {
+  it('returns --append-system-prompt args when system is present', () => {
+    const result = deliverPrompt('pi', { system: 'sys content', user: 'usr content' })
+    expect(result.systemArgs).toEqual(['--append-system-prompt', 'sys content'])
+    expect(result.userPrompt).toBe('usr content')
+  })
+
+  it('returns empty systemArgs when system is empty', () => {
+    const result = deliverPrompt('pi', { system: '', user: 'usr content' })
+    expect(result.systemArgs).toEqual([])
+    expect(result.userPrompt).toBe('usr content')
+  })
+})
+
