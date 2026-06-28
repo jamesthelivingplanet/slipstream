@@ -79,6 +79,9 @@
           <button type="button" class="toggle-opt" class:active={agentKind === 'opencode'} on:click={() => agentKind = 'opencode'}>
             OpenCode
           </button>
+          <button type="button" class="toggle-opt" class:active={agentKind === 'pi'} on:click={() => agentKind = 'pi'}>
+            Pi
+          </button>
         </div>
       </div>
 
