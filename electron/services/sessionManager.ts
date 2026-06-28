@@ -26,6 +26,7 @@ import { hasTranscript } from './transcripts.js'
 import { deliverPrompt, buildAgentsMdContent } from '../shared/promptComposer.js'
 import { writeAgentsMd } from './promptWriter.js'
 import { fetchOpencodeMessages, opencodeStatusFromMessages, withOpencodePromptArg } from './opencodeSessions.js'
+import type { RunLogger } from './runLogger.js'
 
 function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<string, string>): pty.IPty {
   return pty.spawn(cmd, args, {
@@ -65,7 +66,7 @@ interface SessionRecord {
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
-export function createSessionManager(): ISessionManager {
+export function createSessionManager(logger?: RunLogger): ISessionManager {
   const emitter = new EventEmitter()
   const sessions = new Map<string, SessionRecord>()
 
@@ -95,13 +96,21 @@ export function createSessionManager(): ISessionManager {
         emit('status', id, s)
       }
     })
-    proc.onExit(({ exitCode }: { exitCode: number }) => {
+    proc.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => {
       if (rec.disposed) return
       stopPolling(rec)
       rec.disposed = true
       detector.markExit(exitCode)
       const s = detector.status()
       dto.status = s
+      // Forensic log: capture exit code + tail of recent PTY output so the
+      // reason for a non-zero exit is not lost with the red bubble.
+      logger?.exit(id, {
+        exitCode,
+        signal: signal !== undefined && signal !== 0 ? String(signal) : undefined,
+        status: s,
+        tail: buffer.snapshot().data,
+      })
       emit('status', id, s)
       emit('exit', id, exitCode)
       if (sessions.get(id) === rec) sessions.delete(id)
@@ -152,14 +161,31 @@ export function createSessionManager(): ISessionManager {
 
     const agentKind = input.agentKind ?? 'claude-code'
     let proc: pty.IPty
+    let spawnCmd: string
+    let spawnArgs: string[]
     if (agentKind === 'opencode') {
       const { userPrompt } = deliverPrompt('opencode', { system: input.systemPrompt ?? '', user: input.prompt })
       const portArgs = input.opencodePort ? ['--port', String(input.opencodePort)] : []
+      spawnArgs = withOpencodePromptArg(portArgs, userPrompt)
+      spawnCmd = OPENCODE_BIN
       proc = spawnOpencode(portArgs, userPrompt, input.cwd, input.env)
     } else {
       const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system: input.systemPrompt ?? '', user: input.prompt })
+      spawnArgs = ['--dangerously-skip-permissions', ...systemArgs, '--session-id', id, userPrompt]
+      spawnCmd = 'claude'
       proc = spawnAgent('claude', ['--dangerously-skip-permissions', ...systemArgs, '--session-id', id, userPrompt], input.cwd, input.env)
     }
+
+    // Forensic log of the spawn (before the process might fail)
+    logger?.spawn(id, {
+      agentKind,
+      cmd: spawnCmd,
+      args: spawnArgs,
+      cwd: input.cwd,
+      tid: input.tid,
+      title: input.title,
+      prompt: input.prompt,
+    })
 
     const dto: SessionDTO = {
       id,

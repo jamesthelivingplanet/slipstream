@@ -170,10 +170,23 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   // so tests can import createServer without loading better-sqlite3/node-pty.
   const { createServices, resolveDataDir } = await import('../core/services.js')
   const deps = createServices(resolveDataDir())
+  const logger = deps.logger
+
+  // Process-level error capture: these survive restarts via server.log.
+  logger?.server('info', 'server starting', { pid: process.pid, ppid: process.ppid })
+  process.on('uncaughtException', (err) => {
+    logger?.server('error', 'uncaughtException', err)
+    console.error('[slipstream-server] uncaughtException:', err)
+  })
+  process.on('unhandledRejection', (reason) => {
+    logger?.server('error', 'unhandledRejection', reason)
+    console.error('[slipstream-server] unhandledRejection:', reason)
+  })
 
   createServer(deps, {
     token,
     bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1',
     port: process.env.SLIPSTREAM_PORT ? Number(process.env.SLIPSTREAM_PORT) : 7421,
   })
+  logger?.server('info', 'server listening', { bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1', port: process.env.SLIPSTREAM_PORT ?? 7421 })
 }

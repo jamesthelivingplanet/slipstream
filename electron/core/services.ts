@@ -12,6 +12,7 @@ import { createSessionStore } from '../services/sessionStore.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createPushService, createDbPushStore } from '../services/pushService.js'
+import { createRunLogger } from '../services/runLogger.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -39,7 +40,8 @@ export function createServices(root: string): IpcDeps {
   const db = openDb(path.join(root, 'slipstream.db'))
   const configStore = createConfigStore(db)
   const sessionStore = createSessionStore(db)
-  const sessions = createSessionManager()
+  const runLogger = createRunLogger(root)
+  const sessions = createSessionManager(runLogger)
   const push = createPushService({
     config: configStore,
     store: createDbPushStore(db),
@@ -57,5 +59,6 @@ export function createServices(root: string): IpcDeps {
     editor: createEditorLauncher(),
     appRunner: createAppRunner(),
     push,
+    logger: runLogger,
   }
 }

@@ -53,6 +53,17 @@ builds, then restarts the systemd `slipstream.service` and hits a healthz check.
   `hasBackend` is `false` and all backend calls silently no-op.
 - **`SLIPSTREAM_TOKEN` is required**: the headless server (`pnpm serve`) refuses to start if
   the env var is unset. Without it there is no authentication on the WebSocket endpoint.
+- **Agent-run logs**: every session spawn and exit is logged to
+  `<dataDir>/logs/<sessionId>.log` (spawn: cmd + args + cwd + prompt; exit: code + signal +
+  status + last 2KB of PTY output). Process-level errors land in `<dataDir>/logs/server.log`.
+  When debugging a red "errored" bubble, read the per-session log first — it shows the exit
+  code and the tail of what the agent printed before dying. See `electron/services/runLogger.ts`.
+- **Repo paths are frozen at registration time**: `repoRegistry.ts` stores `path: absPath`
+  and never re-validates it. If a repo directory is moved or renamed (e.g. the
+  `flotilla` → `slipstream` rename), the DB row still points at the dead path and every
+  agent run against it fails silently — deep in `worktrees.create`, no clear error, just the
+  red bubble. Fix: update `repos.path` in SQLite, or re-register the repo. FLO-40 will make
+  repos resolve dynamically by remote URL instead of trusting a frozen path.
 
 ## Troubleshooting native setup
 
