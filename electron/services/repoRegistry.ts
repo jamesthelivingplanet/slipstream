@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { basename } from 'node:path'
 import Database from 'better-sqlite3'
 import { upsertRepo, allRepos, getRepo, deleteRepo, getRepoSettings, setRepoSettings } from '../db/db.js'
+import { getRemoteUrl, resolveRepoPath } from './repoResolve.js'
 import type { IRepoRegistry, RepoDTO, RepoSettings } from '../shared/contract.js'
 
 /** Turn an arbitrary string into a lower-kebab-case slug. */
@@ -13,19 +14,11 @@ function slugify(s: string): string {
 }
 
 /** Parse "org/repo" out of a remote URL, returning [org, name]. Falls back to
- *  ["local", dirName] when the URL cannot be parsed or git fails. */
-function parseRemote(absPath: string): { org: string; name: string } {
-  try {
-    const url = execFileSync('git', ['-C', absPath, 'remote', 'get-url', 'origin'], {
-      encoding: 'utf8',
-    }).trim()
-    // Handles:
-    //   https://github.com/org/repo.git
-    //   git@github.com:org/repo.git
+ *  ["local", dirName] when the URL is null or cannot be parsed. */
+function parseOrgName(url: string | null, absPath: string): { org: string; name: string } {
+  if (url) {
     const match = url.match(/[/:]([^/]+)\/([^/]+?)(?:\.git)?$/)
     if (match) return { org: match[1], name: match[2] }
-  } catch {
-    // no remote — fall through
   }
   return { org: 'local', name: basename(absPath) }
 }
@@ -52,7 +45,17 @@ function detectBase(absPath: string): string {
   }
 }
 
+/** Backfill remoteUrl for legacy rows registered before the column existed. */
+function backfillRemoteUrls(db: Database.Database): void {
+  const rows = db.prepare('SELECT id, path FROM repos WHERE remoteUrl IS NULL').all() as { id: string; path: string }[]
+  for (const row of rows) {
+    const url = getRemoteUrl(row.path)
+    if (url) db.prepare('UPDATE repos SET remoteUrl = ? WHERE id = ?').run(url, row.id)
+  }
+}
+
 export function createRepoRegistry(db: Database.Database, _root: string): IRepoRegistry {
+  backfillRemoteUrls(db)
   return {
     async register(absPath: string): Promise<RepoDTO> {
       // Validate: must be inside a git work tree.
@@ -78,11 +81,12 @@ export function createRepoRegistry(db: Database.Database, _root: string): IRepoR
         throw new Error('Repository has no commits.')
       }
 
-      const { org, name } = parseRemote(absPath)
+      const remoteUrl = getRemoteUrl(absPath)
+      const { org, name } = parseOrgName(remoteUrl, absPath)
       const base = detectBase(absPath)
       const id = slugify(`${org}-${name}`)
 
-      const repo: RepoDTO = { id, org, name, base, path: absPath }
+      const repo: RepoDTO = { id, org, name, base, path: absPath, remoteUrl: remoteUrl ?? undefined }
       upsertRepo(db, repo)
       return repo
     },
@@ -93,6 +97,19 @@ export function createRepoRegistry(db: Database.Database, _root: string): IRepoR
 
     async get(id: string): Promise<RepoDTO | undefined> {
       return getRepo(db, id)
+    },
+
+    async resolvePath(id: string): Promise<RepoDTO> {
+      const repo = getRepo(db, id)
+      if (!repo) throw new Error(`Unknown repo: ${id}`)
+      const result = resolveRepoPath(repo)
+      if (!result) {
+        throw new Error(
+          `Repository path no longer exists: ${repo.path}. Re-register it or restore the directory.`,
+        )
+      }
+      if (result.healed) upsertRepo(db, result.repo)
+      return result.repo
     },
 
     async remove(id: string): Promise<void> {
