@@ -28,6 +28,7 @@ export interface RepoDTO {
   name: string
   base: string        // base branch: main | master | develop | …
   path: string        // absolute path to the repo checkout under .repositories
+  remoteUrl?: string  // git origin URL — stable identity used to self-heal a moved checkout
 }
 
 export interface RepoSettings {
@@ -88,6 +89,9 @@ export interface IRepoRegistry {
   /** Validates absPath is a git work tree with commits; throws on failure. Idempotent. */
   register(absPath: string): Promise<RepoDTO>
   get(id: string): Promise<RepoDTO | undefined>
+  /** Resolve the repo's current on-disk path, self-healing the DB when the
+   *  checkout was moved/renamed. Throws a clear error when no checkout can be found. */
+  resolvePath(id: string): Promise<RepoDTO>
   remove(id: string): Promise<void>
   getSettings(id: string): Promise<RepoSettings>
   setSettings(id: string, settings: RepoSettings): Promise<void>

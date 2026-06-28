@@ -76,6 +76,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     list: vi.fn().mockResolvedValue([repo]),
     register: vi.fn().mockResolvedValue(repo),
     get: vi.fn().mockResolvedValue(repo),
+    resolvePath: vi.fn().mockResolvedValue(repo),
     remove: vi.fn().mockResolvedValue(undefined),
     getSettings: vi.fn().mockResolvedValue({ installCmd: '', startCmd: '' }),
     setSettings: vi.fn().mockResolvedValue(undefined),
@@ -395,6 +396,43 @@ describe('createRpc', () => {
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ]) as SessionDTO
     expect(result.id).toBe('s1')
+  })
+
+  it('startSession calls repos.resolvePath (not get) before creating the worktree', async () => {
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
+    expect(deps.repos.resolvePath).toHaveBeenCalledWith('r1')
+    expect(deps.worktrees.create).toHaveBeenCalledWith(makeRepo(), 'T-1-fix-bug')
+  })
+
+  it('startSession surfaces resolvePath errors (clear failure, not silent)', async () => {
+    ;(deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }).resolvePath
+      .mockRejectedValueOnce(new Error('Repository path no longer exists: /gone/repo. Re-register it or restore the directory.'))
+    await expect(
+      rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+      ]),
+    ).rejects.toThrow(/Repository path no longer exists/)
+    expect(deps.worktrees.create).not.toHaveBeenCalled()
+  })
+
+  it('startSession uses the resolved (healed) repo path for worktree creation', async () => {
+    const healed = makeRepo({ path: '/new-location/api' })
+    ;(deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }).resolvePath
+      .mockResolvedValueOnce(healed)
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
+    expect(deps.worktrees.create).toHaveBeenCalledWith(healed, 'T-1-fix-bug')
+  })
+
+  it('resumeSession calls resolvePath and throws clearly when repo is gone', async () => {
+    deps.sessionStore.upsert(makeSession())
+    ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
+    ;(deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }).resolvePath
+      .mockRejectedValueOnce(new Error('Repository path no longer exists: /gone. Re-register it or restore the directory.'))
+    await expect(rpc.handle(IPC.resumeSession, ['s1'])).rejects.toThrow(/Repository path no longer exists/)
   })
 
   it('cleanupSession resets the linked ticket back to to-do (resetTicket)', async () => {

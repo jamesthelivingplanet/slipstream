@@ -1,0 +1,97 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync, renameSync, writeFileSync, mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { resolveRepoPath, getRemoteUrl, isWorkTree, findSiblingCheckout } from './repoResolve.js'
+import type { RepoDTO } from '../shared/contract.js'
+
+const git = (cwd: string, ...args: string[]) =>
+  execFileSync('git', args, { cwd, encoding: 'utf8' })
+
+let root: string
+
+beforeAll(() => {
+  root = mkdtempSync(join(tmpdir(), 'slipstream-resolve-'))
+})
+
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+function initRepo(path: string, remote: string): void {
+  execFileSync('git', ['init', '-b', 'main', path], { encoding: 'utf8' })
+  git(path, 'config', 'user.email', 'test@slipstream.dev')
+  git(path, 'config', 'user.name', 'Slipstream Test')
+  writeFileSync(join(path, 'README.md'), '# demo\n')
+  git(path, 'add', '-A')
+  git(path, 'commit', '-m', 'init')
+  git(path, 'remote', 'add', 'origin', remote)
+}
+
+describe('repoResolve helpers', () => {
+  it('getRemoteUrl returns the origin url for a repo with a remote', () => {
+    const p = join(root, 'has-remote')
+    initRepo(p, 'https://github.com/acme/api.git')
+    expect(getRemoteUrl(p)).toBe('https://github.com/acme/api.git')
+  })
+
+  it('getRemoteUrl returns null for a missing path', () => {
+    expect(getRemoteUrl(join(root, 'does-not-exist'))).toBeNull()
+  })
+
+  it('isWorkTree is true for a real checkout and false for a missing path', () => {
+    const p = join(root, 'is-a-repo')
+    initRepo(p, 'https://github.com/acme/is.git')
+    expect(isWorkTree(p)).toBe(true)
+    expect(isWorkTree(join(root, 'nope'))).toBe(false)
+  })
+})
+
+describe('resolveRepoPath', () => {
+  it('fast-path: returns the repo unchanged when the stored path is still valid and remote matches', () => {
+    const p = join(root, 'stable')
+    initRepo(p, 'https://github.com/acme/stable.git')
+    const repo: RepoDTO = { id: 'acme-stable', org: 'acme', name: 'stable', base: 'main', path: p, remoteUrl: 'https://github.com/acme/stable.git' }
+    const result = resolveRepoPath(repo)
+    expect(result).not.toBeNull()
+    expect(result!.healed).toBe(false)
+    expect(result!.repo.path).toBe(p)
+  })
+
+  it('self-heals when the checkout dir was renamed (flotilla -> slipstream case)', () => {
+    const parent = join(root, 'rename-parent')
+    const oldPath = join(parent, 'flotilla')
+    mkdirSync(parent, { recursive: true })
+    initRepo(oldPath, 'https://github.com/ajlebaron/slipstream.git')
+    const newPath = join(parent, 'slipstream')
+    renameSync(oldPath, newPath)
+
+    const repo: RepoDTO = { id: 'ajlebaron-slipstream', org: 'ajlebaron', name: 'slipstream', base: 'main', path: oldPath, remoteUrl: 'https://github.com/ajlebaron/slipstream.git' }
+    const result = resolveRepoPath(repo)
+    expect(result).not.toBeNull()
+    expect(result!.healed).toBe(true)
+    expect(result!.repo.path).toBe(newPath)
+  })
+
+  it('findSiblingCheckout locates a sibling with the matching remote', () => {
+    const parent = join(root, 'sibling-parent')
+    mkdirSync(parent, { recursive: true })
+    const a = join(parent, 'a')
+    initRepo(a, 'https://github.com/acme/seek.git')
+    const staleStored = join(parent, 'gone')
+    expect(findSiblingCheckout('https://github.com/acme/seek.git', staleStored)).toBe(a)
+  })
+
+  it('returns null (clear error upstream) when the dir is deleted and no sibling matches', () => {
+    const parent = join(root, 'deleted-parent')
+    mkdirSync(parent, { recursive: true })
+    const gone = join(parent, 'gone-repo')
+    initRepo(gone, 'https://github.com/acme/gone.git')
+    rmSync(gone, { recursive: true, force: true })
+
+    const repo: RepoDTO = { id: 'acme-gone', org: 'acme', name: 'gone', base: 'main', path: gone, remoteUrl: 'https://github.com/acme/gone.git' }
+    const result = resolveRepoPath(repo)
+    expect(result).toBeNull()
+  })
+})
