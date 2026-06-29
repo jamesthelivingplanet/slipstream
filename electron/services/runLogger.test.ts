@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRunLogger } from './runLogger.js'
+import { CLAUDE_BIN, CLAUDE_FLAGS } from '../shared/agentCli.js'
 
 describe('createRunLogger', () => {
   let root: string
@@ -29,8 +30,8 @@ describe('createRunLogger', () => {
       const sid = '11111111-2222-3333-4444-555555555555'
       log.spawn(sid, {
         agentKind: 'claude-code',
-        cmd: 'claude',
-        args: ['--dangerously-skip-permissions', '--session-id', sid, 'do the thing'],
+        cmd: CLAUDE_BIN,
+        args: [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.sessionId, sid, 'do the thing'],
         cwd: '/tmp/repo',
         tid: 'FLO-1',
         title: 'Fix bug',
@@ -41,7 +42,7 @@ describe('createRunLogger', () => {
       expect(content).toContain(`session=${sid}`)
       expect(content).toContain('agentKind: claude-code')
       expect(content).toContain('cmd: claude')
-      expect(content).toContain('--dangerously-skip-permissions')
+      expect(content).toContain(CLAUDE_FLAGS.skipPermissions)
       expect(content).toContain('cwd: /tmp/repo')
       expect(content).toContain('tid: FLO-1')
       expect(content).toContain('title: Fix bug')

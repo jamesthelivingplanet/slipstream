@@ -1,5 +1,6 @@
 import type { SessionStatus } from '../shared/contract.js'
 import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
+import { OPENCODE_FLAGS, OPENCODE_SESSION_CAPTURE_ATTEMPTS, OPENCODE_SESSION_CAPTURE_INTERVAL_MS } from '../shared/agentCli.js'
 
 export interface OpencodeSession {
   id: string
@@ -50,7 +51,7 @@ export function withOpencodePromptArg(
   args: string[],
   prompt: string | null | undefined,
 ): string[] {
-  return prompt ? [...args, '--prompt', prompt] : args
+  return prompt ? [...args, OPENCODE_FLAGS.prompt, prompt] : args
 }
 
 /**
@@ -78,8 +79,8 @@ export async function captureOpencodeSessionId(
   sinceMs: number,
   opts: { attempts?: number; intervalMs?: number } = {},
 ): Promise<string | null> {
-  const attempts = opts.attempts ?? 20
-  const intervalMs = opts.intervalMs ?? 500
+  const attempts = opts.attempts ?? OPENCODE_SESSION_CAPTURE_ATTEMPTS
+  const intervalMs = opts.intervalMs ?? OPENCODE_SESSION_CAPTURE_INTERVAL_MS
   for (let i = 0; i < attempts; i++) {
     const id = selectNewestSessionSince(await listOpencodeSessions(port), sinceMs)
     if (id) return id
