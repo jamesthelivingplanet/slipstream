@@ -8,7 +8,7 @@ import { createSessionManager } from '../services/sessionManager.js'
 import { createPortBroker } from '../services/portBroker.js'
 import { createConfigStore } from '../services/configStore.js'
 import { createLinearProvider } from '../tickets/linearProvider.js'
-import { createSessionStore } from '../services/sessionStore.js'
+import { createSessionStore, restoreInterruptedSessions } from '../services/sessionStore.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createPushService, createDbPushStore } from '../services/pushService.js'
@@ -40,6 +40,8 @@ export function createServices(root: string): IpcDeps {
   const db = openDb(path.join(root, 'slipstream.db'))
   const configStore = createConfigStore(db)
   const sessionStore = createSessionStore(db)
+  // FLO-46: mark orphaned in-flight sessions as interrupted on boot
+  restoreInterruptedSessions(sessionStore)
   const runLogger = createRunLogger(root)
   const sessions = createSessionManager(runLogger)
   const push = createPushService({

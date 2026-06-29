@@ -12,7 +12,7 @@
  *   <root>     → app data dir (see paths.ts, owned by integration layer)
  */
 
-export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored'
+export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted'
 export type TicketSource = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi'
 
