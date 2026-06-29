@@ -19,6 +19,7 @@ import type {
   SessionStatus,
   StartSessionInput,
 } from '../shared/contract.js'
+import { CLAUDE_BIN, OPENCODE_BIN_NAME, CLAUDE_FLAGS, OPENCODE_FLAGS, OPENCODE_STATUS_POLL_MS } from '../shared/agentCli.js'
 import { StatusDetector } from './statusDetector.js'
 import { OutputBuffer } from './outputBuffer.js'
 import { trustDirectory } from './claudeTrust.js'
@@ -41,7 +42,7 @@ function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<strin
 
 const OPENCODE_BIN = (() => {
   const local = path.join(process.cwd(), 'node_modules', '.bin', 'opencode')
-  return existsSync(local) ? local : 'opencode'
+  return existsSync(local) ? local : OPENCODE_BIN_NAME
 })()
 
 const PI_BIN = (() => {
@@ -150,7 +151,7 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       }
     }
     void tick()
-    rec.pollTimer = setInterval(() => void tick(), 2000)
+    rec.pollTimer = setInterval(() => void tick(), OPENCODE_STATUS_POLL_MS)
   }
 
   // ── pi status polling ──────────────────────────────────────────────────────
@@ -201,7 +202,7 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     let spawnArgs: string[]
     if (agentKind === 'opencode') {
       const { userPrompt } = deliverPrompt('opencode', { system: input.systemPrompt ?? '', user: input.prompt })
-      const portArgs = input.opencodePort ? ['--port', String(input.opencodePort)] : []
+      const portArgs = input.opencodePort ? [OPENCODE_FLAGS.port, String(input.opencodePort)] : []
       spawnArgs = withOpencodePromptArg(portArgs, userPrompt)
       spawnCmd = OPENCODE_BIN
       proc = spawnOpencode(portArgs, userPrompt, input.cwd, input.env)
@@ -212,9 +213,10 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       proc = spawnAgent(PI_BIN, ['--approve', ...systemArgs, userPrompt], input.cwd, input.env)
     } else {
       const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system: input.systemPrompt ?? '', user: input.prompt })
-      spawnArgs = ['--dangerously-skip-permissions', ...systemArgs, '--session-id', id, userPrompt]
-      spawnCmd = 'claude'
-      proc = spawnAgent('claude', ['--dangerously-skip-permissions', ...systemArgs, '--session-id', id, userPrompt], input.cwd, input.env)
+      const claudeArgs = [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, id, userPrompt]
+      spawnArgs = claudeArgs
+      spawnCmd = CLAUDE_BIN
+      proc = spawnAgent(CLAUDE_BIN, claudeArgs, input.cwd, input.env)
     }
 
     // Forensic log of the spawn (before the process might fail)
@@ -273,19 +275,19 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
         writeAgentsMd(input.cwd, buildAgentsMdContent(input.session.systemPrompt))
       }
       const ocSid = input.session.opencodeSid
-      const portArgs = input.opencodePort ? ['--port', String(input.opencodePort)] : []
-      const resumeArgs = ocSid ? ['--session', ocSid] : ['--continue']
+      const portArgs = input.opencodePort ? [OPENCODE_FLAGS.port, String(input.opencodePort)] : []
+      const resumeArgs = ocSid ? [OPENCODE_FLAGS.session, ocSid] : [OPENCODE_FLAGS.continue]
       proc = spawnOpencode([...portArgs, ...resumeArgs], null, input.cwd, input.env)
     } else if (agentKind === 'pi') {
       proc = spawnAgent(PI_BIN, ['--approve', '--continue'], input.cwd, input.env)
     } else {
       let args: string[]
       if (hasTranscript(id)) {
-        args = ['--dangerously-skip-permissions', '--resume', id]
+        args = [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, id]
       } else {
-        args = ['--dangerously-skip-permissions', ...resumeSystemArgs, '--session-id', id, resumeUserPrompt]
+        args = [CLAUDE_FLAGS.skipPermissions, ...resumeSystemArgs, CLAUDE_FLAGS.sessionId, id, resumeUserPrompt]
       }
-      proc = spawnAgent('claude', args, input.cwd, input.env)
+      proc = spawnAgent(CLAUDE_BIN, args, input.cwd, input.env)
     }
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
@@ -323,19 +325,19 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
         writeAgentsMd(input.cwd, buildAgentsMdContent(input.session.systemPrompt))
       }
       const ocSid = input.session.opencodeSid
-      const portArgs = input.opencodePort ? ['--port', String(input.opencodePort)] : []
-      const resumeArgs = ocSid ? ['--session', ocSid] : ['--continue']
+      const portArgs = input.opencodePort ? [OPENCODE_FLAGS.port, String(input.opencodePort)] : []
+      const resumeArgs = ocSid ? [OPENCODE_FLAGS.session, ocSid] : [OPENCODE_FLAGS.continue]
       proc = spawnOpencode([...portArgs, ...resumeArgs], null, input.cwd, input.env)
     } else if (agentKind === 'pi') {
       proc = spawnAgent(PI_BIN, ['--approve', '--continue'], input.cwd, input.env)
     } else {
       let args: string[]
       if (hasTranscript(id)) {
-        args = ['--dangerously-skip-permissions', '--remote-control', '--resume', id]
+        args = [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, CLAUDE_FLAGS.resume, id]
       } else {
-        args = ['--dangerously-skip-permissions', '--remote-control', ...rcSystemArgs, '--session-id', id, rcUserPrompt]
+        args = [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, ...rcSystemArgs, CLAUDE_FLAGS.sessionId, id, rcUserPrompt]
       }
-      proc = spawnAgent('claude', args, input.cwd, input.env)
+      proc = spawnAgent(CLAUDE_BIN, args, input.cwd, input.env)
     }
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
