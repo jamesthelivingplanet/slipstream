@@ -1,33 +1,28 @@
 /**
- * SessionManager — owns all node-pty processes for active Claude Code agents.
+ * SessionManager — owns all node-pty processes for active agents.
  *
  * Each session gets its own StatusDetector. PTY events are forwarded to
- * consumers via a typed EventEmitter (satisfies ISessionManager.on).
+ * consumers via a typed EventEmitter (satisfies ISessionManager.on). All
+ * agent-specific launch/resume/status logic lives behind an AgentBackend
+ * (see agentBackend.ts) — this file has no agentKind branching.
  */
 
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import * as pty from 'node-pty'
-import { existsSync } from 'node:fs'
-import * as path from 'node:path'
 
 import type {
   ISessionManager,
   ResumeSessionInput,
   SessionDTO,
   SessionEvents,
-  SessionStatus,
   StartSessionInput,
 } from '../shared/contract.js'
-import { CLAUDE_BIN, OPENCODE_BIN_NAME, CLAUDE_FLAGS, OPENCODE_FLAGS, OPENCODE_STATUS_POLL_MS } from '../shared/agentCli.js'
 import { StatusDetector } from './statusDetector.js'
 import { OutputBuffer } from './outputBuffer.js'
 import { trustDirectory } from './claudeTrust.js'
 import { hasTranscript } from './transcripts.js'
-import { deliverPrompt, buildAgentsMdContent } from '../shared/promptComposer.js'
-import { writeAgentsMd } from './promptWriter.js'
-import { fetchOpencodeMessages, opencodeStatusFromMessages, withOpencodePromptArg } from './opencodeSessions.js'
-import { capturePiSessionFile, piSessionDirFor, readPiSessionFile, piStatusFromFileContent } from './piSessions.js'
+import { selectBackend, type AgentBackend, type SpawnSpec, type StatusHandle } from './agentBackend.js'
 import type { RunLogger } from './runLogger.js'
 
 function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<string, string>): pty.IPty {
@@ -40,23 +35,6 @@ function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<strin
   })
 }
 
-const OPENCODE_BIN = (() => {
-  const local = path.join(process.cwd(), 'node_modules', '.bin', 'opencode')
-  return existsSync(local) ? local : OPENCODE_BIN_NAME
-})()
-
-const PI_BIN = (() => {
-  const local = path.join(process.cwd(), 'node_modules', '.bin', 'pi')
-  return existsSync(local) ? local : 'pi'
-})()
-
-function spawnOpencode(args: string[], prompt: string | null, cwd: string, env?: Record<string, string>): pty.IPty {
-  // Hand the prompt to opencode via its `--prompt` flag so the TUI auto-starts
-  // on launch. Writing the prompt into the PTY after a delay races the TUI's
-  // startup and the keystrokes are lost — see withOpencodePromptArg.
-  return spawnAgent(OPENCODE_BIN, withOpencodePromptArg(args, prompt), cwd, env)
-}
-
 // ─── Internal session record ──────────────────────────────────────────────────
 
 interface SessionRecord {
@@ -64,12 +42,11 @@ interface SessionRecord {
   detector: StatusDetector
   buffer: OutputBuffer
   dto: SessionDTO
+  backend: AgentBackend
   disposed?: boolean
   // opencode-only: embedded server port + session id used for status polling
   opencodePort?: number
   opencodeSid?: string
-  // pi-only: path to the on-disk session JSONL used for status polling
-  piSessionFile?: string
   pollTimer?: ReturnType<typeof setInterval>
 }
 
@@ -90,19 +67,18 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
   // ── Shared wiring helper ───────────────────────────────────────────────────
 
   function wire(id: string, rec: SessionRecord) {
-    const { pty: proc, detector, buffer, dto } = rec
-    // OpenCode and Pi are full-screen TUIs: their redraws make PTY-scraped
-    // markers unreliable, so their status is driven by polling (opencode's
-    // embedded server / pi's session file — see startPolling / startPiPolling)
-    // instead of the StatusDetector.
-    const ptyDrivenStatus = dto.agentKind !== 'opencode' && dto.agentKind !== 'pi'
+    const { pty: proc, detector, buffer } = rec
+    // Poll-driven backends (opencode's embedded server, pi's session file) are
+    // full-screen TUIs whose redraws make PTY-scraped markers unreliable, so
+    // their status comes from beginStatusTracking instead of the StatusDetector.
+    const ptyDrivenStatus = rec.backend.statusSource === 'pty'
     proc.onData((chunk: string) => {
       const seq = buffer.push(chunk)
       detector.push(chunk)
       emit('data', id, chunk, seq)
       if (ptyDrivenStatus) {
         const s = detector.status()
-        dto.status = s
+        rec.dto.status = s
         emit('status', id, s)
       }
     })
@@ -112,7 +88,7 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       rec.disposed = true
       detector.markExit(exitCode)
       const s = detector.status()
-      dto.status = s
+      rec.dto.status = s
       // Forensic log: capture exit code + tail of recent PTY output so the
       // reason for a non-zero exit is not lost with the red bubble.
       logger?.exit(id, {
@@ -127,7 +103,7 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     })
   }
 
-  // ── opencode status polling ────────────────────────────────────────────────
+  // ── status polling plumbing ──────────────────────────────────────────────────
 
   function stopPolling(rec: SessionRecord) {
     if (rec.pollTimer) {
@@ -136,99 +112,91 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     }
   }
 
-  function startPolling(id: string, rec: SessionRecord) {
-    if (rec.pollTimer || !rec.opencodePort || !rec.opencodeSid) return
-    const port = rec.opencodePort
-    const sid = rec.opencodeSid
-    const tick = async () => {
-      if (rec.disposed) return
-      const messages = await fetchOpencodeMessages(port, sid)
-      if (rec.disposed) return
-      const s = opencodeStatusFromMessages(messages)
-      if (rec.dto.status !== s) {
-        rec.dto.status = s
-        emit('status', id, s)
-      }
+  /** Handle a polling backend uses to report status + register its timer. */
+  function makeStatusHandle(id: string, rec: SessionRecord): StatusHandle {
+    return {
+      get disposed() {
+        return rec.disposed === true
+      },
+      get polling() {
+        return rec.pollTimer !== undefined
+      },
+      setStatus(s) {
+        if (rec.dto.status !== s) {
+          rec.dto.status = s
+          emit('status', id, s)
+        }
+      },
+      setPollTimer(timer) {
+        rec.pollTimer = timer
+      },
     }
-    void tick()
-    rec.pollTimer = setInterval(() => void tick(), OPENCODE_STATUS_POLL_MS)
   }
 
-  // ── pi status polling ──────────────────────────────────────────────────────
+  // ── Shared launch helper ───────────────────────────────────────────────────
 
-  function startPiPolling(id: string, rec: SessionRecord, filePath: string) {
-    if (rec.pollTimer) return
-    const tick = async () => {
-      if (rec.disposed) return
-      const content = await readPiSessionFile(filePath)
-      if (rec.disposed) return
-      const s = piStatusFromFileContent(content)
-      if (rec.dto.status !== s) {
-        rec.dto.status = s
-        emit('status', id, s)
-      }
-    }
-    void tick()
-    rec.pollTimer = setInterval(() => void tick(), 2000)
-  }
+  function launch(params: {
+    id: string
+    cwd: string
+    env?: Record<string, string>
+    system: string
+    dto: SessionDTO
+    backend: AgentBackend
+    spec: SpawnSpec
+    opencodePort?: number
+    opencodeSid?: string
+    isInitialStart: boolean
+  }): SessionDTO {
+    const { id, cwd, env, system, dto, backend, spec } = params
 
-  /** Discover pi's session file for `cwd` and begin status polling. */
-  function captureAndPollPi(id: string, rec: SessionRecord, cwd: string) {
-    void capturePiSessionFile(piSessionDirFor(cwd)).then((file) => {
-      if (rec.disposed || !file) return
-      rec.piSessionFile = file
-      startPiPolling(id, rec, file)
+    const detector = new StatusDetector()
+    const buffer = new OutputBuffer()
+
+    trustDirectory(cwd)
+    backend.prepareWorktree?.(cwd, system)
+
+    const proc = spawnAgent(spec.cmd, spec.args, cwd, env)
+
+    // Forensic log of the spawn (before the process might fail)
+    logger?.spawn(id, {
+      agentKind: backend.kind,
+      cmd: spec.cmd,
+      args: spec.args,
+      cwd,
+      tid: dto.tid,
+      title: dto.title,
+      prompt: dto.prompt,
     })
+
+    const rec: SessionRecord = {
+      pty: proc,
+      detector,
+      buffer,
+      dto,
+      backend,
+      opencodePort: params.opencodePort,
+      opencodeSid: params.opencodeSid,
+    }
+    sessions.set(id, rec)
+    wire(id, rec)
+    emit('status', id, 'running')
+    backend.beginStatusTracking?.({
+      cwd,
+      opencodePort: rec.opencodePort,
+      opencodeSid: rec.opencodeSid,
+      isInitialStart: params.isInitialStart,
+      handle: makeStatusHandle(id, rec),
+    })
+    return { ...dto }
   }
 
   // ── ISessionManager implementation ─────────────────────────────────────────
 
   function start(input: StartSessionInput): SessionDTO {
     const id = randomUUID()
-
-    const detector = new StatusDetector()
-    const buffer = new OutputBuffer()
-
-    trustDirectory(input.cwd)
-
-    // Write AGENTS.md for opencode sessions (system prompt via file, not CLI arg)
-    if (input.agentKind === 'opencode' && input.systemPrompt) {
-      writeAgentsMd(input.cwd, buildAgentsMdContent(input.systemPrompt))
-    }
-
-    const agentKind = input.agentKind ?? 'claude-code'
-    let proc: pty.IPty
-    let spawnCmd: string
-    let spawnArgs: string[]
-    if (agentKind === 'opencode') {
-      const { userPrompt } = deliverPrompt('opencode', { system: input.systemPrompt ?? '', user: input.prompt })
-      const portArgs = input.opencodePort ? [OPENCODE_FLAGS.port, String(input.opencodePort)] : []
-      spawnArgs = withOpencodePromptArg(portArgs, userPrompt)
-      spawnCmd = OPENCODE_BIN
-      proc = spawnOpencode(portArgs, userPrompt, input.cwd, input.env)
-    } else if (agentKind === 'pi') {
-      const { systemArgs, userPrompt } = deliverPrompt('pi', { system: input.systemPrompt ?? '', user: input.prompt })
-      spawnArgs = ['--approve', ...systemArgs, userPrompt]
-      spawnCmd = PI_BIN
-      proc = spawnAgent(PI_BIN, ['--approve', ...systemArgs, userPrompt], input.cwd, input.env)
-    } else {
-      const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system: input.systemPrompt ?? '', user: input.prompt })
-      const claudeArgs = [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, id, userPrompt]
-      spawnArgs = claudeArgs
-      spawnCmd = CLAUDE_BIN
-      proc = spawnAgent(CLAUDE_BIN, claudeArgs, input.cwd, input.env)
-    }
-
-    // Forensic log of the spawn (before the process might fail)
-    logger?.spawn(id, {
-      agentKind,
-      cmd: spawnCmd,
-      args: spawnArgs,
-      cwd: input.cwd,
-      tid: input.tid,
-      title: input.title,
-      prompt: input.prompt,
-    })
+    const backend = selectBackend(input.agentKind)
+    const system = input.systemPrompt ?? ''
+    const spec = backend.buildStartArgs({ sessionId: id, system, user: input.prompt, opencodePort: input.opencodePort })
 
     const dto: SessionDTO = {
       id,
@@ -243,17 +211,7 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       createdAt: Date.now(),
     }
 
-    const rec: SessionRecord = { pty: proc, detector, buffer, dto, opencodePort: input.opencodePort }
-    sessions.set(id, rec)
-    wire(id, rec)
-
-    // Emit initial running status so consumers get the first state immediately
-    emit('status', id, 'running')
-
-    // Pi status is polled from its on-disk session file (async capture).
-    if (agentKind === 'pi') captureAndPollPi(id, rec, input.cwd)
-
-    return { ...dto }
+    return launch({ id, cwd: input.cwd, env: input.env, system, dto, backend, spec, opencodePort: input.opencodePort, isInitialStart: true })
   }
 
   function resume(input: ResumeSessionInput): SessionDTO {
@@ -262,44 +220,19 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     if (existing) return { ...existing.dto }
 
     const id = input.session.id
-    const detector = new StatusDetector()
-    const buffer = new OutputBuffer()
-
-    trustDirectory(input.cwd)
-    const agentKind = input.session.agentKind ?? 'claude-code'
-    const { userPrompt: resumeUserPrompt, systemArgs: resumeSystemArgs } = deliverPrompt(agentKind, { system: input.session.systemPrompt ?? '', user: input.session.prompt })
-
-    let proc: pty.IPty
-    if (agentKind === 'opencode') {
-      if (input.session.systemPrompt) {
-        writeAgentsMd(input.cwd, buildAgentsMdContent(input.session.systemPrompt))
-      }
-      const ocSid = input.session.opencodeSid
-      const portArgs = input.opencodePort ? [OPENCODE_FLAGS.port, String(input.opencodePort)] : []
-      const resumeArgs = ocSid ? [OPENCODE_FLAGS.session, ocSid] : [OPENCODE_FLAGS.continue]
-      proc = spawnOpencode([...portArgs, ...resumeArgs], null, input.cwd, input.env)
-    } else if (agentKind === 'pi') {
-      proc = spawnAgent(PI_BIN, ['--approve', '--continue'], input.cwd, input.env)
-    } else {
-      let args: string[]
-      if (hasTranscript(id)) {
-        args = [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, id]
-      } else {
-        args = [CLAUDE_FLAGS.skipPermissions, ...resumeSystemArgs, CLAUDE_FLAGS.sessionId, id, resumeUserPrompt]
-      }
-      proc = spawnAgent(CLAUDE_BIN, args, input.cwd, input.env)
-    }
+    const backend = selectBackend(input.session.agentKind)
+    const system = input.session.systemPrompt ?? ''
+    const spec = backend.buildResumeArgs({
+      sessionId: id,
+      system,
+      user: input.session.prompt,
+      opencodeSid: input.session.opencodeSid,
+      opencodePort: input.opencodePort,
+      hasTranscript: hasTranscript(id),
+    })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
-    const rec: SessionRecord = { pty: proc, detector, buffer, dto, opencodePort: input.opencodePort, opencodeSid: input.session.opencodeSid }
-    sessions.set(id, rec)
-    wire(id, rec)
-    emit('status', id, 'running')
-    // opencodeSid is already known on resume — begin status polling right away.
-    if (agentKind === 'opencode') startPolling(id, rec)
-    // Pi re-discovers its session file on resume and polls it for status.
-    if (agentKind === 'pi') captureAndPollPi(id, rec, input.cwd)
-    return { ...dto }
+    return launch({ id, cwd: input.cwd, env: input.env, system, dto, backend, spec, opencodePort: input.opencodePort, opencodeSid: input.session.opencodeSid, isInitialStart: false })
   }
 
   function attachRemoteControl(input: ResumeSessionInput): SessionDTO {
@@ -312,42 +245,19 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       sessions.delete(id)
     }
 
-    const detector = new StatusDetector()
-    const buffer = new OutputBuffer()
-
-    trustDirectory(input.cwd)
-    const agentKind = input.session.agentKind ?? 'claude-code'
-    const { userPrompt: rcUserPrompt, systemArgs: rcSystemArgs } = deliverPrompt(agentKind, { system: input.session.systemPrompt ?? '', user: input.session.prompt })
-
-    let proc: pty.IPty
-    if (agentKind === 'opencode') {
-      if (input.session.systemPrompt) {
-        writeAgentsMd(input.cwd, buildAgentsMdContent(input.session.systemPrompt))
-      }
-      const ocSid = input.session.opencodeSid
-      const portArgs = input.opencodePort ? [OPENCODE_FLAGS.port, String(input.opencodePort)] : []
-      const resumeArgs = ocSid ? [OPENCODE_FLAGS.session, ocSid] : [OPENCODE_FLAGS.continue]
-      proc = spawnOpencode([...portArgs, ...resumeArgs], null, input.cwd, input.env)
-    } else if (agentKind === 'pi') {
-      proc = spawnAgent(PI_BIN, ['--approve', '--continue'], input.cwd, input.env)
-    } else {
-      let args: string[]
-      if (hasTranscript(id)) {
-        args = [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, CLAUDE_FLAGS.resume, id]
-      } else {
-        args = [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, ...rcSystemArgs, CLAUDE_FLAGS.sessionId, id, rcUserPrompt]
-      }
-      proc = spawnAgent(CLAUDE_BIN, args, input.cwd, input.env)
-    }
+    const backend = selectBackend(input.session.agentKind)
+    const system = input.session.systemPrompt ?? ''
+    const spec = backend.buildRemoteControlArgs({
+      sessionId: id,
+      system,
+      user: input.session.prompt,
+      opencodeSid: input.session.opencodeSid,
+      opencodePort: input.opencodePort,
+      hasTranscript: hasTranscript(id),
+    })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
-    const rec: SessionRecord = { pty: proc, detector, buffer, dto, opencodePort: input.opencodePort, opencodeSid: input.session.opencodeSid }
-    sessions.set(id, rec)
-    wire(id, rec)
-    emit('status', id, 'running')
-    if (agentKind === 'opencode') startPolling(id, rec)
-    if (agentKind === 'pi') captureAndPollPi(id, rec, input.cwd)
-    return { ...dto }
+    return launch({ id, cwd: input.cwd, env: input.env, system, dto, backend, spec, opencodePort: input.opencodePort, opencodeSid: input.session.opencodeSid, isInitialStart: false })
   }
 
   function has(sessionId: string): boolean {
@@ -408,7 +318,15 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     const rec = sessions.get(sessionId)
     if (!rec || !rec.opencodePort) return
     rec.opencodeSid = sid
-    startPolling(sessionId, rec)
+    // Now that the sid is known, ask the backend to begin polling. cwd is unused
+    // by opencode tracking (the only backend with an opencodePort), so '' is safe.
+    rec.backend.beginStatusTracking?.({
+      cwd: '',
+      opencodePort: rec.opencodePort,
+      opencodeSid: sid,
+      isInitialStart: false,
+      handle: makeStatusHandle(sessionId, rec),
+    })
   }
 
   return { start, resume, attachRemoteControl, has, write, resize, kill, killAll, on, off, getBuffer, setOpencodeSid }
