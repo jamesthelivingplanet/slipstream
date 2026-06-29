@@ -113,21 +113,24 @@ export async function initFromBackend(): Promise<void> {
 
   const sessionDTOs = await listSessions()
   sessions.set(
-    sessionDTOs.map((dto) => ({
-      id: dto.id,
-      tid: dto.tid,
-      src: 'jira' as const,
-      status: (dto.status === 'running' || dto.status === 'needs') ? 'detached' : dto.status,
-      title: dto.title,
-      repo: dto.repoId,
-      branch: dto.branch,
-      add: 0,
-      del: 0,
-      ago: '',
-      prompt: dto.prompt,
-      port: dto.port,
-      activity: { text: 'Detached — open to resume.' },
-    }))
+    sessionDTOs.map((dto) => {
+      const uiStatus: Status = (dto.status === 'running' || dto.status === 'needs') ? 'detached' : dto.status as Status
+      return {
+        id: dto.id,
+        tid: dto.tid,
+        src: 'jira' as const,
+        status: uiStatus,
+        title: dto.title,
+        repo: dto.repoId,
+        branch: dto.branch,
+        add: 0,
+        del: 0,
+        ago: '',
+        prompt: dto.prompt,
+        port: dto.port,
+        activity: { text: uiStatus === 'interrupted' ? 'Interrupted by restart — open to resume.' : 'Detached — open to resume.' },
+      }
+    })
   )
   await refreshDiffStats().catch(() => {})
 }
