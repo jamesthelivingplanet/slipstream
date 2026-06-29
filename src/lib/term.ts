@@ -1,5 +1,6 @@
 import type { ITheme } from '@xterm/xterm'
 import type { Repo, Session } from './types'
+import { CLAUDE_BIN, CLAUDE_FLAGS } from '../../electron/shared/agentCli.js'
 
 export type Line = [text: string, delay: number, tag?: 'ASK' | 'SPIN']
 
@@ -39,7 +40,7 @@ export function buildScript(s: Session, r: Repo): Line[] {
     [C.dim(`Preparing worktree (new branch '${s.branch}')`), 200],
     [`${C.green('✓')} worktree ready  ${C.dim('· floo → port 51840')}`, 240],
     ['', 50],
-    [C.dim('$ claude --dangerously-skip-permissions'), 40],
+    [C.dim(`$ ${CLAUDE_BIN} ${CLAUDE_FLAGS.skipPermissions}`), 40],
     ['', 40],
     [`${C.violet('✻ ')}${C.b('Claude Code')}${C.dim('  dangerous mode')}`, 180],
     [`${C.dim('> ')}${s.tid}: ${s.title}`, 240],
