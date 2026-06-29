@@ -148,6 +148,22 @@ is its own backend and does **not** share live sessions with a separately-runnin
 app. Unifying them (desktop app as thin client of one daemon) is the "background daemon"
 item on the ROADMAP.
 
+### Session lifecycle is client-independent
+
+PTY sessions are owned by the backend process, not by any WebSocket client. A client
+disconnect (`ws` `close`/`error`) triggers only `rpc.dispose()` in `electron/server/server.ts`,
+which detaches that client's `data`/`status` event listeners and clears its coalescing flush
+timer — it never reaps a PTY. PTYs are ended solely by:
+
+- explicit `IPC.killSession` → `sessions.kill()` in `electron/core/rpc.ts`,
+- `attachRemoteControl` replacement (same file), or
+- `sessions.killAll()` called from `electron/main.ts` on Electron's `before-quit` event
+  (full process shutdown).
+
+A late-reconnecting client recovers missed output by calling `IPC.getSessionBuffer`, which
+returns the session's `OutputBuffer` snapshot (`electron/services/outputBuffer.ts`) — a
+bounded ring-buffer of the last 256 KB of PTY output.
+
 ## Key decisions
 
 - **Electron + Svelte** over Tauri — `node-pty` is the proven path for many concurrent

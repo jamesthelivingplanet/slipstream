@@ -16,6 +16,7 @@ import { WebSocket } from 'ws'
 import type { WireReq, WireRes } from '../shared/wire.js'
 import type { IConfigStore } from '../services/configStore.js'
 import type { IPushService } from '../services/pushService.js'
+import { OutputBuffer } from '../services/outputBuffer.js'
 
 // ── Fake deps (no native modules) ────────────────────────────────────────────
 
@@ -100,6 +101,94 @@ function makeFakeDeps(): IpcDeps {
   }
 
   return { repos, worktrees, sessions, ports, tickets, config, sessionStore, editor, appRunner: { run: vi.fn().mockResolvedValue({ pid: 1234 }) }, push }
+}
+
+function makeSurvivalDeps(): { deps: IpcDeps; seedSession: (id: string, ...chunks: string[]) => void } {
+  const liveMap = new Map<string, OutputBuffer>()
+  const sessionListeners: Record<string, ((...args: unknown[]) => void)[]> = {}
+
+  const sessions: ISessionManager = {
+    start: vi.fn(),
+    resume: vi.fn(),
+    attachRemoteControl: vi.fn(),
+    has: vi.fn().mockImplementation((id: string) => liveMap.has(id)),
+    write: vi.fn(),
+    resize: vi.fn(),
+    kill: vi.fn().mockImplementation((id: string) => { liveMap.delete(id) }),
+    killAll: vi.fn().mockImplementation(() => { liveMap.clear() }),
+    getBuffer: vi.fn().mockImplementation((id: string) => liveMap.get(id)?.snapshot() ?? { data: '', seq: 0 }),
+    setOpencodeSid: vi.fn(),
+    on(event: string, listener: (...args: unknown[]) => void) {
+      sessionListeners[event] ??= []
+      sessionListeners[event].push(listener)
+    },
+    off(event: string, listener: (...args: unknown[]) => void) {
+      if (sessionListeners[event]) {
+        sessionListeners[event] = sessionListeners[event].filter((l) => l !== listener)
+      }
+    },
+  }
+
+  const repos: IRepoRegistry = {
+    list: vi.fn().mockResolvedValue([makeRepo()]),
+    register: vi.fn().mockResolvedValue(makeRepo()),
+    get: vi.fn().mockResolvedValue(makeRepo()),
+    resolvePath: vi.fn().mockResolvedValue(makeRepo()),
+    remove: vi.fn().mockResolvedValue(undefined),
+    getSettings: vi.fn().mockResolvedValue({ installCmd: '', startCmd: '' }),
+    setSettings: vi.fn().mockResolvedValue(undefined),
+  }
+
+  const worktrees: IWorktreeManager = {
+    pathFor: vi.fn().mockReturnValue('/wt/branch'),
+    create: vi.fn().mockResolvedValue({ branch: 'b', path: '/wt/b', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 }),
+    remove: vi.fn().mockResolvedValue({ removed: true }),
+    status: vi.fn().mockResolvedValue({ branch: 'b', path: '/wt/b', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 }),
+    list: vi.fn().mockResolvedValue([]),
+  }
+
+  const ports: IPortBroker = { claim: vi.fn().mockResolvedValue(3000) }
+
+  const tickets: ITicketProvider = {
+    id: 'test',
+    listTickets: vi.fn().mockResolvedValue([]),
+    getTicketStatus: vi.fn().mockResolvedValue({ current: null, available: [] }),
+    setTicketStatus: vi.fn().mockRejectedValue(new Error('not implemented')),
+    startTicket: vi.fn().mockResolvedValue(null),
+    resetTicket: vi.fn().mockResolvedValue(null),
+  }
+
+  const config: IConfigStore = {
+    get: vi.fn().mockReturnValue(undefined),
+    set: vi.fn(),
+  }
+
+  const editor = { open: vi.fn().mockResolvedValue(undefined) }
+
+  const sessionStoreMap = new Map()
+  const sessionStore: ISessionStore = {
+    list() { return Array.from(sessionStoreMap.values()) },
+    get(id) { return sessionStoreMap.get(id) },
+    upsert(s) { sessionStoreMap.set(s.id, s) },
+    delete(id) { sessionStoreMap.delete(id) },
+  }
+
+  const push: IPushService = {
+    getVapidPublicKey: vi.fn().mockResolvedValue('test-vapid-key'),
+    savePushSubscription: vi.fn().mockResolvedValue(undefined),
+    deletePushSubscription: vi.fn().mockResolvedValue(undefined),
+    getPushPrefs: vi.fn().mockResolvedValue(null),
+  }
+
+  const deps: IpcDeps = { repos, worktrees, sessions, ports, tickets, config, sessionStore, editor, appRunner: { run: vi.fn().mockResolvedValue({ pid: 1234 }) }, push }
+
+  function seedSession(id: string, ...chunks: string[]): void {
+    const buf = new OutputBuffer()
+    for (const chunk of chunks) buf.push(chunk)
+    liveMap.set(id, buf)
+  }
+
+  return { deps, seedSession }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -246,5 +335,48 @@ describe('createServer', () => {
     })
 
     expect(JSON.parse(body)).toEqual({ ok: true })
+  })
+
+  it('session survives across zero connected clients — output replays on reconnect, PTY not reaped', async () => {
+    const { deps, seedSession } = makeSurvivalDeps()
+    seedSession('s1', 'hello ', 'world', '!')
+
+    server = createServer(deps, { token: 'secret', port: 0 })
+    await new Promise<void>((resolve) => server!.once('listening', resolve))
+    const port = getPort(server!)
+
+    // Connect client A
+    const wsA = wsConnect(port, 'secret')
+    await new Promise<void>((resolve, reject) => {
+      wsA.once('open', resolve)
+      wsA.once('error', reject)
+    })
+
+    // Disconnect client A — simulates all clients gone
+    wsA.close()
+    await new Promise<void>((resolve) => wsA.once('close', resolve))
+
+    // Give the server a tick to process the close event
+    await new Promise<void>((r) => setTimeout(r, 0))
+
+    // PTY must NOT have been reaped
+    expect(deps.sessions.kill).not.toHaveBeenCalled()
+    expect(deps.sessions.killAll).not.toHaveBeenCalled()
+    expect(deps.sessions.has('s1')).toBe(true)
+
+    // Connect client B and replay output
+    const wsB = wsConnect(port, 'secret')
+    await new Promise<void>((resolve, reject) => {
+      wsB.once('open', resolve)
+      wsB.once('error', reject)
+    })
+
+    const res = await sendReq(wsB, IPC.getSessionBuffer, ['s1'])
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      expect(res.result).toEqual({ data: 'hello world!', seq: 12 })
+    }
+
+    wsB.close()
   })
 })
