@@ -168,7 +168,7 @@ describe('createRpc', () => {
 
   it('routes registerRepo with the correct arg', async () => {
     const result = await rpc.handle(IPC.registerRepo, ['/some/path'])
-    expect(deps.repos.register).toHaveBeenCalledWith('/some/path')
+    expect(deps.repos.register).toHaveBeenCalledWith('/some/path', 'local')
     expect(result).toEqual(makeRepo())
   })
 
@@ -278,6 +278,7 @@ describe('createRpc', () => {
   })
 
   it('routes getSessionBuffer to sessions.getBuffer', async () => {
+    deps.sessionStore.upsert(makeSession())
     const result = await rpc.handle(IPC.getSessionBuffer, ['s1'])
     expect(deps.sessions.getBuffer).toHaveBeenCalledWith('s1')
     expect(result).toEqual({ data: 'buffered output', seq: 15 })
@@ -510,5 +511,107 @@ describe('createRpc', () => {
     const result = await rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'main' }]) as { started: boolean; port?: number }
     expect(deps.appRunner.run).toHaveBeenCalledWith('/wt/t-1-fix-bug', 'pnpm dev', { PORT: '3001' })
     expect(result).toEqual({ started: true, port: 3001 })
+  })
+
+  describe('owner filter (identity seam)', () => {
+    it('startSession stamps the caller identity as ownerId', async () => {
+      await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+      expect(deps.sessionStore.get('s1')?.ownerId).toBe('local')
+    })
+
+    it('listSessions returns rows owned by the caller (default local sees local rows)', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'mine', ownerId: 'local' }))
+      deps.sessionStore.upsert(makeSession({ id: 'legacy' })) // no ownerId → treated as local
+      const result = await rpc.handle(IPC.listSessions, []) as SessionDTO[]
+      expect(result.map((s) => s.id).sort()).toEqual(['legacy', 'mine'])
+    })
+
+    it('listSessions excludes rows owned by a different identity', async () => {
+      const aliceRpc = createRpc(deps, () => {}, { coalesceMs: 0, identity: { id: 'alice' } })
+      deps.sessionStore.upsert(makeSession({ id: 'mine', ownerId: 'local' }))
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
+      const result = await aliceRpc.handle(IPC.listSessions, []) as SessionDTO[]
+      expect(result.map((s) => s.id)).toEqual(['hers'])
+      aliceRpc.dispose()
+    })
+
+    it('listRepos filters by caller identity', async () => {
+      ;(deps.repos.list as ReturnType<typeof vi.fn>).mockResolvedValue([
+        makeRepo({ id: 'mine', ownerId: 'local' }),
+        makeRepo({ id: 'hers', ownerId: 'alice' }),
+        makeRepo({ id: 'legacy' }), // no ownerId → local
+      ])
+      const result = await rpc.handle(IPC.listRepos, []) as RepoDTO[]
+      expect(result.map((r) => r.id).sort()).toEqual(['legacy', 'mine'])
+    })
+  })
+
+  describe('ownership guards (identity seam)', () => {
+    it('registerRepo stamps the caller identity', async () => {
+      await rpc.handle(IPC.registerRepo, ['/some/path'])
+      expect(deps.repos.register).toHaveBeenCalledWith('/some/path', 'local')
+    })
+
+    it('resumeSession throws not-found for a session owned by another identity', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
+      await expect(rpc.handle(IPC.resumeSession, ['s1'])).rejects.toThrow('Session not found: s1')
+      expect(deps.sessions.resume).not.toHaveBeenCalled()
+    })
+
+    it('resumeSession does not return a hot session owned by another identity', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(true)
+      await expect(rpc.handle(IPC.resumeSession, ['s1'])).rejects.toThrow('Session not found: s1')
+    })
+
+    it('attachRemoteControl throws not-found for another identity\'s session', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.attachRemoteControl, ['s1'])).rejects.toThrow('Session not found: s1')
+    })
+
+    it('cleanupSession reports not-found for another identity\'s session', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice', repoId: 'r1', branch: 't-1-fix-bug' }))
+      const result = await rpc.handle(IPC.cleanupSession, ['s1'])
+      expect(result).toEqual({ removed: false, reason: 'session not found' })
+      expect(deps.worktrees.remove).not.toHaveBeenCalled()
+    })
+
+    it('getSessionBuffer throws not-found for another identity\'s session', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.getSessionBuffer, ['s1'])).rejects.toThrow('Session not found: s1')
+    })
+
+    it('worktreeStatus throws Unknown repo for another identity\'s repo', async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.worktreeStatus, ['r1', 'b'])).rejects.toThrow('Unknown repo: r1')
+    })
+
+    it('openInEditor throws Unknown repo for another identity\'s repo', async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.openInEditor, [{ repoId: 'r1', branch: 'b' }])).rejects.toThrow('Unknown repo: r1')
+    })
+
+    it('runApp throws Unknown repo for another identity\'s repo', async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'b' }])).rejects.toThrow('Unknown repo: r1')
+    })
+
+    it('getRepoSettings throws Unknown repo for another identity\'s repo', async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.getRepoSettings, ['r1'])).rejects.toThrow('Unknown repo: r1')
+    })
+
+    it('setRepoSettings throws Unknown repo for another identity\'s repo', async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.setRepoSettings, ['r1', { installCmd: '', startCmd: '' }])).rejects.toThrow('Unknown repo: r1')
+      expect(deps.repos.setSettings).not.toHaveBeenCalled()
+    })
+
+    it('startSession throws Unknown repo when the repo is owned by another identity', async () => {
+      ;(deps.repos.resolvePath as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])).rejects.toThrow('Unknown repo: r1')
+      expect(deps.worktrees.create).not.toHaveBeenCalled()
+    })
   })
 })

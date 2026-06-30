@@ -57,7 +57,7 @@ function backfillRemoteUrls(db: Database.Database): void {
 export function createRepoRegistry(db: Database.Database, _root: string): IRepoRegistry {
   backfillRemoteUrls(db)
   return {
-    async register(absPath: string): Promise<RepoDTO> {
+    async register(absPath: string, ownerId = 'local'): Promise<RepoDTO> {
       // Validate: must be inside a git work tree.
       try {
         const out = execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
@@ -86,7 +86,7 @@ export function createRepoRegistry(db: Database.Database, _root: string): IRepoR
       const base = detectBase(absPath)
       const id = slugify(`${org}-${name}`)
 
-      const repo: RepoDTO = { id, org, name, base, path: absPath, remoteUrl: remoteUrl ?? undefined }
+      const repo: RepoDTO = { id, org, name, base, path: absPath, remoteUrl: remoteUrl ?? undefined, ownerId }
       upsertRepo(db, repo)
       return repo
     },

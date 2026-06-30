@@ -1,9 +1,10 @@
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { BackendKind, RepoDTO, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO } from '../shared/contract.js'
+import type { BackendKind, RepoDTO, SessionDTO, Identity, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
+import { LOCAL_IDENTITY } from './auth.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -19,9 +20,30 @@ export interface Rpc {
 export function createRpc(
   deps: IpcDeps,
   emit: (channel: string, ...args: unknown[]) => void,
-  opts: { coalesceMs?: number } = {},
+  opts: { coalesceMs?: number; identity?: Identity } = {},
 ): Rpc {
   const coalesceMs = opts.coalesceMs ?? 40
+  const identity = opts.identity ?? LOCAL_IDENTITY
+  // Owner filter — a no-op in the single-user tier (every row is 'local').
+  // The seam scopes all reads so a future multi-user tier isolates owners.
+  const ownedByCaller = (row: { ownerId?: string }): boolean =>
+    (row.ownerId ?? 'local') === identity.id
+
+  // Treat a persisted session as owned-or-absent: callers may only act on
+  // sessions they own. Returns undefined for missing OR other-owner rows so
+  // handlers surface an identical "not found" to both — no existence leak.
+  function ownedSession(id: string): SessionDTO | undefined {
+    const s = deps.sessionStore.get(id)
+    return s && ownedByCaller(s) ? s : undefined
+  }
+
+  // Resolve a repo the caller owns, or throw the same "Unknown repo" error
+  // used for a missing repo (no existence leak across owners).
+  async function requireOwnedRepo(repoId: string): Promise<RepoDTO> {
+    const repo = await deps.repos.get(repoId)
+    if (!repo || !ownedByCaller(repo)) throw new Error(`Unknown repo: ${repoId}`)
+    return repo
+  }
 
   // Tracks which repo+branch each session owns so cleanup can remove the worktree.
   const sessionMeta = new Map<string, { repo: RepoDTO; branch: string }>()
@@ -78,10 +100,10 @@ export function createRpc(
   async function handle(channel: string, args: unknown[]): Promise<unknown> {
     switch (channel) {
       case IPC.listRepos:
-        return deps.repos.list()
+        return (await deps.repos.list()).filter(ownedByCaller)
 
       case IPC.registerRepo:
-        return deps.repos.register(args[0] as string)
+        return deps.repos.register(args[0] as string, identity.id)
 
       case IPC.removeRepo:
         return deps.repos.remove(args[0] as string)
@@ -95,6 +117,7 @@ export function createRpc(
         const agentKind = input.agentKind
 
         const repo = await deps.repos.resolvePath(repoId)
+        if (!ownedByCaller(repo)) throw new Error(`Unknown repo: ${repoId}`)
 
         const branch = branchFor(tid, title)
         await deps.worktrees.create(repo, branch)
@@ -132,7 +155,7 @@ export function createRpc(
         })
 
         sessionMeta.set(session.id, { repo, branch })
-        deps.sessionStore.upsert({ ...session, port, agentKind: agentKind ?? 'claude-code' })
+        deps.sessionStore.upsert({ ...session, port, agentKind: agentKind ?? 'claude-code', ownerId: identity.id })
         persistedStatus.set(session.id, 'running')
 
         if (agentKind === 'opencode' && opencodePort) {
@@ -172,7 +195,7 @@ export function createRpc(
       case IPC.cleanupSession: {
         const id = args[0] as string
         const opts = args[1] as { force?: boolean } | undefined
-        const persisted = deps.sessionStore.get(id)
+        const persisted = ownedSession(id)
         let meta = sessionMeta.get(id)
         if (!meta) {
           // Post-restart: try to reconstruct from sessionStore
@@ -203,14 +226,15 @@ export function createRpc(
       }
 
       case IPC.listSessions:
-        return deps.sessionStore.list()
+        return deps.sessionStore.list().filter(ownedByCaller)
 
       case IPC.resumeSession: {
         const id = args[0] as string
-        if (deps.sessions.has(id)) {
-          return deps.sessionStore.get(id) ?? { id, status: 'running' }
+        const owned = ownedSession(id)
+        if (deps.sessions.has(id) && owned) {
+          return owned
         }
-        const persisted = deps.sessionStore.get(id)
+        const persisted = owned
         if (!persisted) throw new Error(`Session not found: ${id}`)
         const repo = await deps.repos.resolvePath(persisted.repoId)
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
@@ -229,7 +253,7 @@ export function createRpc(
 
       case IPC.attachRemoteControl: {
         const id = args[0] as string
-        const persisted = deps.sessionStore.get(id)
+        const persisted = ownedSession(id)
         if (!persisted) throw new Error(`Session not found: ${id}`)
         const repo = await deps.repos.resolvePath(persisted.repoId)
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
@@ -246,14 +270,16 @@ export function createRpc(
         return { ...dto, port }
       }
 
-      case IPC.getSessionBuffer:
-        return deps.sessions.getBuffer(args[0] as string)
+      case IPC.getSessionBuffer: {
+        const id = args[0] as string
+        if (!ownedSession(id)) throw new Error(`Session not found: ${id}`)
+        return deps.sessions.getBuffer(id)
+      }
 
       case IPC.worktreeStatus: {
         const repoId = args[0] as string
         const branch = args[1] as string
-        const repo = await deps.repos.get(repoId)
-        if (!repo) throw new Error(`Unknown repo: ${repoId}`)
+        const repo = await requireOwnedRepo(repoId)
         return deps.worktrees.status(repo, branch)
       }
 
@@ -285,8 +311,7 @@ export function createRpc(
 
       case IPC.openInEditor: {
         const input = args[0] as { repoId: string; branch: string; mobile?: boolean }
-        const repo = await deps.repos.get(input.repoId)
-        if (!repo) throw new Error(`Unknown repo: ${input.repoId}`)
+        const repo = await requireOwnedRepo(input.repoId)
         const cwd = deps.worktrees.pathFor(repo, input.branch)
         const desktop = deps.config.get('editor.command') ?? 'code'
         const mobileCmd = (deps.config.get('editor.mobileCommand') ?? '').trim()
@@ -296,16 +321,21 @@ export function createRpc(
         return undefined
       }
 
-      case IPC.getRepoSettings:
-        return deps.repos.getSettings(args[0] as string)
+      case IPC.getRepoSettings: {
+        const id = args[0] as string
+        await requireOwnedRepo(id)
+        return deps.repos.getSettings(id)
+      }
 
-      case IPC.setRepoSettings:
-        return deps.repos.setSettings(args[0] as string, args[1] as RepoSettings)
+      case IPC.setRepoSettings: {
+        const id = args[0] as string
+        await requireOwnedRepo(id)
+        return deps.repos.setSettings(id, args[1] as RepoSettings)
+      }
 
       case IPC.runApp: {
         const { repoId, branch } = args[0] as { repoId: string; branch: string }
-        const repo = await deps.repos.get(repoId)
-        if (!repo) throw new Error(`Unknown repo: ${repoId}`)
+        const repo = await requireOwnedRepo(repoId)
         const settings = await deps.repos.getSettings(repoId)
         if (!settings.startCmd.trim()) return { started: false, reason: 'no-start-command' }
         const cwd = deps.worktrees.pathFor(repo, branch)
