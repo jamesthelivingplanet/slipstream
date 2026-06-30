@@ -8,18 +8,31 @@ only through a typed bridge. The single source of truth for that boundary is
 ## Process model
 
 ```
-Renderer (Svelte)  ──window.slipstream──▶  preload  ──ipcRenderer──▶  main (ipcMain)
-   xterm, stores                          (contextBridge)            services + node-pty
-        ▲                                                                  │
-        └────────────── session:data / session:status (push) ─────────────┘
+Renderer (Svelte)  ──window.slipstream──▶  wsApi  ──WebSocket /rpc──▶  daemon (server.ts)
+   xterm, stores     (createWsApi)        ws://127.0.0.1:<port>        createRpc → services
+        ▲                                                                    │
+        └──────────────── session:data / session:status (push) ─────────────┘
+
+Electron main  ──spawns──▶  daemon (ELECTRON_RUN_AS_NODE=1, server.js)
+  daemonManager              survives app-close unless SLIPSTREAM_DAEMON_EPHEMERAL=1
 ```
 
-- **`preload.ts`** exposes `window.slipstream` (the `SlipstreamApi`) via `contextBridge`,
-  forwarding to `ipcRenderer.invoke/send` keyed by the `IPC` channel constants.
-- **`ipc.ts` / `registerIpc(win, deps)`** registers the `ipcMain` handlers and forwards
-  PTY `data`/`status` events to the renderer with `win.webContents.send(...)`.
-- **`main.ts`** constructs the concrete services and calls `registerIpc`. It is the only
-  place that wires implementations together; services never import each other.
+- **`electron/core/daemonManager.ts`** resolves or spawns the local daemon. On startup,
+  `main.ts` calls `resolveDaemonConfig` (reads `daemon.json` from `userData`, or falls back
+  to `SLIPSTREAM_DAEMON_URL` for remote mode) and then `ensureLocalDaemon` (polls `/healthz`;
+  spawns `server.js` via `ELECTRON_RUN_AS_NODE=1` if not already running). The daemon is
+  `detached + unref()`d by default so it outlives the app; set `SLIPSTREAM_DAEMON_EPHEMERAL=1`
+  to tie its lifetime to the window.
+- **`preload.ts`** no longer exposes `window.slipstream`. Instead it reads the
+  `--slipstream-daemon=<base64>` argument passed via `additionalArguments` and exposes:
+  - `window.__slipstreamDaemon` — `{ url, token }` (the WS URL + bearer token)
+  - `window.__slipstreamNative` — `{ pickFolder() }` backed by `ipcRenderer.invoke(IPC.pickRepo)`
+- **`src/main.ts`** detects `window.__slipstreamDaemon` and calls `bootElectron()`, which
+  calls `createWsApi({ url, token })` and assigns `window.slipstream` **before** importing
+  `App.svelte` (preserving the `hasBackend` ordering invariant).
+- **`ipc.ts`** retains the `IpcDeps` interface (used by `rpc.ts` and `server.ts`) but the
+  `registerIpc` Electron adapter has been removed — the renderer now reaches all services
+  over WebSocket, the same path as web mode.
 
 > ⚠️ The preload is ESM (`preload.mjs`). Electron only loads an ESM preload when
 > `sandbox: false`, and the bundler must emit ESM (`output.format: 'es'`) or it writes
@@ -143,10 +156,11 @@ The bearer token provides application-layer authentication on top.
 
 ### Session locality
 
-PTY sessions live in whichever process spawned them. The standalone server (`pnpm serve`)
-is its own backend and does **not** share live sessions with a separately-running desktop
-app. Unifying them (desktop app as thin client of one daemon) is the "background daemon"
-item on the ROADMAP.
+PTY sessions live in the daemon process. Because the daemon survives app-close (it is
+`detached + unref()`d), sessions persist between Electron launches. A new Electron window
+reconnects to the same daemon over WebSocket and replays buffered output via
+`IPC.getSessionBuffer`. Set `SLIPSTREAM_DAEMON_EPHEMERAL=1` to revert to the old behavior
+(daemon killed on `before-quit`).
 
 ### Session lifecycle is client-independent
 
@@ -168,8 +182,9 @@ bounded ring-buffer of the last 256 KB of PTY output.
 
 - **Electron + Svelte** over Tauri — `node-pty` is the proven path for many concurrent
   terminals.
-- **PTYs are tied to app lifetime**; only metadata is persisted to SQLite. A background
-  daemon for surviving app-close is a later phase.
+- **Desktop-as-thin-client**: Electron main spawns a local daemon child and the renderer
+  talks to it over WebSocket — the same transport as web mode. The daemon survives app-close
+  (detached + unref) so agents keep running with the UI closed.
 - **No mock data** — the app is real-data-only; ticket access is behind `ITicketProvider`.
 - **Schema is inlined** in `db.ts` (the bundler doesn't copy a `.sql` file next to the
   bundled `main.js`).

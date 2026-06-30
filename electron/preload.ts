@@ -1,69 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { SlipstreamApi, SessionStatus } from './shared/contract.js'
 import { IPC } from './shared/contract.js'
 
-const api: SlipstreamApi = {
-  // ── Repos ────────────────────────────────────────────────────────────────
-  listRepos: () => ipcRenderer.invoke(IPC.listRepos),
-  registerRepo: (absPath) => ipcRenderer.invoke(IPC.registerRepo, absPath),
-  pickAndRegisterRepo: () => ipcRenderer.invoke(IPC.pickRepo),
-  removeRepo: (id) => ipcRenderer.invoke(IPC.removeRepo, id),
+const arg = process.argv.find((a) => a.startsWith('--slipstream-daemon='))
+const daemon = arg
+  ? (JSON.parse(
+      Buffer.from(arg.slice('--slipstream-daemon='.length), 'base64').toString(),
+    ) as { url: string; token: string })
+  : null
 
-  // ── Tickets ──────────────────────────────────────────────────────────────
-  listTickets: () => ipcRenderer.invoke(IPC.listTickets),
-  getTicketStatus: (tid) => ipcRenderer.invoke(IPC.getTicketStatus, tid),
-  setTicketStatus: (tid, stateId) => ipcRenderer.invoke(IPC.setTicketStatus, tid, stateId),
-
-  // ── Config / Integrations ────────────────────────────────────────────────
-  getLinearKey: () => ipcRenderer.invoke(IPC.getLinearKey),
-  setLinearKey: (key: string) => ipcRenderer.invoke(IPC.setLinearKey, key),
-  getEditorConfig: () => ipcRenderer.invoke(IPC.getEditorConfig),
-  setEditorConfig: (cfg) => ipcRenderer.invoke(IPC.setEditorConfig, cfg),
-  openInEditor: (input) => ipcRenderer.invoke(IPC.openInEditor, input),
-
-  // ── Sessions ─────────────────────────────────────────────────────────────
-  startSession: (input) => ipcRenderer.invoke(IPC.startSession, input),
-  listSessions: () => ipcRenderer.invoke(IPC.listSessions),
-  resumeSession: (id: string) => ipcRenderer.invoke(IPC.resumeSession, id),
-  attachRemoteControl: (id: string) => ipcRenderer.invoke(IPC.attachRemoteControl, id),
-
-  writeSession: (id, data) => ipcRenderer.send(IPC.writeSession, id, data),
-  resizeSession: (id, cols, rows) =>
-    ipcRenderer.send(IPC.resizeSession, id, cols, rows),
-
-  killSession: (id) => ipcRenderer.invoke(IPC.killSession, id),
-  cleanupSession: (id, opts) =>
-    ipcRenderer.invoke(IPC.cleanupSession, id, opts),
-
-  // ── Push events (main → renderer) ────────────────────────────────────────
-  onSessionData(cb: (id: string, data: string, seq: number) => void): () => void {
-    const listener = (_e: Electron.IpcRendererEvent, id: string, data: string, seq: number) =>
-      cb(id, data, seq)
-    ipcRenderer.on(IPC.sessionData, listener)
-    return () => ipcRenderer.removeListener(IPC.sessionData, listener)
-  },
-
-  getSessionBuffer: (id) => ipcRenderer.invoke(IPC.getSessionBuffer, id),
-  worktreeStatus: (repoId, branch) => ipcRenderer.invoke(IPC.worktreeStatus, repoId, branch),
-
-  onSessionStatus(cb: (id: string, status: SessionStatus) => void): () => void {
-    const listener = (
-      _e: Electron.IpcRendererEvent,
-      id: string,
-      status: SessionStatus,
-    ) => cb(id, status)
-    ipcRenderer.on(IPC.sessionStatus, listener)
-    return () => ipcRenderer.removeListener(IPC.sessionStatus, listener)
-  },
-  getRepoSettings: (id) => ipcRenderer.invoke(IPC.getRepoSettings, id),
-  setRepoSettings: (id, settings) => ipcRenderer.invoke(IPC.setRepoSettings, id, settings),
-  runApp: (input) => ipcRenderer.invoke(IPC.runApp, input),
-
-  // ── Push notifications ───────────────────────────────────────────────────────
-  getVapidPublicKey: () => ipcRenderer.invoke(IPC.getVapidPublicKey),
-  savePushSubscription: (sub, prefs) => ipcRenderer.invoke(IPC.savePushSubscription, sub, prefs),
-  deletePushSubscription: (endpoint) => ipcRenderer.invoke(IPC.deletePushSubscription, endpoint),
-  getPushPrefs: (endpoint) => ipcRenderer.invoke(IPC.getPushPrefs, endpoint),
-}
-
-contextBridge.exposeInMainWorld('slipstream', api)
+contextBridge.exposeInMainWorld('__slipstreamDaemon', daemon)
+contextBridge.exposeInMainWorld('__slipstreamNative', {
+  pickFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.pickRepo),
+})
