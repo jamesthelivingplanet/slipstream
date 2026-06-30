@@ -95,6 +95,11 @@ export interface IRepoRegistry {
   /** Validates absPath is a git work tree with commits; throws on failure. Idempotent.
    *  Stamps the repo with `ownerId` (defaults to 'local' for the single-user tier). */
   register(absPath: string, ownerId?: string): Promise<RepoDTO>
+  /** Clone a repo from its git remote URL into the managed location
+   *  (`<root>/.repositories/<id>`) and register it. Idempotent: reuses an
+   *  existing managed clone with the same remote. Throws a clear error when the
+   *  clone fails (bad URL, auth, network). Stamps `ownerId` (defaults 'local'). */
+  registerByUrl(remoteUrl: string, ownerId?: string): Promise<RepoDTO>
   get(id: string): Promise<RepoDTO | undefined>
   /** Resolve the repo's current on-disk path, self-healing the DB when the
    *  checkout was moved/renamed. Throws a clear error when no checkout can be found. */
@@ -215,6 +220,9 @@ export interface ITicketProvider {
 export interface SlipstreamApi {
   listRepos(): Promise<RepoDTO[]>
   registerRepo(absPath: string): Promise<RepoDTO>
+  /** Clone a repo from its git remote URL into the managed location and register
+   *  it. Rejects with a descriptive Error when the clone fails. */
+  registerRepoByUrl(remoteUrl: string): Promise<RepoDTO>
   /** Opens a native folder picker, registers the chosen repo. null if cancelled.
    *  Rejects with a descriptive Error if the folder isn't a valid git repo. */
   pickAndRegisterRepo(): Promise<RepoDTO | null>
@@ -256,6 +264,7 @@ export interface SlipstreamApi {
 export const IPC = {
   listRepos: 'repos:list',
   registerRepo: 'repos:register',
+  registerRepoByUrl: 'repos:registerUrl',
   pickRepo: 'repos:pick',
   removeRepo: 'repos:remove',
   listTickets: 'tickets:list',

@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { basename } from 'node:path'
+import { basename, join } from 'node:path'
+import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import Database from 'better-sqlite3'
 import { upsertRepo, allRepos, getRepo, deleteRepo, getRepoSettings, setRepoSettings } from '../db/db.js'
-import { getRemoteUrl, resolveRepoPath } from './repoResolve.js'
+import { getRemoteUrl, resolveRepoPath, cloneRepo, isWorkTree } from './repoResolve.js'
 import type { IRepoRegistry, RepoDTO, RepoSettings } from '../shared/contract.js'
 
 /** Turn an arbitrary string into a lower-kebab-case slug. */
@@ -54,8 +55,18 @@ function backfillRemoteUrls(db: Database.Database): void {
   }
 }
 
-export function createRepoRegistry(db: Database.Database, _root: string): IRepoRegistry {
+/** Build a RepoDTO from an on-disk checkout (org/name from remote URL when
+ *  present, base branch detected from the checkout). */
+function buildRepoDTO(absPath: string, remoteUrl: string | null, ownerId: string): RepoDTO {
+  const { org, name } = parseOrgName(remoteUrl, absPath)
+  const base = detectBase(absPath)
+  const id = slugify(`${org}-${name}`)
+  return { id, org, name, base, path: absPath, remoteUrl: remoteUrl ?? undefined, ownerId }
+}
+
+export function createRepoRegistry(db: Database.Database, root: string): IRepoRegistry {
   backfillRemoteUrls(db)
+  const managedPath = (id: string) => join(root, '.repositories', id)
   return {
     async register(absPath: string, ownerId = 'local'): Promise<RepoDTO> {
       // Validate: must be inside a git work tree.
@@ -82,11 +93,32 @@ export function createRepoRegistry(db: Database.Database, _root: string): IRepoR
       }
 
       const remoteUrl = getRemoteUrl(absPath)
-      const { org, name } = parseOrgName(remoteUrl, absPath)
-      const base = detectBase(absPath)
-      const id = slugify(`${org}-${name}`)
+      const repo = buildRepoDTO(absPath, remoteUrl, ownerId)
+      upsertRepo(db, repo)
+      return repo
+    },
 
-      const repo: RepoDTO = { id, org, name, base, path: absPath, remoteUrl: remoteUrl ?? undefined, ownerId }
+    async registerByUrl(remoteUrl: string, ownerId = 'local'): Promise<RepoDTO> {
+      const trimmed = remoteUrl.trim()
+      if (!trimmed) throw new Error('Remote URL is required.')
+      // Derive the managed destination from the URL so the id is stable & deterministic.
+      const { org, name } = parseOrgName(trimmed, trimmed)
+      const id = slugify(`${org}-${name}`)
+      const dest = managedPath(id)
+
+      // Idempotent: an existing managed clone with the same remote is reused.
+      if (isWorkTree(dest) && getRemoteUrl(dest) === trimmed) {
+        const repo = buildRepoDTO(dest, trimmed, ownerId)
+        upsertRepo(db, repo)
+        return repo
+      }
+      // Stale/partial leftover in our managed dir — safe to remove and re-clone.
+      if (existsSync(dest)) rmSync(dest, { recursive: true, force: true })
+
+      mkdirSync(join(root, '.repositories'), { recursive: true })
+      cloneRepo(trimmed, dest)
+
+      const repo = buildRepoDTO(dest, getRemoteUrl(dest), ownerId)
       upsertRepo(db, repo)
       return repo
     },
@@ -104,6 +136,14 @@ export function createRepoRegistry(db: Database.Database, _root: string): IRepoR
       if (!repo) throw new Error(`Unknown repo: ${id}`)
       const result = resolveRepoPath(repo)
       if (!result) {
+        // Managed clone went missing — re-provision it on demand.
+        if (repo.remoteUrl && repo.path === managedPath(repo.id)) {
+          if (existsSync(repo.path)) rmSync(repo.path, { recursive: true, force: true })
+          mkdirSync(join(root, '.repositories'), { recursive: true })
+          cloneRepo(repo.remoteUrl, repo.path)
+          upsertRepo(db, repo)
+          return repo
+        }
         throw new Error(
           `Repository path no longer exists: ${repo.path}. Re-register it or restore the directory.`,
         )
