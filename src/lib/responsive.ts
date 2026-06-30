@@ -9,3 +9,11 @@ export const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_BREAKPOINT}px)`
 export function isMobileWidth(width: number): boolean {
   return width <= MOBILE_BREAKPOINT
 }
+
+/** Vertical drag distance (px) at or beyond which a drawer drag dismisses it. */
+export const DRAWER_DISMISS_PX = 72
+
+/** Returns true when a downward drawer drag of `deltaY` pixels should dismiss. */
+export function shouldDismissDrawer(deltaY: number): boolean {
+  return deltaY >= DRAWER_DISMISS_PX
+}

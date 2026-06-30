@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import TicketStatusBar from './lib/components/TicketStatusBar.svelte'
-  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select, subscribeSessionStatus } from './lib/stores'
+  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select, subscribeSessionStatus, mobile } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
@@ -15,10 +15,9 @@
 
   // Mobile drawer state — the sidebar is an overlay on narrow viewports.
   let listOpen = false
-  let isMobile = false
 
   function checkMobile() {
-    isMobile = window.matchMedia(MOBILE_MEDIA_QUERY).matches
+    mobile.set(window.matchMedia(MOBILE_MEDIA_QUERY).matches)
   }
 
   onMount(() => {
@@ -58,12 +57,12 @@
   })
 
   // When an agent is selected on mobile, close the drawer.
-  $: if ($selected && isMobile) listOpen = false
+  $: if ($selected && $mobile) listOpen = false
 </script>
 
 <div class="app">
   <header class="bar">
-    {#if isMobile}
+    {#if $mobile}
       <!-- Hamburger: toggles the agent list drawer on mobile -->
       <button
         class="btn btn-ghost btn-icon btn-sm"
@@ -77,7 +76,7 @@
     <div class="logo">
       <img src="/icons/icon.svg" alt="Slipstream" class="glyph" />
       <b>Slipstream</b>
-      {#if !isMobile}<span class="badge mono">dangerous mode</span>{/if}
+      {#if !$mobile}<span class="badge mono">dangerous mode</span>{/if}
     </div>
     <div class="spacer"></div>
     <ThemeMenu />
@@ -88,12 +87,12 @@
       {@html icons.settings}
     </button>
     <button class="btn btn-primary btn-sm" on:click={() => dialogOpen.set(true)}>
-      {@html icons.plus} {isMobile ? '' : 'New agent'}
+      {@html icons.plus} {$mobile ? '' : 'New agent'}
     </button>
   </header>
 
   <!-- Mobile overlay backdrop: tap outside drawer to close -->
-  {#if isMobile && listOpen}
+  {#if $mobile && listOpen}
     <div
       class="drawer-backdrop"
       on:click={() => (listOpen = false)}
@@ -102,7 +101,7 @@
   {/if}
 
   <div class="content">
-    <AgentList mobileOpen={!isMobile || listOpen} onSelect={() => { if (isMobile) listOpen = false }} />
+    <AgentList mobileOpen={!$mobile || listOpen} onSelect={() => { if ($mobile) listOpen = false }} />
 
     <section class="term-pane">
       {#if !$selected}

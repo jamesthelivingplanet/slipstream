@@ -332,6 +332,7 @@ html[data-mode="light"] .mode-toggle .mt.on { background: #fff; box-shadow: 0 1p
   width: 560px; max-width: 94vw; max-height: 88vh;
   background: hsl(var(--popover)); border: 1px solid hsl(var(--border)); border-radius: calc(var(--radius) + 2px);
   box-shadow: var(--shadow); display: flex; flex-direction: column; animation: dialogIn .22s cubic-bezier(.2,.8,.2,1); }
+.dialog.settings-dialog { width: 680px; }
 .dlg-head { padding: 20px 22px 14px; border-bottom: 1px solid hsl(var(--border)); }
 .dlg-head h2 { font-size: 16px; font-weight: 600; }
 .dlg-head p { font-size: 12.5px; color: hsl(var(--muted-foreground)); margin-top: 3px; }
