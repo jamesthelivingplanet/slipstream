@@ -18,6 +18,7 @@ import type {
   EditorConfig,
   NotifyPrefs,
   PushSubscriptionDTO,
+  GitHost,
 } from '../../electron/shared/contract.js'
 
 export const hasBackend =
@@ -198,4 +199,23 @@ export function deletePushSubscription(endpoint: string): Promise<void> {
 
 export function getPushPrefs(endpoint: string): Promise<NotifyPrefs | null> {
   return hasBackend ? window.slipstream.getPushPrefs(endpoint) : Promise.resolve(null)
+}
+
+// ── Git host tokens / PR push ───────────────────────────────────────────────
+
+export function getGitToken(host: GitHost): Promise<string | null> {
+  return hasBackend ? window.slipstream.getGitToken(host) : Promise.resolve(null)
+}
+
+export function setGitToken(host: GitHost, token: string): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.setGitToken(host, token)
+}
+
+/** Subscribe to session PR/MR-opened events. Returns an unsubscribe fn. */
+export function onSessionPr(
+  cb: (id: string, prUrl: string) => void,
+): () => void {
+  if (!hasBackend) return () => {}
+  return window.slipstream.onSessionPr(cb)
 }

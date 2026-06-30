@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import TicketStatusBar from './lib/components/TicketStatusBar.svelte'
-  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select, subscribeSessionStatus, mobile } from './lib/stores'
+  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select, subscribeSessionStatus, subscribeSessionPr, mobile } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
@@ -22,6 +22,7 @@
 
   onMount(() => {
     const offStatus = subscribeSessionStatus()
+    const offPr = subscribeSessionPr()
 
     initFromBackend().then(() => {
       return refreshAndReconcile().then(() => {
@@ -51,6 +52,7 @@
     window.addEventListener('orientationchange', checkMobile)
     return () => {
       offStatus()
+      offPr()
       window.removeEventListener('resize', checkMobile)
       window.removeEventListener('orientationchange', checkMobile)
     }

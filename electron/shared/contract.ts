@@ -15,6 +15,7 @@
 export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted'
 export type TicketSource = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi'
+export type GitHost = 'github' | 'gitlab'
 
 /** Resolved caller identity. Single-user today ({ id: 'local' }); the seam
  *  exists so a future multi-user tier can map tokens → distinct owners. */
@@ -65,6 +66,7 @@ export interface SessionDTO {
   opencodeSid?: string
   createdAt: number
   ownerId?: string  // owner identity; 'local' for the single-user tier
+  prUrl?: string  // MR/PR URL opened for this session's branch
 }
 
 export interface WorkflowState {
@@ -123,6 +125,7 @@ export interface SessionEvents {
   data: (sessionId: string, chunk: string, seq: number) => void
   status: (sessionId: string, status: SessionStatus) => void
   exit: (sessionId: string, code: number) => void
+  pr: (sessionId: string, prUrl: string) => void
 }
 
 export interface StartSessionInput {
@@ -136,6 +139,8 @@ export interface StartSessionInput {
   systemPrompt?: string
   agentKind?: BackendKind
   opencodePort?: number
+  mcpConfigPath?: string
+  sessionId?: string
 }
 
 export interface ResumeSessionInput {
@@ -143,6 +148,7 @@ export interface ResumeSessionInput {
   cwd: string
   env?: Record<string, string>
   opencodePort?: number
+  mcpConfigPath?: string
 }
 
 export interface ISessionStore {
@@ -259,6 +265,9 @@ export interface SlipstreamApi {
   savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void>
   deletePushSubscription(endpoint: string): Promise<void>
   getPushPrefs(endpoint: string): Promise<NotifyPrefs | null>
+  getGitToken(host: GitHost): Promise<string | null>
+  setGitToken(host: GitHost, token: string): Promise<void>
+  onSessionPr(cb: (id: string, prUrl: string) => void): () => void
 }
 
 export const IPC = {
@@ -294,6 +303,9 @@ export const IPC = {
   savePushSubscription: 'push:save',
   deletePushSubscription: 'push:delete',
   getPushPrefs: 'push:prefs',
+  getGitToken: 'config:getGitToken',
+  setGitToken: 'config:setGitToken',
+  sessionPr: 'session:pr',   // main → renderer push
 } as const
 
 declare global {

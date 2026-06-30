@@ -7,7 +7,7 @@
  * Framework-free (plain TS) — unit-testable against a fake WebSocket.
  */
 
-import type { SlipstreamApi, RepoDTO, RepoSettings, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo, EditorConfig, NotifyPrefs, PushSubscriptionDTO, BackendKind } from '../../electron/shared/contract.js'
+import type { SlipstreamApi, RepoDTO, RepoSettings, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo, EditorConfig, NotifyPrefs, PushSubscriptionDTO, BackendKind, GitHost } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
 import { genId } from './id.js'
@@ -52,6 +52,8 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   // Push listeners
   const dataListeners = new Set<DataCb>()
   const statusListeners = new Set<StatusCb>()
+  type PrCb = (id: string, prUrl: string) => void
+  const prListeners = new Set<PrCb>()
 
   function connect() {
     if (destroyed) return
@@ -97,6 +99,9 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
         } else if (msg.channel === IPC.sessionStatus) {
           const [id, status] = msg.args as [string, SessionStatus]
           for (const cb of statusListeners) cb(id, status)
+        } else if (msg.channel === IPC.sessionPr) {
+          const [id, prUrl] = msg.args as [string, string]
+          for (const cb of prListeners) cb(id, prUrl)
         }
       }
     }
@@ -288,6 +293,16 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     },
     getPushPrefs(endpoint: string): Promise<import('../../electron/shared/contract.js').NotifyPrefs | null> {
       return request(IPC.getPushPrefs, [endpoint]) as Promise<import('../../electron/shared/contract.js').NotifyPrefs | null>
+    },
+    getGitToken(host: GitHost): Promise<string | null> {
+      return request(IPC.getGitToken, [host]) as Promise<string | null>
+    },
+    setGitToken(host: GitHost, token: string): Promise<void> {
+      return request(IPC.setGitToken, [host, token]) as Promise<void>
+    },
+    onSessionPr(cb: (id: string, prUrl: string) => void): () => void {
+      prListeners.add(cb)
+      return () => prListeners.delete(cb)
     },
   }
 }

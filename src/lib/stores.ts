@@ -16,6 +16,7 @@ import {
   worktreeStatus,
   runApp,
   onSessionStatus,
+  onSessionPr,
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
@@ -132,6 +133,7 @@ export async function initFromBackend(): Promise<void> {
         ago: '',
         prompt: dto.prompt,
         port: dto.port,
+        prUrl: dto.prUrl,
         activity: { text: uiStatus === 'interrupted' ? 'Interrupted by restart — open to resume.' : 'Detached — open to resume.' },
       }
     })
@@ -307,6 +309,17 @@ export async function startAgent(tid: string, repoId: string, prompt: string, ag
 export function subscribeSessionStatus(): () => void {
   if (!hasBackend) return () => {}
   return onSessionStatus((id, status) => setSessionStatus(id, status as Status))
+}
+
+/** Subscribe to the backend's session PR/MR-opened broadcast and mirror it into the store. */
+export function subscribeSessionPr(): () => void {
+  if (!hasBackend) return () => {}
+  return onSessionPr((id, prUrl) => setSessionPrUrl(id, prUrl))
+}
+
+/** Update the PR/MR URL of the session identified by its backend UUID. */
+export function setSessionPrUrl(id: string, prUrl: string) {
+  sessions.update(($s) => $s.map((s) => (s.id === id ? { ...s, prUrl } : s)))
 }
 
 /** Update the status of the session identified by its backend UUID. */
