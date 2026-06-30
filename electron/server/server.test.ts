@@ -186,6 +186,16 @@ function makeSurvivalDeps(): { deps: IpcDeps; seedSession: (id: string, ...chunk
     const buf = new OutputBuffer()
     for (const chunk of chunks) buf.push(chunk)
     liveMap.set(id, buf)
+    sessionStoreMap.set(id, {
+      id,
+      tid: 'T-1',
+      title: 'seeded',
+      prompt: '',
+      repoId: 'r1',
+      branch: 'b',
+      status: 'running' as const,
+      createdAt: Date.now(),
+    })
   }
 
   return { deps, seedSession }

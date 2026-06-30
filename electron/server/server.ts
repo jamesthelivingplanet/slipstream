@@ -6,6 +6,8 @@ import { WebSocketServer, WebSocket } from 'ws'
 import type { IpcDeps } from '../ipc.js'
 import { createRpc } from '../core/rpc.js'
 import type { WireReq, WireRes, WirePush } from '../shared/wire.js'
+import { resolveIdentity, LOCAL_IDENTITY } from '../core/auth.js'
+import type { Identity } from '../shared/contract.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -110,16 +112,17 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
       return
     }
 
+    const identity = resolveIdentity(provided as string)
     wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit('connection', ws, req)
+      wss.emit('connection', ws, req, identity)
     })
   })
 
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', (ws: WebSocket, _req: http.IncomingMessage, identity: Identity = LOCAL_IDENTITY) => {
     const rpc = createRpc(deps, (channel, ...args) => {
       if (ws.readyState !== WebSocket.OPEN) return
       ws.send(JSON.stringify({ t: 'push', channel, args } as WirePush))
-    })
+    }, { identity })
 
     ws.on('message', (raw) => {
       let req: WireReq

@@ -181,3 +181,53 @@ describe('worktreeManager (real git)', () => {
     await wm.remove(repo, 'feat-missingstat', { force: true })
   })
 })
+
+describe('worktreeManager pull-before-create (real git + remote)', () => {
+  let rroot: string
+  let rrepo: RepoDTO
+  let rwm: ReturnType<typeof createWorktreeManager>
+
+  beforeAll(() => {
+    rroot = mkdtempSync(join(tmpdir(), 'slipstream-wt-remote-'))
+    const remotePath = join(rroot, 'remote.git')
+    execFileSync('git', ['init', '--bare', '-b', 'main', remotePath], { encoding: 'utf8' })
+
+    // First clone seeds the remote with an initial commit.
+    const seedPath = join(rroot, 'seed')
+    execFileSync('git', ['clone', remotePath, seedPath], { encoding: 'utf8' })
+    git(seedPath, 'config', 'user.email', 'test@slipstream.dev')
+    git(seedPath, 'config', 'user.name', 'Slipstream Test')
+    writeFileSync(join(seedPath, 'README.md'), '# demo\n')
+    git(seedPath, 'add', '-A')
+    git(seedPath, 'commit', '-m', 'init')
+    git(seedPath, 'push', 'origin', 'main')
+
+    // The repo the app manages — clone it now, while origin/main is at "init".
+    const repoPath = join(rroot, 'source')
+    execFileSync('git', ['clone', remotePath, repoPath], { encoding: 'utf8' })
+    git(repoPath, 'config', 'user.email', 'test@slipstream.dev')
+    git(repoPath, 'config', 'user.name', 'Slipstream Test')
+
+    // Someone else advances origin/main AFTER source was cloned, so source's
+    // local main is now stale.
+    writeFileSync(join(seedPath, 'remote-feature.txt'), 'from remote\n')
+    git(seedPath, 'add', '-A')
+    git(seedPath, 'commit', '-m', 'remote feature')
+    git(seedPath, 'push', 'origin', 'main')
+
+    rrepo = { id: 'acme-remote', org: 'acme', name: 'remote', base: 'main', path: repoPath }
+    rwm = createWorktreeManager(rroot)
+  })
+
+  afterAll(() => {
+    rmSync(rroot, { recursive: true, force: true })
+  })
+
+  it('cuts a new branch from the latest remote base (pulls first)', async () => {
+    // source's local main does NOT have remote-feature.txt yet.
+    const info = await rwm.create(rrepo, 'feat-fresh')
+    // The new worktree must include the commit that only exists on origin/main.
+    expect(existsSync(join(info.path, 'remote-feature.txt'))).toBe(true)
+    await rwm.remove(rrepo, 'feat-fresh', { force: true })
+  })
+})
