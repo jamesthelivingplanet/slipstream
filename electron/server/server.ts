@@ -44,14 +44,25 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     function serveFile(fp: string): void {
       fs.readFile(fp, (err, data) => {
         if (err) {
-          // SPA fallback
+          // Only SPA-fallback for routes without a file extension.
+          // A missing .js/.css means the browser has a stale index.html
+          // referencing chunks from a previous build — serving HTML here
+          // causes a MIME mismatch that silently kills the app.
+          if (path.extname(url.pathname)) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' })
+            res.end('Not found')
+            return
+          }
           fs.readFile(path.join(distDir, 'index.html'), (err2, html) => {
             if (err2) {
               res.writeHead(404)
               res.end('Not found')
               return
             }
-            res.writeHead(200, { 'Content-Type': 'text/html' })
+            res.writeHead(200, {
+              'Content-Type': 'text/html',
+              'Cache-Control': 'no-cache',
+            })
             res.end(html)
           })
           return
@@ -69,7 +80,17 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
           woff2: 'font/woff2',
           woff: 'font/woff',
         }
-        res.writeHead(200, { 'Content-Type': mime[ext] ?? 'application/octet-stream' })
+        // Cache policy:
+        //  - index.html and other non-asset files: no-cache (always revalidate)
+        //  - /assets/* (content-hashed filenames): immutable, cache for 1 year
+        const isHashedAsset = url.pathname.startsWith('/assets/')
+        const cacheControl = isHashedAsset
+          ? 'public, max-age=31536000, immutable'
+          : 'no-cache'
+        res.writeHead(200, {
+          'Content-Type': mime[ext] ?? 'application/octet-stream',
+          'Cache-Control': cacheControl,
+        })
         res.end(data)
       })
     }

@@ -391,4 +391,21 @@ describe('createServer', () => {
 
     wsB.close()
   })
+
+  it('returns 404 for missing /assets/*.js instead of SPA-fallback HTML (prevents MIME mismatch blank screen)', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+
+    // Request a non-existent hashed asset — it should 404, not SPA-fallback to HTML
+    const { statusCode, contentType } = await new Promise<{ statusCode: number; contentType: string }>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/assets/old-stale-hash.js`, (res) => {
+        res.resume()
+        resolve({ statusCode: res.statusCode ?? 0, contentType: res.headers['content-type'] ?? '' })
+      }).on('error', reject)
+    })
+
+    expect(statusCode).toBe(404)
+    expect(contentType).not.toContain('text/html')
+  })
 })
