@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { dialogOpen, tickets, createAgentFromTicket, createBlankAgent, startAgent, refreshTickets, repos, repoById, settingsOpen } from '../stores'
+  import { dialogOpen, tickets, createAgentFromTicket, createBlankAgent, startAgent, refreshTickets, repos, repoById, settingsOpen, mobile } from '../stores'
+  import ResponsivePanel from './ResponsivePanel.svelte'
   import { branchFor } from '../branch'
   import { icons } from '../icons'
   import type { Ticket, BackendKind } from '../types'
@@ -57,12 +58,11 @@
 <svelte:window on:click={onWindowClick} />
 
 {#if $dialogOpen}
-  <div class="overlay" on:click={() => dialogOpen.set(false)} role="presentation"></div>
-  <div class="dialog">
-    <div class="dlg-head">
+  <ResponsivePanel open mobile={$mobile} onClose={() => dialogOpen.set(false)}>
+    <svelte:fragment slot="header">
       <h2>New agent</h2>
       <p>Pick a ticket or start blank, choose a repo, and start it in one go.</p>
-    </div>
+    </svelte:fragment>
 
     <div class="dlg-body">
       <div>
@@ -150,11 +150,11 @@
       {/if}
     </div>
 
-    <div class="dlg-foot">
+    <svelte:fragment slot="footer">
       <button class="btn btn-ghost" on:click={() => dialogOpen.set(false)}>Cancel</button>
       <button class="btn btn-primary" disabled={!title.trim() || !repoChoice} on:click={start}>{@html icons.play} Start agent</button>
-    </div>
-  </div>
+    </svelte:fragment>
+  </ResponsivePanel>
 {/if}
 
 <style>
