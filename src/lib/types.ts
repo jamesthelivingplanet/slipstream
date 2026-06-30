@@ -38,6 +38,7 @@ export interface Session {
   description?: string
   port?: number
   agentKind?: BackendKind
+  prUrl?: string
   activity: { text: string; q?: boolean }
 }
 

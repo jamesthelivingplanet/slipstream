@@ -2,7 +2,7 @@
   import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath, registerRepoByUrl, settingsRepoId, mobile } from '../stores'
   import ResponsivePanel from './ResponsivePanel.svelte'
   import { icons } from '../icons'
-  import { hasBackend, getEditorConfig, setEditorConfig, getRepoSettings, setRepoSettings } from '../ipc'
+  import { hasBackend, getEditorConfig, setEditorConfig, getRepoSettings, setRepoSettings, getGitToken, setGitToken } from '../ipc'
   import { pushToast } from '../toast'
   import { pushSupported, enablePush, updatePrefs, disablePush, loadPrefs } from '../push'
   import type { NotifyPrefs } from '../../../electron/shared/contract.js'
@@ -18,6 +18,11 @@
 
   let linearKey = ''
   let linearPending = false
+
+  let githubToken = ''
+  let githubPending = false
+  let gitlabToken = ''
+  let gitlabPending = false
 
   let editorCommand = ''
   let mobileEditorCommand = ''
@@ -46,6 +51,52 @@
     }
   }
 
+  async function loadGithubToken() {
+    if (!hasBackend) return
+    try {
+      const stored = await getGitToken('github')
+      if (stored) githubToken = stored
+    } catch {
+      // ignore
+    }
+  }
+
+  async function saveGithubToken() {
+    if (!hasBackend) return
+    githubPending = true
+    try {
+      await setGitToken('github', githubToken.trim())
+      pushToast('success', 'GitHub token saved')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save token')
+    } finally {
+      githubPending = false
+    }
+  }
+
+  async function loadGitlabToken() {
+    if (!hasBackend) return
+    try {
+      const stored = await getGitToken('gitlab')
+      if (stored) gitlabToken = stored
+    } catch {
+      // ignore
+    }
+  }
+
+  async function saveGitlabToken() {
+    if (!hasBackend) return
+    gitlabPending = true
+    try {
+      await setGitToken('gitlab', gitlabToken.trim())
+      pushToast('success', 'GitLab token saved')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save token')
+    } finally {
+      gitlabPending = false
+    }
+  }
+
   async function loadEditorConfig() {
     if (!hasBackend) return
     try {
@@ -67,7 +118,7 @@
     }
   }
 
-  $: if ($settingsOpen && activeTab === 'integrations') loadLinearKey()
+  $: if ($settingsOpen && activeTab === 'integrations') { loadLinearKey(); loadGithubToken(); loadGitlabToken() }
   $: if ($settingsOpen && activeTab === 'behavior') loadEditorConfig()
   $: if ($settingsOpen && activeTab === 'notifications') initNotifications()
 
@@ -241,7 +292,7 @@
           type="button"
           class="tab-item"
           class:active={activeTab === 'integrations'}
-          on:click={() => { activeTab = 'integrations'; loadLinearKey() }}
+          on:click={() => { activeTab = 'integrations'; loadLinearKey(); loadGithubToken(); loadGitlabToken() }}
         >
           Integrations
         </button>
@@ -406,6 +457,52 @@
                 class="btn btn-outline btn-sm"
                 on:click={saveLinearKey}
                 disabled={!linearKey.trim() || linearPending || !hasBackend}
+              >
+                Save
+              </button>
+            </div>
+            {#if !hasBackend}
+              <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+            {/if}
+          </div>
+          <div>
+            <span class="lbl-f">GitHub Token</span>
+            <p class="integration-hint">Personal access token with repo scope.</p>
+            <div class="path-add">
+              <input
+                type="password"
+                class="path-input"
+                placeholder="ghp_••••••••••••••••••••••••••••••••"
+                bind:value={githubToken}
+                disabled={githubPending || !hasBackend}
+              />
+              <button
+                class="btn btn-outline btn-sm"
+                on:click={saveGithubToken}
+                disabled={!githubToken.trim() || githubPending || !hasBackend}
+              >
+                Save
+              </button>
+            </div>
+            {#if !hasBackend}
+              <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+            {/if}
+          </div>
+          <div>
+            <span class="lbl-f">GitLab Token</span>
+            <p class="integration-hint">Personal access token with repo scope.</p>
+            <div class="path-add">
+              <input
+                type="password"
+                class="path-input"
+                placeholder="glpat-••••••••••••••••••••••••••••••••"
+                bind:value={gitlabToken}
+                disabled={gitlabPending || !hasBackend}
+              />
+              <button
+                class="btn btn-outline btn-sm"
+                on:click={saveGitlabToken}
+                disabled={!gitlabToken.trim() || gitlabPending || !hasBackend}
               >
                 Save
               </button>

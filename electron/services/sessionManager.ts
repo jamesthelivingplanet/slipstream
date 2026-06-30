@@ -9,6 +9,8 @@
 
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
 import * as pty from 'node-pty'
 
 import type {
@@ -48,11 +50,12 @@ interface SessionRecord {
   opencodePort?: number
   opencodeSid?: string
   pollTimer?: ReturnType<typeof setInterval>
+  watcher?: ReturnType<typeof fs.watch>
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
-export function createSessionManager(logger?: RunLogger): ISessionManager {
+export function createSessionManager(logger?: RunLogger, root?: string): ISessionManager {
   const emitter = new EventEmitter()
   const sessions = new Map<string, SessionRecord>()
 
@@ -85,6 +88,8 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     proc.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => {
       if (rec.disposed) return
       stopPolling(rec)
+      rec.watcher?.close()
+      rec.watcher = undefined
       rec.disposed = true
       detector.markExit(exitCode)
       const s = detector.status()
@@ -178,6 +183,35 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       opencodeSid: params.opencodeSid,
     }
     sessions.set(id, rec)
+
+    // Set up fs.watch for pr.json sentinel if root is provided
+    if (root) {
+      const sentinelDir = path.join(root, 'sessions', id)
+      void fs.promises.mkdir(sentinelDir, { recursive: true }).then(() => {
+        const emittedPrUrl = new Set<string>()
+        try {
+          const watcher = fs.watch(sentinelDir, { persistent: false }, (_event, filename) => {
+            if (filename !== 'pr.json') return
+            const filePath = path.join(sentinelDir, 'pr.json')
+            try {
+              const content = fs.readFileSync(filePath, 'utf8')
+              const parsed = JSON.parse(content) as { url?: string }
+              if (parsed.url && !emittedPrUrl.has(parsed.url)) {
+                emittedPrUrl.add(parsed.url)
+                emit('pr', id, parsed.url)
+              }
+            } catch {
+              // Ignore read/parse errors (file may be partially written)
+            }
+          })
+          watcher.on('error', () => { /* ignore */ })
+          rec.watcher = watcher
+        } catch {
+          // Ignore watch errors
+        }
+      }).catch(() => { /* ignore mkdir errors */ })
+    }
+
     wire(id, rec)
     emit('status', id, 'running')
     backend.beginStatusTracking?.({
@@ -193,10 +227,10 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
   // ── ISessionManager implementation ─────────────────────────────────────────
 
   function start(input: StartSessionInput): SessionDTO {
-    const id = randomUUID()
+    const id = input.sessionId ?? randomUUID()
     const backend = selectBackend(input.agentKind)
     const system = input.systemPrompt ?? ''
-    const spec = backend.buildStartArgs({ sessionId: id, system, user: input.prompt, opencodePort: input.opencodePort })
+    const spec = backend.buildStartArgs({ sessionId: id, system, user: input.prompt, opencodePort: input.opencodePort, mcpConfigPath: input.mcpConfigPath })
 
     const dto: SessionDTO = {
       id,
@@ -229,6 +263,7 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       opencodeSid: input.session.opencodeSid,
       opencodePort: input.opencodePort,
       hasTranscript: hasTranscript(id),
+      mcpConfigPath: input.mcpConfigPath,
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
@@ -254,6 +289,7 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
       opencodeSid: input.session.opencodeSid,
       opencodePort: input.opencodePort,
       hasTranscript: hasTranscript(id),
+      mcpConfigPath: input.mcpConfigPath,
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
@@ -280,6 +316,8 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
     const rec = sessions.get(sessionId)
     if (!rec) return
     stopPolling(rec)
+    rec.watcher?.close()
+    rec.watcher = undefined
     rec.disposed = true
     rec.pty.kill()
     sessions.delete(sessionId)
@@ -308,6 +346,8 @@ export function createSessionManager(logger?: RunLogger): ISessionManager {
   function killAll(): void {
     for (const rec of sessions.values()) {
       stopPolling(rec)
+      rec.watcher?.close()
+      rec.watcher = undefined
       rec.disposed = true
       try { rec.pty.kill() } catch { /* already gone */ }
     }

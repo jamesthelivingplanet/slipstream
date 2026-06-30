@@ -187,6 +187,17 @@ describe('wsApi', () => {
       expect(received).toEqual([['sess-2', 'done']])
     })
 
+    it('delivers session:pr to onSessionPr callbacks', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      const received: [string, string][] = []
+      api.onSessionPr((id, prUrl) => received.push([id, prUrl]))
+
+      ws.simulateMessage({ t: 'push', channel: IPC.sessionPr, args: ['sess-3', 'https://example.com/mr/1'] })
+      expect(received).toEqual([['sess-3', 'https://example.com/mr/1']])
+    })
+
     it('unsubscribe stops push delivery', () => {
       const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
       const ws = openWs()
