@@ -34,6 +34,11 @@ export function registerRepo(absPath: string): Promise<RepoDTO> {
   return window.slipstream.registerRepo(absPath)
 }
 
+export function registerRepoByUrl(remoteUrl: string): Promise<RepoDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.registerRepoByUrl(remoteUrl)
+}
+
 /** Opens a native folder picker and registers the chosen repo. Resolves null if cancelled or no backend. */
 export function pickAndRegisterRepo(): Promise<RepoDTO | null> {
   const native = (window as Window & { __slipstreamNative?: { pickFolder(): Promise<string | null> } }).__slipstreamNative

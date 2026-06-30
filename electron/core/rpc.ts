@@ -105,6 +105,9 @@ export function createRpc(
       case IPC.registerRepo:
         return deps.repos.register(args[0] as string, identity.id)
 
+      case IPC.registerRepoByUrl:
+        return deps.repos.registerByUrl(args[0] as string, identity.id)
+
       case IPC.removeRepo:
         return deps.repos.remove(args[0] as string)
 

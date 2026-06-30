@@ -15,6 +15,21 @@ export function getRemoteUrl(absPath: string): string | null {
   }
 }
 
+/** Clone `remoteUrl` into `dest`. Throws a clear error (with git's stderr) on
+ *  failure — bad URL, auth, or network. The caller ensures `dest` does not
+ *  already exist. */
+export function cloneRepo(remoteUrl: string, dest: string): void {
+  try {
+    execFileSync('git', ['clone', remoteUrl, dest], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+  } catch (err: unknown) {
+    const e = err as { stderr?: string; message?: string }
+    throw new Error(`Failed to clone ${remoteUrl}: ${(e.stderr ?? e.message ?? String(err)).trim()}`)
+  }
+}
+
 /** True when absPath exists and is inside a git work tree. */
 export function isWorkTree(absPath: string): boolean {
   if (!existsSync(absPath)) return false
