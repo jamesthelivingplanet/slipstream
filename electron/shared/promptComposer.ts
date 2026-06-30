@@ -56,7 +56,16 @@ Rules:
 Ticket:
 ${tid}: ${title}
 
-${desc}`
+${desc}
+
+## Git workflow (automated — do not skip)
+
+When the ticket is complete, commit and push your changes yourself using ordinary git commands in your shell (add, commit, rebase, push). Once your branch is pushed, use the slipstream-git MCP tool to open a merge/pull request:
+
+1. Call \`open_merge_request\` with a concise title (e.g. "${tid}: ${title}") and a brief description of what changed.
+2. Report the URL returned by \`open_merge_request\` in your final message.
+
+Do not skip this step — it is how the work gets reviewed.`
 }
 
 export function buildAgentsMdContent(systemPrompt: string): string {

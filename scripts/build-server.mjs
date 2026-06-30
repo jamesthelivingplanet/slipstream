@@ -27,3 +27,15 @@ await build({
 })
 
 console.log('Built dist-electron/server.js')
+
+await build({
+  entryPoints: ['electron/mcp/gitMcp.ts'],
+  outfile: 'dist-electron/git-mcp.js',
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  external,
+  sourcemap: true,
+})
+
+console.log('Built dist-electron/git-mcp.js')

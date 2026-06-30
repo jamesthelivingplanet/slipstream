@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { get } from 'svelte/store'
 import { isStartableTicket } from './ticketFilter.js'
-import { sessions, tickets, createBlankAgent, createAgentFromTicket } from './stores.js'
+import { sessions, tickets, createBlankAgent, createAgentFromTicket, setSessionPrUrl } from './stores.js'
 import type { Ticket } from './types.js'
 
 describe('isStartableTicket', () => {
@@ -66,5 +66,31 @@ describe('createAgentFromTicket', () => {
     expect(tid).toBe('FLO-34')
     expect(get(sessions)[0]).toMatchObject({ tid: 'FLO-34', title: 'Consolidate', status: 'idle' })
     expect(get(tickets)).toHaveLength(0)
+  })
+})
+
+describe('setSessionPrUrl', () => {
+  beforeEach(() => {
+    sessions.set([])
+    tickets.set([])
+  })
+
+  it('updates the prUrl of the matching session by backend id', () => {
+    sessions.set([
+      { id: 'abc', tid: 'FLO-1', src: 'linear', status: 'running', title: 'A', repo: null, branch: null, add: 0, del: 0, ago: '', activity: { text: '' } },
+      { id: 'def', tid: 'FLO-2', src: 'linear', status: 'running', title: 'B', repo: null, branch: null, add: 0, del: 0, ago: '', activity: { text: '' } },
+    ])
+    setSessionPrUrl('abc', 'https://github.com/acme/repo/pull/1')
+    const all = get(sessions)
+    expect(all.find((s) => s.id === 'abc')?.prUrl).toBe('https://github.com/acme/repo/pull/1')
+    expect(all.find((s) => s.id === 'def')?.prUrl).toBeUndefined()
+  })
+
+  it('leaves the store unchanged when no session matches the id', () => {
+    sessions.set([
+      { id: 'abc', tid: 'FLO-1', src: 'linear', status: 'running', title: 'A', repo: null, branch: null, add: 0, del: 0, ago: '', activity: { text: '' } },
+    ])
+    setSessionPrUrl('zzz', 'https://gitlab.com/acme/repo/-/merge_requests/1')
+    expect(get(sessions)[0].prUrl).toBeUndefined()
   })
 })
