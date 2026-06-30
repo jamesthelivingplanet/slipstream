@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath, settingsRepoId, mobile } from '../stores'
+  import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath, registerRepoByUrl, settingsRepoId, mobile } from '../stores'
   import ResponsivePanel from './ResponsivePanel.svelte'
   import { icons } from '../icons'
   import { hasBackend, getEditorConfig, setEditorConfig, getRepoSettings, setRepoSettings } from '../ipc'
@@ -133,6 +133,8 @@
 
   let pathInput = ''
   let pathPending = false
+  let urlInput = ''
+  let urlPending = false
 
   async function addByPath() {
     const p = pathInput.trim()
@@ -148,6 +150,21 @@
 
   function pathKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') addByPath()
+  }
+
+  async function addByUrl() {
+    const u = urlInput.trim()
+    if (!u) return
+    urlPending = true
+    try {
+      await registerRepoByUrl(u)
+      urlInput = ''
+    } finally {
+      urlPending = false
+    }
+  }
+  function urlKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') addByUrl()
   }
 
   // Per-repo settings expansion
@@ -263,6 +280,24 @@
                 {@html icons.plus} Add repository
               </button>
             {/if}
+          </div>
+
+          <div class="path-add">
+            <input
+              type="text"
+              class="path-input"
+              placeholder="Git remote URL, e.g. https://github.com/acme/api.git"
+              bind:value={urlInput}
+              on:keydown={urlKeydown}
+              disabled={urlPending}
+            />
+            <button
+              class="btn btn-outline btn-sm"
+              on:click={addByUrl}
+              disabled={!urlInput.trim() || urlPending}
+            >
+              {@html icons.plus} Clone
+            </button>
           </div>
 
           {#if isWeb}

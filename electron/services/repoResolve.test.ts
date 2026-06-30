@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, renameSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveRepoPath, getRemoteUrl, isWorkTree, findSiblingCheckout } from './repoResolve.js'
+import { resolveRepoPath, getRemoteUrl, isWorkTree, findSiblingCheckout, cloneRepo } from './repoResolve.js'
 import type { RepoDTO } from '../shared/contract.js'
 
 const git = (cwd: string, ...args: string[]) =>
@@ -93,5 +93,22 @@ describe('resolveRepoPath', () => {
     const repo: RepoDTO = { id: 'acme-gone', org: 'acme', name: 'gone', base: 'main', path: gone, remoteUrl: 'https://github.com/acme/gone.git' }
     const result = resolveRepoPath(repo)
     expect(result).toBeNull()
+  })
+})
+
+describe('cloneRepo', () => {
+  it('clones a local repo into dest and makes it a work tree with the correct remote', () => {
+    const src = join(root, 'clone-src')
+    initRepo(src, 'https://github.com/acme/cloned.git')
+    const dest = join(root, 'clone-dest')
+    cloneRepo(src, dest)
+    expect(isWorkTree(dest)).toBe(true)
+    expect(getRemoteUrl(dest)).toBe(src)
+  })
+
+  it('throws a clear Error when given a bogus path', () => {
+    const bad = join(root, 'does-not-exist-at-all')
+    const dest = join(root, 'clone-bad-dest')
+    expect(() => cloneRepo(bad, dest)).toThrow(/Failed to clone/)
   })
 })

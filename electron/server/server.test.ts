@@ -52,6 +52,7 @@ function makeFakeDeps(): IpcDeps {
   const repos: IRepoRegistry = {
     list: vi.fn().mockResolvedValue([makeRepo()]),
     register: vi.fn().mockResolvedValue(makeRepo()),
+    registerByUrl: vi.fn().mockResolvedValue(makeRepo()),
     get: vi.fn().mockResolvedValue(makeRepo()),
     resolvePath: vi.fn().mockResolvedValue(makeRepo()),
     remove: vi.fn().mockResolvedValue(undefined),
@@ -132,6 +133,7 @@ function makeSurvivalDeps(): { deps: IpcDeps; seedSession: (id: string, ...chunk
   const repos: IRepoRegistry = {
     list: vi.fn().mockResolvedValue([makeRepo()]),
     register: vi.fn().mockResolvedValue(makeRepo()),
+    registerByUrl: vi.fn().mockResolvedValue(makeRepo()),
     get: vi.fn().mockResolvedValue(makeRepo()),
     resolvePath: vi.fn().mockResolvedValue(makeRepo()),
     remove: vi.fn().mockResolvedValue(undefined),

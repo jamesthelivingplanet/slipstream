@@ -75,6 +75,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
   const repos: IRepoRegistry = {
     list: vi.fn().mockResolvedValue([repo]),
     register: vi.fn().mockResolvedValue(repo),
+    registerByUrl: vi.fn().mockResolvedValue(repo),
     get: vi.fn().mockResolvedValue(repo),
     resolvePath: vi.fn().mockResolvedValue(repo),
     remove: vi.fn().mockResolvedValue(undefined),

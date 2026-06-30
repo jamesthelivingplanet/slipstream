@@ -170,6 +170,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.registerRepo, [absPath]) as Promise<RepoDTO>
     },
 
+    registerRepoByUrl(remoteUrl: string): Promise<RepoDTO> {
+      return request(IPC.registerRepoByUrl, [remoteUrl]) as Promise<RepoDTO>
+    },
+
     /** Not supported on web — resolve null. Path-input fallback in SettingsModal handles repo adding. */
     pickAndRegisterRepo(): Promise<RepoDTO | null> {
       return Promise.resolve(null)
