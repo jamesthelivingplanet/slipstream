@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath, settingsRepoId } from '../stores'
+  import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath, settingsRepoId, mobile } from '../stores'
+  import ResponsivePanel from './ResponsivePanel.svelte'
   import { icons } from '../icons'
   import { hasBackend, getEditorConfig, setEditorConfig, getRepoSettings, setRepoSettings } from '../ipc'
   import { pushToast } from '../toast'
@@ -204,11 +205,10 @@
 </script>
 
 {#if $settingsOpen}
-  <div class="overlay" on:click={closeModal} role="presentation"></div>
-  <div class="dialog settings-dialog">
-    <div class="dlg-head">
+  <ResponsivePanel open mobile={$mobile} onClose={closeModal} dialogClass="settings-dialog">
+    <svelte:fragment slot="header">
       <h2>Settings</h2>
-    </div>
+    </svelte:fragment>
 
     <div class="settings-body">
       <nav class="tab-list">
@@ -501,14 +501,10 @@
         {/if}
       </div>
     </div>
-  </div>
+  </ResponsivePanel>
 {/if}
 
 <style>
-  .settings-dialog {
-    width: 680px;
-  }
-
   .settings-body {
     display: flex;
     flex: 1;
@@ -698,4 +694,17 @@
   .about-label { font-size: 13px; font-weight: 500; }
   .about-value { font-size: 12px; color: hsl(var(--primary)); display: inline-flex; align-items: center; gap: 6px; }
   .about-version { display: flex; align-items: center; gap: 8px; font-size: 12px; padding-top: 4px; }
+
+  @media (max-width: 700px) {
+    .settings-body { flex-direction: column; }
+    .tab-list {
+      flex-direction: row;
+      width: 100%;
+      flex: 0 0 auto;
+      overflow-x: auto;
+      border-right: none;
+      border-bottom: 1px solid hsl(var(--border));
+    }
+    .tab-content { padding: 16px; }
+  }
 </style>
