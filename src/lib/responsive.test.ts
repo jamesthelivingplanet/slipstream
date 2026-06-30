@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isMobileWidth, MOBILE_MEDIA_QUERY, MOBILE_BREAKPOINT } from './responsive.js'
+import { isMobileWidth, MOBILE_MEDIA_QUERY, MOBILE_BREAKPOINT, DRAWER_DISMISS_PX, shouldDismissDrawer } from './responsive.js'
 
 describe('responsive', () => {
   describe('isMobileWidth', () => {
@@ -38,5 +38,26 @@ describe('responsive', () => {
 
   it('MOBILE_BREAKPOINT equals 700', () => {
     expect(MOBILE_BREAKPOINT).toBe(700)
+  })
+})
+
+describe('drawer dismiss', () => {
+  it('DRAWER_DISMISS_PX equals 72', () => {
+    expect(DRAWER_DISMISS_PX).toBe(72)
+  })
+
+  it('does not dismiss a drag below the threshold', () => {
+    expect(shouldDismissDrawer(0)).toBe(false)
+    expect(shouldDismissDrawer(71)).toBe(false)
+  })
+
+  it('dismisses at or above the threshold', () => {
+    expect(shouldDismissDrawer(72)).toBe(true)
+    expect(shouldDismissDrawer(400)).toBe(true)
+  })
+
+  it('does not dismiss upward (negative) drags', () => {
+    expect(shouldDismissDrawer(-10)).toBe(false)
+    expect(shouldDismissDrawer(-400)).toBe(false)
   })
 })

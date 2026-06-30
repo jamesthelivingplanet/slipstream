@@ -57,6 +57,9 @@ export const dialogOpen = writable<boolean>(false)
 export const settingsOpen = writable<boolean>(false)
 export const settingsRepoId = writable<string | null>(null)
 
+/** True when the viewport is at or below the mobile breakpoint. Synced from App.svelte. */
+export const mobile = writable<boolean>(false)
+
 export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
   $id ? $sessions.find((s) => s.tid === $id) ?? null : null,
 )
