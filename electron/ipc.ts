@@ -31,4 +31,10 @@ export interface IpcDeps {
   push: IPushService
   /** Optional process-level logger for startup/uncaught errors. */
   logger?: RunLogger
+  gitMcp?: {
+    configDir: string
+    gitMcpJsPath: string
+    electronPath: string
+    dataDir: string
+  }
 }

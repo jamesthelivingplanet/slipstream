@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
 import type { BackendKind, RepoDTO, SessionDTO, Identity, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO } from '../shared/contract.js'
@@ -5,6 +7,7 @@ import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
 import { LOCAL_IDENTITY } from './auth.js'
+import { buildGitMcpConfig, writeGitMcpConfig } from '../services/mcpConfig.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -94,8 +97,17 @@ export function createRpc(
     }
   }
 
+  function onPr(id: string, url: string): void {
+    emit(IPC.sessionPr, id, url)
+    const persisted = deps.sessionStore.get(id)
+    if (persisted) {
+      deps.sessionStore.upsert({ ...persisted, prUrl: url })
+    }
+  }
+
   deps.sessions.on('data', onData)
   deps.sessions.on('status', onStatus)
+  deps.sessions.on('pr', onPr)
 
   async function handle(channel: string, args: unknown[]): Promise<unknown> {
     switch (channel) {
@@ -143,6 +155,22 @@ export function createRpc(
             opencodePort = undefined
           }
         }
+
+        const sessionId = randomUUID()
+        let mcpConfigPath: string | undefined
+        if (deps.gitMcp) {
+          mcpConfigPath = path.join(deps.gitMcp.configDir, `${sessionId}.json`)
+          const config = buildGitMcpConfig({
+            gitMcpJsPath: deps.gitMcp.gitMcpJsPath,
+            electronPath: deps.gitMcp.electronPath,
+            dataDir: deps.gitMcp.dataDir,
+            sessionId,
+            base: repo.base,
+            branch,
+          })
+          await writeGitMcpConfig(mcpConfigPath, config)
+        }
+
         const startedAt = Date.now()
         const session = deps.sessions.start({
           tid,
@@ -155,6 +183,8 @@ export function createRpc(
           systemPrompt,
           agentKind,
           opencodePort,
+          sessionId,
+          mcpConfigPath,
         })
 
         sessionMeta.set(session.id, { repo, branch })
@@ -360,6 +390,19 @@ export function createRpc(
       case IPC.getPushPrefs:
         return deps.push.getPushPrefs(args[0] as string)
 
+      case IPC.getGitToken: {
+        const host = args[0] as string
+        if (host !== 'github' && host !== 'gitlab') throw new Error(`Invalid host: ${host}`)
+        return deps.config.get(`${host}.token`) ?? null
+      }
+
+      case IPC.setGitToken: {
+        const host = args[0] as string
+        if (host !== 'github' && host !== 'gitlab') throw new Error(`Invalid host: ${host}`)
+        deps.config.set(`${host}.token`, args[1] as string)
+        return undefined
+      }
+
       case IPC.pickRepo:
         throw new Error('pickRepo is not supported without a desktop window')
 
@@ -376,6 +419,7 @@ export function createRpc(
     pendingData.clear()
     deps.sessions.off('data', onData)
     deps.sessions.off('status', onStatus)
+    deps.sessions.off('pr', onPr)
   }
 
   return { handle, dispose }

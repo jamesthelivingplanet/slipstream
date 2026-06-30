@@ -214,6 +214,11 @@
     <div class="m">
       <span class="badge mono">{@html icons.folder} {r?.org}/{r?.name}</span>
       <span class="badge mono">{@html icons.gitBranch} {session.branch}</span>
+      {#if session.prUrl}
+        <a class="badge mono" href={session.prUrl} target="_blank" rel="noopener noreferrer">
+          {@html icons.externalLink} View PR
+        </a>
+      {/if}
     </div>
   </div>
   <div class="spacer"></div>

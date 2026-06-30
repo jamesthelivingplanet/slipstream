@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   agentKind TEXT NOT NULL DEFAULT 'claude-code',
   opencodeSid TEXT,
   createdAt INTEGER NOT NULL,
-  ownerId   TEXT DEFAULT 'local'
+  ownerId   TEXT DEFAULT 'local',
+  prUrl     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -67,6 +68,9 @@ export function openDb(file: string): Database.Database {
   if (!cols.some((c) => c.name === 'ownerId')) {
     db.exec(`ALTER TABLE sessions ADD COLUMN ownerId TEXT DEFAULT 'local'`)
   }
+  if (!cols.some((c) => c.name === 'prUrl')) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN prUrl TEXT`)
+  }
   const repoCols = db.prepare(`PRAGMA table_info(repos)`).all() as { name: string }[]
   if (!repoCols.some((c) => c.name === 'remoteUrl')) {
     db.exec(`ALTER TABLE repos ADD COLUMN remoteUrl TEXT`)
@@ -103,8 +107,8 @@ export function getRepo(db: Database.Database, id: string): RepoDTO | undefined 
 
 export function upsertSession(db: Database.Database, session: SessionDTO): void {
   db.prepare(`
-    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt, ownerId)
-    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt, @ownerId)
+    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt, ownerId, prUrl)
+    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt, @ownerId, @prUrl)
     ON CONFLICT(id) DO UPDATE SET
       tid          = excluded.tid,
       title        = excluded.title,
@@ -117,8 +121,9 @@ export function upsertSession(db: Database.Database, session: SessionDTO): void 
       agentKind    = excluded.agentKind,
       opencodeSid  = excluded.opencodeSid,
       createdAt    = excluded.createdAt,
-      ownerId      = excluded.ownerId
-  `).run({ ...session, port: session.port ?? null, systemPrompt: session.systemPrompt ?? null, agentKind: session.agentKind ?? 'claude-code', opencodeSid: session.opencodeSid ?? null, ownerId: session.ownerId ?? 'local' })
+      ownerId      = excluded.ownerId,
+      prUrl        = excluded.prUrl
+  `).run({ ...session, port: session.port ?? null, systemPrompt: session.systemPrompt ?? null, agentKind: session.agentKind ?? 'claude-code', opencodeSid: session.opencodeSid ?? null, ownerId: session.ownerId ?? 'local', prUrl: session.prUrl ?? null })
 }
 
 export function allSessions(db: Database.Database): SessionDTO[] {

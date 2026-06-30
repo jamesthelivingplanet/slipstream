@@ -29,6 +29,7 @@ export interface StartArgsCtx {
   system: string
   user: string
   opencodePort?: number
+  mcpConfigPath?: string
 }
 
 export interface ResumeArgsCtx {
@@ -39,6 +40,7 @@ export interface ResumeArgsCtx {
   opencodePort?: number
   /** Whether a Claude Code transcript already exists for this session id. */
   hasTranscript: boolean
+  mcpConfigPath?: string
 }
 
 /**
@@ -105,25 +107,32 @@ function runPoll(handle: StatusHandle, intervalMs: number, source: () => Promise
 export const claudeCodeBackend: AgentBackend = {
   kind: 'claude-code',
   statusSource: 'pty',
-  buildStartArgs({ sessionId, system, user }) {
+  buildStartArgs({ sessionId, system, user, mcpConfigPath }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
-    return {
-      cmd: CLAUDE_BIN,
-      args: [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt],
+    const args = [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
+    if (mcpConfigPath) {
+      args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
     }
+    return { cmd: CLAUDE_BIN, args }
   },
-  buildResumeArgs({ sessionId, system, user, hasTranscript }) {
+  buildResumeArgs({ sessionId, system, user, hasTranscript, mcpConfigPath }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
     const args = hasTranscript
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, sessionId]
       : [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
+    if (mcpConfigPath) {
+      args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
+    }
     return { cmd: CLAUDE_BIN, args }
   },
-  buildRemoteControlArgs({ sessionId, system, user, hasTranscript }) {
+  buildRemoteControlArgs({ sessionId, system, user, hasTranscript, mcpConfigPath }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
     const args = hasTranscript
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, CLAUDE_FLAGS.resume, sessionId]
       : [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
+    if (mcpConfigPath) {
+      args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
+    }
     return { cmd: CLAUDE_BIN, args }
   },
 }

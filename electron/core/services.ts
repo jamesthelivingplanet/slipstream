@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { openDb } from '../db/db.js'
 import { createRepoRegistry } from '../services/repoRegistry.js'
 import { createWorktreeManager } from '../services/worktreeManager.js'
@@ -43,7 +44,7 @@ export function createServices(root: string): IpcDeps {
   // FLO-46: mark orphaned in-flight sessions as interrupted on boot
   restoreInterruptedSessions(sessionStore)
   const runLogger = createRunLogger(root)
-  const sessions = createSessionManager(runLogger)
+  const sessions = createSessionManager(runLogger, root)
   const push = createPushService({
     config: configStore,
     store: createDbPushStore(db),
@@ -62,5 +63,11 @@ export function createServices(root: string): IpcDeps {
     appRunner: createAppRunner(),
     push,
     logger: runLogger,
+    gitMcp: {
+      configDir: path.join(root, 'mcp'),
+      gitMcpJsPath: fileURLToPath(new URL('./git-mcp.js', import.meta.url)),
+      electronPath: process.execPath,
+      dataDir: root,
+    },
   }
 }

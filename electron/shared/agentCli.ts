@@ -16,6 +16,7 @@ export const CLAUDE_FLAGS = {
   sessionId: '--session-id',
   resume: '--resume',
   remoteControl: '--remote-control',
+  mcpConfig: '--mcp-config',
 } as const
 
 /** opencode CLI flags. */
