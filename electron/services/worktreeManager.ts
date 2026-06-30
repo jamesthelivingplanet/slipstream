@@ -100,6 +100,35 @@ function git(args: string[], opts?: { cwd?: string }): string {
   }
 }
 
+/**
+ * "Pull before create": refresh the repo's base branch from origin so a brand-new
+ * branch is cut from the latest remote state. Returns the start point to branch
+ * from. Best-effort and offline-safe:
+ *   1. Fast-forward the LOCAL base ref straight from origin without a checkout
+ *      (`fetch origin <base>:<base>`) — keeps the new branch's ahead/behind honest.
+ *      Fails when base is the repo's checked-out branch or the update isn't a
+ *      fast-forward; then we fall through.
+ *   2. Fetch the remote-tracking ref and cut from `origin/<base>` instead.
+ *   3. No origin at all (local-only repo) / offline — cut from the local <base>,
+ *      exactly as before.
+ */
+function pullBaseStartPoint(repoPath: string, base: string): string {
+  try {
+    git(['-C', repoPath, 'fetch', 'origin', `${base}:${base}`])
+    return base
+  } catch {
+    // base is checked out, non-fast-forward, or no origin — try a plain fetch.
+  }
+  try {
+    git(['-C', repoPath, 'fetch', 'origin', base])
+    git(['-C', repoPath, 'show-ref', '--verify', '--quiet', `refs/remotes/origin/${base}`])
+    return `origin/${base}`
+  } catch {
+    // local-only repo / offline — fall back to the local base as before.
+  }
+  return base
+}
+
 export function createWorktreeManager(root: string): IWorktreeManager {
   return {
     // Pure, synchronous — no git calls.
@@ -132,7 +161,8 @@ export function createWorktreeManager(root: string): IWorktreeManager {
         // Check out the existing branch into a new worktree (no -b).
         git(['-C', repo.path, 'worktree', 'add', wt, branch])
       } else {
-        git(['-C', repo.path, 'worktree', 'add', wt, '-b', branch, repo.base])
+        const startPoint = pullBaseStartPoint(repo.path, repo.base)
+        git(['-C', repo.path, 'worktree', 'add', wt, '-b', branch, startPoint])
       }
 
       return this.status(repo, branch)

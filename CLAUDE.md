@@ -85,6 +85,11 @@ builds, then restarts the systemd `slipstream.service` and hits a healthz check.
   already-running daemon (via `/healthz`). So edits to `server.ts` or any `electron/services/*`
   / `electron/core/*` code the daemon runs **won't take effect** until you rebuild server.js
   *and* kill the running daemon so a fresh one spawns. Renderer-only work doesn't need this.
+- **Identity seam (`ownerId`)**: every RPC request carries a resolved `Identity` (today
+  always `{ id: 'local' }` via `resolveIdentity` in `electron/core/auth.ts`). `createRpc`
+  filters enumerations and guards single-item reads by `ownerId`; it's a deliberate no-op
+  for the single user (legacy rows coalesce to `'local'`). Don't add a read of a
+  `sessions`/`repos` row without scoping it by owner. See `docs/IDENTITY-SEAM.md`.
 
 ## Troubleshooting native setup
 

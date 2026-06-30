@@ -16,6 +16,10 @@ export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 
 export type TicketSource = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi'
 
+/** Resolved caller identity. Single-user today ({ id: 'local' }); the seam
+ *  exists so a future multi-user tier can map tokens → distinct owners. */
+export interface Identity { id: string }
+
 export interface NotifyPrefs { needs: boolean; done: boolean; running: boolean }
 export interface PushSubscriptionDTO {
   endpoint: string
@@ -29,6 +33,7 @@ export interface RepoDTO {
   base: string        // base branch: main | master | develop | …
   path: string        // absolute path to the repo checkout under .repositories
   remoteUrl?: string  // git origin URL — stable identity used to self-heal a moved checkout
+  ownerId?: string  // owner identity; 'local' for the single-user tier
 }
 
 export interface RepoSettings {
@@ -59,6 +64,7 @@ export interface SessionDTO {
   agentKind?: BackendKind
   opencodeSid?: string
   createdAt: number
+  ownerId?: string  // owner identity; 'local' for the single-user tier
 }
 
 export interface WorkflowState {
@@ -86,8 +92,9 @@ export interface EditorConfig {
 
 export interface IRepoRegistry {
   list(): Promise<RepoDTO[]>
-  /** Validates absPath is a git work tree with commits; throws on failure. Idempotent. */
-  register(absPath: string): Promise<RepoDTO>
+  /** Validates absPath is a git work tree with commits; throws on failure. Idempotent.
+   *  Stamps the repo with `ownerId` (defaults to 'local' for the single-user tier). */
+  register(absPath: string, ownerId?: string): Promise<RepoDTO>
   get(id: string): Promise<RepoDTO | undefined>
   /** Resolve the repo's current on-disk path, self-healing the DB when the
    *  checkout was moved/renamed. Throws a clear error when no checkout can be found. */

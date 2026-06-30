@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS repos (
   name      TEXT NOT NULL,
   base      TEXT NOT NULL,
   path      TEXT NOT NULL,
-  remoteUrl TEXT
+  remoteUrl TEXT,
+  ownerId   TEXT DEFAULT 'local'
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -25,7 +26,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   systemPrompt TEXT,
   agentKind TEXT NOT NULL DEFAULT 'claude-code',
   opencodeSid TEXT,
-  createdAt INTEGER NOT NULL
+  createdAt INTEGER NOT NULL,
+  ownerId   TEXT DEFAULT 'local'
 );
 
 CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -62,9 +64,15 @@ export function openDb(file: string): Database.Database {
   if (!cols.some((c) => c.name === 'opencodeSid')) {
     db.exec(`ALTER TABLE sessions ADD COLUMN opencodeSid TEXT`)
   }
+  if (!cols.some((c) => c.name === 'ownerId')) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN ownerId TEXT DEFAULT 'local'`)
+  }
   const repoCols = db.prepare(`PRAGMA table_info(repos)`).all() as { name: string }[]
   if (!repoCols.some((c) => c.name === 'remoteUrl')) {
     db.exec(`ALTER TABLE repos ADD COLUMN remoteUrl TEXT`)
+  }
+  if (!repoCols.some((c) => c.name === 'ownerId')) {
+    db.exec(`ALTER TABLE repos ADD COLUMN ownerId TEXT DEFAULT 'local'`)
   }
   return db
 }
@@ -73,29 +81,30 @@ export function openDb(file: string): Database.Database {
 
 export function upsertRepo(db: Database.Database, repo: RepoDTO): void {
   db.prepare(`
-    INSERT INTO repos (id, org, name, base, path, remoteUrl)
-    VALUES (@id, @org, @name, @base, @path, @remoteUrl)
+    INSERT INTO repos (id, org, name, base, path, remoteUrl, ownerId)
+    VALUES (@id, @org, @name, @base, @path, @remoteUrl, @ownerId)
     ON CONFLICT(id) DO UPDATE SET
       org       = excluded.org,
       name      = excluded.name,
       base      = excluded.base,
       path      = excluded.path,
-      remoteUrl = excluded.remoteUrl
-  `).run({ ...repo, remoteUrl: repo.remoteUrl ?? null })
+      remoteUrl = excluded.remoteUrl,
+      ownerId   = excluded.ownerId
+  `).run({ ...repo, remoteUrl: repo.remoteUrl ?? null, ownerId: repo.ownerId ?? 'local' })
 }
 
 export function allRepos(db: Database.Database): RepoDTO[] {
-  return db.prepare('SELECT id, org, name, base, path, remoteUrl FROM repos').all() as RepoDTO[]
+  return db.prepare('SELECT id, org, name, base, path, remoteUrl, ownerId FROM repos').all() as RepoDTO[]
 }
 
 export function getRepo(db: Database.Database, id: string): RepoDTO | undefined {
-  return db.prepare('SELECT id, org, name, base, path, remoteUrl FROM repos WHERE id = ?').get(id) as RepoDTO | undefined
+  return db.prepare('SELECT id, org, name, base, path, remoteUrl, ownerId FROM repos WHERE id = ?').get(id) as RepoDTO | undefined
 }
 
 export function upsertSession(db: Database.Database, session: SessionDTO): void {
   db.prepare(`
-    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt)
-    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt)
+    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt, ownerId)
+    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt, @ownerId)
     ON CONFLICT(id) DO UPDATE SET
       tid          = excluded.tid,
       title        = excluded.title,
@@ -107,8 +116,9 @@ export function upsertSession(db: Database.Database, session: SessionDTO): void 
       systemPrompt = excluded.systemPrompt,
       agentKind    = excluded.agentKind,
       opencodeSid  = excluded.opencodeSid,
-      createdAt    = excluded.createdAt
-  `).run({ ...session, port: session.port ?? null, systemPrompt: session.systemPrompt ?? null, agentKind: session.agentKind ?? 'claude-code', opencodeSid: session.opencodeSid ?? null })
+      createdAt    = excluded.createdAt,
+      ownerId      = excluded.ownerId
+  `).run({ ...session, port: session.port ?? null, systemPrompt: session.systemPrompt ?? null, agentKind: session.agentKind ?? 'claude-code', opencodeSid: session.opencodeSid ?? null, ownerId: session.ownerId ?? 'local' })
 }
 
 export function allSessions(db: Database.Database): SessionDTO[] {
