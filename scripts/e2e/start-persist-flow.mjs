@@ -9,13 +9,17 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const shot = (win, name) => win.screenshot({ path: `/tmp/e2e-${name}.png` })
 
-const launch = () => electron.launch({ executablePath: electronPath, args: [root] })
+const launch = () => electron.launch({
+  executablePath: electronPath,
+  args: [root],
+  env: { ...process.env, SLIPSTREAM_DAEMON_EPHEMERAL: '1' },
+})
 
 // Phase 1 — create from ticket, pick slipstream repo, start
 let app = await launch()
 let win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
-await win.waitForTimeout(1200)
+await win.waitForTimeout(1500)
 
 console.log('sessions:', JSON.stringify(await win.evaluate(() => window.slipstream.listSessions())))
 console.log('repos:', JSON.stringify(await win.evaluate(() => window.slipstream.listRepos())))

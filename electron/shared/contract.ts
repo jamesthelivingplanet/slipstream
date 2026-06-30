@@ -283,5 +283,8 @@ export const IPC = {
 declare global {
   interface Window {
     slipstream: SlipstreamApi
+    __slipstreamWeb?: boolean
+    __slipstreamDaemon?: { url: string; token: string } | null
+    __slipstreamNative?: { pickFolder(): Promise<string | null> }
   }
 }
