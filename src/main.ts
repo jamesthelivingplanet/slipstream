@@ -147,8 +147,22 @@ window.addEventListener('appinstalled', () => {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-if (typeof window !== 'undefined' && window.slipstream) {
-  // Electron — preload already set window.slipstream; boot straight to App.
+async function bootElectron(daemon: { url: string; token: string }): Promise<void> {
+  const { createWsApi } = await import('./lib/wsApi.js')
+  const api = createWsApi({ url: daemon.url, token: daemon.token })
+  // Assign before any import of App/ipc.ts so hasBackend evaluates true
+  ;(window as unknown as { slipstream?: typeof api }).slipstream = api
+  // Electron has native picker — not web mode
+  ;(window as unknown as { __slipstreamWeb?: boolean }).__slipstreamWeb = false
+  // Do NOT register service worker (web/PWA only)
+  await mountApp()
+}
+
+const daemon = (window as unknown as { __slipstreamDaemon?: { url: string; token: string } | null }).__slipstreamDaemon
+if (daemon) {
+  bootElectron(daemon)
+} else if (typeof window !== 'undefined' && window.slipstream) {
+  // Legacy safety net
   mountApp()
 } else {
   bootWeb()

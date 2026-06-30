@@ -64,6 +64,27 @@ builds, then restarts the systemd `slipstream.service` and hits a healthz check.
   agent run against it fails silently — deep in `worktrees.create`, no clear error, just the
   red bubble. Fix: update `repos.path` in SQLite, or re-register the repo. FLO-40 will make
   repos resolve dynamically by remote URL instead of trusting a frozen path.
+- **`--slipstream-daemon=` additionalArguments**: `main.ts` passes the daemon URL + token to
+  the renderer via `additionalArguments: ['--slipstream-daemon=<base64>']`. The preload
+  reads `process.argv` (not `ipcRenderer`) to parse this arg and exposes it as
+  `window.__slipstreamDaemon = { url, token }`. `src/main.ts` detects `__slipstreamDaemon`
+  and calls `bootElectron()` (which runs `createWsApi`) rather than `bootWeb()`. If
+  `window.__slipstreamDaemon` is absent, the app falls back to web mode. Symptom if broken:
+  `window.slipstream` is undefined and all backend calls silently no-op.
+- **The daemon survives app-close.** `main.ts` spawns the local daemon `detached + unref()`d,
+  so quitting the desktop does **not** stop it — it keeps the PTYs alive and keeps holding the
+  port recorded in `<dataDir>/daemon.json`. On next launch `ensureLocalDaemon` finds it via
+  `/healthz` and **reuses** it. To fully reset (free the port, drop live sessions, pick up new
+  daemon/server code): kill the daemon process (it's the `ELECTRON_RUN_AS_NODE` `server.js`
+  listening on the `daemon.json` port), or launch with `SLIPSTREAM_DAEMON_EPHEMERAL=1` to tie
+  its lifetime to the window. Symptom if forgotten: relaunch reattaches to stale sessions, or
+  "port in use", or backend edits seem to have no effect.
+- **`pnpm dev` builds `server.js` once, up front — it does not hot-reload.** The `dev` script
+  is `node scripts/build-server.mjs && vite`; the daemon is the *built* `dist-electron/server.js`.
+  Vite hot-reloads the renderer and restarts `main`, but a restarted `main` just *reuses* the
+  already-running daemon (via `/healthz`). So edits to `server.ts` or any `electron/services/*`
+  / `electron/core/*` code the daemon runs **won't take effect** until you rebuild server.js
+  *and* kill the running daemon so a fresh one spawns. Renderer-only work doesn't need this.
 
 ## Troubleshooting native setup
 
@@ -87,3 +108,8 @@ pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty   # match Elec
 They require a display (not headless). Build first (`pnpm build`), then
 `node scripts/e2e/<flow>.mjs`. Do **not** drive `Start agent` with a real repo unless you
 intend to spawn an autonomous `claude`.
+
+Every driver launches with `env: { SLIPSTREAM_DAEMON_EPHEMERAL: '1' }` so the daemon dies on
+`app.close()` — without it, each run would leave an orphan daemon holding a port. The one
+exception is `daemon-survival-flow.mjs`, which deliberately omits the flag to prove the daemon
+outlives the UI and is reused on relaunch (so it leaves a daemon running — kill it afterward).

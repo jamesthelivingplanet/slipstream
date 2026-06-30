@@ -6,7 +6,7 @@
   "main": "dist-electron/main.js",
   "description": "Desktop console for managing many parallel Claude Code agents",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/build-server.mjs && vite",
     "build": "vite build && node scripts/build-server.mjs",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
