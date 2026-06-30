@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { resolveDaemonConfig, ensureLocalDaemon } from './core/daemonManager.js'
@@ -40,6 +40,11 @@ function createWindow(cfg: DaemonConfig): void {
   } else {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url)
+    return { action: 'deny' }
+  })
 }
 
 ipcMain.handle(IPC.pickRepo, async () => {

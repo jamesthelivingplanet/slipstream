@@ -2,6 +2,15 @@ import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import electron from 'vite-plugin-electron/simple'
 import { builtinModules } from 'node:module'
+import { readFileSync } from 'node:fs'
+import { execSync } from 'node:child_process'
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
+
+let gitHash = 'unknown'
+try {
+  gitHash = execSync('git rev-parse --short HEAD').toString().trim()
+} catch {}
 
 // Native / node modules must NOT be bundled into the main process — node-pty and
 // better-sqlite3 dynamically require their .node binaries at runtime, which a
@@ -17,6 +26,10 @@ const external = [
 ]
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_GIT_HASH__: JSON.stringify(gitHash),
+  },
   plugins: [
     svelte(),
     electron({
