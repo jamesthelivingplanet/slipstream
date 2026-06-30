@@ -26,13 +26,17 @@ fs.writeFileSync(path.join(repoDir, 'README.md'), '# persist demo\n')
 git('add', '.')
 git('commit', '-m', 'init')
 
-const launch = () => electron.launch({ executablePath: electronPath, args: [root, `--user-data-dir=${userDataDir}`] })
+const launch = () => electron.launch({
+  executablePath: electronPath,
+  args: [root, `--user-data-dir=${userDataDir}`],
+  env: { ...process.env, SLIPSTREAM_DAEMON_EPHEMERAL: '1' },
+})
 
 // ── Instance 1: start an agent ──────────────────────────────────────────────
 let app = await launch()
 let win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
-await win.waitForTimeout(800)
+await win.waitForTimeout(1500)
 
 const repo = await win.evaluate((p) => window.slipstream.registerRepo(p), repoDir)
 console.log('registered repo:', JSON.stringify(repo))

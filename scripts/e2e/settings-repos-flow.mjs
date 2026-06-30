@@ -17,10 +17,11 @@ const stubDialog = (app, p) =>
 const app = await electron.launch({
   executablePath: electronPath,
   args: [root, `--user-data-dir=${userDataDir}`],
+  env: { ...process.env, SLIPSTREAM_DAEMON_EPHEMERAL: '1' },
 })
 const win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
-await win.waitForTimeout(1000)
+await win.waitForTimeout(1500)
 await shot(win, 's1-home')
 
 // open Settings (gear is the icon button directly in the header bar)

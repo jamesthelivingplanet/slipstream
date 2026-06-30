@@ -69,10 +69,17 @@ _Last updated: 2026-06-21._
    (the "needs you" patterns are coarse stubs today).
 2. **Jira ticket provider** — second `ITicketProvider` alongside Linear, if needed.
 
+**Background daemon** (FLO-47)
+- Electron main spawns a local daemon child (`ELECTRON_RUN_AS_NODE=1 server.js`) and the
+  renderer connects to it over WebSocket — the same transport as web mode. The daemon is
+  `detached + unref()`d so agents survive app-close; `daemon.json` in `userData` persists
+  the token + port across relaunches so the same daemon is reused. Set
+  `SLIPSTREAM_DAEMON_EPHEMERAL=1` to tie daemon lifetime to the window (used in e2e tests).
+  `daemonManager.ts` (node builtins only, unit-tested) owns the spawn/reuse/healthz logic.
+
 ## Later 🗓️
 
-- **Session persistence/restore** across app restart (metadata is stored; PTYs currently
-  die with the app).
+- **Session persistence/restore** across app restart (metadata is stored; PTYs persist in
+  the daemon — reconnect replays the output buffer).
 - **Packaging** with electron-builder (Linux first).
-- **Background daemon** so agents keep running with the UI closed and reattach on reopen.
 - **floo** UX: surface the assigned port in the UI; confirm env injection.

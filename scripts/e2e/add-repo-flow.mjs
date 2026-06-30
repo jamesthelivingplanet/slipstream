@@ -16,11 +16,12 @@ const shot = (win, name) => win.screenshot({ path: `/tmp/e2e-${name}.png` })
 const app = await electron.launch({
   executablePath: electronPath,
   args: [root, `--user-data-dir=${userDataDir}`],
+  env: { ...process.env, SLIPSTREAM_DAEMON_EPHEMERAL: '1' },
 })
 
 const win = await app.firstWindow()
 await win.waitForLoadState('domcontentloaded')
-await win.waitForTimeout(1000)
+await win.waitForTimeout(1500)
 
 const hasBridge = await win.evaluate(() => !!window.slipstream)
 console.log('window.slipstream present:', hasBridge)
