@@ -2,10 +2,11 @@
   import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath, registerRepoByUrl, settingsRepoId, mobile } from '../stores'
   import ResponsivePanel from './ResponsivePanel.svelte'
   import { icons } from '../icons'
-  import { hasBackend, getEditorConfig, setEditorConfig, getRepoSettings, setRepoSettings, getGitToken, setGitToken } from '../ipc'
+  import { hasBackend, getEditorConfig, setEditorConfig, getRepoSettings, setRepoSettings, getGitToken, setGitToken, getGcPolicy, setGcPolicy } from '../ipc'
   import { pushToast } from '../toast'
   import { pushSupported, enablePush, updatePrefs, disablePush, loadPrefs } from '../push'
-  import type { NotifyPrefs } from '../../../electron/shared/contract.js'
+  import type { NotifyPrefs, GcPolicy } from '../../../electron/shared/contract.js'
+  import { DEFAULT_GC_POLICY } from '../../../electron/shared/contract.js'
 
   let activeTab = 'repositories'
 
@@ -119,8 +120,41 @@
   }
 
   $: if ($settingsOpen && activeTab === 'integrations') { loadLinearKey(); loadGithubToken(); loadGitlabToken() }
-  $: if ($settingsOpen && activeTab === 'behavior') loadEditorConfig()
+  $: if ($settingsOpen && activeTab === 'behavior') { loadEditorConfig(); loadGcPolicy() }
   $: if ($settingsOpen && activeTab === 'notifications') initNotifications()
+
+  let gcPolicy: GcPolicy = { ...DEFAULT_GC_POLICY }
+  let gcIdleMin = 0     // minutes, UI-facing (idleMs / 60000)
+  let gcMaxAgeMin = 0   // minutes, UI-facing (maxAgeMs / 60000)
+  let gcPending = false
+
+  async function loadGcPolicy() {
+    if (!hasBackend) return
+    try {
+      const p = await getGcPolicy()
+      gcPolicy = p
+      gcIdleMin = Math.round(p.idleMs / 60000)
+      gcMaxAgeMin = Math.round(p.maxAgeMs / 60000)
+    } catch { /* ignore */ }
+  }
+  async function saveGcPolicy() {
+    if (!hasBackend) return
+    gcPending = true
+    try {
+      const next: GcPolicy = {
+        ...gcPolicy,
+        idleMs: Math.max(0, Math.round(gcIdleMin)) * 60000,
+        maxAgeMs: Math.max(0, Math.round(gcMaxAgeMin)) * 60000,
+      }
+      await setGcPolicy(next)
+      gcPolicy = next
+      pushToast('success', 'Session cleanup settings saved')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save settings')
+    } finally {
+      gcPending = false
+    }
+  }
 
   async function initNotifications() {
     if (!isWeb || !pushSupported()) return
@@ -300,7 +334,7 @@
           type="button"
           class="tab-item"
           class:active={activeTab === 'behavior'}
-          on:click={() => { activeTab = 'behavior'; loadEditorConfig() }}
+          on:click={() => { activeTab = 'behavior'; loadEditorConfig(); loadGcPolicy() }}
         >
           Behavior
         </button>
@@ -547,6 +581,35 @@
                 Save
               </button>
             </div>
+            {#if !hasBackend}
+              <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+            {/if}
+          </div>
+
+          <div>
+            <span class="lbl-f">Session cleanup (cost guard)</span>
+            <p class="integration-hint">Automatically stop abandoned or idle agent sessions so forgotten agents don't keep burning compute. Reaped sessions stay visible in the sidebar marked <b>Reaped</b>.</p>
+            <label class="notify-check">
+              <input type="checkbox" bind:checked={gcPolicy.enabled} disabled={gcPending || !hasBackend} />
+              Enable automatic cleanup
+            </label>
+            <label class="notify-check">
+              <input type="checkbox" bind:checked={gcPolicy.onlyAbandoned} disabled={gcPending || !hasBackend || !gcPolicy.enabled} />
+              Only reap sessions with no one watching
+            </label>
+            <label class="notify-check">
+              <input type="checkbox" bind:checked={gcPolicy.autoStopOnDone} disabled={gcPending || !hasBackend || !gcPolicy.enabled} />
+              Stop finished (done) agents automatically
+            </label>
+            <div class="repo-settings-field" style="margin-top:8px">
+              <label class="lbl-f" for="gc-idle">Idle timeout (minutes, 0 = off)</label>
+              <input id="gc-idle" type="number" min="0" class="path-input" bind:value={gcIdleMin} disabled={gcPending || !hasBackend || !gcPolicy.enabled} />
+            </div>
+            <div class="repo-settings-field">
+              <label class="lbl-f" for="gc-maxage">Max session age (minutes, 0 = off)</label>
+              <input id="gc-maxage" type="number" min="0" class="path-input" bind:value={gcMaxAgeMin} disabled={gcPending || !hasBackend || !gcPolicy.enabled} />
+            </div>
+            <button class="btn btn-outline btn-sm" style="margin-top:8px" on:click={saveGcPolicy} disabled={gcPending || !hasBackend}>Save</button>
             {#if !hasBackend}
               <p class="integration-hint muted">Backend not available in browser-only mode.</p>
             {/if}

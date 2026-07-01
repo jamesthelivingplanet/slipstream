@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { BackendKind, RepoDTO, SessionDTO, Identity, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO, WriteLockState } from '../shared/contract.js'
+import type { BackendKind, RepoDTO, SessionDTO, Identity, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO, WriteLockState, GcPolicy } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
 import { LOCAL_IDENTITY } from './auth.js'
 import { buildGitMcpConfig, writeGitMcpConfig } from '../services/mcpConfig.js'
+import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -439,6 +440,13 @@ export function createRpc(
         deps.config.set(`${host}.token`, args[1] as string)
         return undefined
       }
+
+      case IPC.getGcPolicy:
+        return readGcPolicy(deps.config)
+
+      case IPC.setGcPolicy:
+        writeGcPolicy(deps.config, args[0] as GcPolicy)
+        return undefined
 
       case IPC.pickRepo:
         throw new Error('pickRepo is not supported without a desktop window')

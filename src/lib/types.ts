@@ -1,4 +1,4 @@
-export type Status = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'detached' | 'interrupted'
+export type Status = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'detached' | 'interrupted' | 'reaped'
 export type Source = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi'
 export type Filter = 'all' | 'needs' | 'running' | 'done'
@@ -50,4 +50,5 @@ export const STATUS_LABEL: Record<Status, string> = {
   errored: 'Errored',
   detached: 'Detached',
   interrupted: 'Interrupted',
+  reaped: 'Reaped',
 }
