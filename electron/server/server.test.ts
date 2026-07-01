@@ -38,6 +38,8 @@ function makeFakeDeps(): IpcDeps {
     killAll: vi.fn(),
     getBuffer: vi.fn().mockReturnValue({ data: '', seq: 0 }),
     setOpencodeSid: vi.fn(),
+    liveSessions: vi.fn().mockReturnValue([]),
+    reap: vi.fn(),
     on(event: string, listener: (...args: unknown[]) => void) {
       sessionListeners[event] ??= []
       sessionListeners[event].push(listener)
@@ -119,6 +121,8 @@ function makeSurvivalDeps(): { deps: IpcDeps; seedSession: (id: string, ...chunk
     killAll: vi.fn().mockImplementation(() => { liveMap.clear() }),
     getBuffer: vi.fn().mockImplementation((id: string) => liveMap.get(id)?.snapshot() ?? { data: '', seq: 0 }),
     setOpencodeSid: vi.fn(),
+    liveSessions: vi.fn().mockReturnValue([]),
+    reap: vi.fn().mockImplementation((id: string) => { liveMap.delete(id) }),
     on(event: string, listener: (...args: unknown[]) => void) {
       sessionListeners[event] ??= []
       sessionListeners[event].push(listener)

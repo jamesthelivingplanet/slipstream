@@ -20,7 +20,9 @@ import type {
   PushSubscriptionDTO,
   GitHost,
   WriteLockState,
+  GcPolicy,
 } from '../../electron/shared/contract.js'
+import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
 
 export const hasBackend =
   typeof window !== 'undefined' && !!window.slipstream
@@ -239,4 +241,15 @@ export function takeWrite(id: string): Promise<WriteLockState> {
 export function onSessionWriteLock(cb: (state: WriteLockState) => void): () => void {
   if (!hasBackend) return () => {}
   return window.slipstream.onSessionWriteLock(cb)
+}
+
+// ── Session GC / cost guard policy ──────────────────────────────────────────
+
+export function getGcPolicy(): Promise<GcPolicy> {
+  return hasBackend ? window.slipstream.getGcPolicy() : Promise.resolve({ ...DEFAULT_GC_POLICY })
+}
+
+export function setGcPolicy(policy: GcPolicy): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.setGcPolicy(policy)
 }

@@ -158,6 +158,15 @@ Roadmap #1. Coarse "needs you" heuristics → tuned against captured real output
 Two devices driving one PTY interleave keystrokes. Add a soft-lock / "second client is
 view-only." Fine to defer until multi-device use is real. **Deps:** P7. **Size:** S–M.
 
+### PX3 — Persist & replay session scrollback across restarts
+**Why:** the `OutputBuffer` is a ~256 KB in-memory ring tied to the live PTY, so all terminal
+scrollback dies when the process ends (reap, interrupt, daemon restart) — you can't come back
+and read what the agent did or reasoned. `--resume` shows Claude's own view, not the prior
+output. The durable record today is only the git diff + PR.
+**Scope:** persist each session's output to disk (rolling per-session file) and replay it into
+xterm on open, so a resumed/reaped session shows its earlier history. Bound the on-disk size;
+reuse the `logs/<id>.log` location or a sibling. **Deps:** P12. **Size:** M.
+
 ---
 
 ## Critical path (one line)

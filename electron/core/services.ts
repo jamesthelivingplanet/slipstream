@@ -15,6 +15,7 @@ import { createAppRunner } from '../services/appRunner.js'
 import { createPushService, createDbPushStore } from '../services/pushService.js'
 import { createRunLogger } from '../services/runLogger.js'
 import { createWriteCoordinator } from '../services/writeCoordinator.js'
+import { createSessionReaper } from '../services/sessionReaper.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -52,7 +53,7 @@ export function createServices(root: string): IpcDeps {
     sessions,
     sessionStore,
   })
-  return {
+  const deps: IpcDeps = {
     repos: createRepoRegistry(db, root),
     worktrees: createWorktreeManager(os.homedir()),
     sessions,
@@ -72,4 +73,15 @@ export function createServices(root: string): IpcDeps {
       dataDir: root,
     },
   }
+
+  const reaper = createSessionReaper({
+    sessions,
+    store: sessionStore,
+    config: configStore,
+    viewers: (id) => deps.writeCoordinator?.viewers(id) ?? 0,
+    logger: runLogger,
+  })
+  reaper.start()
+
+  return deps
 }

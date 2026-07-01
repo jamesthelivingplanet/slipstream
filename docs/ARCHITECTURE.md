@@ -170,9 +170,15 @@ which detaches that client's `data`/`status` event listeners and clears its coal
 timer — it never reaps a PTY. PTYs are ended solely by:
 
 - explicit `IPC.killSession` → `sessions.kill()` in `electron/core/rpc.ts`,
-- `attachRemoteControl` replacement (same file), or
+- `attachRemoteControl` replacement (same file),
 - `sessions.killAll()` called from `electron/main.ts` on Electron's `before-quit` event
-  (full process shutdown).
+  (full process shutdown), or
+- the **session reaper** (`electron/services/sessionReaper.ts`, FLO-52) — a 60s daemon
+  timer that reaps a session via `sessions.reap()` when it matches the configurable
+  `GcPolicy` (abandoned/idle/aged, or auto-stop on `done`). A reap kills the PTY, persists
+  the session as `reaped` (a visible sidebar record), and logs the reason to `server.log`.
+  Policy is edited under Settings → Behavior → "Session cleanup" and stored in the `gc.policy`
+  config key.
 
 A late-reconnecting client recovers missed output by calling `IPC.getSessionBuffer`, which
 returns the session's `OutputBuffer` snapshot (`electron/services/outputBuffer.ts`) — a
