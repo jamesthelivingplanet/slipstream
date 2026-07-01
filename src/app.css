@@ -161,6 +161,8 @@ html[data-mode="light"] .seg.on { background: #fff; }
 .detached .a-status { color: hsl(var(--muted-foreground)); }
 .interrupted .stat-dot { background: hsl(var(--muted-foreground)); }
 .interrupted .a-status { color: hsl(var(--muted-foreground)); }
+.reaped .stat-dot { background: hsl(var(--muted-foreground)); }
+.reaped .a-status { color: hsl(var(--muted-foreground)); }
 .idle .stat-dot { background: hsl(var(--muted-foreground)); }
 .idle .a-status { color: hsl(var(--muted-foreground)); }
 .a-id { margin-left: auto; font-size: 11px; color: hsl(var(--muted-foreground)); }

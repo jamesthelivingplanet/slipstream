@@ -15,6 +15,7 @@ import * as pty from 'node-pty'
 
 import type {
   ISessionManager,
+  LiveSessionInfo,
   ResumeSessionInput,
   SessionDTO,
   SessionEvents,
@@ -46,6 +47,7 @@ interface SessionRecord {
   dto: SessionDTO
   backend: AgentBackend
   disposed?: boolean
+  lastActivityAt: number
   // opencode-only: embedded server port + session id used for status polling
   opencodePort?: number
   opencodeSid?: string
@@ -76,6 +78,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     // their status comes from beginStatusTracking instead of the StatusDetector.
     const ptyDrivenStatus = rec.backend.statusSource === 'pty'
     proc.onData((chunk: string) => {
+      rec.lastActivityAt = Date.now()
       const seq = buffer.push(chunk)
       detector.push(chunk)
       emit('data', id, chunk, seq)
@@ -181,6 +184,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       backend,
       opencodePort: params.opencodePort,
       opencodeSid: params.opencodeSid,
+      lastActivityAt: Date.now(),
     }
     sessions.set(id, rec)
 
@@ -354,6 +358,27 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     sessions.clear()
   }
 
+  function liveSessions(): LiveSessionInfo[] {
+    const out: LiveSessionInfo[] = []
+    for (const [id, rec] of sessions) {
+      out.push({ id, status: rec.dto.status, createdAt: rec.dto.createdAt, lastActivityAt: rec.lastActivityAt })
+    }
+    return out
+  }
+
+  function reap(sessionId: string): void {
+    const rec = sessions.get(sessionId)
+    if (!rec) return
+    stopPolling(rec)
+    rec.watcher?.close()
+    rec.watcher = undefined
+    rec.disposed = true // suppress the onExit status/exit emission
+    rec.dto.status = 'reaped'
+    emit('status', sessionId, 'reaped')
+    try { rec.pty.kill() } catch { /* already gone */ }
+    sessions.delete(sessionId)
+  }
+
   function setOpencodeSid(sessionId: string, sid: string): void {
     const rec = sessions.get(sessionId)
     if (!rec || !rec.opencodePort) return
@@ -369,5 +394,5 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     })
   }
 
-  return { start, resume, attachRemoteControl, has, write, resize, kill, killAll, on, off, getBuffer, setOpencodeSid }
+  return { start, resume, attachRemoteControl, has, write, resize, kill, killAll, on, off, getBuffer, setOpencodeSid, liveSessions, reap }
 }
