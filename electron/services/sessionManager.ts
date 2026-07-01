@@ -23,6 +23,7 @@ import type {
 } from '../shared/contract.js'
 import { StatusDetector } from './statusDetector.js'
 import { OutputBuffer } from './outputBuffer.js'
+import { ScrollbackStore } from './scrollbackStore.js'
 import { trustDirectory } from './claudeTrust.js'
 import { hasTranscript } from './transcripts.js'
 import { selectBackend, type AgentBackend, type SpawnSpec, type StatusHandle } from './agentBackend.js'
@@ -45,6 +46,7 @@ interface SessionRecord {
   pty: pty.IPty
   detector: StatusDetector
   buffer: OutputBuffer
+  scrollback: ScrollbackStore | null
   dto: SessionDTO
   backend: AgentBackend
   disposed?: boolean
@@ -73,7 +75,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
   // ── Shared wiring helper ───────────────────────────────────────────────────
 
   function wire(id: string, rec: SessionRecord) {
-    const { pty: proc, detector, buffer } = rec
+    const { pty: proc, detector, buffer, scrollback } = rec
     // Poll-driven backends (opencode's embedded server, pi's session file) are
     // full-screen TUIs whose redraws make PTY-scraped markers unreliable, so
     // their status comes from beginStatusTracking instead of the StatusDetector.
@@ -81,6 +83,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     proc.onData((chunk: string) => {
       rec.lastActivityAt = Date.now()
       const seq = buffer.push(chunk)
+      if (scrollback) scrollback.append(id, chunk)
       detector.push(chunk)
       emit('data', id, chunk, seq)
       if (ptyDrivenStatus) {
@@ -160,9 +163,20 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
 
     const detector = new StatusDetector()
     const buffer = new OutputBuffer()
+    const scrollback = root ? new ScrollbackStore(root) : null
 
     trustDirectory(cwd)
     backend.prepareWorktree?.(cwd, system)
+
+    // Replay persisted scrollback on resume (not initial start)
+    if (!params.isInitialStart && scrollback) {
+      const replay = scrollback.read(id)
+      if (replay.length > 0) {
+        const seq = buffer.push(replay)
+        // Emit replayed data so clients can render it before live stream resumes
+        emit('data', id, replay, seq)
+      }
+    }
 
     const proc = spawnAgent(spec.cmd, spec.args, cwd, env)
 
@@ -181,6 +195,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       pty: proc,
       detector,
       buffer,
+      scrollback,
       dto,
       backend,
       opencodePort: params.opencodePort,
@@ -371,8 +386,15 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
 
   function getBuffer(sessionId: string): { data: string; seq: number } {
     const rec = sessions.get(sessionId)
-    if (!rec) return { data: '', seq: 0 }
-    return rec.buffer.snapshot()
+    if (rec) return rec.buffer.snapshot()
+
+    // Session not live — try to read persisted scrollback
+    if (root) {
+      const store = new ScrollbackStore(root)
+      const data = store.read(sessionId)
+      return { data, seq: data.length }
+    }
+    return { data: '', seq: 0 }
   }
 
   function killAll(): void {
