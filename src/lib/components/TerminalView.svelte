@@ -4,7 +4,7 @@
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
   import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession, cleanupAgent, runAppForSession } from '../stores'
-  import { hasBackend, onSessionData, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl, openInEditor } from '../ipc'
+  import { hasBackend, onSessionData, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl, openInEditor, attachSession, detachSession, takeWrite, onSessionWriteLock } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
@@ -23,6 +23,9 @@
 
   // Unsubscribe fns for backend push listeners
   let offData: (() => void) | null = null
+  let offWriteLock: (() => void) | null = null
+  let canWrite = true
+  let viewers = 1
 
   $: r = repoById(session.repo)
   $: dot =
@@ -61,6 +64,7 @@
   onDestroy(() => {
     cleanupListeners()
     cleanupSimulation()
+    if (session.id) detachSession(session.id)
     term?.dispose()
   })
 
@@ -94,9 +98,21 @@
     held.length = 0
     snapSeq = snap.seq
 
-    // Forward keypresses to the PTY.
+    // Track the write lock so only one client can control the PTY at a time.
+    offWriteLock = onSessionWriteLock((state) => {
+      if (state.sessionId !== session.id) return
+      canWrite = state.canWrite
+      viewers = state.viewers
+    })
+    if (session.id) {
+      const lock = await attachSession(session.id)
+      canWrite = lock.canWrite
+      viewers = lock.viewers
+    }
+
+    // Forward keypresses to the PTY (only when this client holds the write lock).
     term.onData((d) => {
-      if (session.id) writeSession(session.id, d)
+      if (session.id && canWrite) writeSession(session.id, d)
     })
 
     // Keep the PTY sized to the panel (window + element resizes).
@@ -115,6 +131,7 @@
 
   function cleanupListeners() {
     if (offData) { offData(); offData = null }
+    if (offWriteLock) { offWriteLock(); offWriteLock = null }
     if (offResize) { offResize(); offResize = null }
     if (ro) { ro.disconnect(); ro = null }
   }
@@ -186,6 +203,18 @@
     }
   }
 
+  async function handleTakeOver() {
+    if (!session.id) return
+    try {
+      const lock = await takeWrite(session.id)
+      canWrite = lock.canWrite
+      viewers = lock.viewers
+      term.focus()
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : String(e))
+    }
+  }
+
   async function handleCleanup() {
     await cleanupAgent(session, { auto: false })
   }
@@ -214,6 +243,9 @@
     <div class="m">
       <span class="badge mono">{@html icons.folder} {r?.org}/{r?.name}</span>
       <span class="badge mono">{@html icons.gitBranch} {session.branch}</span>
+      {#if liveMode && viewers > 1}
+        <span class="badge mono">{viewers} viewers</span>
+      {/if}
       {#if session.prUrl}
         <a class="badge mono" href={session.prUrl} target="_blank" rel="noopener noreferrer">
           {@html icons.externalLink} View PR
@@ -233,6 +265,14 @@
 </div>
 
 <div class="term-wrap"><div class="term-mount" bind:this={mountEl}></div></div>
+
+{#if liveMode && !canWrite}
+  <div class="alert">
+    <span class="ic">{@html icons.remote}</span>
+    <div class="tx"><b>View-only</b><span>Another client is controlling this session.</span></div>
+    <button class="btn btn-sm" on:click={handleTakeOver}>Take over</button>
+  </div>
+{/if}
 
 {#if needsInput}
   <div class="alert">

@@ -14,6 +14,7 @@ import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createPushService, createDbPushStore } from '../services/pushService.js'
 import { createRunLogger } from '../services/runLogger.js'
+import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -63,6 +64,7 @@ export function createServices(root: string): IpcDeps {
     appRunner: createAppRunner(),
     push,
     logger: runLogger,
+    writeCoordinator: createWriteCoordinator(),
     gitMcp: {
       configDir: path.join(root, 'mcp'),
       gitMcpJsPath: fileURLToPath(new URL('./git-mcp.js', import.meta.url)),

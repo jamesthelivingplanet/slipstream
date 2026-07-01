@@ -90,6 +90,12 @@ export interface EditorConfig {
   mobileCommand: string  // optional mobile editor command; "" when unset
 }
 
+export interface WriteLockState {
+  sessionId: string
+  canWrite: boolean   // does THIS client currently hold the write lock
+  viewers: number     // number of clients attached to this session
+}
+
 /* ───────── main-process service interfaces ───────── */
 
 export interface IRepoRegistry {
@@ -268,6 +274,16 @@ export interface SlipstreamApi {
   getGitToken(host: GitHost): Promise<string | null>
   setGitToken(host: GitHost, token: string): Promise<void>
   onSessionPr(cb: (id: string, prUrl: string) => void): () => void
+
+  /** Register this client as viewing a session. Grants the write lock if free,
+   *  otherwise the client is view-only. Returns the current lock state. */
+  attachSession(id: string): Promise<WriteLockState>
+  /** Stop viewing a session (releases the write lock if held). Fire-and-forget. */
+  detachSession(id: string): void
+  /** Claim the write lock for a session, demoting the current holder to view-only. */
+  takeWrite(id: string): Promise<WriteLockState>
+  /** Subscribe to write-lock state changes for sessions this client is viewing. Returns unsubscribe fn. */
+  onSessionWriteLock(cb: (state: WriteLockState) => void): () => void
 }
 
 export const IPC = {
@@ -306,6 +322,10 @@ export const IPC = {
   getGitToken: 'config:getGitToken',
   setGitToken: 'config:setGitToken',
   sessionPr: 'session:pr',   // main → renderer push
+  attachSession: 'session:attach',
+  detachSession: 'session:detach',
+  takeWrite: 'session:takeWrite',
+  sessionWriteLock: 'session:writeLock', // main → renderer push
 } as const
 
 declare global {
