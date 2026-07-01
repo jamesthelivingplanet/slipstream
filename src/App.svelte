@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import TicketStatusBar from './lib/components/TicketStatusBar.svelte'
-  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select, subscribeSessionStatus, subscribeSessionPr, mobile } from './lib/stores'
+  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select, subscribeSessionStatus, subscribeSessionPr, mobile, contentLoading, contentResolvedAt, contentRefreshNonce } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
@@ -15,6 +15,21 @@
 
   // Mobile drawer state — the sidebar is an overlay on narrow viewports.
   let listOpen = false
+
+  let showCheck = false
+  let checkTimer: ReturnType<typeof setTimeout> | undefined
+  // FLO-56: show a brief check mark on the refresh button after agent content resolves.
+  $: if ($contentResolvedAt) {
+    showCheck = true
+    clearTimeout(checkTimer)
+    checkTimer = setTimeout(() => (showCheck = false), 1500)
+  }
+
+  function onRefresh() {
+    // Keep existing refresh behavior AND fetch the selected agent's content.
+    refreshAndReconcile()
+    contentRefreshNonce.update((n) => n + 1)
+  }
 
   function checkMobile() {
     mobile.set(window.matchMedia(MOBILE_MEDIA_QUERY).matches)
@@ -82,8 +97,14 @@
     </div>
     <div class="spacer"></div>
     <ThemeMenu />
-    <button class="btn btn-outline btn-icon btn-sm" title="Refresh tickets" on:click={refreshAndReconcile}>
-      {@html icons.refresh}
+    <button class="btn btn-outline btn-icon btn-sm" title="Refresh" on:click={onRefresh}>
+      {#if $contentLoading}
+        <span class="spin">{@html icons.refresh}</span>
+      {:else if showCheck}
+        {@html icons.check}
+      {:else}
+        {@html icons.refresh}
+      {/if}
     </button>
     <button class="btn btn-outline btn-icon btn-sm" title="Settings" on:click={() => settingsOpen.set(true)}>
       {@html icons.settings}
@@ -139,5 +160,14 @@
     inset: 0;
     z-index: 29;
     background: rgba(0, 0, 0, 0.45);
+  }
+  .spin {
+    display: inline-flex;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
