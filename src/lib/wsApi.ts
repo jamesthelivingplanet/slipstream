@@ -7,7 +7,7 @@
  * Framework-free (plain TS) — unit-testable against a fake WebSocket.
  */
 
-import type { SlipstreamApi, RepoDTO, RepoSettings, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo, EditorConfig, NotifyPrefs, PushSubscriptionDTO, BackendKind, GitHost, WriteLockState } from '../../electron/shared/contract.js'
+import type { SlipstreamApi, RepoDTO, RepoSettings, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo, EditorConfig, NotifyPrefs, PushSubscriptionDTO, BackendKind, GitHost, WriteLockState, GcPolicy } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
 import { genId } from './id.js'
@@ -326,6 +326,14 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     onSessionWriteLock(cb: WriteLockCb): () => void {
       writeLockListeners.add(cb)
       return () => writeLockListeners.delete(cb)
+    },
+
+    getGcPolicy(): Promise<GcPolicy> {
+      return request(IPC.getGcPolicy, []) as Promise<GcPolicy>
+    },
+
+    setGcPolicy(policy: GcPolicy): Promise<void> {
+      return request(IPC.setGcPolicy, [policy]) as Promise<void>
     },
   }
 }

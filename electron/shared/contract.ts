@@ -12,7 +12,7 @@
  *   <root>     → app data dir (see paths.ts, owned by integration layer)
  */
 
-export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted'
+export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted' | 'reaped'
 export type TicketSource = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi'
 export type GitHost = 'github' | 'gitlab'
@@ -22,6 +22,22 @@ export type GitHost = 'github' | 'gitlab'
 export interface Identity { id: string }
 
 export interface NotifyPrefs { needs: boolean; done: boolean; running: boolean }
+
+/** Session GC / cost-guard policy (FLO-52). Reaps idle/abandoned/finished PTYs. */
+export interface GcPolicy {
+  enabled: boolean        // master switch
+  onlyAbandoned: boolean  // only reap sessions with 0 attached clients (viewers)
+  autoStopOnDone: boolean // reap a live session whose status is 'done'
+  idleMs: number          // reap after this much output silence; 0 = disabled
+  maxAgeMs: number        // reap after this age regardless; 0 = disabled
+}
+export const DEFAULT_GC_POLICY: GcPolicy = {
+  enabled: true,
+  onlyAbandoned: true,
+  autoStopOnDone: true,
+  idleMs: 0,
+  maxAgeMs: 0,
+}
 export interface PushSubscriptionDTO {
   endpoint: string
   keys: { p256dh: string; auth: string }
@@ -94,6 +110,14 @@ export interface WriteLockState {
   sessionId: string
   canWrite: boolean   // does THIS client currently hold the write lock
   viewers: number     // number of clients attached to this session
+}
+
+/** Live-session snapshot for the GC reaper (electron/services/sessionReaper.ts). */
+export interface LiveSessionInfo {
+  id: string
+  status: SessionStatus
+  createdAt: number        // ms epoch when the session started
+  lastActivityAt: number   // ms epoch of last PTY output (spawn time if none yet)
 }
 
 /* ───────── main-process service interfaces ───────── */
@@ -180,6 +204,11 @@ export interface ISessionManager {
   /** Record the opencode server's session id so status polling can begin.
    *  No-op for non-opencode sessions or when no port was assigned. */
   setOpencodeSid(sessionId: string, sid: string): void
+  /** Snapshot of every live PTY session, for the GC reaper. */
+  liveSessions(): LiveSessionInfo[]
+  /** Reap a session for the cost guard: kill the PTY and mark it 'reaped'.
+   *  Distinct from kill() so the exit is recorded as a policy reap, not a crash. */
+  reap(sessionId: string): void
 }
 
 /**
@@ -284,6 +313,9 @@ export interface SlipstreamApi {
   takeWrite(id: string): Promise<WriteLockState>
   /** Subscribe to write-lock state changes for sessions this client is viewing. Returns unsubscribe fn. */
   onSessionWriteLock(cb: (state: WriteLockState) => void): () => void
+
+  getGcPolicy(): Promise<GcPolicy>
+  setGcPolicy(policy: GcPolicy): Promise<void>
 }
 
 export const IPC = {
@@ -326,6 +358,8 @@ export const IPC = {
   detachSession: 'session:detach',
   takeWrite: 'session:takeWrite',
   sessionWriteLock: 'session:writeLock', // main → renderer push
+  getGcPolicy: 'gc:getPolicy',
+  setGcPolicy: 'gc:setPolicy',
 } as const
 
 declare global {

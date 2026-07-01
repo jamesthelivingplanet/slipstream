@@ -142,7 +142,7 @@ export async function initFromBackend(): Promise<void> {
         prompt: dto.prompt,
         port: dto.port,
         prUrl: dto.prUrl,
-        activity: { text: uiStatus === 'interrupted' ? 'Interrupted by restart — open to resume.' : 'Detached — open to resume.' },
+        activity: { text: uiStatus === 'interrupted' ? 'Interrupted by restart — open to resume.' : uiStatus === 'reaped' ? 'Reaped by the cost guard.' : 'Detached — open to resume.' },
       }
     })
   )
