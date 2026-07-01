@@ -48,18 +48,15 @@
     term.open(mountEl)
     try { fit.fit() } catch {}
 
-    if (liveMode) {
-      startLive()
-    } else {
-      runSimulation()
-    }
-
     const onResize = () => { try { fit.fit() } catch {} }
     window.addEventListener('resize', onResize)
     const unsub = mode.subscribe(() => { if (term) term.options.theme = terminalTheme() })
 
     return () => { window.removeEventListener('resize', onResize); unsub() }
   })
+
+  $: if (liveMode && session.id) startLive()
+  $: if (!liveMode) runSimulation()
 
   onDestroy(() => {
     cleanupListeners()
