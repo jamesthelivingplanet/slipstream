@@ -66,9 +66,9 @@ export function createServices(root: string): IpcDeps {
     push,
     logger: runLogger,
     writeCoordinator: createWriteCoordinator(),
-    gitMcp: {
+    appMcp: {
       configDir: path.join(root, 'mcp'),
-      gitMcpJsPath: fileURLToPath(new URL('./git-mcp.js', import.meta.url)),
+      appMcpJsPath: fileURLToPath(new URL('./app-mcp.js', import.meta.url)),
       electronPath: process.execPath,
       dataDir: root,
     },

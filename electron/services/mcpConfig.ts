@@ -1,8 +1,8 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-export interface GitMcpConfigParams {
-  gitMcpJsPath: string
+export interface AppMcpConfigParams {
+  appMcpJsPath: string
   electronPath: string
   dataDir: string
   sessionId: string
@@ -10,12 +10,12 @@ export interface GitMcpConfigParams {
   branch: string
 }
 
-export function buildGitMcpConfig(params: GitMcpConfigParams): object {
+export function buildAppMcpConfig(params: AppMcpConfigParams): object {
   return {
     mcpServers: {
-      'slipstream-git': {
+      slipstream: {
         command: params.electronPath,
-        args: [params.gitMcpJsPath],
+        args: [params.appMcpJsPath],
         env: {
           ELECTRON_RUN_AS_NODE: '1',
           SLIPSTREAM_DATA_DIR: params.dataDir,
@@ -28,7 +28,7 @@ export function buildGitMcpConfig(params: GitMcpConfigParams): object {
   }
 }
 
-export async function writeGitMcpConfig(filePath: string, config: object): Promise<void> {
+export async function writeAppMcpConfig(filePath: string, config: object): Promise<void> {
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true })
   await fs.promises.writeFile(filePath, JSON.stringify(config, null, 2))
 }
