@@ -8,7 +8,7 @@ import { parseRemote, createGitDriver } from '../services/gitDriver.js'
 
 const execFile = promisify(_execFile)
 
-export interface GitMcpDeps {
+export interface AppMcpDeps {
   cwd: string
   dataDir: string
   sessionId: string
@@ -19,6 +19,7 @@ export interface GitMcpDeps {
   openMergeRequest(input: { remoteUrl: string; branch: string; base: string; title: string; body: string; token: string }): Promise<{ url: string; isNew: boolean }>
   getRemoteUrl(cwd: string): Promise<string>
   writeSentinel(url: string): Promise<void>
+  writeStatus(state: 'running' | 'needs' | 'done', message?: string): Promise<void>
 }
 
 const TOOLS = [
@@ -32,6 +33,18 @@ const TOOLS = [
         description: { type: 'string', description: 'Optional description' },
       },
       required: ['title'],
+    },
+  },
+  {
+    name: 'report_status',
+    description: 'Report your current working state to the Slipstream app so it shows the correct status. Call with state "needs" when you are blocked waiting on the user, "done" when the ticket is fully complete, or "running" when actively working. This is the reliable status channel — prefer it over relying on printed terminal markers.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        state: { type: 'string', enum: ['running', 'needs', 'done'], description: 'Current working state' },
+        message: { type: 'string', description: 'Optional short human-readable note' },
+      },
+      required: ['state'],
     },
   },
 ]
@@ -52,7 +65,7 @@ function makeToolSuccess(text: string): { content: Array<{ type: string; text: s
   return { content: [{ type: 'text', text }] }
 }
 
-export async function handleRpc(msg: unknown, deps: GitMcpDeps): Promise<unknown | null> {
+export async function handleRpc(msg: unknown, deps: AppMcpDeps): Promise<unknown | null> {
   const m = msg as Record<string, unknown>
 
   // Notifications have no id
@@ -67,7 +80,7 @@ export async function handleRpc(msg: unknown, deps: GitMcpDeps): Promise<unknown
       return makeResponse(id, {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'slipstream-git', version: '1.0.0' },
+        serverInfo: { name: 'slipstream', version: '1.0.0' },
       })
 
     case 'notifications/initialized':
@@ -111,6 +124,16 @@ export async function handleRpc(msg: unknown, deps: GitMcpDeps): Promise<unknown
           return makeResponse(id, makeToolSuccess(`${action} merge/pull request: ${result.url}`))
         }
 
+        if (toolName === 'report_status') {
+          const state = args['state'] as string
+          const message = args['message'] as string | undefined
+          if (state !== 'running' && state !== 'needs' && state !== 'done') {
+            return makeResponse(id, makeToolError(`Invalid state: ${state}`))
+          }
+          await deps.writeStatus(state, message)
+          return makeResponse(id, makeToolSuccess(`Status reported: ${state}`))
+        }
+
         return makeError(id, -32601, `Unknown tool: ${toolName}`)
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
@@ -140,7 +163,7 @@ export async function main(): Promise<void> {
 
   const driver = createGitDriver()
 
-  const deps: GitMcpDeps = {
+  const deps: AppMcpDeps = {
     cwd,
     dataDir,
     sessionId,
@@ -164,6 +187,11 @@ export async function main(): Promise<void> {
       await fs.promises.mkdir(sentinelDir, { recursive: true })
       await fs.promises.writeFile(path.join(sentinelDir, 'pr.json'), JSON.stringify({ url }))
     },
+    async writeStatus(state: 'running' | 'needs' | 'done', message?: string): Promise<void> {
+      const sentinelDir = path.join(dataDir, 'sessions', sessionId)
+      await fs.promises.mkdir(sentinelDir, { recursive: true })
+      await fs.promises.writeFile(path.join(sentinelDir, 'status.json'), JSON.stringify({ state, message, ts: Date.now() }))
+    },
   }
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
@@ -176,7 +204,7 @@ export async function main(): Promise<void> {
     try {
       msg = JSON.parse(trimmed)
     } catch (err) {
-      process.stderr.write(`[gitMcp] Failed to parse JSON: ${err}\n`)
+      process.stderr.write(`[appMcp] Failed to parse JSON: ${err}\n`)
       return
     }
 
@@ -185,7 +213,7 @@ export async function main(): Promise<void> {
         process.stdout.write(JSON.stringify(response) + '\n')
       }
     }).catch((err) => {
-      process.stderr.write(`[gitMcp] Error handling RPC: ${err}\n`)
+      process.stderr.write(`[appMcp] Error handling RPC: ${err}\n`)
     })
   })
 

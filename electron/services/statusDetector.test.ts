@@ -344,3 +344,47 @@ describe('tailSignal / explicit markers', () => {
     expect(d.status()).toBe('running')
   })
 })
+
+// ─── applySignal / MCP channel ────────────────────────────────────────────────
+
+describe('applySignal / MCP channel', () => {
+  it('a "needs" signal is sticky until strictly-newer PTY output arrives', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.applySignal('needs', 0)
+    // No new output yet — signal wins even within the idle window
+    expect(d.status()).toBe('needs')
+    clock.advance(100)
+    d.push('Still no new output pushed at this signalAt though...')
+    // Output is now newer than the signal, but tail has no marker/question and
+    // is within idle window — falls through to running.
+    expect(d.status()).toBe('running')
+  })
+
+  it('a "done" signal is sticky even after later plain output is pushed', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.applySignal('done', 0)
+    clock.advance(100)
+    d.push('Some more output after done was reported')
+    expect(d.status()).toBe('done')
+  })
+
+  it('a strictly-newer PTY marker wins over an older applySignal', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.applySignal('needs', 0)
+    clock.advance(100)
+    d.push(`Resuming and finishing up.\n${DONE_MARKER}`)
+    expect(d.status()).toBe('done')
+  })
+
+  it('a signal strictly newer than the last output wins over a stale tail state', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.push('Plain progress output, no markers.')
+    clock.advance(100)
+    d.applySignal('needs', clock.now())
+    expect(d.status()).toBe('needs')
+  })
+})

@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { buildGitMcpConfig } from './mcpConfig.js'
+import { buildAppMcpConfig } from './mcpConfig.js'
 
-describe('buildGitMcpConfig', () => {
+describe('buildAppMcpConfig', () => {
   it('returns correct shape', () => {
-    const config = buildGitMcpConfig({
-      gitMcpJsPath: '/dist/git-mcp.js',
+    const config = buildAppMcpConfig({
+      appMcpJsPath: '/dist/app-mcp.js',
       electronPath: '/usr/bin/electron',
       dataDir: '/data',
       sessionId: 'sess-1',
@@ -13,14 +13,14 @@ describe('buildGitMcpConfig', () => {
     })
     const serialized = JSON.stringify(config)
     const parsed = JSON.parse(serialized)
-    expect(parsed.mcpServers['slipstream-git'].command).toBe('/usr/bin/electron')
-    expect(parsed.mcpServers['slipstream-git'].args).toEqual(['/dist/git-mcp.js'])
-    expect(parsed.mcpServers['slipstream-git'].env.SLIPSTREAM_SESSION_ID).toBe('sess-1')
+    expect(parsed.mcpServers['slipstream'].command).toBe('/usr/bin/electron')
+    expect(parsed.mcpServers['slipstream'].args).toEqual(['/dist/app-mcp.js'])
+    expect(parsed.mcpServers['slipstream'].env.SLIPSTREAM_SESSION_ID).toBe('sess-1')
   })
 
   it('JSON.stringify of result contains NO token key (security assertion)', () => {
-    const config = buildGitMcpConfig({
-      gitMcpJsPath: '/dist/git-mcp.js',
+    const config = buildAppMcpConfig({
+      appMcpJsPath: '/dist/app-mcp.js',
       electronPath: '/usr/bin/electron',
       dataDir: '/data',
       sessionId: 'sess-1',

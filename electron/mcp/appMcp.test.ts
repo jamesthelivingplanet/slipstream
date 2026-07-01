@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
-import { handleRpc } from './gitMcp.js'
-import type { GitMcpDeps } from './gitMcp.js'
+import { handleRpc } from './appMcp.js'
+import type { AppMcpDeps } from './appMcp.js'
 
-function makeDeps(overrides: Partial<GitMcpDeps> = {}): GitMcpDeps {
+function makeDeps(overrides: Partial<AppMcpDeps> = {}): AppMcpDeps {
   return {
     cwd: '/cwd',
     dataDir: '/data',
@@ -14,6 +14,7 @@ function makeDeps(overrides: Partial<GitMcpDeps> = {}): GitMcpDeps {
     openMergeRequest: vi.fn().mockResolvedValue({ url: 'https://example.com/mr/1', isNew: true }),
     getRemoteUrl: vi.fn().mockResolvedValue('git@github.com:org/repo.git'),
     writeSentinel: vi.fn().mockResolvedValue(undefined),
+    writeStatus: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -32,11 +33,13 @@ describe('handleRpc', () => {
     expect(res).toBeNull()
   })
 
-  it('tools/list returns 1 tool', async () => {
+  it('tools/list returns 2 tools', async () => {
     const msg = { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }
     const res = await handleRpc(msg, makeDeps()) as any
-    expect(res.result.tools).toHaveLength(1)
-    expect(res.result.tools[0].name).toBe('open_merge_request')
+    expect(res.result.tools).toHaveLength(2)
+    const names = res.result.tools.map((t: any) => t.name)
+    expect(names).toContain('open_merge_request')
+    expect(names).toContain('report_status')
   })
 
   it('unknown method returns error -32601', async () => {
@@ -64,5 +67,31 @@ describe('handleRpc', () => {
     expect(deps.openMergeRequest).toHaveBeenCalled()
     expect(deps.writeSentinel).toHaveBeenCalledWith('https://example.com/mr/1')
     expect(res.result.content[0].text).toContain('https://example.com/mr/1')
+  })
+
+  it('tools/call report_status calls writeStatus and returns success text containing the state', async () => {
+    const deps = makeDeps()
+    const msg = { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'report_status', arguments: { state: 'needs', message: 'blocked' } } }
+    const res = await handleRpc(msg, deps) as any
+    expect(deps.writeStatus).toHaveBeenCalledWith('needs', 'blocked')
+    expect(res.result.isError).toBeFalsy()
+    expect(res.result.content[0].text).toContain('needs')
+  })
+
+  it('tools/call report_status with invalid state returns a tool error and does not call writeStatus', async () => {
+    const deps = makeDeps()
+    const msg = { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'report_status', arguments: { state: 'bogus' } } }
+    const res = await handleRpc(msg, deps) as any
+    expect(deps.writeStatus).not.toHaveBeenCalled()
+    expect(res.result.isError).toBe(true)
+  })
+
+  it('tools/call report_status with only state works (message undefined)', async () => {
+    const deps = makeDeps()
+    const msg = { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'report_status', arguments: { state: 'done' } } }
+    const res = await handleRpc(msg, deps) as any
+    expect(deps.writeStatus).toHaveBeenCalledWith('done', undefined)
+    expect(res.result.isError).toBeFalsy()
+    expect(res.result.content[0].text).toContain('done')
   })
 })
