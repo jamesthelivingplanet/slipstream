@@ -62,6 +62,14 @@ export const settingsRepoId = writable<string | null>(null)
 /** True when the viewport is at or below the mobile breakpoint. Synced from App.svelte. */
 export const mobile = writable<boolean>(false)
 
+// FLO-56: the header refresh button doubles as the agent-content fetch indicator.
+// TicketStatusBar reports its ticket-status fetch here so the header can show loading/resolved.
+export const contentLoading = writable<boolean>(false)
+// Bumped (to Date.now()) each time a content fetch resolves successfully; header shows a brief check mark.
+export const contentResolvedAt = writable<number>(0)
+// Bumped by the header refresh button to force a re-fetch of the selected agent's content.
+export const contentRefreshNonce = writable<number>(0)
+
 export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
   $id ? $sessions.find((s) => s.tid === $id) ?? null : null,
 )

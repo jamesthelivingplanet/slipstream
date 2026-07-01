@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { get } from 'svelte/store'
 import { isStartableTicket } from './ticketFilter.js'
-import { sessions, tickets, createBlankAgent, createAgentFromTicket, setSessionPrUrl } from './stores.js'
+import { sessions, tickets, createBlankAgent, createAgentFromTicket, setSessionPrUrl, contentLoading, contentResolvedAt, contentRefreshNonce } from './stores.js'
 import type { Ticket } from './types.js'
 
 describe('isStartableTicket', () => {
@@ -92,5 +92,13 @@ describe('setSessionPrUrl', () => {
     ])
     setSessionPrUrl('zzz', 'https://gitlab.com/acme/repo/-/merge_requests/1')
     expect(get(sessions)[0].prUrl).toBeUndefined()
+  })
+})
+
+describe('FLO-56 content stores', () => {
+  it('default to false/0/0', () => {
+    expect(get(contentLoading)).toBe(false)
+    expect(get(contentResolvedAt)).toBe(0)
+    expect(get(contentRefreshNonce)).toBe(0)
   })
 })
