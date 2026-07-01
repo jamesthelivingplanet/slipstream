@@ -6,6 +6,10 @@ Hard-won, non-obvious notes for this repo — start with
 Use **pnpm**. Run `pnpm check` (svelte-check) and `pnpm test` before committing. `pnpm deploy`
 builds, then restarts the systemd `slipstream.service` and hits a healthz check.
 
+If a change touches `scripts/setup.sh`, `scripts/deploy.sh`, `package.json` (scripts/engines),
+or how the app is bootstrapped/deployed, check whether `.claude/skills/setup/SKILL.md` still
+describes the current behavior and update it in the same change.
+
 ## Conventions
 
 - **The contract is the seam.** `electron/shared/contract.ts` defines all DTOs, service
@@ -32,12 +36,12 @@ builds, then restarts the systemd `slipstream.service` and hits a healthz check.
   node-run tests can't import `db.ts`/`sessionManager.ts`. Tests cover pure logic +
   real-git integration instead.
 - **Rebuild natives for Electron, not Node.** `pnpm rebuild better-sqlite3 node-pty` — and
-  any change to the Node version pnpm runs scripts on (e.g. `devEngines.runtime` in
-  `package.json`) — compiles them against the *current Node's* ABI, which Electron then
-  refuses to load. Symptom: `better_sqlite3.node … compiled against … NODE_MODULE_VERSION
-  127 … requires 130` (127 = Node 22, 130 = Electron 33). That throw happens in `openDb()`,
-  so `registerIpc()` never runs → `No handler registered for 'repos:list'`. Always finish a
-  native rebuild with `pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty`.
+  any change to the Node version pnpm runs scripts on (e.g. switching Node via `mise`/`nvm`) —
+  compiles them against the *current Node's* ABI, which Electron then refuses to load.
+  Symptom: `better_sqlite3.node … compiled against … NODE_MODULE_VERSION 127 … requires 130`
+  (127 = Node 22, 130 = Electron 33). That throw happens in `openDb()`, so `registerIpc()`
+  never runs → `No handler registered for 'repos:list'`. Always finish a native rebuild with
+  `pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty`.
 - **vitest uses `vitest.config.ts`** (not the Vite config) so tests don't run through the
   Electron plugin (which rewrites `child_process` into a require-shim that breaks ESM).
 - **`ELECTRON_RUN_AS_NODE` + native ABI**: `pnpm serve` runs
