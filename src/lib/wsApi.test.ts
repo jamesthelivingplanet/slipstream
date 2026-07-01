@@ -226,6 +226,17 @@ describe('wsApi', () => {
       expect(b).toEqual(['s1'])
     })
 
+    it('delivers session:writeLock to onSessionWriteLock callbacks', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      const received: unknown[] = []
+      api.onSessionWriteLock((state) => received.push(state))
+
+      ws.simulateMessage({ t: 'push', channel: IPC.sessionWriteLock, args: [{ sessionId: 'sess-1', canWrite: false, viewers: 2 }] })
+      expect(received).toEqual([{ sessionId: 'sess-1', canWrite: false, viewers: 2 }])
+    })
+
     it('getSessionBuffer sends a request on session:buffer and resolves result', async () => {
       const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
       const ws = openWs()
