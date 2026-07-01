@@ -7,6 +7,7 @@
   import { pushSupported, enablePush, updatePrefs, disablePush, loadPrefs } from '../push'
   import type { NotifyPrefs, GcPolicy } from '../../../electron/shared/contract.js'
   import { DEFAULT_GC_POLICY } from '../../../electron/shared/contract.js'
+  import { mcpStatus, mcpChecking, refreshMcpStatus } from '../stores'
 
   let activeTab = 'repositories'
 
@@ -119,7 +120,20 @@
     }
   }
 
-  $: if ($settingsOpen && activeTab === 'integrations') { loadLinearKey(); loadGithubToken(); loadGitlabToken() }
+  function mcpRelTime(ms: number): string {
+    const diff = Math.max(0, Date.now() - ms)
+    const sec = Math.round(diff / 1000)
+    if (sec < 5) return 'just now'
+    if (sec < 60) return `${sec}s`
+    const min = Math.round(sec / 60)
+    if (min < 60) return `${min}m`
+    const hr = Math.round(min / 60)
+    if (hr < 24) return `${hr}h`
+    const day = Math.round(hr / 24)
+    return `${day}d`
+  }
+
+  $: if ($settingsOpen && activeTab === 'integrations') { loadLinearKey(); loadGithubToken(); loadGitlabToken(); refreshMcpStatus() }
   $: if ($settingsOpen && activeTab === 'behavior') { loadEditorConfig(); loadGcPolicy() }
   $: if ($settingsOpen && activeTab === 'notifications') initNotifications()
 
@@ -475,6 +489,35 @@
         {#if activeTab === 'integrations'}
           <div class="tab-header">
             <span class="tab-title">Integrations</span>
+          </div>
+          <div>
+            <span class="lbl-f">MCP server</span>
+            <p class="integration-hint">Lets a finished agent push its branch, open the PR, and report status back to Slipstream.</p>
+            <div class="mcp-settings-row">
+              <span class="mcp-settings-dot" class:up={$mcpStatus?.up} class:down={$mcpStatus && !$mcpStatus.up}></span>
+              <span class="mcp-settings-state">{$mcpStatus === null ? 'Checking' : $mcpStatus.up ? 'Up' : 'Unreachable'}</span>
+              {#if $mcpStatus?.serverName || $mcpStatus?.protocolVersion}
+                <span class="mono muted mcp-settings-meta">
+                  {$mcpStatus?.serverName ?? ''}{$mcpStatus?.serverName && $mcpStatus?.protocolVersion ? ' · ' : ''}{$mcpStatus?.protocolVersion ?? ''}
+                </span>
+              {/if}
+            </div>
+            {#if $mcpStatus?.tools?.length}
+              <div class="mcp-settings-tools">
+                {#each $mcpStatus.tools as tool (tool)}
+                  <span class="mcp-settings-tool mono">{tool}</span>
+                {/each}
+              </div>
+            {/if}
+            {#if $mcpStatus}
+              <p class="integration-hint muted">Checked {mcpRelTime($mcpStatus.checkedAt)} ago{#if $mcpStatus.lastActivityAt} · Last used {mcpRelTime($mcpStatus.lastActivityAt)} ago{:else} · No agent has used it yet{/if}</p>
+            {/if}
+            {#if $mcpStatus?.error}
+              <p class="mcp-settings-error">{$mcpStatus.error}</p>
+            {/if}
+            <button class="btn btn-outline btn-sm" on:click={() => refreshMcpStatus()} disabled={$mcpChecking}>
+              {$mcpChecking ? 'Checking…' : 'Test connection'}
+            </button>
           </div>
           <div>
             <span class="lbl-f">Linear API Key</span>
@@ -845,6 +888,22 @@
     margin: 0 0 8px;
     line-height: 1.5;
   }
+
+  .mcp-settings-row { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; flex-wrap: wrap; }
+  .mcp-settings-dot {
+    width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px;
+    background: hsl(var(--muted-foreground));
+  }
+  .mcp-settings-dot.up { background: hsl(var(--st-done)); }
+  .mcp-settings-dot.down { background: hsl(var(--st-error)); }
+  .mcp-settings-state { font-size: 12.5px; font-weight: 500; }
+  .mcp-settings-meta { font-size: 11px; }
+  .mcp-settings-tools { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+  .mcp-settings-tool {
+    font-size: 10.5px; padding: 2px 6px; border-radius: 6px;
+    border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground));
+  }
+  .mcp-settings-error { font-size: 12px; color: hsl(var(--st-error)); margin: 0 0 8px; }
 
   .repo-settings-panel {
     padding: 12px 16px;
