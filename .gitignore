@@ -6,3 +6,6 @@ out/
 
 # tdd-guard tooling data (not source)
 .claude/tdd-guard/
+
+# pod deploy secrets (docker compose reads .env)
+.env
