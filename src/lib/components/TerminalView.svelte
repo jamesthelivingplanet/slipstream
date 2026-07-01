@@ -24,8 +24,11 @@
   // Unsubscribe fns for backend push listeners
   let offData: (() => void) | null = null
   let offWriteLock: (() => void) | null = null
+  let onDataSub: IDisposable | null = null
   let canWrite = true
   let viewers = 1
+  let liveId: string | null | undefined = null
+  let simStarted = false
 
   $: r = repoById(session.repo)
   $: dot =
@@ -55,12 +58,13 @@
     return () => { window.removeEventListener('resize', onResize); unsub() }
   })
 
-  $: if (liveMode && session.id) startLive()
-  $: if (!liveMode) runSimulation()
+  $: if (liveMode && session.id && session.id !== liveId) startLive()
+  $: if (!liveMode && !simStarted) { simStarted = true; runSimulation() }
 
   onDestroy(() => {
     cleanupListeners()
     cleanupSimulation()
+    simStarted = false
     if (session.id) detachSession(session.id)
     term?.dispose()
   })
@@ -72,6 +76,9 @@
   const resumedIds = new Set<string>()
 
   async function startLive() {
+    if (liveId !== null && liveId !== session.id) cleanupListeners()
+    liveId = session.id
+
     // Lazily respawn a detached session when the user opens it.
     if (session.id && !resumedIds.has(session.id)) {
       resumedIds.add(session.id)
@@ -108,7 +115,7 @@
     }
 
     // Forward keypresses to the PTY (only when this client holds the write lock).
-    term.onData((d) => {
+    onDataSub = term.onData((d) => {
       if (session.id && canWrite) writeSession(session.id, d)
     })
 
@@ -131,6 +138,8 @@
     if (offWriteLock) { offWriteLock(); offWriteLock = null }
     if (offResize) { offResize(); offResize = null }
     if (ro) { ro.disconnect(); ro = null }
+    if (onDataSub) { onDataSub.dispose(); onDataSub = null }
+    liveId = null
   }
 
   // ── Simulation mode ───────────────────────────────────────────────────────
