@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
   import type { Session } from '../types'
   import type { WorkflowState } from '../types'
   import { getTicketStatus, setTicketStatus, hasBackend } from '../ipc'
   import { icons } from '../icons'
   import { pushToast } from '../toast'
+  import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
 
   export let session: Session
 
@@ -13,29 +15,42 @@
   let error: string | null = null
   let menuOpen = false
   let lastTid = ''
+  let lastNonce = 0
 
   $: isBlank = session.tid.startsWith('TASK-')
   $: shouldShow = !isBlank && hasBackend
 
-  $: if (shouldShow && session.tid !== lastTid) {
-    lastTid = session.tid
+  function fetchStatus() {
     loading = true
     error = null
-    current = null
-    available = []
     menuOpen = false
+    contentLoading.set(true)
     getTicketStatus(session.tid)
       .then((res) => {
         current = res.current
         available = res.available
+        contentResolvedAt.set(Date.now())
       })
       .catch((e) => {
         error = e instanceof Error ? e.message : 'Failed to load status'
       })
       .finally(() => {
         loading = false
+        contentLoading.set(false)
       })
   }
+
+  $: if (shouldShow && session.tid !== lastTid) {
+    lastTid = session.tid
+    fetchStatus()
+  }
+
+  $: if (shouldShow && $contentRefreshNonce !== lastNonce) {
+    lastNonce = $contentRefreshNonce
+    fetchStatus()
+  }
+
+  onDestroy(() => contentLoading.set(false))
 
   async function selectState(state: WorkflowState) {
     const prev = current
@@ -55,7 +70,7 @@
   }
 
   function onTriggerClick() {
-    if (!loading && !error && available.length > 0) menuOpen = !menuOpen
+    if (!error && available.length > 0) menuOpen = !menuOpen
   }
 </script>
 
@@ -67,7 +82,7 @@
     <span class="ticket-title">{session.title}</span>
     <div class="spacer"></div>
     <div class="select" id="ticketStatusSel">
-      {#if loading}
+      {#if loading && !current && available.length === 0}
         <button class="sel-trigger status-trigger" type="button" disabled>
           <span class="muted">Loading…</span>
           <span class="chev">{@html icons.chevronDown}</span>
