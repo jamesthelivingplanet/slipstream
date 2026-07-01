@@ -2,6 +2,7 @@
 # setup.sh — one-time, idempotent per-machine bootstrap for Slipstream
 #
 # Usage: pnpm setup   (or: bash scripts/setup.sh)
+#        pnpm setup -- --serve=none|tailscale   (skips the interactive prompt)
 #
 # What it does (prep only — does NOT build or start the service):
 #   a. Detects Linux or macOS; fails on anything else
@@ -16,6 +17,31 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# ---------------------------------------------------------------------------
+# Argument parsing — lets a caller (e.g. an automated skill) drive the
+# remote-access choice without an interactive terminal.
+# ---------------------------------------------------------------------------
+SERVE_ARG=""
+for arg in "$@"; do
+  case "$arg" in
+    --serve=tailscale|--serve=none)
+      SERVE_ARG="${arg#--serve=}"
+      ;;
+    --serve=*)
+      echo "✗ Unknown --serve value: '${arg#--serve=}' (expected 'tailscale' or 'none')" >&2
+      exit 1
+      ;;
+    -h|--help)
+      echo "Usage: pnpm setup [-- --serve=tailscale|none]"
+      exit 0
+      ;;
+    *)
+      echo "✗ Unknown argument: $arg" >&2
+      exit 1
+      ;;
+  esac
+done
 
 # ---------------------------------------------------------------------------
 # Node 22 enforcement — needed for native module ABI compatibility with Electron 33
@@ -131,9 +157,12 @@ echo ""
 echo "▶ Remote access setup"
 
 SERVE_CHOICE="none"
-if [[ ! -t 0 ]]; then
+if [[ -n "$SERVE_ARG" ]]; then
+  SERVE_CHOICE="$SERVE_ARG"
+  echo "  (--serve=$SERVE_CHOICE passed — skipping interactive prompt)"
+elif [[ ! -t 0 ]]; then
   echo "  (non-interactive shell — defaulting to local-only; SLIPSTREAM_SERVE=none)"
-  echo "  Re-run 'pnpm setup' in a terminal to enable Tailscale remote access."
+  echo "  Re-run 'pnpm setup' in a terminal, or pass --serve=tailscale|none, to change this."
   SERVE_CHOICE="none"
 else
   printf '  Set up remote phone access via Tailscale HTTPS? [y/N] '
@@ -171,7 +200,27 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "▶ Installing dependencies (pnpm install)…"
-with_node22 pnpm install
+if ! with_node22 pnpm install; then
+  echo ""
+  echo "✗ pnpm install failed (see error above)."
+  echo "  If it mentions 'node: command not found' inside a package's postinstall script,"
+  echo "  node wasn't actually on PATH in the shell that launched 'pnpm setup', even if"
+  echo "  it looked available — this happens when a Node version manager isn't"
+  echo "  auto-activating for this shell session."
+  case "${SHELL:-}" in
+    */fish)
+      echo "  You're on fish: if you use the nvm.fish plugin, make sure a default version"
+      echo "  is set so new shells activate it automatically:"
+      echo "    set -Ux nvm_default_version <version>   # e.g. 22.23.1 or lts"
+      ;;
+    *)
+      echo "  Check that your nvm/mise init block runs for non-login shells too (not just"
+      echo "  interactive login shells), then open a new terminal."
+      ;;
+  esac
+  echo "  Then re-run 'pnpm setup'."
+  exit 1
+fi
 
 echo ""
 echo "▶ Rebuilding native modules for Electron's ABI…"

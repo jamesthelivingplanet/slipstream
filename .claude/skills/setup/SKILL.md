@@ -15,7 +15,7 @@ disable-model-invocation: true
 
 ## One-time setup
 
-Run in a real terminal (interactive prompts are used):
+Interactive (asks about Tailscale):
 
 ```sh
 pnpm setup
@@ -28,9 +28,21 @@ present, then asks:
 Set up remote phone access via Tailscale HTTPS? [y/N]
 ```
 
-In a non-interactive shell the default is `none`. If you are running inside a Claude Code
-session, use `! pnpm setup` so the output (including the prompt) lands in the conversation,
-or open your own terminal.
+In a non-interactive shell (no flag passed) the default is `none`.
+
+**Non-interactive** — pass the remote-access choice directly and it skips the prompt
+entirely:
+
+```sh
+pnpm setup -- --serve=none        # local-only
+pnpm setup -- --serve=tailscale   # Tailscale HTTPS
+```
+
+If you (Claude) already know which the user wants — e.g. they said they don't want/have
+Tailscale, or explicitly asked for local-only — run `pnpm setup -- --serve=none` (or
+`=tailscale`) yourself; there's no need to hand off to the user for that prompt. Only fall
+back to telling the user to run `! pnpm setup` interactively when their preference is
+genuinely unknown and you want them to answer it themselves.
 
 What `pnpm setup` produces:
 
