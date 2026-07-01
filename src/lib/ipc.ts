@@ -21,6 +21,7 @@ import type {
   GitHost,
   WriteLockState,
   GcPolicy,
+  McpStatusDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
 
@@ -252,4 +253,11 @@ export function getGcPolicy(): Promise<GcPolicy> {
 export function setGcPolicy(policy: GcPolicy): Promise<void> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.setGcPolicy(policy)
+}
+
+// ── MCP status ───────────────────────────────────────────────────────────
+
+export function getMcpStatus(): Promise<McpStatusDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.getMcpStatus()
 }
