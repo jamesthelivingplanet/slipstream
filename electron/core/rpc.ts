@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { BackendKind, RepoDTO, SessionDTO, Identity, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO } from '../shared/contract.js'
+import type { BackendKind, RepoDTO, SessionDTO, Identity, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO, WriteLockState } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
@@ -23,10 +23,17 @@ export interface Rpc {
 export function createRpc(
   deps: IpcDeps,
   emit: (channel: string, ...args: unknown[]) => void,
-  opts: { coalesceMs?: number; identity?: Identity } = {},
+  opts: { coalesceMs?: number; identity?: Identity; clientId?: string } = {},
 ): Rpc {
   const coalesceMs = opts.coalesceMs ?? 40
   const identity = opts.identity ?? LOCAL_IDENTITY
+  const clientId = opts.clientId ?? randomUUID()
+  const coord = deps.writeCoordinator
+
+  function lockState(id: string): WriteLockState {
+    if (!coord) return { sessionId: id, canWrite: true, viewers: 1 }
+    return { sessionId: id, canWrite: coord.canWrite(id, clientId), viewers: coord.viewers(id) }
+  }
   // Owner filter — a no-op in the single-user tier (every row is 'local').
   // The seam scopes all reads so a future multi-user tier isolates owners.
   const ownedByCaller = (row: { ownerId?: string }): boolean =>
@@ -108,6 +115,12 @@ export function createRpc(
   deps.sessions.on('data', onData)
   deps.sessions.on('status', onStatus)
   deps.sessions.on('pr', onPr)
+
+  function onLockChange(sessionId: string): void {
+    if (!coord!.isViewer(sessionId, clientId)) return
+    emit(IPC.sessionWriteLock, lockState(sessionId))
+  }
+  if (coord) coord.on('change', onLockChange)
 
   async function handle(channel: string, args: unknown[]): Promise<unknown> {
     switch (channel) {
@@ -213,13 +226,37 @@ export function createRpc(
         return { ...session, port }
       }
 
-      case IPC.writeSession:
-        deps.sessions.write(args[0] as string, args[1] as string)
+      case IPC.writeSession: {
+        const id = args[0] as string
+        if (coord && !coord.noteWrite(id, clientId)) return undefined
+        deps.sessions.write(id, args[1] as string)
         return undefined
+      }
 
-      case IPC.resizeSession:
-        deps.sessions.resize(args[0] as string, args[1] as number, args[2] as number)
+      case IPC.resizeSession: {
+        const id = args[0] as string
+        if (coord && !coord.canWrite(id, clientId)) return undefined
+        deps.sessions.resize(id, args[1] as number, args[2] as number)
         return undefined
+      }
+
+      case IPC.attachSession: {
+        const id = args[0] as string
+        coord?.attach(id, clientId)
+        return lockState(id)
+      }
+
+      case IPC.detachSession: {
+        const id = args[0] as string
+        coord?.detach(id, clientId)
+        return undefined
+      }
+
+      case IPC.takeWrite: {
+        const id = args[0] as string
+        coord?.take(id, clientId)
+        return lockState(id)
+      }
 
       case IPC.killSession:
         deps.sessions.kill(args[0] as string)
@@ -420,6 +457,10 @@ export function createRpc(
     deps.sessions.off('data', onData)
     deps.sessions.off('status', onStatus)
     deps.sessions.off('pr', onPr)
+    if (coord) {
+      coord.dropClient(clientId)
+      coord.off('change', onLockChange)
+    }
   }
 
   return { handle, dispose }

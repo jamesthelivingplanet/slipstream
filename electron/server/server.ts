@@ -1,6 +1,7 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { IpcDeps } from '../ipc.js'
@@ -140,10 +141,11 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
   })
 
   wss.on('connection', (ws: WebSocket, _req: http.IncomingMessage, identity: Identity = LOCAL_IDENTITY) => {
+    const clientId = randomUUID()
     const rpc = createRpc(deps, (channel, ...args) => {
       if (ws.readyState !== WebSocket.OPEN) return
       ws.send(JSON.stringify({ t: 'push', channel, args } as WirePush))
-    }, { identity })
+    }, { identity, clientId })
 
     ws.on('message', (raw) => {
       let req: WireReq
