@@ -31,6 +31,9 @@ export interface IpcDeps {
   push: IPushService
   /** Optional process-level logger for startup/uncaught errors. */
   logger?: RunLogger
+  /** Shared per-session write-lock coordinator. Optional: when absent, rpc treats
+   *  every client as the writer (single-user / test fallback). */
+  writeCoordinator?: import('./services/writeCoordinator.js').IWriteCoordinator
   gitMcp?: {
     configDir: string
     gitMcpJsPath: string

@@ -19,6 +19,7 @@ import type {
   NotifyPrefs,
   PushSubscriptionDTO,
   GitHost,
+  WriteLockState,
 } from '../../electron/shared/contract.js'
 
 export const hasBackend =
@@ -218,4 +219,24 @@ export function onSessionPr(
 ): () => void {
   if (!hasBackend) return () => {}
   return window.slipstream.onSessionPr(cb)
+}
+
+// ── Multi-client write lock ────────────────────────────────────────────────
+
+export function attachSession(id: string): Promise<WriteLockState> {
+  return hasBackend ? window.slipstream.attachSession(id) : Promise.resolve({ sessionId: id, canWrite: true, viewers: 1 })
+}
+
+export function detachSession(id: string): void {
+  if (hasBackend) window.slipstream.detachSession(id)
+}
+
+export function takeWrite(id: string): Promise<WriteLockState> {
+  if (!hasBackend) return Promise.resolve({ sessionId: id, canWrite: true, viewers: 1 })
+  return window.slipstream.takeWrite(id)
+}
+
+export function onSessionWriteLock(cb: (state: WriteLockState) => void): () => void {
+  if (!hasBackend) return () => {}
+  return window.slipstream.onSessionWriteLock(cb)
 }

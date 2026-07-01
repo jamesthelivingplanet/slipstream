@@ -7,7 +7,7 @@
  * Framework-free (plain TS) — unit-testable against a fake WebSocket.
  */
 
-import type { SlipstreamApi, RepoDTO, RepoSettings, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo, EditorConfig, NotifyPrefs, PushSubscriptionDTO, BackendKind, GitHost } from '../../electron/shared/contract.js'
+import type { SlipstreamApi, RepoDTO, RepoSettings, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo, EditorConfig, NotifyPrefs, PushSubscriptionDTO, BackendKind, GitHost, WriteLockState } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
 import { genId } from './id.js'
@@ -54,6 +54,8 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   const statusListeners = new Set<StatusCb>()
   type PrCb = (id: string, prUrl: string) => void
   const prListeners = new Set<PrCb>()
+  type WriteLockCb = (state: WriteLockState) => void
+  const writeLockListeners = new Set<WriteLockCb>()
 
   function connect() {
     if (destroyed) return
@@ -102,6 +104,9 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
         } else if (msg.channel === IPC.sessionPr) {
           const [id, prUrl] = msg.args as [string, string]
           for (const cb of prListeners) cb(id, prUrl)
+        } else if (msg.channel === IPC.sessionWriteLock) {
+          const [state] = msg.args as [WriteLockState]
+          for (const cb of writeLockListeners) cb(state)
         }
       }
     }
@@ -303,6 +308,24 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     onSessionPr(cb: (id: string, prUrl: string) => void): () => void {
       prListeners.add(cb)
       return () => prListeners.delete(cb)
+    },
+
+    attachSession(id: string): Promise<WriteLockState> {
+      return request(IPC.attachSession, [id]) as Promise<WriteLockState>
+    },
+
+    detachSession(id: string): void {
+      const req: WireReq = { t: 'req', id: genId(), channel: IPC.detachSession, args: [id] }
+      send(req)
+    },
+
+    takeWrite(id: string): Promise<WriteLockState> {
+      return request(IPC.takeWrite, [id]) as Promise<WriteLockState>
+    },
+
+    onSessionWriteLock(cb: WriteLockCb): () => void {
+      writeLockListeners.add(cb)
+      return () => writeLockListeners.delete(cb)
     },
   }
 }

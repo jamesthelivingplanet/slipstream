@@ -13,10 +13,13 @@ import type {
   ITicketProvider,
   ISessionStore,
   SessionStatus,
+  WriteLockState,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 import type { IEditorLauncher } from '../services/editorLauncher.js'
 import type { IPushService } from '../services/pushService.js'
+import { createWriteCoordinator } from '../services/writeCoordinator.js'
+import type { IWriteCoordinator } from '../services/writeCoordinator.js'
 
 // ── Fake deps ─────────────────────────────────────────────────────────────────
 
@@ -613,6 +616,82 @@ describe('createRpc', () => {
       ;(deps.repos.resolvePath as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
       await expect(rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])).rejects.toThrow('Unknown repo: r1')
       expect(deps.worktrees.create).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('multi-client write lock', () => {
+    let sharedDeps: ReturnType<typeof makeFakeDeps>
+    let coord: IWriteCoordinator
+    let emittedA: Array<[string, ...unknown[]]>
+    let emittedB: Array<[string, ...unknown[]]>
+    let rpcA: ReturnType<typeof createRpc>
+    let rpcB: ReturnType<typeof createRpc>
+
+    beforeEach(() => {
+      sharedDeps = makeFakeDeps()
+      coord = createWriteCoordinator()
+      sharedDeps.writeCoordinator = coord
+      emittedA = []
+      emittedB = []
+      rpcA = createRpc(sharedDeps, (channel, ...args) => { emittedA.push([channel, ...args]) }, { coalesceMs: 0, clientId: 'client-a' })
+      rpcB = createRpc(sharedDeps, (channel, ...args) => { emittedB.push([channel, ...args]) }, { coalesceMs: 0, clientId: 'client-b' })
+    })
+
+    it('grants the write lock to the first client to attach, view-only for the second', async () => {
+      const lockA = await rpcA.handle(IPC.attachSession, ['s1']) as WriteLockState
+      const lockB = await rpcB.handle(IPC.attachSession, ['s1']) as WriteLockState
+
+      expect(lockA.canWrite).toBe(true)
+      expect(lockB.canWrite).toBe(false)
+      expect(lockB.viewers).toBe(2)
+    })
+
+    it('blocks writeSession from a view-only client but allows the holder', async () => {
+      await rpcA.handle(IPC.attachSession, ['s1'])
+      await rpcB.handle(IPC.attachSession, ['s1'])
+
+      await rpcB.handle(IPC.writeSession, ['s1', 'hello'])
+      expect(sharedDeps.sessions.write).not.toHaveBeenCalled()
+
+      await rpcA.handle(IPC.writeSession, ['s1', 'hello'])
+      expect(sharedDeps.sessions.write).toHaveBeenCalledWith('s1', 'hello')
+    })
+
+    it('takeWrite flips the lock and pushes session:writeLock to both attached clients', async () => {
+      await rpcA.handle(IPC.attachSession, ['s1'])
+      await rpcB.handle(IPC.attachSession, ['s1'])
+      emittedA.length = 0
+      emittedB.length = 0
+
+      const lockB = await rpcB.handle(IPC.takeWrite, ['s1']) as WriteLockState
+      expect(lockB.canWrite).toBe(true)
+
+      const pushA = emittedA.find(([ch]) => ch === IPC.sessionWriteLock)
+      const pushB = emittedB.find(([ch]) => ch === IPC.sessionWriteLock)
+      expect(pushA).toBeTruthy()
+      expect(pushB).toBeTruthy()
+      expect((pushA![1] as WriteLockState).canWrite).toBe(false)
+      expect((pushB![1] as WriteLockState).canWrite).toBe(true)
+    })
+
+    it('resizeSession is blocked for a view-only client', async () => {
+      await rpcA.handle(IPC.attachSession, ['s1'])
+      await rpcB.handle(IPC.attachSession, ['s1'])
+
+      await rpcB.handle(IPC.resizeSession, ['s1', 80, 24])
+      expect(sharedDeps.sessions.resize).not.toHaveBeenCalled()
+
+      await rpcA.handle(IPC.resizeSession, ['s1', 80, 24])
+      expect(sharedDeps.sessions.resize).toHaveBeenCalledWith('s1', 80, 24)
+    })
+
+    it('detachSession on dispose frees the lock for remaining viewers', async () => {
+      await rpcA.handle(IPC.attachSession, ['s1'])
+      await rpcB.handle(IPC.attachSession, ['s1'])
+
+      rpcA.dispose()
+
+      expect(coord.canWrite('s1', 'client-b')).toBe(true)
     })
   })
 })
