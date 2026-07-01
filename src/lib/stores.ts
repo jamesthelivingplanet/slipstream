@@ -1,5 +1,6 @@
 import { writable, derived, get } from 'svelte/store'
 import type { Filter, Repo, Session, Status, Ticket, BackendKind } from './types'
+import type { McpStatusDTO } from '../../electron/shared/contract.js'
 import { branchFor } from './branch'
 import {
   hasBackend,
@@ -17,6 +18,7 @@ import {
   runApp,
   onSessionStatus,
   onSessionPr,
+  getMcpStatus as ipcGetMcpStatus,
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
@@ -69,6 +71,23 @@ export const contentLoading = writable<boolean>(false)
 export const contentResolvedAt = writable<number>(0)
 // Bumped by the header refresh button to force a re-fetch of the selected agent's content.
 export const contentRefreshNonce = writable<number>(0)
+
+// FLO-61: MCP self-test status, shared between the header dot and the Settings
+// Integrations panel so both read the same data without duplicate fetches.
+export const mcpStatus = writable<McpStatusDTO | null>(null)
+export const mcpChecking = writable(false)
+
+export async function refreshMcpStatus(): Promise<void> {
+  if (!hasBackend) return
+  mcpChecking.set(true)
+  try {
+    mcpStatus.set(await ipcGetMcpStatus())
+  } catch (e) {
+    mcpStatus.set({ up: false, tools: [], checkedAt: Date.now(), error: cleanError(e) })
+  } finally {
+    mcpChecking.set(false)
+  }
+}
 
 export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
   $id ? $sessions.find((s) => s.tid === $id) ?? null : null,
