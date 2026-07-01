@@ -2,7 +2,7 @@
 
 Living doc: where Slipstream is and where it's going. Update it as phases land.
 
-_Last updated: 2026-06-21._
+_Last updated: 2026-06-30._
 
 ## Done ✅
 
@@ -76,6 +76,15 @@ _Last updated: 2026-06-21._
   the token + port across relaunches so the same daemon is reused. Set
   `SLIPSTREAM_DAEMON_EPHEMERAL=1` to tie daemon lifetime to the window (used in e2e tests).
   `daemonManager.ts` (node builtins only, unit-tested) owns the spawn/reuse/healthz logic.
+
+**Pod deploy** (FLO-51, D4c)
+- One-command pod path: a `Dockerfile` builds the daemon for the **Node** ABI
+  (no Electron binary / GUI libs) and runs it with `node dist-electron/server.js`;
+  `docker-compose.yml` pairs it with a Tailscale sidecar (`network_mode:
+  service:tailscale` + `tailscale serve`) so HTTPS phone access is `docker compose
+  up -d --build`. The `claude` CLI is baked into the image; `ANTHROPIC_API_KEY`,
+  `SLIPSTREAM_TOKEN`, and optional `GH_TOKEN` come from `.env`. Full walkthrough in
+  [POD-DEPLOY.md](POD-DEPLOY.md).
 
 ## Later 🗓️
 
