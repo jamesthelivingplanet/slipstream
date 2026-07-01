@@ -35,7 +35,9 @@ export const NEEDS_PATTERNS: RegExp[] = [
   /Do you want\b/i,
   /Continue\?/i,
   /Proceed\?/i,
-  /Press enter/i,
+  /Would you like\b/i,
+  /\bpress\s+(enter|return|any key)\b/i,
+  /❯\s*\d+[.)]/,  // arrow pointing at a numbered menu option (e.g. permission select box)
   /\?\s*$/,       // ends with a question mark (optionally trailing whitespace)
   /[❯>]\s*$/,     // trailing prompt glyph
 ]
@@ -108,6 +110,10 @@ export class StatusDetector implements IStatusDetector {
   private exited = false
   private exitCode: number | null = null
 
+  // Out-of-band signal reported via the app MCP's report_status tool.
+  private signalState: 'needs' | 'done' | 'running' | null = null
+  private signalAt = 0
+
   constructor(opts: StatusDetectorOptions = {}) {
     this.idleMs = opts.idleMs ?? 4000
     this.now = opts.now ?? Date.now
@@ -129,17 +135,33 @@ export class StatusDetector implements IStatusDetector {
     this.exitCode = code
   }
 
+  /**
+   * Apply an out-of-band status signal reported via the app MCP's
+   * `report_status` tool. This is the reliable channel: it doesn't depend on
+   * scraping PTY output. `done` is sticky (see status()); `needs`/`running`
+   * are overridden only by a strictly-newer PTY marker or a process exit.
+   */
+  applySignal(state: 'needs' | 'done' | 'running', at?: number): void {
+    this.signalState = state
+    this.signalAt = at ?? this.now()
+  }
+
   /** Best-guess status given all data pushed so far plus the current time. */
   status(): SessionStatus {
     if (this.exited) {
       return this.exitCode === 0 ? 'done' : 'errored'
     }
 
-    // Explicit marker emitted by the agent takes precedence and is not
-    // idle-gated: as soon as it appears at the tail we trust it.
+    // MCP "done" is sticky — once the agent reports completion, nothing short
+    // of a real process exit should undo it.
+    if (this.signalState === 'done') return 'done'
+
     const tail = this.buffer.slice(-512)
-    const signal = tailSignal(tail)
-    if (signal) return signal
+    const marker = tailSignal(tail)
+
+    // Most-recent-wins between an out-of-band MCP signal and a PTY tail marker.
+    if (this.signalState && this.signalAt >= this.lastOutputAt) return this.signalState
+    if (marker) return marker
 
     const elapsed = this.now() - this.lastOutputAt
     if (elapsed < this.idleMs) {

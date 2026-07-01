@@ -7,7 +7,7 @@ import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
 import { LOCAL_IDENTITY } from './auth.js'
-import { buildGitMcpConfig, writeGitMcpConfig } from '../services/mcpConfig.js'
+import { buildAppMcpConfig, writeAppMcpConfig } from '../services/mcpConfig.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 
 export interface Rpc {
@@ -172,17 +172,17 @@ export function createRpc(
 
         const sessionId = randomUUID()
         let mcpConfigPath: string | undefined
-        if (deps.gitMcp) {
-          mcpConfigPath = path.join(deps.gitMcp.configDir, `${sessionId}.json`)
-          const config = buildGitMcpConfig({
-            gitMcpJsPath: deps.gitMcp.gitMcpJsPath,
-            electronPath: deps.gitMcp.electronPath,
-            dataDir: deps.gitMcp.dataDir,
+        if (deps.appMcp) {
+          mcpConfigPath = path.join(deps.appMcp.configDir, `${sessionId}.json`)
+          const config = buildAppMcpConfig({
+            appMcpJsPath: deps.appMcp.appMcpJsPath,
+            electronPath: deps.appMcp.electronPath,
+            dataDir: deps.appMcp.dataDir,
             sessionId,
             base: repo.base,
             branch,
           })
-          await writeGitMcpConfig(mcpConfigPath, config)
+          await writeAppMcpConfig(mcpConfigPath, config)
         }
 
         const startedAt = Date.now()

@@ -53,6 +53,8 @@ Rules:
 - The most recently printed marker is what the app displays \u2014 if you resume work after a ${NEEDS_INPUT_MARKER}, print ${IN_PROGRESS_MARKER} to show you are running again.
 - Emit a marker ONLY when the condition is true.
 
+You also have a reliable MCP status channel: call the \`report_status\` tool of the **slipstream** MCP with \`state: "needs" | "done" | "running"\` whenever your state changes. This is more reliable than the printed markers in a TUI, since it does not depend on scraping terminal output \u2014 use it in addition to (not instead of) printing the markers above.
+
 Ticket:
 ${tid}: ${title}
 
@@ -60,7 +62,7 @@ ${desc}
 
 ## Git workflow (automated — do not skip)
 
-When the ticket is complete, commit and push your changes yourself using ordinary git commands in your shell (add, commit, rebase, push). Once your branch is pushed, use the slipstream-git MCP tool to open a merge/pull request:
+When the ticket is complete, commit and push your changes yourself using ordinary git commands in your shell (add, commit, rebase, push). Once your branch is pushed, use the **slipstream** MCP tool \`open_merge_request\` to open a merge/pull request:
 
 1. Call \`open_merge_request\` with a concise title (e.g. "${tid}: ${title}") and a brief description of what changed.
 2. Report the URL returned by \`open_merge_request\` in your final message.

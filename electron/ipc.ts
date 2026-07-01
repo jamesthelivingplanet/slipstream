@@ -34,9 +34,9 @@ export interface IpcDeps {
   /** Shared per-session write-lock coordinator. Optional: when absent, rpc treats
    *  every client as the writer (single-user / test fallback). */
   writeCoordinator?: import('./services/writeCoordinator.js').IWriteCoordinator
-  gitMcp?: {
+  appMcp?: {
     configDir: string
-    gitMcpJsPath: string
+    appMcpJsPath: string
     electronPath: string
     dataDir: string
   }

@@ -27,6 +27,7 @@ import { trustDirectory } from './claudeTrust.js'
 import { hasTranscript } from './transcripts.js'
 import { selectBackend, type AgentBackend, type SpawnSpec, type StatusHandle } from './agentBackend.js'
 import type { RunLogger } from './runLogger.js'
+import { parseStatusSentinel, STATUS_SENTINEL_FILE } from './statusSentinel.js'
 
 function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<string, string>): pty.IPty {
   return pty.spawn(cmd, args, {
@@ -193,16 +194,43 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       const sentinelDir = path.join(root, 'sessions', id)
       void fs.promises.mkdir(sentinelDir, { recursive: true }).then(() => {
         const emittedPrUrl = new Set<string>()
+        let lastStatusTs = 0
         try {
           const watcher = fs.watch(sentinelDir, { persistent: false }, (_event, filename) => {
-            if (filename !== 'pr.json') return
-            const filePath = path.join(sentinelDir, 'pr.json')
+            if (filename !== 'pr.json' && filename !== STATUS_SENTINEL_FILE) return
+
+            if (filename === 'pr.json') {
+              const filePath = path.join(sentinelDir, 'pr.json')
+              try {
+                const content = fs.readFileSync(filePath, 'utf8')
+                const parsed = JSON.parse(content) as { url?: string }
+                if (parsed.url && !emittedPrUrl.has(parsed.url)) {
+                  emittedPrUrl.add(parsed.url)
+                  emit('pr', id, parsed.url)
+                }
+              } catch {
+                // Ignore read/parse errors (file may be partially written)
+              }
+              return
+            }
+
+            // filename === STATUS_SENTINEL_FILE
+            const filePath = path.join(sentinelDir, STATUS_SENTINEL_FILE)
             try {
               const content = fs.readFileSync(filePath, 'utf8')
-              const parsed = JSON.parse(content) as { url?: string }
-              if (parsed.url && !emittedPrUrl.has(parsed.url)) {
-                emittedPrUrl.add(parsed.url)
-                emit('pr', id, parsed.url)
+              const parsed = parseStatusSentinel(content)
+              if (parsed && parsed.ts > lastStatusTs) {
+                lastStatusTs = parsed.ts
+                const ptyDriven = rec.backend.statusSource === 'pty'
+                if (ptyDriven) {
+                  detector.applySignal(parsed.state)
+                  const s = detector.status()
+                  rec.dto.status = s
+                  emit('status', id, s)
+                } else {
+                  rec.dto.status = parsed.state
+                  emit('status', id, parsed.state)
+                }
               }
             } catch {
               // Ignore read/parse errors (file may be partially written)
