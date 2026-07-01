@@ -6,7 +6,9 @@ disable-model-invocation: true
 
 ## Prerequisites
 
-- **Node 22+** — pnpm auto-downloads the right version via `devEngines` in `package.json`
+- **Node 22** — `setup.sh`/`deploy.sh` require it on PATH. If a different version is active,
+  they'll switch via `mise` or `nvm` automatically (whichever is installed); if neither is
+  installed, setup exits with an error and you must install/switch to Node 22 yourself
 - **pnpm** — required; must be on PATH before running any scripts
 - **`claude` CLI** — must be on PATH and authenticated; the app spawns `claude --dangerously-skip-permissions`
 - **Tailscale** (only if you want phone/remote access) — system-level CLI from https://tailscale.com/download, logged in (`tailscale up`). On macOS use the Homebrew CLI (`brew install tailscale`), **not** the App Store GUI app.

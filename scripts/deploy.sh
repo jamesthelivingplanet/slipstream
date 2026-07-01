@@ -33,8 +33,15 @@ with_node22() {
     echo "  Using Node 22 via mise…"
     mise install node@22 2>/dev/null || true
     mise exec node@22 -- "$@"
+  elif [[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]]; then
+    echo "  Using Node 22 via nvm…"
+    # shellcheck disable=SC1091
+    \. "${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+    nvm install 22 2>/dev/null || true
+    nvm exec 22 "$@"
   else
     echo "✗ Node 22 is required but $(node --version 2>/dev/null || echo 'none') was detected."
+    echo "  Install Node 22 directly, or install mise or nvm so this script can switch to it."
     exit 1
   fi
 }
