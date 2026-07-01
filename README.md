@@ -87,6 +87,20 @@ This is idempotent — safe to re-run. It will:
   a Cloudflare Tunnel, or a reverse proxy (Caddy/nginx) with a Let's Encrypt cert in
   front of `http://127.0.0.1:7421`.
 
+### Deploy to a pod (Docker)
+
+To run Slipstream on a server you own and drive it from your phone, use the
+one-command Docker path: it brings up the daemon plus a Tailscale sidecar that
+publishes it over HTTPS on your tailnet.
+
+```sh
+cp .env.pod.example .env   # fill in SLIPSTREAM_TOKEN, ANTHROPIC_API_KEY, TS_AUTHKEY
+docker compose up -d --build
+```
+
+Full walkthrough — prerequisites, secrets, phone setup, and updates — in
+[docs/POD-DEPLOY.md](docs/POD-DEPLOY.md).
+
 ### Each release
 
 ```sh

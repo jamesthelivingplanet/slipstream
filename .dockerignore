@@ -1,0 +1,11 @@
+node_modules
+dist
+dist-electron
+out
+.git
+.worktrees
+.env
+*.log
+.DS_Store
+.claude/tdd-guard
+scripts/e2e
