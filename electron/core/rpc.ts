@@ -9,6 +9,7 @@ import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
 import { LOCAL_IDENTITY } from './auth.js'
 import { buildAppMcpConfig, writeAppMcpConfig } from '../services/mcpConfig.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
+import { checkAppMcp, lastMcpActivity } from '../services/mcpHealth.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -447,6 +448,13 @@ export function createRpc(
       case IPC.setGcPolicy:
         writeGcPolicy(deps.config, args[0] as GcPolicy)
         return undefined
+
+      case IPC.getMcpStatus: {
+        if (!deps.appMcp) return { up: false, tools: [], checkedAt: Date.now(), error: 'MCP not configured' }
+        const res = await checkAppMcp({ electronPath: deps.appMcp.electronPath, appMcpJsPath: deps.appMcp.appMcpJsPath, dataDir: deps.appMcp.dataDir })
+        const lastActivityAt = await lastMcpActivity(deps.appMcp.dataDir)
+        return { ...res, checkedAt: Date.now(), lastActivityAt }
+      }
 
       case IPC.pickRepo:
         throw new Error('pickRepo is not supported without a desktop window')

@@ -38,6 +38,19 @@ export const DEFAULT_GC_POLICY: GcPolicy = {
   idleMs: 0,
   maxAgeMs: 0,
 }
+/** Result of an out-of-band self-test handshake against the app's own MCP
+ *  server (electron/mcp/appMcp.ts). Never spawned inside an agent session —
+ *  see McpHealthParams / checkAppMcp — so it adds no agent context. */
+export interface McpStatusDTO {
+  up: boolean               // true iff the app's self-test handshake succeeded
+  serverName?: string       // serverInfo.name from initialize
+  protocolVersion?: string  // protocolVersion from initialize
+  tools: string[]           // tool names from tools/list
+  checkedAt: number         // epoch ms of this self-test
+  error?: string            // present when up === false
+  lastActivityAt?: number   // epoch ms of most recent real MCP activity (status.json/pr.json mtime across sessions), if any
+}
+
 export interface PushSubscriptionDTO {
   endpoint: string
   keys: { p256dh: string; auth: string }
@@ -316,6 +329,11 @@ export interface SlipstreamApi {
 
   getGcPolicy(): Promise<GcPolicy>
   setGcPolicy(policy: GcPolicy): Promise<void>
+
+  /** Out-of-band self-test of the app's own MCP server: spawns it directly
+   *  and runs the initialize/tools-list handshake outside of any agent
+   *  session, so it never adds anything to an agent's context. */
+  getMcpStatus(): Promise<McpStatusDTO>
 }
 
 export const IPC = {
@@ -360,6 +378,7 @@ export const IPC = {
   sessionWriteLock: 'session:writeLock', // main → renderer push
   getGcPolicy: 'gc:getPolicy',
   setGcPolicy: 'gc:setPolicy',
+  getMcpStatus: 'mcp:status',
 } as const
 
 declare global {
