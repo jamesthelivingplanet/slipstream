@@ -4,10 +4,7 @@ import type { Session } from './types.js'
 
 describe('sessionsToReconcile', () => {
   it('returns sessions whose tid matches a done=true dto', () => {
-    const sessions = [
-      { tid: 'A' } as Session,
-      { tid: 'B' } as Session,
-    ]
+    const sessions = [{ tid: 'A' } as Session, { tid: 'B' } as Session]
     const dtos = [
       { tid: 'A', done: true },
       { tid: 'B', done: false },

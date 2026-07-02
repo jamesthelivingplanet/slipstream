@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-electron
+out
+coverage
+pnpm-lock.yaml
+prototype.html
+public
+*.md

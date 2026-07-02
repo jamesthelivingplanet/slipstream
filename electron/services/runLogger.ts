@@ -109,7 +109,9 @@ export function createRunLogger(root: string): RunLogger {
     const extraStr = extra !== undefined ? ' ' + safeStringify(extra) : ''
     const line = `${ts()} [${level}] ${msg}${extraStr}\n`
     try {
-      fs.appendFile(serverLogPath, line, () => { /* fire-and-forget */ })
+      fs.appendFile(serverLogPath, line, () => {
+        /* fire-and-forget */
+      })
     } catch {
       // best-effort
     }
@@ -120,7 +122,8 @@ export function createRunLogger(root: string): RunLogger {
 
 function safeStringify(v: unknown): string {
   try {
-    if (v instanceof Error) return JSON.stringify({ name: v.name, message: v.message, stack: v.stack })
+    if (v instanceof Error)
+      return JSON.stringify({ name: v.name, message: v.message, stack: v.stack })
     return JSON.stringify(v)
   } catch {
     return String(v)

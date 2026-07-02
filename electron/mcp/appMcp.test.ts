@@ -22,7 +22,10 @@ function makeDeps(overrides: Partial<AppMcpDeps> = {}): AppMcpDeps {
 describe('handleRpc', () => {
   it('returns correct protocolVersion for initialize', async () => {
     const msg = { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }
-    const res = await handleRpc(msg, makeDeps()) as { id: number; result: { protocolVersion: string } }
+    const res = (await handleRpc(msg, makeDeps())) as {
+      id: number
+      result: { protocolVersion: string }
+    }
     expect(res).not.toBeNull()
     expect((res as any).result.protocolVersion).toBe('2024-11-05')
   })
@@ -35,7 +38,7 @@ describe('handleRpc', () => {
 
   it('tools/list returns 2 tools', async () => {
     const msg = { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }
-    const res = await handleRpc(msg, makeDeps()) as any
+    const res = (await handleRpc(msg, makeDeps())) as any
     expect(res.result.tools).toHaveLength(2)
     const names = res.result.tools.map((t: any) => t.name)
     expect(names).toContain('open_merge_request')
@@ -44,14 +47,19 @@ describe('handleRpc', () => {
 
   it('unknown method returns error -32601', async () => {
     const msg = { jsonrpc: '2.0', id: 3, method: 'unknown/method', params: {} }
-    const res = await handleRpc(msg, makeDeps()) as any
+    const res = (await handleRpc(msg, makeDeps())) as any
     expect(res.error.code).toBe(-32601)
   })
 
   it('tools/call open_merge_request calls openMergeRequest and writeSentinel', async () => {
     const deps = makeDeps()
-    const msg = { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'open_merge_request', arguments: { title: 'My PR' } } }
-    const res = await handleRpc(msg, deps) as any
+    const msg = {
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'tools/call',
+      params: { name: 'open_merge_request', arguments: { title: 'My PR' } },
+    }
+    const res = (await handleRpc(msg, deps)) as any
     expect(deps.push).toHaveBeenCalled()
     expect(deps.openMergeRequest).toHaveBeenCalled()
     expect(deps.writeSentinel).toHaveBeenCalledWith('https://example.com/mr/1')
@@ -60,8 +68,13 @@ describe('handleRpc', () => {
 
   it('tools/call open_merge_request still succeeds when push fails (best-effort)', async () => {
     const deps = makeDeps({ push: vi.fn().mockRejectedValue(new Error('already up to date')) })
-    const msg = { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'open_merge_request', arguments: { title: 'My PR' } } }
-    const res = await handleRpc(msg, deps) as any
+    const msg = {
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'tools/call',
+      params: { name: 'open_merge_request', arguments: { title: 'My PR' } },
+    }
+    const res = (await handleRpc(msg, deps)) as any
     expect(res.error).toBeUndefined()
     expect(res.result.isError).toBeFalsy()
     expect(deps.openMergeRequest).toHaveBeenCalled()
@@ -71,8 +84,13 @@ describe('handleRpc', () => {
 
   it('tools/call report_status calls writeStatus and returns success text containing the state', async () => {
     const deps = makeDeps()
-    const msg = { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'report_status', arguments: { state: 'needs', message: 'blocked' } } }
-    const res = await handleRpc(msg, deps) as any
+    const msg = {
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'tools/call',
+      params: { name: 'report_status', arguments: { state: 'needs', message: 'blocked' } },
+    }
+    const res = (await handleRpc(msg, deps)) as any
     expect(deps.writeStatus).toHaveBeenCalledWith('needs', 'blocked')
     expect(res.result.isError).toBeFalsy()
     expect(res.result.content[0].text).toContain('needs')
@@ -80,16 +98,26 @@ describe('handleRpc', () => {
 
   it('tools/call report_status with invalid state returns a tool error and does not call writeStatus', async () => {
     const deps = makeDeps()
-    const msg = { jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'report_status', arguments: { state: 'bogus' } } }
-    const res = await handleRpc(msg, deps) as any
+    const msg = {
+      jsonrpc: '2.0',
+      id: 8,
+      method: 'tools/call',
+      params: { name: 'report_status', arguments: { state: 'bogus' } },
+    }
+    const res = (await handleRpc(msg, deps)) as any
     expect(deps.writeStatus).not.toHaveBeenCalled()
     expect(res.result.isError).toBe(true)
   })
 
   it('tools/call report_status with only state works (message undefined)', async () => {
     const deps = makeDeps()
-    const msg = { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'report_status', arguments: { state: 'done' } } }
-    const res = await handleRpc(msg, deps) as any
+    const msg = {
+      jsonrpc: '2.0',
+      id: 9,
+      method: 'tools/call',
+      params: { name: 'report_status', arguments: { state: 'done' } },
+    }
+    const res = (await handleRpc(msg, deps)) as any
     expect(deps.writeStatus).toHaveBeenCalledWith('done', undefined)
     expect(res.result.isError).toBeFalsy()
     expect(res.result.content[0].text).toContain('done')

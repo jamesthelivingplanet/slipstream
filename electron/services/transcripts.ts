@@ -15,7 +15,11 @@ export function claudeProjectsDir(): string {
  */
 export function hasTranscript(id: string, projectsDir: string = claudeProjectsDir()): boolean {
   let subs: string[]
-  try { subs = fs.readdirSync(projectsDir) } catch { return false }
+  try {
+    subs = fs.readdirSync(projectsDir)
+  } catch {
+    return false
+  }
   for (const sub of subs) {
     if (fs.existsSync(path.join(projectsDir, sub, `${id}.jsonl`))) return true
   }

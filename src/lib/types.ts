@@ -1,4 +1,5 @@
-export type Status = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'detached' | 'interrupted' | 'reaped'
+export type Status =
+  'idle' | 'running' | 'needs' | 'done' | 'errored' | 'detached' | 'interrupted' | 'reaped'
 export type Source = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi'
 export type Filter = 'all' | 'needs' | 'running' | 'done'
@@ -10,7 +11,11 @@ export interface Repo {
   base: string
 }
 
-export interface WorkflowState { id: string; name: string; type?: string }
+export interface WorkflowState {
+  id: string
+  name: string
+  type?: string
+}
 
 export interface Ticket {
   tid: string
@@ -23,7 +28,7 @@ export interface Ticket {
 }
 
 export interface Session {
-  id?: string           // backend SessionDTO UUID; absent on mock sessions
+  id?: string // backend SessionDTO UUID; absent on mock sessions
   tid: string
   src: Source
   status: Status

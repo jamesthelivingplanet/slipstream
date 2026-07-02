@@ -33,7 +33,9 @@
     <div class="drawer-overlay" on:click={onClose} role="presentation"></div>
     <div
       class="drawer"
-      style="transform: translateY({dragY}px); transition: {dragging ? 'none' : 'transform .26s cubic-bezier(.2,.8,.2,1)'}"
+      style="transform: translateY({dragY}px); transition: {dragging
+        ? 'none'
+        : 'transform .26s cubic-bezier(.2,.8,.2,1)'}"
     >
       <div
         class="drawer-grab"
@@ -72,7 +74,7 @@
     z-index: 50;
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(2px);
-    animation: drawerFade .2s;
+    animation: drawerFade 0.2s;
   }
   .drawer {
     position: fixed;
@@ -88,7 +90,7 @@
     border-bottom: none;
     border-radius: calc(var(--radius) + 6px) calc(var(--radius) + 6px) 0 0;
     box-shadow: var(--shadow);
-    animation: drawerUp .26s cubic-bezier(.2,.8,.2,1);
+    animation: drawerUp 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
     padding-bottom: env(safe-area-inset-bottom);
   }
   .drawer-grab {
@@ -99,7 +101,9 @@
     cursor: grab;
     touch-action: none;
   }
-  .drawer-grab:active { cursor: grabbing; }
+  .drawer-grab:active {
+    cursor: grabbing;
+  }
   .drawer-handle {
     width: 36px;
     height: 5px;
@@ -115,9 +119,20 @@
     overflow: visible;
     padding: 16px 18px;
   }
-  @keyframes drawerFade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes drawerFade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
   @keyframes drawerUp {
-    from { transform: translateY(100%); }
-    to { transform: translateY(0); }
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
   }
 </style>

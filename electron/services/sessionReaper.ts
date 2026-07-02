@@ -8,7 +8,12 @@
  * (fakes in tests), never node-pty/better-sqlite3 directly.
  */
 
-import type { GcPolicy, ISessionManager, ISessionStore, LiveSessionInfo } from '../shared/contract.js'
+import type {
+  GcPolicy,
+  ISessionManager,
+  ISessionStore,
+  LiveSessionInfo,
+} from '../shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../shared/contract.js'
 import type { IConfigStore } from './configStore.js'
 import type { RunLogger } from './runLogger.js'
@@ -36,10 +41,18 @@ function coerce(partial: unknown): GcPolicy {
   const p = (partial ?? {}) as Partial<GcPolicy>
   return {
     enabled: typeof p.enabled === 'boolean' ? p.enabled : DEFAULT_GC_POLICY.enabled,
-    onlyAbandoned: typeof p.onlyAbandoned === 'boolean' ? p.onlyAbandoned : DEFAULT_GC_POLICY.onlyAbandoned,
-    autoStopOnDone: typeof p.autoStopOnDone === 'boolean' ? p.autoStopOnDone : DEFAULT_GC_POLICY.autoStopOnDone,
-    idleMs: Number.isFinite(p.idleMs) && (p.idleMs as number) >= 0 ? (p.idleMs as number) : DEFAULT_GC_POLICY.idleMs,
-    maxAgeMs: Number.isFinite(p.maxAgeMs) && (p.maxAgeMs as number) >= 0 ? (p.maxAgeMs as number) : DEFAULT_GC_POLICY.maxAgeMs,
+    onlyAbandoned:
+      typeof p.onlyAbandoned === 'boolean' ? p.onlyAbandoned : DEFAULT_GC_POLICY.onlyAbandoned,
+    autoStopOnDone:
+      typeof p.autoStopOnDone === 'boolean' ? p.autoStopOnDone : DEFAULT_GC_POLICY.autoStopOnDone,
+    idleMs:
+      Number.isFinite(p.idleMs) && (p.idleMs as number) >= 0
+        ? (p.idleMs as number)
+        : DEFAULT_GC_POLICY.idleMs,
+    maxAgeMs:
+      Number.isFinite(p.maxAgeMs) && (p.maxAgeMs as number) >= 0
+        ? (p.maxAgeMs as number)
+        : DEFAULT_GC_POLICY.maxAgeMs,
   }
 }
 
@@ -67,7 +80,11 @@ export function createSessionReaper(deps: ReaperDeps): SessionReaper {
     deps.sessions.reap(info.id)
     const persisted = deps.store.get(info.id)
     if (persisted) deps.store.upsert({ ...persisted, status: 'reaped' })
-    deps.logger?.server('info', 'session reaped', { sessionId: info.id, reason, prevStatus: info.status })
+    deps.logger?.server('info', 'session reaped', {
+      sessionId: info.id,
+      reason,
+      prevStatus: info.status,
+    })
   }
 
   function tick(): string[] {
@@ -98,7 +115,11 @@ export function createSessionReaper(deps: ReaperDeps): SessionReaper {
   function start(): void {
     if (timer) return
     timer = setInterval(() => {
-      try { tick() } catch { /* never crash the daemon */ }
+      try {
+        tick()
+      } catch {
+        /* never crash the daemon */
+      }
     }, REAP_INTERVAL_MS)
     timer.unref?.()
   }

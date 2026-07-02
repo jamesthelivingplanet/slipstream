@@ -168,7 +168,11 @@ export async function checkAppMcp(p: McpHealthParams): Promise<McpHealthResult> 
 
     child.on('exit', (code, signal) => {
       if (!gotInit || !gotTools) {
-        finish({ up: false, tools: [], error: `process exited before handshake completed (code=${code}, signal=${signal})` })
+        finish({
+          up: false,
+          tools: [],
+          error: `process exited before handshake completed (code=${code}, signal=${signal})`,
+        })
       }
     })
 

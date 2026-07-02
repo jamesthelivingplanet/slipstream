@@ -31,10 +31,16 @@ export function resolveDataDir(): string {
     case 'darwin':
       return path.join(os.homedir(), 'Library', 'Application Support', 'slipstream')
     case 'win32':
-      return path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'slipstream')
+      return path.join(
+        process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'),
+        'slipstream',
+      )
     default:
       // Linux / XDG
-      return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'slipstream')
+      return path.join(
+        process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
+        'slipstream',
+      )
   }
 }
 

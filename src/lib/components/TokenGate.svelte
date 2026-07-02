@@ -109,8 +109,8 @@
   .gate-error {
     font-size: 12.5px;
     color: hsl(var(--st-error));
-    background: hsl(var(--st-error) / .1);
-    border: 1px solid hsl(var(--st-error) / .3);
+    background: hsl(var(--st-error) / 0.1);
+    border: 1px solid hsl(var(--st-error) / 0.3);
     border-radius: var(--radius);
     padding: 8px 12px;
   }

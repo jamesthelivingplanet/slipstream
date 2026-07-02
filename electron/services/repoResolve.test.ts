@@ -3,11 +3,16 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, renameSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveRepoPath, getRemoteUrl, isWorkTree, findSiblingCheckout, cloneRepo } from './repoResolve.js'
+import {
+  resolveRepoPath,
+  getRemoteUrl,
+  isWorkTree,
+  findSiblingCheckout,
+  cloneRepo,
+} from './repoResolve.js'
 import type { RepoDTO } from '../shared/contract.js'
 
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8' })
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' })
 
 let root: string
 
@@ -52,7 +57,14 @@ describe('resolveRepoPath', () => {
   it('fast-path: returns the repo unchanged when the stored path is still valid and remote matches', () => {
     const p = join(root, 'stable')
     initRepo(p, 'https://github.com/acme/stable.git')
-    const repo: RepoDTO = { id: 'acme-stable', org: 'acme', name: 'stable', base: 'main', path: p, remoteUrl: 'https://github.com/acme/stable.git' }
+    const repo: RepoDTO = {
+      id: 'acme-stable',
+      org: 'acme',
+      name: 'stable',
+      base: 'main',
+      path: p,
+      remoteUrl: 'https://github.com/acme/stable.git',
+    }
     const result = resolveRepoPath(repo)
     expect(result).not.toBeNull()
     expect(result!.healed).toBe(false)
@@ -67,7 +79,14 @@ describe('resolveRepoPath', () => {
     const newPath = join(parent, 'slipstream')
     renameSync(oldPath, newPath)
 
-    const repo: RepoDTO = { id: 'ajlebaron-slipstream', org: 'ajlebaron', name: 'slipstream', base: 'main', path: oldPath, remoteUrl: 'https://github.com/ajlebaron/slipstream.git' }
+    const repo: RepoDTO = {
+      id: 'ajlebaron-slipstream',
+      org: 'ajlebaron',
+      name: 'slipstream',
+      base: 'main',
+      path: oldPath,
+      remoteUrl: 'https://github.com/ajlebaron/slipstream.git',
+    }
     const result = resolveRepoPath(repo)
     expect(result).not.toBeNull()
     expect(result!.healed).toBe(true)
@@ -90,7 +109,14 @@ describe('resolveRepoPath', () => {
     initRepo(gone, 'https://github.com/acme/gone.git')
     rmSync(gone, { recursive: true, force: true })
 
-    const repo: RepoDTO = { id: 'acme-gone', org: 'acme', name: 'gone', base: 'main', path: gone, remoteUrl: 'https://github.com/acme/gone.git' }
+    const repo: RepoDTO = {
+      id: 'acme-gone',
+      org: 'acme',
+      name: 'gone',
+      base: 'main',
+      path: gone,
+      remoteUrl: 'https://github.com/acme/gone.git',
+    }
     const result = resolveRepoPath(repo)
     expect(result).toBeNull()
   })

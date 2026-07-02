@@ -1,7 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import TicketStatusBar from './lib/components/TicketStatusBar.svelte'
-  import { selected, dialogOpen, settingsOpen, initFromBackend, refreshAndReconcile, select, subscribeSessionStatus, subscribeSessionPr, mobile, contentLoading, contentResolvedAt, contentRefreshNonce } from './lib/stores'
+  import {
+    selected,
+    dialogOpen,
+    settingsOpen,
+    initFromBackend,
+    refreshAndReconcile,
+    select,
+    subscribeSessionStatus,
+    subscribeSessionPr,
+    mobile,
+    contentLoading,
+    contentResolvedAt,
+    contentRefreshNonce,
+  } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
@@ -20,11 +33,15 @@
   let showCheck = false
   let checkTimer: ReturnType<typeof setTimeout> | undefined
   // FLO-56: show a brief check mark on the refresh button after agent content resolves.
-  $: if ($contentResolvedAt) {
+  // Kept as a plain function (not inlined in the $: block) so checkTimer isn't read
+  // inside the reactive statement itself — Svelte would otherwise treat it as a
+  // dependency of the statement it's also assigned in.
+  function flashCheck() {
     showCheck = true
     clearTimeout(checkTimer)
     checkTimer = setTimeout(() => (showCheck = false), 1500)
   }
+  $: if ($contentResolvedAt) flashCheck()
 
   function onRefresh() {
     // Keep existing refresh behavior AND fetch the selected agent's content.
@@ -49,7 +66,11 @@
           select(agentTid)
           params.delete('agent')
           const clean = params.toString()
-          history.replaceState(null, '', location.pathname + (clean ? `?${clean}` : '') + location.hash)
+          history.replaceState(
+            null,
+            '',
+            location.pathname + (clean ? `?${clean}` : '') + location.hash,
+          )
         }
       })
     })
@@ -108,25 +129,31 @@
         {@html icons.refresh}
       {/if}
     </button>
-    <button class="btn btn-outline btn-icon btn-sm" title="Settings" on:click={() => settingsOpen.set(true)}>
+    <button
+      class="btn btn-outline btn-icon btn-sm"
+      title="Settings"
+      on:click={() => settingsOpen.set(true)}
+    >
       {@html icons.settings}
     </button>
     <button class="btn btn-primary btn-sm" on:click={() => dialogOpen.set(true)}>
-      {@html icons.plus} {$mobile ? '' : 'New agent'}
+      {@html icons.plus}
+      {$mobile ? '' : 'New agent'}
     </button>
   </header>
 
   <!-- Mobile overlay backdrop: tap outside drawer to close -->
   {#if $mobile && listOpen}
-    <div
-      class="drawer-backdrop"
-      on:click={() => (listOpen = false)}
-      role="presentation"
-    ></div>
+    <div class="drawer-backdrop" on:click={() => (listOpen = false)} role="presentation"></div>
   {/if}
 
   <div class="content">
-    <AgentList mobileOpen={!$mobile || listOpen} onSelect={() => { if ($mobile) listOpen = false }} />
+    <AgentList
+      mobileOpen={!$mobile || listOpen}
+      onSelect={() => {
+        if ($mobile) listOpen = false
+      }}
+    />
 
     <section class="term-pane">
       {#if !$selected}

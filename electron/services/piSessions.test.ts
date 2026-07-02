@@ -14,7 +14,9 @@ describe('piSessionDirName', () => {
   })
 
   it('encodes a nested worktree path', () => {
-    expect(piSessionDirName('/home/james/.worktrees/foo/bar')).toBe('--home-james-.worktrees-foo-bar-')
+    expect(piSessionDirName('/home/james/.worktrees/foo/bar')).toBe(
+      '--home-james-.worktrees-foo-bar-',
+    )
   })
 })
 
@@ -75,7 +77,13 @@ describe('piStatusFromFileContent', () => {
   it('ignores header and user messages', () => {
     const lines = [
       header,
-      JSON.stringify({ type: 'message', id: '1', parentId: null, timestamp: 't', message: { role: 'user', content: 'hi' } }),
+      JSON.stringify({
+        type: 'message',
+        id: '1',
+        parentId: null,
+        timestamp: 't',
+        message: { role: 'user', content: 'hi' },
+      }),
     ]
     expect(piStatusFromFileContent(lines.join('\n'))).toBe('running')
   })
@@ -83,7 +91,16 @@ describe('piStatusFromFileContent', () => {
   it('classifies done from assistant text blocks', () => {
     const lines = [
       header,
-      JSON.stringify({ type: 'message', id: '2', parentId: null, timestamp: 't', message: { role: 'assistant', content: [{ type: 'text', text: `finished ${DONE_MARKER}` }] } }),
+      JSON.stringify({
+        type: 'message',
+        id: '2',
+        parentId: null,
+        timestamp: 't',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: `finished ${DONE_MARKER}` }],
+        },
+      }),
     ]
     expect(piStatusFromFileContent(lines.join('\n'))).toBe('done')
   })
@@ -91,7 +108,16 @@ describe('piStatusFromFileContent', () => {
   it('classifies needs from assistant text', () => {
     const lines = [
       header,
-      JSON.stringify({ type: 'message', id: '2', parentId: null, timestamp: 't', message: { role: 'assistant', content: [{ type: 'text', text: `question? ${NEEDS_INPUT_MARKER}` }] } }),
+      JSON.stringify({
+        type: 'message',
+        id: '2',
+        parentId: null,
+        timestamp: 't',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: `question? ${NEEDS_INPUT_MARKER}` }],
+        },
+      }),
     ]
     expect(piStatusFromFileContent(lines.join('\n'))).toBe('needs')
   })
@@ -99,7 +125,19 @@ describe('piStatusFromFileContent', () => {
   it('ignores non-text content blocks (thinking, toolCall)', () => {
     const lines = [
       header,
-      JSON.stringify({ type: 'message', id: '2', parentId: null, timestamp: 't', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'hmm' }, { type: 'text', text: `${IN_PROGRESS_MARKER}` }] } }),
+      JSON.stringify({
+        type: 'message',
+        id: '2',
+        parentId: null,
+        timestamp: 't',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'hmm' },
+            { type: 'text', text: `${IN_PROGRESS_MARKER}` },
+          ],
+        },
+      }),
     ]
     expect(piStatusFromFileContent(lines.join('\n'))).toBe('running')
   })
@@ -107,8 +145,20 @@ describe('piStatusFromFileContent', () => {
   it('honors the most recent marker across multiple assistant turns', () => {
     const lines = [
       header,
-      JSON.stringify({ type: 'message', id: '1', parentId: null, timestamp: 't', message: { role: 'assistant', content: [{ type: 'text', text: DONE_MARKER }] } }),
-      JSON.stringify({ type: 'message', id: '2', parentId: '1', timestamp: 't', message: { role: 'assistant', content: [{ type: 'text', text: NEEDS_INPUT_MARKER }] } }),
+      JSON.stringify({
+        type: 'message',
+        id: '1',
+        parentId: null,
+        timestamp: 't',
+        message: { role: 'assistant', content: [{ type: 'text', text: DONE_MARKER }] },
+      }),
+      JSON.stringify({
+        type: 'message',
+        id: '2',
+        parentId: '1',
+        timestamp: 't',
+        message: { role: 'assistant', content: [{ type: 'text', text: NEEDS_INPUT_MARKER }] },
+      }),
     ]
     expect(piStatusFromFileContent(lines.join('\n'))).toBe('needs')
   })
@@ -117,7 +167,13 @@ describe('piStatusFromFileContent', () => {
     const lines = [
       'not json',
       header,
-      JSON.stringify({ type: 'message', id: '2', parentId: null, timestamp: 't', message: { role: 'assistant', content: [{ type: 'text', text: DONE_MARKER }] } }),
+      JSON.stringify({
+        type: 'message',
+        id: '2',
+        parentId: null,
+        timestamp: 't',
+        message: { role: 'assistant', content: [{ type: 'text', text: DONE_MARKER }] },
+      }),
     ]
     expect(piStatusFromFileContent(lines.join('\n'))).toBe('done')
   })

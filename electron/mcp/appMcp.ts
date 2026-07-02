@@ -16,7 +16,14 @@ export interface AppMcpDeps {
   branch: string
   getToken(host: GitHost): string | null
   push(branch: string, token?: string, remoteUrl?: string): Promise<void>
-  openMergeRequest(input: { remoteUrl: string; branch: string; base: string; title: string; body: string; token: string }): Promise<{ url: string; isNew: boolean }>
+  openMergeRequest(input: {
+    remoteUrl: string
+    branch: string
+    base: string
+    title: string
+    body: string
+    token: string
+  }): Promise<{ url: string; isNew: boolean }>
   getRemoteUrl(cwd: string): Promise<string>
   writeSentinel(url: string): Promise<void>
   writeStatus(state: 'running' | 'needs' | 'done', message?: string): Promise<void>
@@ -37,11 +44,16 @@ const TOOLS = [
   },
   {
     name: 'report_status',
-    description: 'Report your current working state to the Slipstream app so it shows the correct status. Call with state "needs" when you are blocked waiting on the user, "done" when the ticket is fully complete, or "running" when actively working. This is the reliable status channel — prefer it over relying on printed terminal markers.',
+    description:
+      'Report your current working state to the Slipstream app so it shows the correct status. Call with state "needs" when you are blocked waiting on the user, "done" when the ticket is fully complete, or "running" when actively working. This is the reliable status channel — prefer it over relying on printed terminal markers.',
     inputSchema: {
       type: 'object',
       properties: {
-        state: { type: 'string', enum: ['running', 'needs', 'done'], description: 'Current working state' },
+        state: {
+          type: 'string',
+          enum: ['running', 'needs', 'done'],
+          description: 'Current working state',
+        },
         message: { type: 'string', description: 'Optional short human-readable note' },
       },
       required: ['state'],
@@ -57,7 +69,10 @@ function makeError(id: unknown, code: number, message: string): unknown {
   return { jsonrpc: '2.0', id, error: { code, message } }
 }
 
-function makeToolError(text: string): { isError: true; content: Array<{ type: string; text: string }> } {
+function makeToolError(text: string): {
+  isError: true
+  content: Array<{ type: string; text: string }>
+} {
   return { isError: true, content: [{ type: 'text', text }] }
 }
 
@@ -108,7 +123,10 @@ export async function handleRpc(msg: unknown, deps: AppMcpDeps): Promise<unknown
           }
           const token = deps.getToken(parsed.host)
           if (!token) {
-            return makeResponse(id, makeToolError('No git token found. Set it in Settings → Integrations.'))
+            return makeResponse(
+              id,
+              makeToolError('No git token found. Set it in Settings → Integrations.'),
+            )
           }
           // Best-effort push — the agent should already have pushed via its own
           // shell; ignore failures here (e.g. branch already pushed) and continue.
@@ -118,7 +136,14 @@ export async function handleRpc(msg: unknown, deps: AppMcpDeps): Promise<unknown
             /* best-effort; branch may already be pushed */
           }
           // Open MR/PR
-          const result = await deps.openMergeRequest({ remoteUrl, branch, base: deps.base, title, body: description, token })
+          const result = await deps.openMergeRequest({
+            remoteUrl,
+            branch,
+            base: deps.base,
+            title,
+            body: description,
+            token,
+          })
           await deps.writeSentinel(result.url)
           const action = result.isNew ? 'Opened' : 'Found existing'
           return makeResponse(id, makeToolSuccess(`${action} merge/pull request: ${result.url}`))
@@ -190,11 +215,18 @@ export async function main(): Promise<void> {
     async writeStatus(state: 'running' | 'needs' | 'done', message?: string): Promise<void> {
       const sentinelDir = path.join(dataDir, 'sessions', sessionId)
       await fs.promises.mkdir(sentinelDir, { recursive: true })
-      await fs.promises.writeFile(path.join(sentinelDir, 'status.json'), JSON.stringify({ state, message, ts: Date.now() }))
+      await fs.promises.writeFile(
+        path.join(sentinelDir, 'status.json'),
+        JSON.stringify({ state, message, ts: Date.now() }),
+      )
     },
   }
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false })
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false,
+  })
 
   rl.on('line', (line) => {
     const trimmed = line.trim()
@@ -208,13 +240,15 @@ export async function main(): Promise<void> {
       return
     }
 
-    void handleRpc(msg, deps).then((response) => {
-      if (response !== null) {
-        process.stdout.write(JSON.stringify(response) + '\n')
-      }
-    }).catch((err) => {
-      process.stderr.write(`[appMcp] Error handling RPC: ${err}\n`)
-    })
+    void handleRpc(msg, deps)
+      .then((response) => {
+        if (response !== null) {
+          process.stdout.write(JSON.stringify(response) + '\n')
+        }
+      })
+      .catch((err) => {
+        process.stderr.write(`[appMcp] Error handling RPC: ${err}\n`)
+      })
   })
 
   rl.on('close', () => {

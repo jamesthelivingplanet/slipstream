@@ -6,7 +6,9 @@ export function createEmptyProvider(): ITicketProvider {
     async listTickets(): Promise<TicketDTO[]> {
       return []
     },
-    async getTicketStatus(_tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
+    async getTicketStatus(
+      _tid: string,
+    ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
       return { current: null, available: [] }
     },
     async setTicketStatus(_tid: string, _stateId: string): Promise<WorkflowState> {
