@@ -115,7 +115,11 @@ export function createWriteCoordinator(): IWriteCoordinator {
     viewers,
     isViewer,
     dropClient,
-    on(event, listener) { emitter.on(event, listener) },
-    off(event, listener) { emitter.off(event, listener) },
+    on(event, listener) {
+      emitter.on(event, listener)
+    },
+    off(event, listener) {
+      emitter.off(event, listener)
+    },
   }
 }

@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  selectBackend,
-  claudeCodeBackend,
-  opencodeBackend,
-  piBackend,
-} from './agentBackend.js'
+import { selectBackend, claudeCodeBackend, opencodeBackend, piBackend } from './agentBackend.js'
 
 describe('selectBackend', () => {
   it('returns claudeCodeBackend for "claude-code"', () => {
@@ -40,12 +35,20 @@ describe('statusSource', () => {
 
 describe('claudeCodeBackend.buildStartArgs', () => {
   it('cmd is "claude"', () => {
-    const { cmd } = claudeCodeBackend.buildStartArgs({ sessionId: 'abc', system: '', user: 'do task' })
+    const { cmd } = claudeCodeBackend.buildStartArgs({
+      sessionId: 'abc',
+      system: '',
+      user: 'do task',
+    })
     expect(cmd).toBe('claude')
   })
 
   it('args include --dangerously-skip-permissions, --session-id, sessionId, and user prompt last', () => {
-    const { args } = claudeCodeBackend.buildStartArgs({ sessionId: 'sid1', system: '', user: 'my task' })
+    const { args } = claudeCodeBackend.buildStartArgs({
+      sessionId: 'sid1',
+      system: '',
+      user: 'my task',
+    })
     expect(args).toContain('--dangerously-skip-permissions')
     expect(args).toContain('--session-id')
     expect(args).toContain('sid1')
@@ -53,14 +56,22 @@ describe('claudeCodeBackend.buildStartArgs', () => {
   })
 
   it('with non-empty system, args include --append-system-prompt followed by system text', () => {
-    const { args } = claudeCodeBackend.buildStartArgs({ sessionId: 'sid2', system: 'sys prompt', user: 'task' })
+    const { args } = claudeCodeBackend.buildStartArgs({
+      sessionId: 'sid2',
+      system: 'sys prompt',
+      user: 'task',
+    })
     const idx = args.indexOf('--append-system-prompt')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(args[idx + 1]).toBe('sys prompt')
   })
 
   it('with empty system, args do NOT include --append-system-prompt', () => {
-    const { args } = claudeCodeBackend.buildStartArgs({ sessionId: 'sid3', system: '', user: 'task' })
+    const { args } = claudeCodeBackend.buildStartArgs({
+      sessionId: 'sid3',
+      system: '',
+      user: 'task',
+    })
     expect(args).not.toContain('--append-system-prompt')
   })
 })
@@ -128,14 +139,24 @@ describe('claudeCodeBackend.buildRemoteControlArgs', () => {
 
 describe('opencodeBackend.buildStartArgs', () => {
   it('includes --prompt with user text', () => {
-    const { args } = opencodeBackend.buildStartArgs({ sessionId: 'oc1', system: '', user: 'hello task', opencodePort: undefined })
+    const { args } = opencodeBackend.buildStartArgs({
+      sessionId: 'oc1',
+      system: '',
+      user: 'hello task',
+      opencodePort: undefined,
+    })
     const idx = args.indexOf('--prompt')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(args[idx + 1]).toBe('hello task')
   })
 
   it('includes --port with port string when opencodePort given', () => {
-    const { args } = opencodeBackend.buildStartArgs({ sessionId: 'oc2', system: '', user: 'task', opencodePort: 3333 })
+    const { args } = opencodeBackend.buildStartArgs({
+      sessionId: 'oc2',
+      system: '',
+      user: 'task',
+      opencodePort: 3333,
+    })
     const idx = args.indexOf('--port')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(args[idx + 1]).toBe('3333')
@@ -216,12 +237,22 @@ describe('piBackend.buildStartArgs', () => {
 
 describe('piBackend resume / remote-control', () => {
   it('buildResumeArgs is [--approve, --continue]', () => {
-    const { args } = piBackend.buildResumeArgs({ sessionId: 'p4', system: '', user: 'task', hasTranscript: false })
+    const { args } = piBackend.buildResumeArgs({
+      sessionId: 'p4',
+      system: '',
+      user: 'task',
+      hasTranscript: false,
+    })
     expect(args).toEqual(['--approve', '--continue'])
   })
 
   it('buildRemoteControlArgs is [--approve, --continue]', () => {
-    const { args } = piBackend.buildRemoteControlArgs({ sessionId: 'p5', system: '', user: 'task', hasTranscript: false })
+    const { args } = piBackend.buildRemoteControlArgs({
+      sessionId: 'p5',
+      system: '',
+      user: 'task',
+      hasTranscript: false,
+    })
     expect(args).toEqual(['--approve', '--continue'])
   })
 })

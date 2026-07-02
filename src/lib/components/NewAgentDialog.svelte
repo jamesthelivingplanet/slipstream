@@ -1,5 +1,16 @@
 <script lang="ts">
-  import { dialogOpen, tickets, createAgentFromTicket, createBlankAgent, startAgent, refreshTickets, repos, repoById, settingsOpen, mobile } from '../stores'
+  import {
+    dialogOpen,
+    tickets,
+    createAgentFromTicket,
+    createBlankAgent,
+    startAgent,
+    refreshTickets,
+    repos,
+    repoById,
+    settingsOpen,
+    mobile,
+  } from '../stores'
   import ResponsivePanel from './ResponsivePanel.svelte'
   import { branchFor } from '../branch'
   import { icons } from '../icons'
@@ -29,7 +40,9 @@
     wasOpen = true
     // refresh tickets when dialog opens
     loadingTickets = true
-    refreshTickets().finally(() => { loadingTickets = false })
+    refreshTickets().finally(() => {
+      loadingTickets = false
+    })
   }
   $: if (!$dialogOpen) wasOpen = false
 
@@ -67,19 +80,39 @@
     <div class="dlg-body">
       <div>
         <label class="lbl-f" for="dTitle">Title</label>
-        <input id="dTitle" type="text" bind:value={title} placeholder="What should this agent work on?" />
+        <input
+          id="dTitle"
+          type="text"
+          bind:value={title}
+          placeholder="What should this agent work on?"
+        />
       </div>
 
       <div>
         <span class="lbl-f">Agent type</span>
         <div class="agent-kind-toggle">
-          <button type="button" class="toggle-opt" class:active={agentKind === 'claude-code'} on:click={() => agentKind = 'claude-code'}>
+          <button
+            type="button"
+            class="toggle-opt"
+            class:active={agentKind === 'claude-code'}
+            on:click={() => (agentKind = 'claude-code')}
+          >
             Claude Code
           </button>
-          <button type="button" class="toggle-opt" class:active={agentKind === 'opencode'} on:click={() => agentKind = 'opencode'}>
+          <button
+            type="button"
+            class="toggle-opt"
+            class:active={agentKind === 'opencode'}
+            on:click={() => (agentKind = 'opencode')}
+          >
             OpenCode
           </button>
-          <button type="button" class="toggle-opt" class:active={agentKind === 'pi'} on:click={() => agentKind = 'pi'}>
+          <button
+            type="button"
+            class="toggle-opt"
+            class:active={agentKind === 'pi'}
+            on:click={() => (agentKind = 'pi')}
+          >
             Pi
           </button>
         </div>
@@ -93,7 +126,12 @@
           {:else}
             <div class="ticket-pick">
               {#each $tickets as t (t.tid)}
-                <button type="button" class="tk" class:sel={picked?.tid === t.tid} on:click={() => pick(t)}>
+                <button
+                  type="button"
+                  class="tk"
+                  class:sel={picked?.tid === t.tid}
+                  on:click={() => pick(t)}
+                >
                   <span class="badge {t.src}" style="border:none;padding:1px 6px">{t.src}</span>
                   <span class="tk-id">{t.tid}</span>
                   <span class="tk-t">{t.title}</span>
@@ -107,15 +145,23 @@
 
       <div>
         <label class="lbl-f" for="dPrompt">Kickoff prompt</label>
-        <textarea id="dPrompt" bind:value={prompt} placeholder="Describe the task for this agent…"></textarea>
-        <p class="cfg-hint">Full ticket details are sent to the agent automatically as context. This is just the opening message you can tweak.</p>
+        <textarea id="dPrompt" bind:value={prompt} placeholder="Describe the task for this agent…"
+        ></textarea>
+        <p class="cfg-hint">
+          Full ticket details are sent to the agent automatically as context. This is just the
+          opening message you can tweak.
+        </p>
       </div>
 
       <div>
         <span class="lbl-f">Repository</span>
         {#if $repos.length > 0}
           <div class="select" id="dlgRepoSel">
-            <button class="sel-trigger" type="button" on:click|stopPropagation={() => (menuOpen = !menuOpen)}>
+            <button
+              class="sel-trigger"
+              type="button"
+              on:click|stopPropagation={() => (menuOpen = !menuOpen)}
+            >
               {#if chosen}
                 <span><span class="muted">{chosen.org}/</span>{chosen.name}</span>
               {:else}
@@ -125,8 +171,16 @@
             </button>
             {#if menuOpen}
               <div class="sel-menu">
-                {#each $repos as r}
-                  <button type="button" class="opt" class:sel={repoChoice === r.id} on:click|stopPropagation={() => { repoChoice = r.id; menuOpen = false }}>
+                {#each $repos as r (r.id)}
+                  <button
+                    type="button"
+                    class="opt"
+                    class:sel={repoChoice === r.id}
+                    on:click|stopPropagation={() => {
+                      repoChoice = r.id
+                      menuOpen = false
+                    }}
+                  >
                     <span><span class="muted">{r.org}/</span>{r.name}</span>
                     <span class="badge mono" style="margin-left:8px">{r.base}</span>
                     <span class="check">{@html icons.check}</span>
@@ -135,28 +189,53 @@
               </div>
             {/if}
           </div>
-          <p class="cfg-hint">A fresh worktree is branched from this repo's base branch, and claude starts inside it.</p>
+          <p class="cfg-hint">
+            A fresh worktree is branched from this repo's base branch, and claude starts inside it.
+          </p>
         {:else}
-          <p class="cfg-hint">No repositories yet. <button type="button" class="link-btn" on:click={() => { dialogOpen.set(false); settingsOpen.set(true) }}>Add one in Settings</button>.</p>
+          <p class="cfg-hint">
+            No repositories yet. <button
+              type="button"
+              class="link-btn"
+              on:click={() => {
+                dialogOpen.set(false)
+                settingsOpen.set(true)
+              }}>Add one in Settings</button
+            >.
+          </p>
         {/if}
       </div>
 
       {#if chosen}
         <div class="derive">
-          <div class="drow"><span class="k">Base branch</span><span class="v muted">{chosen.base}</span></div>
-          <div class="drow"><span class="k">New branch</span><span class="v"><b>{branch}</b></span></div>
-          <div class="drow"><span class="k">Worktree</span><span class="v muted">{`.worktrees/${chosen.org}-${chosen.name}/${branch}`}</span></div>
+          <div class="drow">
+            <span class="k">Base branch</span><span class="v muted">{chosen.base}</span>
+          </div>
+          <div class="drow">
+            <span class="k">New branch</span><span class="v"><b>{branch}</b></span>
+          </div>
+          <div class="drow">
+            <span class="k">Worktree</span><span class="v muted"
+              >{`.worktrees/${chosen.org}-${chosen.name}/${branch}`}</span
+            >
+          </div>
         </div>
       {/if}
     </div>
 
     <svelte:fragment slot="footer">
       <button class="btn btn-ghost" on:click={() => dialogOpen.set(false)}>Cancel</button>
-      <button class="btn btn-primary" disabled={!title.trim() || !repoChoice} on:click={start}>{@html icons.play} Start agent</button>
+      <button class="btn btn-primary" disabled={!title.trim() || !repoChoice} on:click={start}
+        >{@html icons.play} Start agent</button
+      >
     </svelte:fragment>
   </ResponsivePanel>
 {/if}
 
 <style>
-  .link-btn { color: hsl(var(--primary)); text-decoration: underline; cursor: pointer; }
+  .link-btn {
+    color: hsl(var(--primary));
+    text-decoration: underline;
+    cursor: pointer;
+  }
 </style>

@@ -19,7 +19,10 @@ export interface PushStore {
   getPrefs(endpoint: string): NotifyPrefs | null
 }
 
-export type PushSender = (sub: PushSubscriptionDTO, payload: string) => Promise<{ statusCode: number }>
+export type PushSender = (
+  sub: PushSubscriptionDTO,
+  payload: string,
+) => Promise<{ statusCode: number }>
 
 export interface IPushService {
   getVapidPublicKey(): Promise<string>
@@ -30,7 +33,7 @@ export interface IPushService {
 
 export function transitionKind(
   prev: SessionStatus | undefined,
-  next: SessionStatus
+  next: SessionStatus,
 ): 'needs' | 'done' | 'running' | null {
   if (next === 'needs' && prev !== 'needs') return 'needs'
   if (next === 'done' && prev !== 'done') return 'done'
@@ -106,10 +109,7 @@ export function createPushService(deps: {
     if (_send) return _send
     const wp = await getWebPush()
     _send = async (sub, payload) => {
-      const result = await wp.sendNotification(
-        { endpoint: sub.endpoint, keys: sub.keys },
-        payload
-      )
+      const result = await wp.sendNotification({ endpoint: sub.endpoint, keys: sub.keys }, payload)
       return { statusCode: result.statusCode }
     }
     return _send
@@ -137,7 +137,13 @@ export function createPushService(deps: {
       running: `▶️ ${tid} started`,
     }
 
-    const payload = JSON.stringify({ sessionId, tid, title: texts[kind], body: session?.title ?? '', status: next })
+    const payload = JSON.stringify({
+      sessionId,
+      tid,
+      title: texts[kind],
+      body: session?.title ?? '',
+      status: next,
+    })
 
     const subs = store.all()
 

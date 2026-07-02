@@ -144,12 +144,14 @@ describe('createLinearProvider', () => {
       json: async () => ({
         data: {
           issues: {
-            nodes: [{
-              id: 'issue-uuid-1',
-              identifier: 'ENG-123',
-              team: { id: 'team-1', key: 'ENG' },
-              state: { id: 'state-1', name: 'In Progress', type: 'started' },
-            }],
+            nodes: [
+              {
+                id: 'issue-uuid-1',
+                identifier: 'ENG-123',
+                team: { id: 'team-1', key: 'ENG' },
+                state: { id: 'state-1', name: 'In Progress', type: 'started' },
+              },
+            ],
           },
         },
       }),
@@ -188,12 +190,14 @@ describe('createLinearProvider', () => {
       json: async () => ({
         data: {
           issues: {
-            nodes: [{
-              id: 'issue-uuid-1',
-              identifier: 'ENG-123',
-              team: { id: 'team-1', key: 'ENG' },
-              state: { id: 'state-1', name: 'In Progress', type: 'started' },
-            }],
+            nodes: [
+              {
+                id: 'issue-uuid-1',
+                identifier: 'ENG-123',
+                team: { id: 'team-1', key: 'ENG' },
+                state: { id: 'state-1', name: 'In Progress', type: 'started' },
+              },
+            ],
           },
         },
       }),
@@ -227,12 +231,14 @@ describe('createLinearProvider', () => {
         json: async () => ({
           data: {
             issues: {
-              nodes: [{
-                id: 'issue-uuid-1',
-                identifier: 'ENG-123',
-                team: { id: 'team-1', key: 'ENG' },
-                state: { id: 'state-backlog', name: 'Backlog', type: 'unstarted' },
-              }],
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-backlog', name: 'Backlog', type: 'unstarted' },
+                },
+              ],
             },
           },
         }),
@@ -277,12 +283,14 @@ describe('createLinearProvider', () => {
         json: async () => ({
           data: {
             issues: {
-              nodes: [{
-                id: 'issue-uuid-1',
-                identifier: 'ENG-123',
-                team: { id: 'team-1', key: 'ENG' },
-                state: { id: 'state-1', name: 'In Progress', type: 'started' },
-              }],
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-1', name: 'In Progress', type: 'started' },
+                },
+              ],
             },
           },
         }),
@@ -302,12 +310,14 @@ describe('createLinearProvider', () => {
         json: async () => ({
           data: {
             issues: {
-              nodes: [{
-                id: 'issue-uuid-1',
-                identifier: 'ENG-123',
-                team: { id: 'team-1', key: 'ENG' },
-                state: { id: 'state-backlog', name: 'Backlog', type: 'unstarted' },
-              }],
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-backlog', name: 'Backlog', type: 'unstarted' },
+                },
+              ],
             },
           },
         }),
@@ -342,12 +352,14 @@ describe('createLinearProvider', () => {
         json: async () => ({
           data: {
             issues: {
-              nodes: [{
-                id: 'issue-uuid-1',
-                identifier: 'ENG-123',
-                team: { id: 'team-1', key: 'ENG' },
-                state: { id: 'state-1', name: 'In Progress', type: 'started' },
-              }],
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-1', name: 'In Progress', type: 'started' },
+                },
+              ],
             },
           },
         }),
@@ -392,12 +404,14 @@ describe('createLinearProvider', () => {
         json: async () => ({
           data: {
             issues: {
-              nodes: [{
-                id: 'issue-uuid-1',
-                identifier: 'ENG-123',
-                team: { id: 'team-1', key: 'ENG' },
-                state: { id: 'state-1', name: 'In Progress', type: 'started' },
-              }],
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-1', name: 'In Progress', type: 'started' },
+                },
+              ],
             },
           },
         }),
@@ -443,12 +457,14 @@ describe('createLinearProvider', () => {
         json: async () => ({
           data: {
             issues: {
-              nodes: [{
-                id: 'issue-uuid-1',
-                identifier: 'ENG-123',
-                team: { id: 'team-1', key: 'ENG' },
-                state: { id: 'state-todo', name: 'To Do', type: 'unstarted' },
-              }],
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-todo', name: 'To Do', type: 'unstarted' },
+                },
+              ],
             },
           },
         }),
@@ -467,12 +483,14 @@ describe('createLinearProvider', () => {
         json: async () => ({
           data: {
             issues: {
-              nodes: [{
-                id: 'issue-uuid-1',
-                identifier: 'ENG-123',
-                team: { id: 'team-1', key: 'ENG' },
-                state: { id: 'state-done', name: 'Done', type: 'completed' },
-              }],
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-done', name: 'Done', type: 'completed' },
+                },
+              ],
             },
           },
         }),
@@ -491,12 +509,14 @@ describe('createLinearProvider', () => {
         json: async () => ({
           data: {
             issues: {
-              nodes: [{
-                id: 'issue-uuid-1',
-                identifier: 'ENG-123',
-                team: { id: 'team-1', key: 'ENG' },
-                state: { id: 'state-1', name: 'In Progress', type: 'started' },
-              }],
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-1', name: 'In Progress', type: 'started' },
+                },
+              ],
             },
           },
         }),

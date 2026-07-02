@@ -25,8 +25,7 @@ import type {
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
 
-export const hasBackend =
-  typeof window !== 'undefined' && !!window.slipstream
+export const hasBackend = typeof window !== 'undefined' && !!window.slipstream
 
 // ── Repos ──────────────────────────────────────────────────────────────────
 
@@ -46,7 +45,9 @@ export function registerRepoByUrl(remoteUrl: string): Promise<RepoDTO> {
 
 /** Opens a native folder picker and registers the chosen repo. Resolves null if cancelled or no backend. */
 export function pickAndRegisterRepo(): Promise<RepoDTO | null> {
-  const native = (window as Window & { __slipstreamNative?: { pickFolder(): Promise<string | null> } }).__slipstreamNative
+  const native = (
+    window as Window & { __slipstreamNative?: { pickFolder(): Promise<string | null> } }
+  ).__slipstreamNative
   if (native?.pickFolder) {
     return native.pickFolder().then((p) => (p ? registerRepo(p) : null))
   }
@@ -63,8 +64,12 @@ export function listTickets(): Promise<TicketDTO[]> {
   return hasBackend ? window.slipstream.listTickets() : Promise.resolve([])
 }
 
-export function getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
-  return hasBackend ? window.slipstream.getTicketStatus(tid) : Promise.resolve({ current: null, available: [] })
+export function getTicketStatus(
+  tid: string,
+): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
+  return hasBackend
+    ? window.slipstream.getTicketStatus(tid)
+    : Promise.resolve({ current: null, available: [] })
 }
 
 export function setTicketStatus(tid: string, stateId: string): Promise<WorkflowState> {
@@ -110,26 +115,18 @@ export function cleanupSession(
 // ── Push event subscriptions ───────────────────────────────────────────────
 
 /** Subscribe to PTY data chunks. Returns an unsubscribe fn. */
-export function onSessionData(
-  cb: (id: string, data: string, seq: number) => void,
-): () => void {
+export function onSessionData(cb: (id: string, data: string, seq: number) => void): () => void {
   if (!hasBackend) return () => {}
   return window.slipstream.onSessionData(cb)
 }
 
 /** Fetch the buffered output snapshot for a session. */
-export function getSessionBuffer(
-  id: string,
-): Promise<{ data: string; seq: number }> {
-  return hasBackend
-    ? window.slipstream.getSessionBuffer(id)
-    : Promise.resolve({ data: '', seq: 0 })
+export function getSessionBuffer(id: string): Promise<{ data: string; seq: number }> {
+  return hasBackend ? window.slipstream.getSessionBuffer(id) : Promise.resolve({ data: '', seq: 0 })
 }
 
 /** Subscribe to session status transitions. Returns an unsubscribe fn. */
-export function onSessionStatus(
-  cb: (id: string, status: SessionStatus) => void,
-): () => void {
+export function onSessionStatus(cb: (id: string, status: SessionStatus) => void): () => void {
   if (!hasBackend) return () => {}
   return window.slipstream.onSessionStatus(cb)
 }
@@ -167,19 +164,28 @@ export function setEditorConfig(cfg: EditorConfig): Promise<void> {
   return window.slipstream.setEditorConfig(cfg)
 }
 
-export function openInEditor(input: { repoId: string; branch: string; mobile?: boolean }): Promise<void> {
+export function openInEditor(input: {
+  repoId: string
+  branch: string
+  mobile?: boolean
+}): Promise<void> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.openInEditor(input)
 }
 
 export function getRepoSettings(id: string): Promise<RepoSettings> {
-  return hasBackend ? window.slipstream.getRepoSettings(id) : Promise.resolve({ installCmd: '', startCmd: '' })
+  return hasBackend
+    ? window.slipstream.getRepoSettings(id)
+    : Promise.resolve({ installCmd: '', startCmd: '' })
 }
 export function setRepoSettings(id: string, settings: RepoSettings): Promise<void> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.setRepoSettings(id, settings)
 }
-export function runApp(input: { repoId: string; branch: string }): Promise<{ started: boolean; reason?: string; port?: number }> {
+export function runApp(input: {
+  repoId: string
+  branch: string
+}): Promise<{ started: boolean; reason?: string; port?: number }> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.runApp(input)
 }
@@ -190,10 +196,7 @@ export function getVapidPublicKey(): Promise<string> {
   return hasBackend ? window.slipstream.getVapidPublicKey() : Promise.resolve('')
 }
 
-export function savePushSubscription(
-  sub: PushSubscriptionDTO,
-  prefs: NotifyPrefs
-): Promise<void> {
+export function savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void> {
   return hasBackend ? window.slipstream.savePushSubscription(sub, prefs) : Promise.resolve()
 }
 
@@ -217,9 +220,7 @@ export function setGitToken(host: GitHost, token: string): Promise<void> {
 }
 
 /** Subscribe to session PR/MR-opened events. Returns an unsubscribe fn. */
-export function onSessionPr(
-  cb: (id: string, prUrl: string) => void,
-): () => void {
+export function onSessionPr(cb: (id: string, prUrl: string) => void): () => void {
   if (!hasBackend) return () => {}
   return window.slipstream.onSessionPr(cb)
 }
@@ -227,7 +228,9 @@ export function onSessionPr(
 // ── Multi-client write lock ────────────────────────────────────────────────
 
 export function attachSession(id: string): Promise<WriteLockState> {
-  return hasBackend ? window.slipstream.attachSession(id) : Promise.resolve({ sessionId: id, canWrite: true, viewers: 1 })
+  return hasBackend
+    ? window.slipstream.attachSession(id)
+    : Promise.resolve({ sessionId: id, canWrite: true, viewers: 1 })
 }
 
 export function detachSession(id: string): void {

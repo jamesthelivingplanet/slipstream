@@ -7,7 +7,24 @@
  * Framework-free (plain TS) — unit-testable against a fake WebSocket.
  */
 
-import type { SlipstreamApi, RepoDTO, RepoSettings, SessionDTO, TicketDTO, SessionStatus, WorkflowState, WorktreeInfo, EditorConfig, NotifyPrefs, PushSubscriptionDTO, BackendKind, GitHost, WriteLockState, GcPolicy, McpStatusDTO } from '../../electron/shared/contract.js'
+import type {
+  SlipstreamApi,
+  RepoDTO,
+  RepoSettings,
+  SessionDTO,
+  TicketDTO,
+  SessionStatus,
+  WorkflowState,
+  WorktreeInfo,
+  EditorConfig,
+  NotifyPrefs,
+  PushSubscriptionDTO,
+  BackendKind,
+  GitHost,
+  WriteLockState,
+  GcPolicy,
+  McpStatusDTO,
+} from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
 import { genId } from './id.js'
@@ -16,7 +33,7 @@ const REQUEST_TIMEOUT_MS = 30_000
 const RECONNECT_DELAYS = [500, 1000, 2000, 5000, 10000]
 
 export interface WsApiOpts {
-  url: string   // e.g. ws://host:port/rpc
+  url: string // e.g. ws://host:port/rpc
   token: string
   /** Override WebSocket constructor (for tests). */
   WebSocketCtor?: typeof WebSocket
@@ -39,9 +56,8 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
   let ws: WebSocket | null = null
   let open = false
-  let destroyed = false
+  const destroyed = false
   let reconnectAttempt = 0
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   // In-flight request map
   const pending = new Map<string, PendingReq>()
@@ -140,8 +156,7 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     if (destroyed) return
     const delay = RECONNECT_DELAYS[Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1)]
     reconnectAttempt++
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null
+    setTimeout(() => {
       connect()
     }, delay)
   }
@@ -197,8 +212,13 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.listTickets, []) as Promise<TicketDTO[]>
     },
 
-    getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
-      return request(IPC.getTicketStatus, [tid]) as Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
+    getTicketStatus(
+      tid: string,
+    ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
+      return request(IPC.getTicketStatus, [tid]) as Promise<{
+        current: WorkflowState | null
+        available: WorkflowState[]
+      }>
     },
 
     setTicketStatus(tid: string, stateId: string): Promise<WorkflowState> {
@@ -213,7 +233,13 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.setLinearKey, [key]) as Promise<void>
     },
 
-    startSession(input: { tid: string; title: string; prompt: string; repoId: string; agentKind?: BackendKind }): Promise<SessionDTO> {
+    startSession(input: {
+      tid: string
+      title: string
+      prompt: string
+      repoId: string
+      agentKind?: BackendKind
+    }): Promise<SessionDTO> {
       return request(IPC.startSession, [input]) as Promise<SessionDTO>
     },
 
@@ -225,7 +251,12 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     resizeSession(id: string, cols: number, rows: number): void {
       // Fire-and-forget
-      const req: WireReq = { t: 'req', id: genId(), channel: IPC.resizeSession, args: [id, cols, rows] }
+      const req: WireReq = {
+        t: 'req',
+        id: genId(),
+        channel: IPC.resizeSession,
+        args: [id, cols, rows],
+      }
       send(req)
     },
 
@@ -233,8 +264,14 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.killSession, [id]) as Promise<void>
     },
 
-    cleanupSession(id: string, opts?: { force?: boolean }): Promise<{ removed: boolean; reason?: string }> {
-      return request(IPC.cleanupSession, [id, opts]) as Promise<{ removed: boolean; reason?: string }>
+    cleanupSession(
+      id: string,
+      opts?: { force?: boolean },
+    ): Promise<{ removed: boolean; reason?: string }> {
+      return request(IPC.cleanupSession, [id, opts]) as Promise<{
+        removed: boolean
+        reason?: string
+      }>
     },
 
     listSessions(): Promise<SessionDTO[]> {
@@ -284,8 +321,15 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     setRepoSettings(id: string, settings: RepoSettings): Promise<void> {
       return request(IPC.setRepoSettings, [id, settings]) as Promise<void>
     },
-    runApp(input: { repoId: string; branch: string }): Promise<{ started: boolean; reason?: string; port?: number }> {
-      return request(IPC.runApp, [input]) as Promise<{ started: boolean; reason?: string; port?: number }>
+    runApp(input: {
+      repoId: string
+      branch: string
+    }): Promise<{ started: boolean; reason?: string; port?: number }> {
+      return request(IPC.runApp, [input]) as Promise<{
+        started: boolean
+        reason?: string
+        port?: number
+      }>
     },
     getVapidPublicKey(): Promise<string> {
       return request(IPC.getVapidPublicKey, []) as Promise<string>
@@ -296,8 +340,12 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     deletePushSubscription(endpoint: string): Promise<void> {
       return request(IPC.deletePushSubscription, [endpoint]) as Promise<void>
     },
-    getPushPrefs(endpoint: string): Promise<import('../../electron/shared/contract.js').NotifyPrefs | null> {
-      return request(IPC.getPushPrefs, [endpoint]) as Promise<import('../../electron/shared/contract.js').NotifyPrefs | null>
+    getPushPrefs(
+      endpoint: string,
+    ): Promise<import('../../electron/shared/contract.js').NotifyPrefs | null> {
+      return request(IPC.getPushPrefs, [endpoint]) as Promise<
+        import('../../electron/shared/contract.js').NotifyPrefs | null
+      >
     },
     getGitToken(host: GitHost): Promise<string | null> {
       return request(IPC.getGitToken, [host]) as Promise<string | null>

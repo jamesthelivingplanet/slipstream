@@ -10,8 +10,7 @@ import { writeAgentsMd, resolveInfoExclude } from './promptWriter.js'
  * exact layout Slipstream uses for OpenCode agent runs. No native modules, so it
  * runs under plain node/vitest.
  */
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8' })
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' })
 
 let root: string
 let repoPath: string

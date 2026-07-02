@@ -18,18 +18,36 @@ export function terminalTheme(): ITheme {
   const dark = document.documentElement.getAttribute('data-mode') === 'dark'
   return dark
     ? {
-        background: '#0a0a0c', foreground: '#e4e4e7', cursor: '#a78bfa',
+        background: '#0a0a0c',
+        foreground: '#e4e4e7',
+        cursor: '#a78bfa',
         selectionBackground: 'rgba(167,139,250,.25)',
-        black: '#18181b', red: '#f87171', green: '#4ade80', yellow: '#fbbf24',
-        blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e4e4e7',
-        brightBlack: '#52525b', brightWhite: '#fafafa',
+        black: '#18181b',
+        red: '#f87171',
+        green: '#4ade80',
+        yellow: '#fbbf24',
+        blue: '#60a5fa',
+        magenta: '#c084fc',
+        cyan: '#22d3ee',
+        white: '#e4e4e7',
+        brightBlack: '#52525b',
+        brightWhite: '#fafafa',
       }
     : {
-        background: '#fafafa', foreground: '#27272a', cursor: '#7c3aed',
+        background: '#fafafa',
+        foreground: '#27272a',
+        cursor: '#7c3aed',
         selectionBackground: 'rgba(124,58,237,.18)',
-        black: '#27272a', red: '#dc2626', green: '#16a34a', yellow: '#d97706',
-        blue: '#2563eb', magenta: '#9333ea', cyan: '#0891b2', white: '#52525b',
-        brightBlack: '#a1a1aa', brightWhite: '#000000',
+        black: '#27272a',
+        red: '#dc2626',
+        green: '#16a34a',
+        yellow: '#d97706',
+        blue: '#2563eb',
+        magenta: '#9333ea',
+        cyan: '#0891b2',
+        white: '#52525b',
+        brightBlack: '#a1a1aa',
+        brightWhite: '#000000',
       }
 }
 

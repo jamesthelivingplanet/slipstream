@@ -3,7 +3,7 @@
  * All timing is controlled via a fake clock passed to the constructor.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
   StatusDetector,
   looksLikeQuestion,
@@ -19,7 +19,9 @@ function makeClock(initial = 0) {
   let t = initial
   return {
     now: () => t,
-    advance: (ms: number) => { t += ms },
+    advance: (ms: number) => {
+      t += ms
+    },
   }
 }
 
@@ -235,7 +237,7 @@ describe('StatusDetector', () => {
     it('is a non-empty array of RegExp', () => {
       expect(Array.isArray(NEEDS_PATTERNS)).toBe(true)
       expect(NEEDS_PATTERNS.length).toBeGreaterThan(0)
-      NEEDS_PATTERNS.forEach(p => expect(p).toBeInstanceOf(RegExp))
+      NEEDS_PATTERNS.forEach((p) => expect(p).toBeInstanceOf(RegExp))
     })
   })
 })
@@ -329,7 +331,9 @@ describe('tailSignal / explicit markers', () => {
   })
 
   it('last marker wins: NEEDS_INPUT_MARKER earlier, IN_PROGRESS_MARKER at tail → "running"', () => {
-    expect(tailSignal(`${NEEDS_INPUT_MARKER}\nOk, resuming work.\n${IN_PROGRESS_MARKER}`)).toBe('running')
+    expect(tailSignal(`${NEEDS_INPUT_MARKER}\nOk, resuming work.\n${IN_PROGRESS_MARKER}`)).toBe(
+      'running',
+    )
   })
 
   it('last marker wins: IN_PROGRESS_MARKER earlier, DONE_MARKER at tail → "done"', () => {

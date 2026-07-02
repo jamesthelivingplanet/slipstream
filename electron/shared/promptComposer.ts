@@ -1,8 +1,18 @@
 import type { BackendKind } from './contract.js'
 
-export interface TicketContext { tid: string; title: string; description?: string }
-export interface PromptLayers { system: string; user: string }
-export interface SpawnPrompt { systemArgs: string[]; userPrompt: string }
+export interface TicketContext {
+  tid: string
+  title: string
+  description?: string
+}
+export interface PromptLayers {
+  system: string
+  user: string
+}
+export interface SpawnPrompt {
+  systemArgs: string[]
+  userPrompt: string
+}
 
 /**
  * Sentinel markers the agent prints to signal its state to the app.
@@ -23,9 +33,7 @@ export function defaultUserPrompt(tid: string): string {
 export function buildSystemPrompt(ticket: TicketContext): string {
   const { tid, title, description } = ticket
   const desc =
-    description && description.trim().length > 0
-      ? description.trim()
-      : 'No description provided.'
+    description && description.trim().length > 0 ? description.trim() : 'No description provided.'
 
   return `You are an autonomous agent implementing one ticket inside a dedicated git worktree branched from the base branch.
 

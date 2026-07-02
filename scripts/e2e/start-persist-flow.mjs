@@ -9,11 +9,12 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const shot = (win, name) => win.screenshot({ path: `/tmp/e2e-${name}.png` })
 
-const launch = () => electron.launch({
-  executablePath: electronPath,
-  args: [root],
-  env: { ...process.env, SLIPSTREAM_DAEMON_EPHEMERAL: '1' },
-})
+const launch = () =>
+  electron.launch({
+    executablePath: electronPath,
+    args: [root],
+    env: { ...process.env, SLIPSTREAM_DAEMON_EPHEMERAL: '1' },
+  })
 
 // Phase 1 — create from ticket, pick slipstream repo, start
 let app = await launch()

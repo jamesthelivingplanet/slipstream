@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { selectNewestSessionSince, opencodeStatusFromText, opencodeStatusFromMessages, withOpencodePromptArg } from './opencodeSessions.js'
+import {
+  selectNewestSessionSince,
+  opencodeStatusFromText,
+  opencodeStatusFromMessages,
+  withOpencodePromptArg,
+} from './opencodeSessions.js'
 import type { OpencodeSession, OpencodeMessage } from './opencodeSessions.js'
 import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
 
@@ -47,9 +52,7 @@ describe('selectNewestSessionSince', () => {
   })
 
   it('treats a session exactly equal to sinceMs as qualifying', () => {
-    const sessions: OpencodeSession[] = [
-      { id: 'ses_exact', time_created: 1000 },
-    ]
+    const sessions: OpencodeSession[] = [{ id: 'ses_exact', time_created: 1000 }]
     expect(selectNewestSessionSince(sessions, sinceMs)).toBe('ses_exact')
   })
 })
@@ -154,8 +157,12 @@ describe('opencodeStatusFromMessages', () => {
 
 describe('withOpencodePromptArg', () => {
   it('appends --prompt <prompt> after the base args', () => {
-    expect(withOpencodePromptArg(['--port', '4096'], 'Begin implementing FLO-38.'))
-      .toEqual(['--port', '4096', '--prompt', 'Begin implementing FLO-38.'])
+    expect(withOpencodePromptArg(['--port', '4096'], 'Begin implementing FLO-38.')).toEqual([
+      '--port',
+      '4096',
+      '--prompt',
+      'Begin implementing FLO-38.',
+    ])
   })
 
   it('returns args unchanged when prompt is null (resume/continue path)', () => {
@@ -164,8 +171,7 @@ describe('withOpencodePromptArg', () => {
   })
 
   it('returns args unchanged when prompt is undefined', () => {
-    expect(withOpencodePromptArg(['--port', '1'], undefined))
-      .toEqual(['--port', '1'])
+    expect(withOpencodePromptArg(['--port', '1'], undefined)).toEqual(['--port', '1'])
   })
 
   it('returns args unchanged when prompt is empty (blank agent)', () => {

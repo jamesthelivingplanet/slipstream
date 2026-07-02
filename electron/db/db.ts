@@ -84,7 +84,8 @@ export function openDb(file: string): Database.Database {
 // ── Typed DAO helpers ────────────────────────────────────────────────────────
 
 export function upsertRepo(db: Database.Database, repo: RepoDTO): void {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO repos (id, org, name, base, path, remoteUrl, ownerId)
     VALUES (@id, @org, @name, @base, @path, @remoteUrl, @ownerId)
     ON CONFLICT(id) DO UPDATE SET
@@ -94,19 +95,25 @@ export function upsertRepo(db: Database.Database, repo: RepoDTO): void {
       path      = excluded.path,
       remoteUrl = excluded.remoteUrl,
       ownerId   = excluded.ownerId
-  `).run({ ...repo, remoteUrl: repo.remoteUrl ?? null, ownerId: repo.ownerId ?? 'local' })
+  `,
+  ).run({ ...repo, remoteUrl: repo.remoteUrl ?? null, ownerId: repo.ownerId ?? 'local' })
 }
 
 export function allRepos(db: Database.Database): RepoDTO[] {
-  return db.prepare('SELECT id, org, name, base, path, remoteUrl, ownerId FROM repos').all() as RepoDTO[]
+  return db
+    .prepare('SELECT id, org, name, base, path, remoteUrl, ownerId FROM repos')
+    .all() as RepoDTO[]
 }
 
 export function getRepo(db: Database.Database, id: string): RepoDTO | undefined {
-  return db.prepare('SELECT id, org, name, base, path, remoteUrl, ownerId FROM repos WHERE id = ?').get(id) as RepoDTO | undefined
+  return db
+    .prepare('SELECT id, org, name, base, path, remoteUrl, ownerId FROM repos WHERE id = ?')
+    .get(id) as RepoDTO | undefined
 }
 
 export function upsertSession(db: Database.Database, session: SessionDTO): void {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt, ownerId, prUrl)
     VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt, @ownerId, @prUrl)
     ON CONFLICT(id) DO UPDATE SET
@@ -123,7 +130,16 @@ export function upsertSession(db: Database.Database, session: SessionDTO): void 
       createdAt    = excluded.createdAt,
       ownerId      = excluded.ownerId,
       prUrl        = excluded.prUrl
-  `).run({ ...session, port: session.port ?? null, systemPrompt: session.systemPrompt ?? null, agentKind: session.agentKind ?? 'claude-code', opencodeSid: session.opencodeSid ?? null, ownerId: session.ownerId ?? 'local', prUrl: session.prUrl ?? null })
+  `,
+  ).run({
+    ...session,
+    port: session.port ?? null,
+    systemPrompt: session.systemPrompt ?? null,
+    agentKind: session.agentKind ?? 'claude-code',
+    opencodeSid: session.opencodeSid ?? null,
+    ownerId: session.ownerId ?? 'local',
+    prUrl: session.prUrl ?? null,
+  })
 }
 
 export function allSessions(db: Database.Database): SessionDTO[] {
@@ -144,18 +160,22 @@ export function deleteRepo(db: Database.Database, id: string): void {
 }
 
 export function getRepoSettings(db: Database.Database, repoId: string): RepoSettings {
-  const row = db.prepare('SELECT installCmd, startCmd FROM repo_settings WHERE repoId = ?').get(repoId) as RepoSettings | undefined
+  const row = db
+    .prepare('SELECT installCmd, startCmd FROM repo_settings WHERE repoId = ?')
+    .get(repoId) as RepoSettings | undefined
   return row ?? { installCmd: '', startCmd: '' }
 }
 
 export function setRepoSettings(db: Database.Database, repoId: string, s: RepoSettings): void {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO repo_settings (repoId, installCmd, startCmd)
     VALUES (?, ?, ?)
     ON CONFLICT(repoId) DO UPDATE SET
       installCmd = excluded.installCmd,
       startCmd   = excluded.startCmd
-  `).run(repoId, s.installCmd, s.startCmd)
+  `,
+  ).run(repoId, s.installCmd, s.startCmd)
 }
 
 export interface PushSubscriptionRow {
@@ -172,9 +192,10 @@ export function upsertPushSubscription(
   db: Database.Database,
   sub: { endpoint: string; keys: { p256dh: string; auth: string } },
   prefs: { needs: boolean; done: boolean; running: boolean },
-  now: number
+  now: number,
 ): void {
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO push_subscriptions (endpoint, p256dh, auth, needs, done, running, createdAt)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(endpoint) DO UPDATE SET
@@ -183,14 +204,15 @@ export function upsertPushSubscription(
       needs    = excluded.needs,
       done     = excluded.done,
       running  = excluded.running
-  `).run(
+  `,
+  ).run(
     sub.endpoint,
     sub.keys.p256dh,
     sub.keys.auth,
     prefs.needs ? 1 : 0,
     prefs.done ? 1 : 0,
     prefs.running ? 1 : 0,
-    now
+    now,
   )
 }
 
@@ -198,8 +220,12 @@ export function allPushSubscriptions(db: Database.Database): PushSubscriptionRow
   return db.prepare('SELECT * FROM push_subscriptions').all() as PushSubscriptionRow[]
 }
 
-export function getPushSubscription(db: Database.Database, endpoint: string): PushSubscriptionRow | undefined {
-  return db.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get(endpoint) as PushSubscriptionRow | undefined
+export function getPushSubscription(
+  db: Database.Database,
+  endpoint: string,
+): PushSubscriptionRow | undefined {
+  return db.prepare('SELECT * FROM push_subscriptions WHERE endpoint = ?').get(endpoint) as
+    PushSubscriptionRow | undefined
 }
 
 export function deletePushSubscription(db: Database.Database, endpoint: string): void {

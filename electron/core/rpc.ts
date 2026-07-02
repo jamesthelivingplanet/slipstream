@@ -2,7 +2,18 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { BackendKind, RepoDTO, SessionDTO, Identity, ISessionStore, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO, WriteLockState, GcPolicy } from '../shared/contract.js'
+import type {
+  BackendKind,
+  RepoDTO,
+  SessionDTO,
+  Identity,
+  EditorConfig,
+  RepoSettings,
+  NotifyPrefs,
+  PushSubscriptionDTO,
+  WriteLockState,
+  GcPolicy,
+} from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
@@ -126,7 +137,14 @@ export function createRpc(
         return deps.tickets.listTickets()
 
       case IPC.startSession: {
-        const input = args[0] as { tid: string; title: string; prompt: string; repoId: string; description?: string; agentKind?: BackendKind }
+        const input = args[0] as {
+          tid: string
+          title: string
+          prompt: string
+          repoId: string
+          description?: string
+          agentKind?: BackendKind
+        }
         const { tid, title, prompt, repoId, description } = input
         const agentKind = input.agentKind
 
@@ -187,7 +205,12 @@ export function createRpc(
         })
 
         sessionMeta.set(session.id, { repo, branch })
-        deps.sessionStore.upsert({ ...session, port, agentKind: agentKind ?? 'claude-code', ownerId: identity.id })
+        deps.sessionStore.upsert({
+          ...session,
+          port,
+          agentKind: agentKind ?? 'claude-code',
+          ownerId: identity.id,
+        })
 
         if (agentKind === 'opencode' && opencodePort) {
           void captureOpencodeSessionId(opencodePort, startedAt - 1000).then((sid) => {
@@ -293,12 +316,25 @@ export function createRpc(
         const repo = await deps.repos.resolvePath(persisted.repoId)
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
         let port: number | undefined
-        try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }
+        try {
+          port = await deps.ports.claim(cwd, 'web')
+        } catch {
+          port = undefined
+        }
         let opencodePort: number | undefined
         if (persisted.agentKind === 'opencode') {
-          try { opencodePort = await deps.ports.claim(cwd, 'opencode') } catch { opencodePort = undefined }
+          try {
+            opencodePort = await deps.ports.claim(cwd, 'opencode')
+          } catch {
+            opencodePort = undefined
+          }
         }
-        const dto = deps.sessions.resume({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined, opencodePort })
+        const dto = deps.sessions.resume({
+          session: persisted,
+          cwd,
+          env: port !== undefined ? { PORT: String(port) } : undefined,
+          opencodePort,
+        })
         sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })
         return { ...dto, port }
@@ -311,12 +347,25 @@ export function createRpc(
         const repo = await deps.repos.resolvePath(persisted.repoId)
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
         let port: number | undefined
-        try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }
+        try {
+          port = await deps.ports.claim(cwd, 'web')
+        } catch {
+          port = undefined
+        }
         let opencodePort: number | undefined
         if (persisted.agentKind === 'opencode') {
-          try { opencodePort = await deps.ports.claim(cwd, 'opencode') } catch { opencodePort = undefined }
+          try {
+            opencodePort = await deps.ports.claim(cwd, 'opencode')
+          } catch {
+            opencodePort = undefined
+          }
         }
-        const dto = deps.sessions.attachRemoteControl({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined, opencodePort })
+        const dto = deps.sessions.attachRemoteControl({
+          session: persisted,
+          cwd,
+          env: port !== undefined ? { PORT: String(port) } : undefined,
+          opencodePort,
+        })
         sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })
         return { ...dto, port }
@@ -368,7 +417,8 @@ export function createRpc(
         const desktop = deps.config.get('editor.command') ?? 'code'
         const mobileCmd = (deps.config.get('editor.mobileCommand') ?? '').trim()
         const command = input.mobile && mobileCmd ? mobileCmd : desktop
-        if (!command.trim()) throw new Error('No editor configured. Set one in Settings → Behavior.')
+        if (!command.trim())
+          throw new Error('No editor configured. Set one in Settings → Behavior.')
         await deps.editor.open(command, cwd)
         return undefined
       }
@@ -392,8 +442,16 @@ export function createRpc(
         if (!settings.startCmd.trim()) return { started: false, reason: 'no-start-command' }
         const cwd = deps.worktrees.pathFor(repo, branch)
         let port: number | undefined
-        try { port = await deps.ports.claim(cwd, 'web') } catch { port = undefined }
-        await deps.appRunner.run(cwd, settings.startCmd, port !== undefined ? { PORT: String(port) } : undefined)
+        try {
+          port = await deps.ports.claim(cwd, 'web')
+        } catch {
+          port = undefined
+        }
+        await deps.appRunner.run(
+          cwd,
+          settings.startCmd,
+          port !== undefined ? { PORT: String(port) } : undefined,
+        )
         return { started: true, port }
       }
 
@@ -401,7 +459,10 @@ export function createRpc(
         return deps.push.getVapidPublicKey()
 
       case IPC.savePushSubscription:
-        return deps.push.savePushSubscription(args[0] as PushSubscriptionDTO, args[1] as NotifyPrefs)
+        return deps.push.savePushSubscription(
+          args[0] as PushSubscriptionDTO,
+          args[1] as NotifyPrefs,
+        )
 
       case IPC.deletePushSubscription:
         return deps.push.deletePushSubscription(args[0] as string)
@@ -430,8 +491,13 @@ export function createRpc(
         return undefined
 
       case IPC.getMcpStatus: {
-        if (!deps.appMcp) return { up: false, tools: [], checkedAt: Date.now(), error: 'MCP not configured' }
-        const res = await checkAppMcp({ electronPath: deps.appMcp.electronPath, appMcpJsPath: deps.appMcp.appMcpJsPath, dataDir: deps.appMcp.dataDir })
+        if (!deps.appMcp)
+          return { up: false, tools: [], checkedAt: Date.now(), error: 'MCP not configured' }
+        const res = await checkAppMcp({
+          electronPath: deps.appMcp.electronPath,
+          appMcpJsPath: deps.appMcp.appMcpJsPath,
+          dataDir: deps.appMcp.dataDir,
+        })
         const lastActivityAt = await lastMcpActivity(deps.appMcp.dataDir)
         return { ...res, checkedAt: Date.now(), lastActivityAt }
       }

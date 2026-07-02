@@ -32,7 +32,10 @@ export function piSessionDirFor(cwd: string, root?: string): string {
   return path.join(root ?? piSessionsRoot(), piSessionDirName(cwd))
 }
 
-export interface PiFileMtime { file: string; mtime: number }
+export interface PiFileMtime {
+  file: string
+  mtime: number
+}
 
 /** Pure: pick the newest file by mtime. */
 export function selectNewestPiSessionFile(files: PiFileMtime[]): string | null {
@@ -67,7 +70,9 @@ export function piStatusFromText(text: string): SessionStatus {
 }
 
 /** True if a parsed JSONL line looks like a pi message entry carrying a message. */
-function isPiMessageEntry(entry: unknown): entry is { message: { role?: string; content?: unknown } } {
+function isPiMessageEntry(
+  entry: unknown,
+): entry is { message: { role?: string; content?: unknown } } {
   return typeof entry === 'object' && entry !== null && 'message' in entry
 }
 
@@ -82,13 +87,22 @@ export function piStatusFromFileContent(content: string): SessionStatus {
     const trimmed = line.trim()
     if (!trimmed) continue
     let entry: unknown
-    try { entry = JSON.parse(trimmed) } catch { continue }
+    try {
+      entry = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
     if (!isPiMessageEntry(entry)) continue
     const msg = entry.message
     if (msg?.role !== 'assistant') continue
     const blocks = Array.isArray(msg.content) ? msg.content : []
     for (const b of blocks) {
-      if (b && typeof b === 'object' && (b as { type?: string }).type === 'text' && typeof (b as { text?: string }).text === 'string') {
+      if (
+        b &&
+        typeof b === 'object' &&
+        (b as { type?: string }).type === 'text' &&
+        typeof (b as { text?: string }).text === 'string'
+      ) {
         text += '\n' + (b as { text: string }).text
       }
     }
@@ -107,7 +121,9 @@ export async function listPiSessionFiles(sessionDir: string): Promise<PiFileMtim
       try {
         const st = await stat(file)
         out.push({ file, mtime: st.mtimeMs })
-      } catch { /* skip unreadable */ }
+      } catch {
+        /* skip unreadable */
+      }
     }
     return out
   } catch {

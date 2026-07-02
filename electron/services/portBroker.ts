@@ -23,18 +23,17 @@ export function createPortBroker(): IPortBroker {
       stdout = result.stdout
     } catch (err: unknown) {
       // execFile rejects when the binary is missing (ENOENT) or exits non-zero.
-      const msg =
-        err instanceof Error ? err.message : String(err)
-      throw new Error(
-        `portBroker: floo claim failed for service "${service}" in ${cwd}: ${msg}`
-      )
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`portBroker: floo claim failed for service "${service}" in ${cwd}: ${msg}`, {
+        cause: err,
+      })
     }
 
     // Parse the first integer from floo's output (e.g. "port 3742\n" or "3742").
     const match = stdout.match(/\d+/)
     if (!match) {
       throw new Error(
-        `portBroker: could not parse a port number from floo output: ${JSON.stringify(stdout)}`
+        `portBroker: could not parse a port number from floo output: ${JSON.stringify(stdout)}`,
       )
     }
 

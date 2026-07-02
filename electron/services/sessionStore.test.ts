@@ -3,19 +3,39 @@ import type { ISessionStore, SessionDTO } from '../shared/contract.js'
 import { restoreInterruptedSessions } from './sessionStore.js'
 
 function makeStore(initial: SessionDTO[]): ISessionStore & { upsertCount: number } {
-  const map = new Map<string, SessionDTO>(initial.map(s => [s.id, s]))
+  const map = new Map<string, SessionDTO>(initial.map((s) => [s.id, s]))
   let upsertCount = 0
   return {
-    get upsertCount() { return upsertCount },
-    list() { return [...map.values()] },
-    get(id) { return map.get(id) },
-    upsert(s) { map.set(s.id, s); upsertCount++ },
-    delete(id) { map.delete(id) },
+    get upsertCount() {
+      return upsertCount
+    },
+    list() {
+      return [...map.values()]
+    },
+    get(id) {
+      return map.get(id)
+    },
+    upsert(s) {
+      map.set(s.id, s)
+      upsertCount++
+    },
+    delete(id) {
+      map.delete(id)
+    },
   }
 }
 
 function makeSession(id: string, status: SessionDTO['status']): SessionDTO {
-  return { id, tid: 'T-1', title: 'test', prompt: 'do it', repoId: 'repo1', branch: 'main', status, createdAt: 0 }
+  return {
+    id,
+    tid: 'T-1',
+    title: 'test',
+    prompt: 'do it',
+    repoId: 'repo1',
+    branch: 'main',
+    status,
+    createdAt: 0,
+  }
 }
 
 describe('restoreInterruptedSessions', () => {
@@ -71,7 +91,7 @@ describe('restoreInterruptedSessions', () => {
       makeSession('d', 'idle'),
     ])
     const result = restoreInterruptedSessions(store)
-    expect(result.map(s => s.id).sort()).toEqual(['a', 'c'])
+    expect(result.map((s) => s.id).sort()).toEqual(['a', 'c'])
     expect(store.upsertCount).toBe(2)
   })
 })

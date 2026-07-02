@@ -14,17 +14,29 @@ describe('defaultUserPrompt', () => {
 
 describe('buildSystemPrompt', () => {
   it('includes the tid in the output', () => {
-    const result = buildSystemPrompt({ tid: 'T-42', title: 'Some feature', description: 'Details here' })
+    const result = buildSystemPrompt({
+      tid: 'T-42',
+      title: 'Some feature',
+      description: 'Details here',
+    })
     expect(result).toContain('T-42')
   })
 
   it('includes the title in the output', () => {
-    const result = buildSystemPrompt({ tid: 'T-42', title: 'Some feature', description: 'Details here' })
+    const result = buildSystemPrompt({
+      tid: 'T-42',
+      title: 'Some feature',
+      description: 'Details here',
+    })
     expect(result).toContain('Some feature')
   })
 
   it('includes the description in the output', () => {
-    const result = buildSystemPrompt({ tid: 'T-42', title: 'Some feature', description: 'Details here' })
+    const result = buildSystemPrompt({
+      tid: 'T-42',
+      title: 'Some feature',
+      description: 'Details here',
+    })
     expect(result).toContain('Details here')
   })
 
@@ -120,4 +132,3 @@ describe('deliverPrompt with pi', () => {
     expect(result.userPrompt).toBe('usr content')
   })
 })
-
