@@ -8,8 +8,9 @@
   /** Optional callback invoked after an agent is selected (e.g. to close the mobile drawer). */
   export let onSelect: (() => void) | undefined = undefined
 
-  function choose(tid: string) {
-    select(tid)
+  function choose(id: string | undefined) {
+    if (!id) return
+    select(id)
     onSelect?.()
   }
 
@@ -50,12 +51,12 @@
   </div>
 
   <div class="agents">
-    {#each $visible as s (s.tid)}
+    {#each $visible as s (s.id)}
       <div
         class="agent {s.status}"
-        class:sel={$selectedId === s.tid}
-        on:click={() => choose(s.tid)}
-        on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && choose(s.tid)}
+        class:sel={$selectedId === s.id}
+        on:click={() => choose(s.id)}
+        on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && choose(s.id)}
         role="button"
         tabindex="0"
       >
