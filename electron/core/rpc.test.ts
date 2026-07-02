@@ -246,6 +246,7 @@ describe('createRpc', () => {
   })
 
   it('routes killSession', async () => {
+    deps.sessionStore.upsert(makeSession())
     await rpc.handle(IPC.killSession, ['s1'])
     expect(deps.sessions.kill).toHaveBeenCalledWith('s1')
   })
@@ -265,11 +266,13 @@ describe('createRpc', () => {
   })
 
   it('routes writeSession (fire-and-forget)', async () => {
+    deps.sessionStore.upsert(makeSession())
     await rpc.handle(IPC.writeSession, ['s1', 'hello'])
     expect(deps.sessions.write).toHaveBeenCalledWith('s1', 'hello')
   })
 
   it('routes resizeSession', async () => {
+    deps.sessionStore.upsert(makeSession())
     await rpc.handle(IPC.resizeSession, ['s1', 80, 24])
     expect(deps.sessions.resize).toHaveBeenCalledWith('s1', 80, 24)
   })
@@ -715,6 +718,63 @@ describe('createRpc', () => {
       ).rejects.toThrow('Unknown repo: r1')
       expect(deps.worktrees.create).not.toHaveBeenCalled()
     })
+
+    it("killSession no-ops for another identity's session", async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      await rpc.handle(IPC.killSession, ['s1'])
+      expect(deps.sessions.kill).not.toHaveBeenCalled()
+    })
+
+    it("writeSession no-ops for another identity's session", async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      await rpc.handle(IPC.writeSession, ['s1', 'hello'])
+      expect(deps.sessions.write).not.toHaveBeenCalled()
+    })
+
+    it("resizeSession no-ops for another identity's session", async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      await rpc.handle(IPC.resizeSession, ['s1', 80, 24])
+      expect(deps.sessions.resize).not.toHaveBeenCalled()
+    })
+
+    it("detachSession no-ops for another identity's session", async () => {
+      const coord = createWriteCoordinator()
+      deps.writeCoordinator = coord
+      const guardedRpc = createRpc(deps, () => {}, { coalesceMs: 0 })
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      const detachSpy = vi.spyOn(coord, 'detach')
+      await expect(guardedRpc.handle(IPC.detachSession, ['s1'])).resolves.toBeUndefined()
+      expect(detachSpy).not.toHaveBeenCalled()
+      guardedRpc.dispose()
+    })
+
+    it("attachSession does not attach another identity's session", async () => {
+      const coord = createWriteCoordinator()
+      deps.writeCoordinator = coord
+      const guardedRpc = createRpc(deps, () => {}, { coalesceMs: 0, clientId: 'client-x' })
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      await guardedRpc.handle(IPC.attachSession, ['s1'])
+      expect(coord.isViewer('s1', 'client-x')).toBe(false)
+      guardedRpc.dispose()
+    })
+
+    it("takeWrite does not grant the lock for another identity's session", async () => {
+      const coord = createWriteCoordinator()
+      deps.writeCoordinator = coord
+      const guardedRpc = createRpc(deps, () => {}, { coalesceMs: 0, clientId: 'client-x' })
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      await guardedRpc.handle(IPC.takeWrite, ['s1'])
+      expect(coord.canWrite('s1', 'client-x')).toBe(false)
+      guardedRpc.dispose()
+    })
+
+    it("removeRepo throws Unknown repo for another identity's repo", async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
+      await expect(rpc.handle(IPC.removeRepo, ['r1'])).rejects.toThrow('Unknown repo: r1')
+      expect(deps.repos.remove).not.toHaveBeenCalled()
+    })
   })
 
   describe('multi-client write lock', () => {
@@ -729,6 +789,7 @@ describe('createRpc', () => {
       sharedDeps = makeFakeDeps()
       coord = createWriteCoordinator()
       sharedDeps.writeCoordinator = coord
+      sharedDeps.sessionStore.upsert(makeSession({ id: 's1' }))
       emittedA = []
       emittedB = []
       rpcA = createRpc(

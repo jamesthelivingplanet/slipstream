@@ -37,10 +37,17 @@ backfill migration needed.
   `IRepoRegistry.register`, which writes it into the repo row.
 - **Single-item session guards** via `ownedSession(id)` (returns `undefined` for
   missing or other-owner rows): `resumeSession`, `attachRemoteControl`,
-  `cleanupSession`, `getSessionBuffer`.
+  `cleanupSession`, `getSessionBuffer`, `writeSession`, `resizeSession`,
+  `killSession`, `attachSession`, `takeWrite`, `detachSession`. The last two
+  pairs — `attachSession`/`takeWrite` — are a nuance: instead of returning
+  `undefined` they return a neutral `lockState(id)` (a `WriteLockState` as if
+  the coordinator has no state for that session) so the caller gets a
+  well-typed response without being attached as a viewer or granted the
+  write lock.
 - **Single-item repo guards** via `requireOwnedRepo(repoId)` (throws `Unknown repo`
   for missing or other-owner rows): `worktreeStatus`, `openInEditor`, `runApp`,
-  `getRepoSettings`, `setRepoSettings`, and `startSession`'s repo resolution.
+  `getRepoSettings`, `setRepoSettings`, `removeRepo`, and `startSession`'s repo
+  resolution.
 - **No existence leak**: cross-owner access surfaces an identical error to a missing
   row (`Session not found` / `Unknown repo`).
 
@@ -53,9 +60,18 @@ locked in by `electron/core/auth.test.ts` (identity resolution) and
 
 ## Known follow-up for true multi-user
 
-`writeSession`, `resizeSession`, and `killSession` are NOT owner-checked —
-they are fire-and-forget control ops addressed by an unguessable uuid session
-id whose disclosure boundary is the filtered enumeration. A multi-user tier
-should add owner checks there too, give `resolveIdentity` a real
-token → owner store, and decide between per-owner data-dir vs row-level
-isolation.
+`writeSession`, `resizeSession`, `killSession`, `attachSession`, `takeWrite`,
+and `detachSession` are fire-and-forget control ops addressed by an
+unguessable uuid session id. They are now owner-guarded via `ownedSession`,
+but because they're fire-and-forget they silently no-op for a missing or
+other-owner session — `undefined` for `writeSession`/`resizeSession`/
+`killSession`/`detachSession`, or a neutral, non-attaching `lockState(id)`
+for `attachSession`/`takeWrite` — rather than throwing, preserving the
+no-existence-leak invariant used elsewhere in this file. This does require
+the session to be persisted (owned) in `sessionStore`, which is always true
+after `startSession`, so there's no practical behavior change for legitimate
+callers.
+
+Remaining genuine follow-ups: give `resolveIdentity` a real token → owner
+store (today every valid token maps to `LOCAL_IDENTITY`), and decide between
+per-owner data-dir vs row-level isolation for the eventual multi-user tier.

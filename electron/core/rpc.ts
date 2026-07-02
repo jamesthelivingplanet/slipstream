@@ -134,8 +134,11 @@ export function createRpc(
       case IPC.registerRepoByUrl:
         return deps.repos.registerByUrl(args[0] as string, identity.id)
 
-      case IPC.removeRepo:
-        return deps.repos.remove(args[0] as string)
+      case IPC.removeRepo: {
+        const id = args[0] as string
+        await requireOwnedRepo(id)
+        return deps.repos.remove(id)
+      }
 
       case IPC.listTickets:
         return deps.tickets.listTickets()
@@ -255,6 +258,7 @@ export function createRpc(
 
       case IPC.writeSession: {
         const id = args[0] as string
+        if (!ownedSession(id)) return undefined
         if (coord && !coord.noteWrite(id, clientId)) return undefined
         deps.sessions.write(id, args[1] as string)
         return undefined
@@ -262,6 +266,7 @@ export function createRpc(
 
       case IPC.resizeSession: {
         const id = args[0] as string
+        if (!ownedSession(id)) return undefined
         if (coord && !coord.canWrite(id, clientId)) return undefined
         deps.sessions.resize(id, args[1] as number, args[2] as number)
         return undefined
@@ -269,25 +274,31 @@ export function createRpc(
 
       case IPC.attachSession: {
         const id = args[0] as string
+        if (!ownedSession(id)) return lockState(id)
         coord?.attach(id, clientId)
         return lockState(id)
       }
 
       case IPC.detachSession: {
         const id = args[0] as string
+        if (!ownedSession(id)) return undefined
         coord?.detach(id, clientId)
         return undefined
       }
 
       case IPC.takeWrite: {
         const id = args[0] as string
+        if (!ownedSession(id)) return lockState(id)
         coord?.take(id, clientId)
         return lockState(id)
       }
 
-      case IPC.killSession:
-        deps.sessions.kill(args[0] as string)
+      case IPC.killSession: {
+        const id = args[0] as string
+        if (!ownedSession(id)) return undefined
+        deps.sessions.kill(id)
         return undefined
+      }
 
       case IPC.cleanupSession: {
         const id = args[0] as string
