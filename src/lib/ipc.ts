@@ -86,6 +86,7 @@ export function startSession(input: {
   repoId: string
   description?: string
   agentKind?: BackendKind
+  sessionId?: string
 }): Promise<SessionDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.startSession(input)

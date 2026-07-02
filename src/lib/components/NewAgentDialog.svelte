@@ -57,10 +57,10 @@
 
   async function start() {
     if (!title.trim() || !repoChoice) return
-    const tid = picked
+    const id = picked
       ? createAgentFromTicket(picked, prompt, agentKind)
       : createBlankAgent(title.trim(), prompt, draftTid, agentKind)
-    await startAgent(tid, repoChoice as string, prompt, agentKind)
+    await startAgent(id, repoChoice as string, prompt, agentKind)
   }
 
   function onWindowClick(e: MouseEvent) {

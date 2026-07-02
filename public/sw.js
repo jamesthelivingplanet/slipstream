@@ -29,14 +29,14 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const tid = event.notification.data.tid
+  const sessionId = event.notification.data.sessionId
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
       if (windowClients.length > 0) {
         windowClients[0].focus()
-        windowClients[0].postMessage({ type: 'open-agent', tid })
+        windowClients[0].postMessage({ type: 'open-agent', sessionId })
       } else {
-        return clients.openWindow('/?agent=' + encodeURIComponent(tid))
+        return clients.openWindow('/?agent=' + encodeURIComponent(sessionId))
       }
     })
   )
