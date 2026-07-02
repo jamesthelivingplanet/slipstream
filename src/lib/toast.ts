@@ -1,9 +1,11 @@
 import { writable } from 'svelte/store'
 import { genId } from './id.js'
 
-export const toasts = writable<{ id: string; type: 'success' | 'error'; message: string }[]>([])
+export const toasts = writable<
+  { id: string; type: 'success' | 'error' | 'warning'; message: string }[]
+>([])
 
-export function pushToast(type: 'success' | 'error', message: string): void {
+export function pushToast(type: 'success' | 'error' | 'warning', message: string): void {
   const id = genId()
   toasts.update(($t) => [...$t, { id, type, message }])
   setTimeout(() => dismissToast(id), 4000)
