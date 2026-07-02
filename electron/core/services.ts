@@ -16,6 +16,7 @@ import { createPushService, createDbPushStore } from '../services/pushService.js
 import { createRunLogger } from '../services/runLogger.js'
 import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import { createSessionReaper } from '../services/sessionReaper.js'
+import { createSessionPersistence } from '../services/sessionPersistence.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -47,6 +48,10 @@ export function createServices(root: string): IpcDeps {
   restoreInterruptedSessions(sessionStore)
   const runLogger = createRunLogger(root)
   const sessions = createSessionManager(runLogger, root)
+  // FLO-69: persist session status/PR changes at the daemon level (once per
+  // process), not per connected client. This is what lets an agent that
+  // finishes with no UI attached still write its final state to SQLite.
+  createSessionPersistence({ sessions, store: sessionStore })
   const push = createPushService({
     config: configStore,
     store: createDbPushStore(db),
