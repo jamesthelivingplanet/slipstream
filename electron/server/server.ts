@@ -125,17 +125,18 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     const queryToken = url.searchParams.get('token') ?? undefined
     const provided = bearerToken ?? queryToken
 
-    if (provided !== token) {
-      const body = 'Unauthorized'
-      socket.write(
-        `HTTP/1.1 401 Unauthorized\r\nContent-Length: ${body.length}\r\n\r\n${body}`,
-      )
-      socket.destroy()
-      return
-    }
-
-    const identity = resolveIdentity(provided as string)
+    // Complete the WebSocket handshake first, THEN authenticate. A raw HTTP 401
+    // during the upgrade surfaces in the browser only as an opaque 1006 close —
+    // indistinguishable from a network drop — so the client can't tell a bad
+    // token from a flaky connection and just reconnects forever. Closing the
+    // opened socket with 4001 gives the client an unambiguous "auth failed"
+    // signal it can act on (see wsApi.ts onAuthError → main.ts re-gate).
     wss.handleUpgrade(req, socket, head, (ws) => {
+      if (provided !== token) {
+        ws.close(4001, 'Unauthorized')
+        return
+      }
+      const identity = resolveIdentity(provided as string)
       wss.emit('connection', ws, req, identity)
     })
   })
