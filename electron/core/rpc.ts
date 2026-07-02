@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
-import type { BackendKind, RepoDTO, SessionDTO, Identity, ISessionStore, SessionStatus, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO, WriteLockState, GcPolicy } from '../shared/contract.js'
+import type { BackendKind, RepoDTO, SessionDTO, Identity, ISessionStore, EditorConfig, RepoSettings, NotifyPrefs, PushSubscriptionDTO, WriteLockState, GcPolicy } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
@@ -60,9 +60,6 @@ export function createRpc(
   // Tracks which repo+branch each session owns so cleanup can remove the worktree.
   const sessionMeta = new Map<string, { repo: RepoDTO; branch: string }>()
 
-  // Tracks persisted status to avoid redundant DB writes on every data chunk.
-  const persistedStatus = new Map<string, string>()
-
   // Per-session output coalescing: batch session:data bursts and flush on a
   // short timer so a chatty PTY doesn't flood the transport with one message
   // per chunk. Status events are never coalesced.
@@ -95,23 +92,10 @@ export function createRpc(
   }
   function onStatus(sessionId: string, status: string): void {
     emit(IPC.sessionStatus, sessionId, status)
-    // Persist status change to DB (only when it actually changes)
-    const prev = persistedStatus.get(sessionId)
-    if (prev !== undefined && prev !== status) {
-      const persisted = deps.sessionStore.get(sessionId)
-      if (persisted) {
-        deps.sessionStore.upsert({ ...persisted, status: status as SessionStatus })
-        persistedStatus.set(sessionId, status)
-      }
-    }
   }
 
   function onPr(id: string, url: string): void {
     emit(IPC.sessionPr, id, url)
-    const persisted = deps.sessionStore.get(id)
-    if (persisted) {
-      deps.sessionStore.upsert({ ...persisted, prUrl: url })
-    }
   }
 
   deps.sessions.on('data', onData)
@@ -204,7 +188,6 @@ export function createRpc(
 
         sessionMeta.set(session.id, { repo, branch })
         deps.sessionStore.upsert({ ...session, port, agentKind: agentKind ?? 'claude-code', ownerId: identity.id })
-        persistedStatus.set(session.id, 'running')
 
         if (agentKind === 'opencode' && opencodePort) {
           void captureOpencodeSessionId(opencodePort, startedAt - 1000).then((sid) => {
@@ -280,7 +263,6 @@ export function createRpc(
         if (result.removed) {
           sessionMeta.delete(id)
           deps.sessionStore.delete(id)
-          persistedStatus.delete(id)
 
           // FLO-35: move the linked ticket back to "To Do" when the agent run
           // is deleted, so the next agent can pick it up. Best-effort — a
@@ -318,7 +300,6 @@ export function createRpc(
         }
         const dto = deps.sessions.resume({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined, opencodePort })
         sessionMeta.set(id, { repo, branch: persisted.branch })
-        persistedStatus.set(id, 'running')
         deps.sessionStore.upsert({ ...dto, port })
         return { ...dto, port }
       }
@@ -337,7 +318,6 @@ export function createRpc(
         }
         const dto = deps.sessions.attachRemoteControl({ session: persisted, cwd, env: port !== undefined ? { PORT: String(port) } : undefined, opencodePort })
         sessionMeta.set(id, { repo, branch: persisted.branch })
-        persistedStatus.set(id, 'running')
         deps.sessionStore.upsert({ ...dto, port })
         return { ...dto, port }
       }
