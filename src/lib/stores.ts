@@ -102,7 +102,7 @@ export async function refreshMcpStatus(): Promise<void> {
 }
 
 export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
-  $id ? ($sessions.find((s) => s.tid === $id) ?? null) : null,
+  $id ? ($sessions.find((s) => s.id === $id) ?? null) : null,
 )
 
 export const counts = derived(sessions, ($sessions) => {
@@ -126,11 +126,7 @@ export function repoById(id: string | null | undefined): Repo | undefined {
   return get(repos).find((r) => r.id === id)
 }
 
-function patch(tid: string, fn: (s: Session) => Session) {
-  sessions.update(($s) => $s.map((s) => (s.tid === tid ? fn(s) : s)))
-}
-
-function patchById(id: string, fn: (s: Session) => Session) {
+function patch(id: string, fn: (s: Session) => Session) {
   sessions.update(($s) => $s.map((s) => (s.id === id ? fn(s) : s)))
 }
 
@@ -196,7 +192,7 @@ export async function refreshDiffStats(): Promise<void> {
     started.map(async (s) => {
       try {
         const info = await worktreeStatus(s.repo as string, s.branch as string)
-        patchById(s.id as string, (x) => ({ ...x, add: info.added, del: info.deleted }))
+        patch(s.id as string, (x) => ({ ...x, add: info.added, del: info.deleted }))
       } catch {
         // leave existing values on failure
       }
@@ -276,9 +272,11 @@ export function createAgentFromTicket(
   prompt: string,
   agentKind: BackendKind = 'claude-code',
 ): string {
+  const id = crypto.randomUUID()
   tickets.update(($t) => $t.filter((t) => t.tid !== ticket.tid))
   sessions.update(($s) => [
     {
+      id,
       tid: ticket.tid,
       src: ticket.src,
       status: 'idle' as Status,
@@ -297,8 +295,8 @@ export function createAgentFromTicket(
     ...$s,
   ])
   dialogOpen.set(false)
-  select(ticket.tid)
-  return ticket.tid
+  select(id)
+  return id
 }
 
 export function createBlankAgent(
@@ -307,8 +305,10 @@ export function createBlankAgent(
   tid: string = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
   agentKind: BackendKind = 'claude-code',
 ): string {
+  const id = crypto.randomUUID()
   sessions.update(($s) => [
     {
+      id,
       tid,
       src: 'jira',
       status: 'idle',
@@ -325,22 +325,22 @@ export function createBlankAgent(
     ...$s,
   ])
   dialogOpen.set(false)
-  select(tid)
-  return tid
+  select(id)
+  return id
 }
 
 export async function startAgent(
-  tid: string,
+  id: string,
   repoId: string,
   prompt: string,
   agentKind?: BackendKind,
 ) {
-  const s = get(sessions).find((x) => x.tid === tid)
+  const s = get(sessions).find((x) => x.id === id)
   if (!s) return
 
   if (hasBackend) {
     // Optimistically update to show activity before the async call resolves.
-    patch(tid, (s) => ({
+    patch(id, (s) => ({
       ...s,
       repo: repoId,
       prompt,
@@ -350,14 +350,15 @@ export async function startAgent(
     }))
     try {
       const dto = await startSession({
-        tid,
+        tid: s.tid,
         title: s.title,
         prompt,
         repoId,
         description: s.description,
         agentKind,
+        sessionId: id,
       })
-      patch(tid, (s) => ({
+      patch(id, (s) => ({
         ...s,
         id: dto.id,
         branch: dto.branch,
@@ -367,7 +368,7 @@ export async function startAgent(
         status: dto.status,
       }))
     } catch (err) {
-      patch(tid, (s) => ({
+      patch(id, (s) => ({
         ...s,
         status: 'errored',
         activity: { text: cleanError(err) },
@@ -376,7 +377,7 @@ export async function startAgent(
     }
   } else {
     // Mock path — simulate immediately.
-    patch(tid, (s) => ({
+    patch(id, (s) => ({
       ...s,
       repo: repoId,
       prompt,
@@ -450,8 +451,8 @@ export function removeSession(id: string) {
   sessions.update(($s) => $s.filter((s) => s.id !== id))
 }
 
-export function resolveNeedsInput(tid: string) {
-  patch(tid, (s) => ({
+export function resolveNeedsInput(id: string) {
+  patch(id, (s) => ({
     ...s,
     status: 'running',
     activity: { text: 'Applying decision, writing the fix…' },
@@ -467,8 +468,8 @@ export function resolveNeedsInput(tid: string) {
  */
 export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promise<boolean> {
   if (!hasBackend || !s.id) {
-    sessions.update(($s) => $s.filter((x) => x.tid !== s.tid))
-    if (get(selectedId) === s.tid) select(null)
+    sessions.update(($s) => $s.filter((x) => x.id !== s.id))
+    if (get(selectedId) === s.id) select(null)
     return true
   }
   try {
@@ -479,7 +480,7 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
       if (opts?.auto) {
         // Never force-destroy a dirty/unmerged worktree during auto-reconcile —
         // that silently discards unpushed agent work. Skip and surface a warning.
-        patch(s.tid, (x) => ({ ...x, reconcileWarning: reason }))
+        patch(s.id, (x) => ({ ...x, reconcileWarning: reason }))
         pushToast('warning', `Kept ${s.tid}: worktree not clean (${reason})`)
         return false
       }
@@ -488,7 +489,7 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
     }
     if (result.removed) {
       removeSession(s.id)
-      if (get(selectedId) === s.tid) select(null)
+      if (get(selectedId) === s.id) select(null)
       pushToast('success', `Cleaned up ${s.tid}`)
       return true
     }

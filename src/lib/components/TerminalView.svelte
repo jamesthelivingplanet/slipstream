@@ -269,7 +269,7 @@
         needsInput = false
         askSub?.dispose()
         askSub = null
-        resolveNeedsInput(session.tid)
+        if (session.id) resolveNeedsInput(session.id)
         setTimeout(() => term.writeln(C.blue('● ') + 'Running tests…'), 900)
       } else {
         term.write(d)

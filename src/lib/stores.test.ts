@@ -32,6 +32,11 @@ import {
   contentLoading,
   contentResolvedAt,
   contentRefreshNonce,
+  select,
+  selectedId,
+  setSessionStatus,
+  removeSession,
+  selected,
 } from './stores.js'
 import { toasts } from './toast.js'
 import type { Ticket, Session } from './types.js'
@@ -76,20 +81,21 @@ describe('createBlankAgent', () => {
     tickets.set([])
   })
 
-  it('returns a tid and adds an idle session to the store', () => {
-    const tid = createBlankAgent('Do thing', 'go')
-    expect(tid).toMatch(/^TASK-/)
+  it('returns a client-generated UUID and adds an idle session to the store', () => {
+    const id = createBlankAgent('Do thing', 'go')
+    expect(id).toMatch(/^[0-9a-f-]{36}$/i)
     const all = get(sessions)
     expect(all).toHaveLength(1)
-    expect(all[0].tid).toBe(tid)
+    expect(all[0].id).toBe(id)
+    expect(all[0].tid).toMatch(/^TASK-/)
     expect(all[0].title).toBe('Do thing')
     expect(all[0].status).toBe('idle')
   })
 
-  it('honours an explicit tid when provided', () => {
-    const tid = createBlankAgent('X', 'go', 'FLO-9')
-    expect(tid).toBe('FLO-9')
+  it('honours an explicit tid', () => {
+    const id = createBlankAgent('X', 'go', 'FLO-9')
     expect(get(sessions)[0].tid).toBe('FLO-9')
+    expect(get(sessions)[0].id).toBe(id)
   })
 })
 
@@ -99,13 +105,58 @@ describe('createAgentFromTicket', () => {
     tickets.set([])
   })
 
-  it('returns the ticket tid, seeds a session, and consumes the ticket', () => {
+  it('returns a client-generated id, seeds a session, and consumes the ticket', () => {
     const t: Ticket = { tid: 'FLO-34', src: 'linear', title: 'Consolidate', repo: '', done: false }
     tickets.set([t])
-    const tid = createAgentFromTicket(t, 'Begin implementing FLO-34.')
-    expect(tid).toBe('FLO-34')
-    expect(get(sessions)[0]).toMatchObject({ tid: 'FLO-34', title: 'Consolidate', status: 'idle' })
+    const id = createAgentFromTicket(t, 'Begin implementing FLO-34.')
+    expect(get(sessions)[0]).toMatchObject({
+      id,
+      tid: 'FLO-34',
+      title: 'Consolidate',
+      status: 'idle',
+    })
     expect(get(tickets)).toHaveLength(0)
+  })
+})
+
+describe('FLO-75 client UUID identity', () => {
+  beforeEach(() => {
+    sessions.set([])
+    tickets.set([])
+    selectedId.set(null)
+  })
+
+  it('isolates selection and status for two drafts of the same ticket', () => {
+    const t: Ticket = { tid: 'FLO-1', src: 'linear', title: 'Dup', repo: '', done: false }
+    const id1 = createAgentFromTicket(t, 'go')
+    const id2 = createAgentFromTicket(t, 'go')
+    expect(id1).not.toBe(id2)
+    const all = get(sessions)
+    expect(all.filter((s) => s.tid === 'FLO-1')).toHaveLength(2)
+    // selection isolated
+    select(id1)
+    expect(get(selected)?.id).toBe(id1)
+    // status update to one does not touch the other
+    setSessionStatus(id2, 'done')
+    const after = get(sessions)
+    expect(after.find((s) => s.id === id1)?.status).toBe('idle')
+    expect(after.find((s) => s.id === id2)?.status).toBe('done')
+    // selection still points at id1 and reflects its (unchanged) status
+    expect(get(selected)?.status).toBe('idle')
+  })
+
+  it('does not leak status from a recreated agent onto the removed old session', () => {
+    const t: Ticket = { tid: 'FLO-2', src: 'linear', title: 'Recreate', repo: '', done: false }
+    const id1 = createAgentFromTicket(t, 'go')
+    setSessionStatus(id1, 'running')
+    removeSession(id1)
+    const id2 = createAgentFromTicket(t, 'go')
+    expect(id2).not.toBe(id1)
+    setSessionStatus(id2, 'done')
+    const all = get(sessions)
+    expect(all.find((s) => s.id === id1)).toBeUndefined()
+    expect(all.find((s) => s.id === id2)?.status).toBe('done')
+    expect(all.filter((s) => s.tid === 'FLO-2')).toHaveLength(1)
   })
 })
 

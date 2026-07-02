@@ -61,9 +61,9 @@
       return refreshAndReconcile().then(() => {
         // Deep-link: open agent specified in ?agent= query param (set by SW notificationclick)
         const params = new URLSearchParams(location.search)
-        const agentTid = params.get('agent')
-        if (agentTid) {
-          select(agentTid)
+        const agentId = params.get('agent')
+        if (agentId) {
+          select(agentId)
           params.delete('agent')
           const clean = params.toString()
           history.replaceState(
@@ -78,8 +78,8 @@
     // SW message: focus agent when notification is clicked in an already-open window
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
-        if (e.data?.type === 'open-agent' && e.data.tid) {
-          select(e.data.tid as string)
+        if (e.data?.type === 'open-agent' && e.data.sessionId) {
+          select(e.data.sessionId as string)
         }
       })
     }
@@ -169,7 +169,7 @@
         {#if $selected.status === 'idle'}
           <AgentConfig session={$selected} />
         {:else}
-          {#key $selected.tid}
+          {#key $selected.id}
             <TerminalView session={$selected} />
           {/key}
         {/if}

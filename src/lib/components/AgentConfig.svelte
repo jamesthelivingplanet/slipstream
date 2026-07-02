@@ -9,12 +9,12 @@
   let prompt = ''
   let repoChoice: string | null = null
   let menuOpen = false
-  let lastTid = ''
+  let lastId: string | undefined = ''
 
   let agentKind: BackendKind = 'claude-code'
 
-  $: if (session && session.tid !== lastTid) {
-    lastTid = session.tid
+  $: if (session && session.id !== lastId) {
+    lastId = session.id
     prompt = session.prompt ?? `Begin implementing ${session.tid}.`
     repoChoice = session.repo ?? session.suggestedRepo ?? null
     menuOpen = false
@@ -29,7 +29,8 @@
       menuOpen = true
       return
     }
-    startAgent(session.tid, repoChoice, prompt, agentKind)
+    if (!session.id) return
+    startAgent(session.id, repoChoice, prompt, agentKind)
   }
 
   function onWindowClick(e: MouseEvent) {
