@@ -7,7 +7,9 @@ export interface IConfigStore {
 
 export function createConfigStore(db: Database.Database): IConfigStore {
   const getStmt = db.prepare<[string], { value: string }>('SELECT value FROM config WHERE key = ?')
-  const setStmt = db.prepare('INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+  const setStmt = db.prepare(
+    'INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  )
   return {
     get(key: string): string | undefined {
       return getStmt.get(key)?.value

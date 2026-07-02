@@ -35,7 +35,10 @@ function healthz(port) {
       res.resume()
     })
     req.on('error', () => resolve(false))
-    req.on('timeout', () => { req.destroy(); resolve(false) })
+    req.on('timeout', () => {
+      req.destroy()
+      resolve(false)
+    })
   })
 }
 

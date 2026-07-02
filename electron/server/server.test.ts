@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import http from 'node:http'
 import { createServer } from './server.js'
 import type { IpcDeps } from '../ipc.js'
@@ -64,9 +64,25 @@ function makeFakeDeps(): IpcDeps {
 
   const worktrees: IWorktreeManager = {
     pathFor: vi.fn().mockReturnValue('/wt/branch'),
-    create: vi.fn().mockResolvedValue({ branch: 'b', path: '/wt/b', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 }),
+    create: vi.fn().mockResolvedValue({
+      branch: 'b',
+      path: '/wt/b',
+      dirty: false,
+      ahead: 0,
+      behind: 0,
+      added: 0,
+      deleted: 0,
+    }),
     remove: vi.fn().mockResolvedValue({ removed: true }),
-    status: vi.fn().mockResolvedValue({ branch: 'b', path: '/wt/b', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 }),
+    status: vi.fn().mockResolvedValue({
+      branch: 'b',
+      path: '/wt/b',
+      dirty: false,
+      ahead: 0,
+      behind: 0,
+      added: 0,
+      deleted: 0,
+    }),
     list: vi.fn().mockResolvedValue([]),
   }
 
@@ -90,10 +106,18 @@ function makeFakeDeps(): IpcDeps {
 
   const sessionStoreMap = new Map()
   const sessionStore: ISessionStore = {
-    list() { return Array.from(sessionStoreMap.values()) },
-    get(id) { return sessionStoreMap.get(id) },
-    upsert(s) { sessionStoreMap.set(s.id, s) },
-    delete(id) { sessionStoreMap.delete(id) },
+    list() {
+      return Array.from(sessionStoreMap.values())
+    },
+    get(id) {
+      return sessionStoreMap.get(id)
+    },
+    upsert(s) {
+      sessionStoreMap.set(s.id, s)
+    },
+    delete(id) {
+      sessionStoreMap.delete(id)
+    },
   }
 
   const push: IPushService = {
@@ -103,10 +127,24 @@ function makeFakeDeps(): IpcDeps {
     getPushPrefs: vi.fn().mockResolvedValue(null),
   }
 
-  return { repos, worktrees, sessions, ports, tickets, config, sessionStore, editor, appRunner: { run: vi.fn().mockResolvedValue({ pid: 1234 }) }, push }
+  return {
+    repos,
+    worktrees,
+    sessions,
+    ports,
+    tickets,
+    config,
+    sessionStore,
+    editor,
+    appRunner: { run: vi.fn().mockResolvedValue({ pid: 1234 }) },
+    push,
+  }
 }
 
-function makeSurvivalDeps(): { deps: IpcDeps; seedSession: (id: string, ...chunks: string[]) => void } {
+function makeSurvivalDeps(): {
+  deps: IpcDeps
+  seedSession: (id: string, ...chunks: string[]) => void
+} {
   const liveMap = new Map<string, OutputBuffer>()
   const sessionListeners: Record<string, ((...args: unknown[]) => void)[]> = {}
 
@@ -117,12 +155,20 @@ function makeSurvivalDeps(): { deps: IpcDeps; seedSession: (id: string, ...chunk
     has: vi.fn().mockImplementation((id: string) => liveMap.has(id)),
     write: vi.fn(),
     resize: vi.fn(),
-    kill: vi.fn().mockImplementation((id: string) => { liveMap.delete(id) }),
-    killAll: vi.fn().mockImplementation(() => { liveMap.clear() }),
-    getBuffer: vi.fn().mockImplementation((id: string) => liveMap.get(id)?.snapshot() ?? { data: '', seq: 0 }),
+    kill: vi.fn().mockImplementation((id: string) => {
+      liveMap.delete(id)
+    }),
+    killAll: vi.fn().mockImplementation(() => {
+      liveMap.clear()
+    }),
+    getBuffer: vi
+      .fn()
+      .mockImplementation((id: string) => liveMap.get(id)?.snapshot() ?? { data: '', seq: 0 }),
     setOpencodeSid: vi.fn(),
     liveSessions: vi.fn().mockReturnValue([]),
-    reap: vi.fn().mockImplementation((id: string) => { liveMap.delete(id) }),
+    reap: vi.fn().mockImplementation((id: string) => {
+      liveMap.delete(id)
+    }),
     on(event: string, listener: (...args: unknown[]) => void) {
       sessionListeners[event] ??= []
       sessionListeners[event].push(listener)
@@ -147,9 +193,25 @@ function makeSurvivalDeps(): { deps: IpcDeps; seedSession: (id: string, ...chunk
 
   const worktrees: IWorktreeManager = {
     pathFor: vi.fn().mockReturnValue('/wt/branch'),
-    create: vi.fn().mockResolvedValue({ branch: 'b', path: '/wt/b', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 }),
+    create: vi.fn().mockResolvedValue({
+      branch: 'b',
+      path: '/wt/b',
+      dirty: false,
+      ahead: 0,
+      behind: 0,
+      added: 0,
+      deleted: 0,
+    }),
     remove: vi.fn().mockResolvedValue({ removed: true }),
-    status: vi.fn().mockResolvedValue({ branch: 'b', path: '/wt/b', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 }),
+    status: vi.fn().mockResolvedValue({
+      branch: 'b',
+      path: '/wt/b',
+      dirty: false,
+      ahead: 0,
+      behind: 0,
+      added: 0,
+      deleted: 0,
+    }),
     list: vi.fn().mockResolvedValue([]),
   }
 
@@ -173,10 +235,18 @@ function makeSurvivalDeps(): { deps: IpcDeps; seedSession: (id: string, ...chunk
 
   const sessionStoreMap = new Map()
   const sessionStore: ISessionStore = {
-    list() { return Array.from(sessionStoreMap.values()) },
-    get(id) { return sessionStoreMap.get(id) },
-    upsert(s) { sessionStoreMap.set(s.id, s) },
-    delete(id) { sessionStoreMap.delete(id) },
+    list() {
+      return Array.from(sessionStoreMap.values())
+    },
+    get(id) {
+      return sessionStoreMap.get(id)
+    },
+    upsert(s) {
+      sessionStoreMap.set(s.id, s)
+    },
+    delete(id) {
+      sessionStoreMap.delete(id)
+    },
   }
 
   const push: IPushService = {
@@ -186,7 +256,18 @@ function makeSurvivalDeps(): { deps: IpcDeps; seedSession: (id: string, ...chunk
     getPushPrefs: vi.fn().mockResolvedValue(null),
   }
 
-  const deps: IpcDeps = { repos, worktrees, sessions, ports, tickets, config, sessionStore, editor, appRunner: { run: vi.fn().mockResolvedValue({ pid: 1234 }) }, push }
+  const deps: IpcDeps = {
+    repos,
+    worktrees,
+    sessions,
+    ports,
+    tickets,
+    config,
+    sessionStore,
+    editor,
+    appRunner: { run: vi.fn().mockResolvedValue({ pid: 1234 }) },
+    push,
+  }
 
   function seedSession(id: string, ...chunks: string[]): void {
     const buf = new OutputBuffer()
@@ -259,7 +340,9 @@ describe('createServer', () => {
   it('refuses to connect without token (query param)', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
-    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
 
     const ws = wsConnect(port) // no token
     await new Promise<void>((resolve) => {
@@ -272,7 +355,9 @@ describe('createServer', () => {
   it('refuses to connect with wrong token', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
-    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
 
     const ws = wsConnect(port, 'wrong-token')
     await new Promise<void>((resolve) => {
@@ -285,7 +370,9 @@ describe('createServer', () => {
   it('closes with code 4001 on wrong token', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
-    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
 
     const ws = wsConnect(port, 'wrong-token')
     const code = await new Promise<number>((resolve) => {
@@ -297,7 +384,9 @@ describe('createServer', () => {
   it('closes with code 4001 when no token is provided', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
-    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
 
     const ws = wsConnect(port)
     const code = await new Promise<number>((resolve) => {
@@ -309,7 +398,9 @@ describe('createServer', () => {
   it('accepts a connection with the correct token', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
-    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
 
     const ws = wsConnect(port, 'secret')
     await new Promise<void>((resolve, reject) => {
@@ -322,7 +413,9 @@ describe('createServer', () => {
   it('routes listRepos and returns a WireRes with repos', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
-    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
 
     const ws = wsConnect(port, 'secret')
     await new Promise<void>((resolve, reject) => {
@@ -343,7 +436,9 @@ describe('createServer', () => {
   it('returns WireRes with ok:false for unknown channel', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
-    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
 
     const ws = wsConnect(port, 'secret')
     await new Promise<void>((resolve, reject) => {
@@ -364,14 +459,18 @@ describe('createServer', () => {
   it('GET /healthz returns { ok: true }', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
-    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
 
     const body = await new Promise<string>((resolve, reject) => {
-      http.get(`http://127.0.0.1:${port}/healthz`, (res) => {
-        let data = ''
-        res.on('data', (c) => (data += c))
-        res.on('end', () => resolve(data))
-      }).on('error', reject)
+      http
+        .get(`http://127.0.0.1:${port}/healthz`, (res) => {
+          let data = ''
+          res.on('data', (c) => (data += c))
+          res.on('end', () => resolve(data))
+        })
+        .on('error', reject)
     })
 
     expect(JSON.parse(body)).toEqual({ ok: true })
@@ -423,14 +522,24 @@ describe('createServer', () => {
   it('returns 404 for missing /assets/*.js instead of SPA-fallback HTML (prevents MIME mismatch blank screen)', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
-    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
 
     // Request a non-existent hashed asset — it should 404, not SPA-fallback to HTML
-    const { statusCode, contentType } = await new Promise<{ statusCode: number; contentType: string }>((resolve, reject) => {
-      http.get(`http://127.0.0.1:${port}/assets/old-stale-hash.js`, (res) => {
-        res.resume()
-        resolve({ statusCode: res.statusCode ?? 0, contentType: res.headers['content-type'] ?? '' })
-      }).on('error', reject)
+    const { statusCode, contentType } = await new Promise<{
+      statusCode: number
+      contentType: string
+    }>((resolve, reject) => {
+      http
+        .get(`http://127.0.0.1:${port}/assets/old-stale-hash.js`, (res) => {
+          res.resume()
+          resolve({
+            statusCode: res.statusCode ?? 0,
+            contentType: res.headers['content-type'] ?? '',
+          })
+        })
+        .on('error', reject)
     })
 
     expect(statusCode).toBe(404)

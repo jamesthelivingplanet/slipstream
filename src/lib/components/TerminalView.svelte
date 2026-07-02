@@ -3,13 +3,33 @@
   import { Terminal, type IDisposable } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
   import { buildScript, C, terminalTheme } from '../term'
-  import { repoById, select, resolveNeedsInput, setSessionStatus, removeSession, cleanupAgent, runAppForSession } from '../stores'
-  import { hasBackend, onSessionData, writeSession, resizeSession, getSessionBuffer, resumeSession, attachRemoteControl, openInEditor, attachSession, detachSession, takeWrite, onSessionWriteLock } from '../ipc'
+  import {
+    repoById,
+    select,
+    resolveNeedsInput,
+    setSessionStatus,
+    cleanupAgent,
+    runAppForSession,
+  } from '../stores'
+  import {
+    hasBackend,
+    onSessionData,
+    writeSession,
+    resizeSession,
+    getSessionBuffer,
+    resumeSession,
+    attachRemoteControl,
+    openInEditor,
+    attachSession,
+    detachSession,
+    takeWrite,
+    onSessionWriteLock,
+  } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
   import { MOBILE_MEDIA_QUERY } from '../responsive'
-  import type { Session, Status } from '../types'
+  import type { Session } from '../types'
 
   export let session: Session
 
@@ -39,27 +59,45 @@
   // Use the live backend PTY whenever a backend is present. The session.id
   // arrives asynchronously (after startSession resolves), so we must not gate
   // on it here — data/status callbacks filter by id once it's set.
-  $: liveMode = hasBackend
+  const liveMode = hasBackend
 
   onMount(() => {
     term = new Terminal({
-      fontFamily: "'Geist Mono', monospace", fontSize: 13, lineHeight: 1.0,
-      cursorBlink: true, cursorStyle: 'bar', theme: terminalTheme(),
+      fontFamily: "'Geist Mono', monospace",
+      fontSize: 13,
+      lineHeight: 1.0,
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      theme: terminalTheme(),
     })
     fit = new FitAddon()
     term.loadAddon(fit)
     term.open(mountEl)
-    try { fit.fit() } catch {}
+    try {
+      fit.fit()
+    } catch {}
 
-    const onResize = () => { try { fit.fit() } catch {} }
+    const onResize = () => {
+      try {
+        fit.fit()
+      } catch {}
+    }
     window.addEventListener('resize', onResize)
-    const unsub = mode.subscribe(() => { if (term) term.options.theme = terminalTheme() })
+    const unsub = mode.subscribe(() => {
+      if (term) term.options.theme = terminalTheme()
+    })
 
-    return () => { window.removeEventListener('resize', onResize); unsub() }
+    return () => {
+      window.removeEventListener('resize', onResize)
+      unsub()
+    }
   })
 
   $: if (liveMode && session.id && session.id !== liveId) startLive()
-  $: if (!liveMode && !simStarted) { simStarted = true; runSimulation() }
+  $: if (!liveMode && !simStarted) {
+    simStarted = true
+    runSimulation()
+  }
 
   onDestroy(() => {
     cleanupListeners()
@@ -82,23 +120,37 @@
     // Lazily respawn a detached session when the user opens it.
     if (session.id && !resumedIds.has(session.id)) {
       resumedIds.add(session.id)
-      try { await resumeSession(session.id) } catch { /* already live or not found */ }
+      try {
+        await resumeSession(session.id)
+      } catch {
+        /* already live or not found */
+      }
     }
 
     term.reset()
-    setTimeout(() => { try { fit.fit() } catch {}; term.focus() }, 40)
+    setTimeout(() => {
+      try {
+        fit.fit()
+      } catch {}
+      term.focus()
+    }, 40)
 
     // Subscribe first, hold pre-backlog chunks, then replay snapshot, then flush held.
     let snapSeq = -1
     const held: Array<[string, number]> = []
     offData = onSessionData((sid, chunk, seq) => {
       if (sid !== session.id) return
-      if (snapSeq < 0) { held.push([chunk, seq]); return }
+      if (snapSeq < 0) {
+        held.push([chunk, seq])
+        return
+      }
       term.write(chunk)
     })
     const snap = await getSessionBuffer(session.id ?? '')
     term.write(snap.data)
-    for (const [chunk, seq] of held) { if (seq > snap.seq) term.write(chunk) }
+    for (const [chunk, seq] of held) {
+      if (seq > snap.seq) term.write(chunk)
+    }
     held.length = 0
     snapSeq = snap.seq
 
@@ -121,7 +173,9 @@
 
     // Keep the PTY sized to the panel (window + element resizes).
     const sendResize = () => {
-      try { fit.fit() } catch {}
+      try {
+        fit.fit()
+      } catch {}
       if (session.id) resizeSession(session.id, term.cols, term.rows)
     }
     if (typeof ResizeObserver !== 'undefined' && mountEl) {
@@ -130,30 +184,55 @@
     }
     window.addEventListener('resize', sendResize)
     offResize = () => window.removeEventListener('resize', sendResize)
-
   }
 
   function cleanupListeners() {
-    if (offData) { offData(); offData = null }
-    if (offWriteLock) { offWriteLock(); offWriteLock = null }
-    if (offResize) { offResize(); offResize = null }
-    if (ro) { ro.disconnect(); ro = null }
-    if (onDataSub) { onDataSub.dispose(); onDataSub = null }
+    if (offData) {
+      offData()
+      offData = null
+    }
+    if (offWriteLock) {
+      offWriteLock()
+      offWriteLock = null
+    }
+    if (offResize) {
+      offResize()
+      offResize = null
+    }
+    if (ro) {
+      ro.disconnect()
+      ro = null
+    }
+    if (onDataSub) {
+      onDataSub.dispose()
+      onDataSub = null
+    }
     liveId = null
   }
 
   // ── Simulation mode ───────────────────────────────────────────────────────
 
   function cleanupSimulation() {
-    if (timer) { clearTimeout(timer); timer = null }
-    if (askSub) { askSub.dispose(); askSub = null }
+    if (timer) {
+      clearTimeout(timer)
+      timer = null
+    }
+    if (askSub) {
+      askSub.dispose()
+      askSub = null
+    }
     needsInput = false
   }
 
   function runSimulation() {
     cleanupSimulation()
     term.reset()
-    setTimeout(() => { try { fit.fit() } catch {}; term.focus() }, 40)
+    setTimeout(() => {
+      try {
+        fit.fit()
+      } catch {}
+      term.focus()
+    }, 40)
     if (!r) return
     const lines = buildScript(session, r)
     let i = 0
@@ -179,7 +258,12 @@
       if (d === '\r') return
       if (d === '1' || d === '2') {
         term.write(d + '\r\n\r\n')
-        term.writeln(C.dim('  ↳ ') + (d === '1' ? 'Invalidating sessions on refresh.' : 'Migrating sessions to the new token.'))
+        term.writeln(
+          C.dim('  ↳ ') +
+            (d === '1'
+              ? 'Invalidating sessions on refresh.'
+              : 'Migrating sessions to the new token.'),
+        )
         term.writeln('')
         term.writeln(C.blue('● ') + 'Editing ' + C.dim('src/auth/refresh.ts'))
         needsInput = false
@@ -205,7 +289,12 @@
       term.write(snap.data)
       pushToast('success', 'Remote control attached.')
     } catch (e) {
-      pushToast('error', e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']*':\s*/, '') : String(e))
+      pushToast(
+        'error',
+        e instanceof Error
+          ? e.message.replace(/^Error invoking remote method '[^']*':\s*/, '')
+          : String(e),
+      )
     }
   }
 
@@ -232,9 +321,10 @@
       await openInEditor({ repoId: session.repo, branch: session.branch, mobile })
       pushToast('success', 'Opening in editor…')
     } catch (e) {
-      const msg = e instanceof Error
-        ? e.message.replace(/^Error invoking remote method '[^']*':\s*/, '')
-        : String(e)
+      const msg =
+        e instanceof Error
+          ? e.message.replace(/^Error invoking remote method '[^']*':\s*/, '')
+          : String(e)
       pushToast('error', msg)
     }
   }
@@ -245,7 +335,9 @@
     {@html icons.chevronLeft}
   </button>
   <div class="th-title">
-    <div class="t"><span class="stat-dot" style="background:{dot}"></span>{session.tid} · {session.title}</div>
+    <div class="t">
+      <span class="stat-dot" style="background:{dot}"></span>{session.tid} · {session.title}
+    </div>
     <div class="m">
       <span class="badge mono">{@html icons.folder} {r?.org}/{r?.name}</span>
       <span class="badge mono">{@html icons.gitBranch} {session.branch}</span>
@@ -260,9 +352,26 @@
     </div>
   </div>
   <div class="spacer"></div>
-  <button class="btn btn-outline btn-sm" title="Run the app using this repository's start command" disabled={!hasBackend || !session.id || !session.branch || !session.repo} on:click={() => runAppForSession(session)}>{@html icons.play} <span class="btn-label">Run</span></button>
-  <button class="btn btn-outline btn-sm" title="Relaunch this agent with Claude Code Remote Control" disabled={!hasBackend || !session.id} on:click={handleRemoteControl}>{@html icons.remote} <span class="btn-label">Remote control</span></button>
-  <button class="btn btn-outline btn-sm" title="Open the worktree in your configured editor" disabled={!hasBackend || !session.repo || !session.branch} on:click={handleOpenEditor}>
+  <button
+    class="btn btn-outline btn-sm"
+    title="Run the app using this repository's start command"
+    disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+    on:click={() => runAppForSession(session)}
+    >{@html icons.play} <span class="btn-label">Run</span></button
+  >
+  <button
+    class="btn btn-outline btn-sm"
+    title="Relaunch this agent with Claude Code Remote Control"
+    disabled={!hasBackend || !session.id}
+    on:click={handleRemoteControl}
+    >{@html icons.remote} <span class="btn-label">Remote control</span></button
+  >
+  <button
+    class="btn btn-outline btn-sm"
+    title="Open the worktree in your configured editor"
+    disabled={!hasBackend || !session.repo || !session.branch}
+    on:click={handleOpenEditor}
+  >
     {@html icons.externalLink} <span class="btn-label">Editor</span>
   </button>
   <button class="btn btn-outline btn-sm btn-danger" on:click={handleCleanup}>
@@ -284,6 +393,8 @@
   <div class="alert">
     <span class="ic">{@html icons.alert}</span>
     <div class="tx"><b>Agent needs your input</b><span>{alertMsg}</span></div>
-    <div class="keys"><span class="kbd">1</span><span class="kbd">2</span><span class="kbd">↵</span></div>
+    <div class="keys">
+      <span class="kbd">1</span><span class="kbd">2</span><span class="kbd">↵</span>
+    </div>
   </div>
 {/if}

@@ -1,0 +1,28 @@
+image: node:22
+
+stages:
+  - verify
+
+before_script:
+  - corepack enable
+  - pnpm install --frozen-lockfile
+
+lint:
+  stage: verify
+  script:
+    - pnpm lint
+
+check:
+  stage: verify
+  script:
+    - pnpm check
+
+test:
+  stage: verify
+  script:
+    - pnpm test
+
+build:
+  stage: verify
+  script:
+    - pnpm build

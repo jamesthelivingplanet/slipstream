@@ -15,8 +15,8 @@ describe('OutputBuffer', () => {
 
     it('accumulates seq across multiple pushes', () => {
       const buf = new OutputBuffer()
-      buf.push('abc')    // 3
-      buf.push('de')     // 2
+      buf.push('abc') // 3
+      buf.push('de') // 2
       const seq = buf.push('f') // 1
       expect(seq).toBe(6)
     })
@@ -65,7 +65,7 @@ describe('OutputBuffer', () => {
     it('seq reflects the full total even when data is trimmed', () => {
       const buf = new OutputBuffer()
       const chunk = 'x'.repeat(MAX)
-      buf.push(chunk)       // seq = MAX
+      buf.push(chunk) // seq = MAX
       buf.push('y'.repeat(200)) // seq = MAX + 200
 
       const snap = buf.snapshot()

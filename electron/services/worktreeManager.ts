@@ -48,7 +48,9 @@ export function parseShortstat(output: string): { added: number; deleted: number
  *   HEAD <sha>
  *   branch refs/heads/<branch>
  */
-export function parsePorcelainWorktreeList(output: string): Array<{ path: string; branch: string }> {
+export function parsePorcelainWorktreeList(
+  output: string,
+): Array<{ path: string; branch: string }> {
   const stanzas = output.trim().split(/\n\n+/)
   const results: Array<{ path: string; branch: string }> = []
 
@@ -96,6 +98,9 @@ function git(args: string[], opts?: { cwd?: string }): string {
     const e = err as { stdout?: string; stderr?: string; message?: string }
     throw new Error(
       `git ${args.slice(0, 3).join(' ')} failed: ${e.stderr ?? e.message ?? String(err)}`,
+      {
+        cause: err,
+      },
     )
   }
 }
@@ -246,15 +251,26 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       try {
         const porcelain = git(['-C', wt, 'status', '--porcelain'])
         dirty = parsePorcelainDirty(porcelain)
-      } catch { /* default false */ }
+      } catch {
+        /* default false */
+      }
 
       // ahead / behind
       let ahead = 0
       let behind = 0
       try {
-        const rl = git(['-C', repo.path, 'rev-list', '--left-right', '--count', `${repo.base}...${branch}`])
+        const rl = git([
+          '-C',
+          repo.path,
+          'rev-list',
+          '--left-right',
+          '--count',
+          `${repo.base}...${branch}`,
+        ])
         ;({ ahead, behind } = parseRevListCount(rl))
-      } catch { /* defaults */ }
+      } catch {
+        /* defaults */
+      }
 
       // added / deleted lines vs branch point (merge-base of base and HEAD)
       let added = 0
@@ -263,7 +279,9 @@ export function createWorktreeManager(root: string): IWorktreeManager {
         const mergeBase = git(['-C', wt, 'merge-base', repo.base, 'HEAD']).trim()
         const stat = git(['-C', wt, 'diff', '--shortstat', mergeBase])
         ;({ added, deleted } = parseShortstat(stat))
-      } catch { /* defaults */ }
+      } catch {
+        /* defaults */
+      }
 
       return { branch, path: wt, dirty, ahead, behind, added, deleted }
     },

@@ -48,9 +48,10 @@ describe('parseRevListCount', () => {
 
 describe('parseShortstat', () => {
   it('parses a full shortstat line', () => {
-    expect(
-      parseShortstat(' 3 files changed, 12 insertions(+), 4 deletions(-)')
-    ).toEqual({ added: 12, deleted: 4 })
+    expect(parseShortstat(' 3 files changed, 12 insertions(+), 4 deletions(-)')).toEqual({
+      added: 12,
+      deleted: 4,
+    })
   })
 
   it('parses insertions-only output', () => {
@@ -112,7 +113,13 @@ describe('parsePorcelainWorktreeList', () => {
 // ── pathFor ───────────────────────────────────────────────────────────────────
 
 describe('pathFor', () => {
-  const repo: RepoDTO = { id: 'acme-api', org: 'acme', name: 'api', base: 'main', path: '/repos/api' }
+  const repo: RepoDTO = {
+    id: 'acme-api',
+    org: 'acme',
+    name: 'api',
+    base: 'main',
+    path: '/repos/api',
+  }
 
   it('produces the correct path', () => {
     const mgr = createWorktreeManager('/home/user/slipstream-data')
@@ -139,7 +146,11 @@ describe('pathFor', () => {
 
 describe('isMissingWorktreeError', () => {
   it('returns true for "not a working tree" errors', () => {
-    expect(isMissingWorktreeError(new Error("git worktree remove failed: fatal: '/x' is not a working tree"))).toBe(true)
+    expect(
+      isMissingWorktreeError(
+        new Error("git worktree remove failed: fatal: '/x' is not a working tree"),
+      ),
+    ).toBe(true)
   })
 
   it('returns true for "No such file or directory" errors', () => {

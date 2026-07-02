@@ -1,5 +1,10 @@
 import type { NotifyPrefs, PushSubscriptionDTO } from '../../electron/shared/contract.js'
-import { getVapidPublicKey, savePushSubscription, deletePushSubscription, getPushPrefs } from './ipc'
+import {
+  getVapidPublicKey,
+  savePushSubscription,
+  deletePushSubscription,
+  getPushPrefs,
+} from './ipc'
 
 export function pushSupported(): boolean {
   return (

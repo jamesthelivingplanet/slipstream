@@ -12,7 +12,11 @@
 <svelte:window on:click={onWindowClick} />
 
 <div class="pop-wrap">
-  <button class="btn btn-outline btn-icon btn-sm" title="Theme" on:click|stopPropagation={() => (open = !open)}>
+  <button
+    class="btn btn-outline btn-icon btn-sm"
+    title="Theme"
+    on:click|stopPropagation={() => (open = !open)}
+  >
     {@html icons.palette}
   </button>
 
@@ -20,16 +24,26 @@
     <div class="pop">
       <div class="lbl">Mode</div>
       <div class="mode-toggle">
-        <button type="button" class="mt" class:on={$mode === 'light'} on:click={() => mode.set('light')}>
+        <button
+          type="button"
+          class="mt"
+          class:on={$mode === 'light'}
+          on:click={() => mode.set('light')}
+        >
           {@html icons.sun}Light
         </button>
-        <button type="button" class="mt" class:on={$mode === 'dark'} on:click={() => mode.set('dark')}>
+        <button
+          type="button"
+          class="mt"
+          class:on={$mode === 'dark'}
+          on:click={() => mode.set('dark')}
+        >
           {@html icons.moon}Dark
         </button>
       </div>
       <div class="lbl">Accent</div>
       <div class="swatches">
-        {#each Object.entries(ACCENTS) as [key, col]}
+        {#each Object.entries(ACCENTS) as [key, col] (key)}
           <button
             type="button"
             class="sw"

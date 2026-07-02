@@ -24,8 +24,20 @@ describe('buildHealthRequests', () => {
 describe('interpretResponses', () => {
   it('extracts serverName, protocolVersion, and tools from valid responses', () => {
     const lines = [
-      JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'slipstream', version: '1.0.0' } } }),
-      JSON.stringify({ jsonrpc: '2.0', id: 2, result: { tools: [{ name: 'open_merge_request' }, { name: 'report_status' }] } }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          serverInfo: { name: 'slipstream', version: '1.0.0' },
+        },
+      }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        result: { tools: [{ name: 'open_merge_request' }, { name: 'report_status' }] },
+      }),
     ]
 
     const result = interpretResponses(lines)
@@ -51,7 +63,11 @@ describe('interpretResponses', () => {
 
   it('returns tools: [] when tools/list response is missing', () => {
     const result = interpretResponses([
-      JSON.stringify({ jsonrpc: '2.0', id: 1, result: { serverInfo: { name: 'slipstream' }, protocolVersion: '2024-11-05' } }),
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { serverInfo: { name: 'slipstream' }, protocolVersion: '2024-11-05' },
+      }),
     ])
 
     expect(result.tools).toEqual([])

@@ -34,7 +34,9 @@ describe('parseStatusSentinel', () => {
   })
 
   it('preserves an optional message when present', () => {
-    const result = parseStatusSentinel(JSON.stringify({ state: 'needs', ts: 1, message: 'blocked on input' }))
+    const result = parseStatusSentinel(
+      JSON.stringify({ state: 'needs', ts: 1, message: 'blocked on input' }),
+    )
     expect(result).toEqual({ state: 'needs', ts: 1, message: 'blocked on input' })
   })
 

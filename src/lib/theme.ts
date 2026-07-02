@@ -14,6 +14,10 @@ accent.subscribe((a) => {
 })
 
 export const ACCENTS: Record<string, string> = {
-  violet: '#7c5cff', blue: '#3b82f6', green: '#22c55e',
-  orange: '#f97316', rose: '#f43f5e', zinc: '#a1a1aa',
+  violet: '#7c5cff',
+  blue: '#3b82f6',
+  green: '#22c55e',
+  orange: '#f97316',
+  rose: '#f43f5e',
+  zinc: '#a1a1aa',
 }

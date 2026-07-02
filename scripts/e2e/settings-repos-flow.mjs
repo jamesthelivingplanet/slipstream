@@ -45,7 +45,10 @@ await shot(win, 's4-error-toast')
 // remove the repo
 await win.locator('.repo-row button[title="Remove repository"]').first().click()
 await win.waitForTimeout(600)
-console.log('repos after remove:', JSON.stringify(await win.evaluate(() => window.slipstream.listRepos())))
+console.log(
+  'repos after remove:',
+  JSON.stringify(await win.evaluate(() => window.slipstream.listRepos())),
+)
 await shot(win, 's5-after-remove')
 
 await app.close()

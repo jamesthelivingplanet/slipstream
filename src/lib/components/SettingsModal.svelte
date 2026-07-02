@@ -1,8 +1,27 @@
 <script lang="ts">
-  import { settingsOpen, repos, registerRepo, removeRepoById, registerRepoByPath, registerRepoByUrl, settingsRepoId, mobile } from '../stores'
+  import {
+    settingsOpen,
+    repos,
+    registerRepo,
+    removeRepoById,
+    registerRepoByPath,
+    registerRepoByUrl,
+    settingsRepoId,
+    mobile,
+  } from '../stores'
   import ResponsivePanel from './ResponsivePanel.svelte'
   import { icons } from '../icons'
-  import { hasBackend, getEditorConfig, setEditorConfig, getRepoSettings, setRepoSettings, getGitToken, setGitToken, getGcPolicy, setGcPolicy } from '../ipc'
+  import {
+    hasBackend,
+    getEditorConfig,
+    setEditorConfig,
+    getRepoSettings,
+    setRepoSettings,
+    getGitToken,
+    setGitToken,
+    getGcPolicy,
+    setGcPolicy,
+  } from '../ipc'
   import { pushToast } from '../toast'
   import { pushSupported, enablePush, updatePrefs, disablePush, loadPrefs } from '../push'
   import type { NotifyPrefs, GcPolicy } from '../../../electron/shared/contract.js'
@@ -105,13 +124,18 @@
       const cfg = await getEditorConfig()
       editorCommand = cfg.command
       mobileEditorCommand = cfg.mobileCommand
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   async function saveEditorConfig() {
     if (!hasBackend) return
     editorPending = true
     try {
-      await setEditorConfig({ command: editorCommand.trim(), mobileCommand: mobileEditorCommand.trim() })
+      await setEditorConfig({
+        command: editorCommand.trim(),
+        mobileCommand: mobileEditorCommand.trim(),
+      })
       pushToast('success', 'Editor settings saved')
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Failed to save editor settings')
@@ -133,13 +157,21 @@
     return `${day}d`
   }
 
-  $: if ($settingsOpen && activeTab === 'integrations') { loadLinearKey(); loadGithubToken(); loadGitlabToken(); refreshMcpStatus() }
-  $: if ($settingsOpen && activeTab === 'behavior') { loadEditorConfig(); loadGcPolicy() }
+  $: if ($settingsOpen && activeTab === 'integrations') {
+    loadLinearKey()
+    loadGithubToken()
+    loadGitlabToken()
+    refreshMcpStatus()
+  }
+  $: if ($settingsOpen && activeTab === 'behavior') {
+    loadEditorConfig()
+    loadGcPolicy()
+  }
   $: if ($settingsOpen && activeTab === 'notifications') initNotifications()
 
   let gcPolicy: GcPolicy = { ...DEFAULT_GC_POLICY }
-  let gcIdleMin = 0     // minutes, UI-facing (idleMs / 60000)
-  let gcMaxAgeMin = 0   // minutes, UI-facing (maxAgeMs / 60000)
+  let gcIdleMin = 0 // minutes, UI-facing (idleMs / 60000)
+  let gcMaxAgeMin = 0 // minutes, UI-facing (maxAgeMs / 60000)
   let gcPending = false
 
   async function loadGcPolicy() {
@@ -149,7 +181,9 @@
       gcPolicy = p
       gcIdleMin = Math.round(p.idleMs / 60000)
       gcMaxAgeMin = Math.round(p.maxAgeMs / 60000)
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   async function saveGcPolicy() {
     if (!hasBackend) return
@@ -195,9 +229,11 @@
         pushToast('success', 'Notifications enabled')
       } else {
         const msg =
-          result.reason === 'unsupported' ? 'Push notifications are not supported in this browser.' :
-          result.reason === 'denied' ? 'Notification permission was denied.' :
-          result.reason ?? 'Could not enable notifications.'
+          result.reason === 'unsupported'
+            ? 'Push notifications are not supported in this browser.'
+            : result.reason === 'denied'
+              ? 'Notification permission was denied.'
+              : (result.reason ?? 'Could not enable notifications.')
         pushToast('error', msg)
       }
     } finally {
@@ -228,7 +264,8 @@
   // We detect web mode by checking the explicit marker set in main.ts on the
   // WS boot path. The Electron preload never sets this marker, so isWeb is
   // false on desktop even though window.electron is also absent there.
-  const isWeb = hasBackend && (window as unknown as { __slipstreamWeb?: boolean }).__slipstreamWeb === true
+  const isWeb =
+    hasBackend && (window as unknown as { __slipstreamWeb?: boolean }).__slipstreamWeb === true
 
   let pathInput = ''
   let pathPending = false
@@ -340,7 +377,12 @@
           type="button"
           class="tab-item"
           class:active={activeTab === 'integrations'}
-          on:click={() => { activeTab = 'integrations'; loadLinearKey(); loadGithubToken(); loadGitlabToken() }}
+          on:click={() => {
+            activeTab = 'integrations'
+            loadLinearKey()
+            loadGithubToken()
+            loadGitlabToken()
+          }}
         >
           Integrations
         </button>
@@ -348,7 +390,11 @@
           type="button"
           class="tab-item"
           class:active={activeTab === 'behavior'}
-          on:click={() => { activeTab = 'behavior'; loadEditorConfig(); loadGcPolicy() }}
+          on:click={() => {
+            activeTab = 'behavior'
+            loadEditorConfig()
+            loadGcPolicy()
+          }}
         >
           Behavior
         </button>
@@ -420,9 +466,7 @@
           {/if}
 
           {#if $repos.length === 0}
-            <div class="repo-empty">
-              No repositories yet. Add one to start launching agents.
-            </div>
+            <div class="repo-empty">No repositories yet. Add one to start launching agents.</div>
           {:else}
             <div class="repo-list">
               {#each $repos as r (r.id)}
@@ -492,13 +536,25 @@
           </div>
           <div>
             <span class="lbl-f">MCP server</span>
-            <p class="integration-hint">Lets a finished agent push its branch, open the PR, and report status back to Slipstream.</p>
+            <p class="integration-hint">
+              Lets a finished agent push its branch, open the PR, and report status back to
+              Slipstream.
+            </p>
             <div class="mcp-settings-row">
-              <span class="mcp-settings-dot" class:up={$mcpStatus?.up} class:down={$mcpStatus && !$mcpStatus.up}></span>
-              <span class="mcp-settings-state">{$mcpStatus === null ? 'Checking' : $mcpStatus.up ? 'Up' : 'Unreachable'}</span>
+              <span
+                class="mcp-settings-dot"
+                class:up={$mcpStatus?.up}
+                class:down={$mcpStatus && !$mcpStatus.up}
+              ></span>
+              <span class="mcp-settings-state"
+                >{$mcpStatus === null ? 'Checking' : $mcpStatus.up ? 'Up' : 'Unreachable'}</span
+              >
               {#if $mcpStatus?.serverName || $mcpStatus?.protocolVersion}
                 <span class="mono muted mcp-settings-meta">
-                  {$mcpStatus?.serverName ?? ''}{$mcpStatus?.serverName && $mcpStatus?.protocolVersion ? ' · ' : ''}{$mcpStatus?.protocolVersion ?? ''}
+                  {$mcpStatus?.serverName ?? ''}{$mcpStatus?.serverName &&
+                  $mcpStatus?.protocolVersion
+                    ? ' · '
+                    : ''}{$mcpStatus?.protocolVersion ?? ''}
                 </span>
               {/if}
             </div>
@@ -510,18 +566,28 @@
               </div>
             {/if}
             {#if $mcpStatus}
-              <p class="integration-hint muted">Checked {mcpRelTime($mcpStatus.checkedAt)} ago{#if $mcpStatus.lastActivityAt} · Last used {mcpRelTime($mcpStatus.lastActivityAt)} ago{:else} · No agent has used it yet{/if}</p>
+              <p class="integration-hint muted">
+                Checked {mcpRelTime($mcpStatus.checkedAt)} ago{#if $mcpStatus.lastActivityAt}
+                  · Last used {mcpRelTime($mcpStatus.lastActivityAt)} ago{:else}
+                  · No agent has used it yet{/if}
+              </p>
             {/if}
             {#if $mcpStatus?.error}
               <p class="mcp-settings-error">{$mcpStatus.error}</p>
             {/if}
-            <button class="btn btn-outline btn-sm" on:click={() => refreshMcpStatus()} disabled={$mcpChecking}>
+            <button
+              class="btn btn-outline btn-sm"
+              on:click={() => refreshMcpStatus()}
+              disabled={$mcpChecking}
+            >
               {$mcpChecking ? 'Checking…' : 'Test connection'}
             </button>
           </div>
           <div>
             <span class="lbl-f">Linear API Key</span>
-            <p class="integration-hint">Personal API key from Linear → Settings → API → Personal API keys.</p>
+            <p class="integration-hint">
+              Personal API key from Linear → Settings → API → Personal API keys.
+            </p>
             <div class="path-add">
               <input
                 type="password"
@@ -596,7 +662,10 @@
           </div>
           <div>
             <span class="lbl-f">Editor command</span>
-            <p class="integration-hint">Command run to open a worktree in your editor, e.g. <code>code</code> (VS Code) or <code>zed</code> (Zed). The worktree path is appended as an argument.</p>
+            <p class="integration-hint">
+              Command run to open a worktree in your editor, e.g. <code>code</code> (VS Code) or
+              <code>zed</code> (Zed). The worktree path is appended as an argument.
+            </p>
             <input
               type="text"
               class="path-input"
@@ -607,7 +676,11 @@
           </div>
           <div>
             <span class="lbl-f">Mobile editor command (optional)</span>
-            <p class="integration-hint">Used instead when opening from the mobile layout. Leave blank to use the editor command above. Tip: a web-accessible editor such as <code>code serve-web</code> works well here.</p>
+            <p class="integration-hint">
+              Used instead when opening from the mobile layout. Leave blank to use the editor
+              command above. Tip: a web-accessible editor such as <code>code serve-web</code> works well
+              here.
+            </p>
             <div class="path-add">
               <input
                 type="text"
@@ -631,28 +704,62 @@
 
           <div>
             <span class="lbl-f">Session cleanup (cost guard)</span>
-            <p class="integration-hint">Automatically stop abandoned or idle agent sessions so forgotten agents don't keep burning compute. Reaped sessions stay visible in the sidebar marked <b>Reaped</b>.</p>
+            <p class="integration-hint">
+              Automatically stop abandoned or idle agent sessions so forgotten agents don't keep
+              burning compute. Reaped sessions stay visible in the sidebar marked <b>Reaped</b>.
+            </p>
             <label class="notify-check">
-              <input type="checkbox" bind:checked={gcPolicy.enabled} disabled={gcPending || !hasBackend} />
+              <input
+                type="checkbox"
+                bind:checked={gcPolicy.enabled}
+                disabled={gcPending || !hasBackend}
+              />
               Enable automatic cleanup
             </label>
             <label class="notify-check">
-              <input type="checkbox" bind:checked={gcPolicy.onlyAbandoned} disabled={gcPending || !hasBackend || !gcPolicy.enabled} />
+              <input
+                type="checkbox"
+                bind:checked={gcPolicy.onlyAbandoned}
+                disabled={gcPending || !hasBackend || !gcPolicy.enabled}
+              />
               Only reap sessions with no one watching
             </label>
             <label class="notify-check">
-              <input type="checkbox" bind:checked={gcPolicy.autoStopOnDone} disabled={gcPending || !hasBackend || !gcPolicy.enabled} />
+              <input
+                type="checkbox"
+                bind:checked={gcPolicy.autoStopOnDone}
+                disabled={gcPending || !hasBackend || !gcPolicy.enabled}
+              />
               Stop finished (done) agents automatically
             </label>
             <div class="repo-settings-field" style="margin-top:8px">
               <label class="lbl-f" for="gc-idle">Idle timeout (minutes, 0 = off)</label>
-              <input id="gc-idle" type="number" min="0" class="path-input" bind:value={gcIdleMin} disabled={gcPending || !hasBackend || !gcPolicy.enabled} />
+              <input
+                id="gc-idle"
+                type="number"
+                min="0"
+                class="path-input"
+                bind:value={gcIdleMin}
+                disabled={gcPending || !hasBackend || !gcPolicy.enabled}
+              />
             </div>
             <div class="repo-settings-field">
               <label class="lbl-f" for="gc-maxage">Max session age (minutes, 0 = off)</label>
-              <input id="gc-maxage" type="number" min="0" class="path-input" bind:value={gcMaxAgeMin} disabled={gcPending || !hasBackend || !gcPolicy.enabled} />
+              <input
+                id="gc-maxage"
+                type="number"
+                min="0"
+                class="path-input"
+                bind:value={gcMaxAgeMin}
+                disabled={gcPending || !hasBackend || !gcPolicy.enabled}
+              />
             </div>
-            <button class="btn btn-outline btn-sm" style="margin-top:8px" on:click={saveGcPolicy} disabled={gcPending || !hasBackend}>Save</button>
+            <button
+              class="btn btn-outline btn-sm"
+              style="margin-top:8px"
+              on:click={saveGcPolicy}
+              disabled={gcPending || !hasBackend}>Save</button
+            >
             {#if !hasBackend}
               <p class="integration-hint muted">Backend not available in browser-only mode.</p>
             {/if}
@@ -664,18 +771,31 @@
             <span class="tab-title">Notifications</span>
           </div>
           {#if !isWeb}
-            <p class="integration-hint muted">Push notifications are available in the installed web app (PWA). Open Slipstream in your mobile/desktop browser to enable them.</p>
+            <p class="integration-hint muted">
+              Push notifications are available in the installed web app (PWA). Open Slipstream in
+              your mobile/desktop browser to enable them.
+            </p>
           {:else if !pushSupported()}
-            <p class="integration-hint muted">Push notifications are not supported in this browser.</p>
+            <p class="integration-hint muted">
+              Push notifications are not supported in this browser.
+            </p>
           {:else}
             <div class="notify-row">
               <span class="lbl-f" style="margin-bottom:0">Enable notifications</span>
               {#if pushEnabled}
-                <button class="btn btn-outline btn-sm" on:click={handleDisablePush} disabled={pushLoading}>
+                <button
+                  class="btn btn-outline btn-sm"
+                  on:click={handleDisablePush}
+                  disabled={pushLoading}
+                >
                   Disable
                 </button>
               {:else}
-                <button class="btn btn-primary btn-sm" on:click={handleEnablePush} disabled={pushLoading}>
+                <button
+                  class="btn btn-primary btn-sm"
+                  on:click={handleEnablePush}
+                  disabled={pushLoading}
+                >
                   Enable
                 </button>
               {/if}
@@ -692,7 +812,11 @@
                   Is done
                 </label>
                 <label class="notify-check">
-                  <input type="checkbox" bind:checked={prefs.running} on:change={handlePrefsChange} />
+                  <input
+                    type="checkbox"
+                    bind:checked={prefs.running}
+                    on:change={handlePrefsChange}
+                  />
                   Starts running
                 </label>
               </div>
@@ -710,20 +834,41 @@
               <img src="/icons/icon.svg" alt="Slipstream" class="about-glyph" />
               <div>
                 <b>Slipstream</b>
-                <p class="about-desc">A desktop console for running and watching many Claude Code agents at once.</p>
+                <p class="about-desc">
+                  A desktop console for running and watching many Claude Code agents at once.
+                </p>
               </div>
             </div>
 
             <div class="about-links">
-              <a class="about-row" href="https://gitlab.com/ajlebaron/slipstream" target="_blank" rel="noopener noreferrer">
+              <a
+                class="about-row"
+                href="https://gitlab.com/ajlebaron/slipstream"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <span class="about-label">Repository</span>
-                <span class="about-value mono">gitlab.com/ajlebaron/slipstream {@html icons.externalLink}</span>
+                <span class="about-value mono"
+                  >gitlab.com/ajlebaron/slipstream {@html icons.externalLink}</span
+                >
               </a>
-              <a class="about-row" href="https://gitlab.com/ajlebaron/slipstream/-/issues" target="_blank" rel="noopener noreferrer">
+              <a
+                class="about-row"
+                href="https://gitlab.com/ajlebaron/slipstream/-/issues"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <span class="about-label">File an issue</span>
-                <span class="about-value mono">Report bugs &amp; request features {@html icons.externalLink}</span>
+                <span class="about-value mono"
+                  >Report bugs &amp; request features {@html icons.externalLink}</span
+                >
               </a>
-              <a class="about-row" href="https://gitlab.com/ajlebaron/slipstream/-/merge_requests" target="_blank" rel="noopener noreferrer">
+              <a
+                class="about-row"
+                href="https://gitlab.com/ajlebaron/slipstream/-/merge_requests"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <span class="about-label">Merge requests</span>
                 <span class="about-value mono">Contribute code {@html icons.externalLink}</span>
               </a>
@@ -769,7 +914,7 @@
     font-weight: 500;
     color: hsl(var(--muted-foreground));
     cursor: pointer;
-    transition: .14s;
+    transition: 0.14s;
   }
 
   .tab-item:hover {
@@ -818,7 +963,7 @@
     padding: 9px 12px;
     background: hsl(var(--card));
     border-bottom: 1px solid hsl(var(--border));
-    transition: background .12s;
+    transition: background 0.12s;
   }
 
   .repo-row:last-child {
@@ -889,21 +1034,51 @@
     line-height: 1.5;
   }
 
-  .mcp-settings-row { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; flex-wrap: wrap; }
+  .mcp-settings-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
   .mcp-settings-dot {
-    width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex: 0 0 9px;
     background: hsl(var(--muted-foreground));
   }
-  .mcp-settings-dot.up { background: hsl(var(--st-done)); }
-  .mcp-settings-dot.down { background: hsl(var(--st-error)); }
-  .mcp-settings-state { font-size: 12.5px; font-weight: 500; }
-  .mcp-settings-meta { font-size: 11px; }
-  .mcp-settings-tools { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
-  .mcp-settings-tool {
-    font-size: 10.5px; padding: 2px 6px; border-radius: 6px;
-    border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground));
+  .mcp-settings-dot.up {
+    background: hsl(var(--st-done));
   }
-  .mcp-settings-error { font-size: 12px; color: hsl(var(--st-error)); margin: 0 0 8px; }
+  .mcp-settings-dot.down {
+    background: hsl(var(--st-error));
+  }
+  .mcp-settings-state {
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .mcp-settings-meta {
+    font-size: 11px;
+  }
+  .mcp-settings-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 8px;
+  }
+  .mcp-settings-tool {
+    font-size: 10.5px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--muted-foreground));
+  }
+  .mcp-settings-error {
+    font-size: 12px;
+    color: hsl(var(--st-error));
+    margin: 0 0 8px;
+  }
 
   .repo-settings-panel {
     padding: 12px 16px;
@@ -936,21 +1111,82 @@
     padding: 4px 0;
   }
 
-  .about-block { display: flex; flex-direction: column; gap: 18px; }
-  .about-logo { display: flex; gap: 14px; align-items: flex-start; }
-  .about-glyph { width: 40px; height: 40px; border-radius: 10px; flex: 0 0 40px; object-fit: contain; }
-  .about-logo b { font-size: 15px; font-weight: 600; }
-  .about-desc { font-size: 12.5px; color: hsl(var(--muted-foreground)); margin-top: 4px; line-height: 1.5; }
-  .about-links { display: flex; flex-direction: column; gap: 1px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); overflow: hidden; }
-  .about-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; background: hsl(var(--card)); border-bottom: 1px solid hsl(var(--border)); transition: background .12s; text-decoration: none; color: inherit; }
-  .about-row:last-child { border-bottom: none; }
-  .about-row:hover { background: hsl(var(--card-hover)); }
-  .about-label { font-size: 13px; font-weight: 500; }
-  .about-value { font-size: 12px; color: hsl(var(--primary)); display: inline-flex; align-items: center; gap: 6px; }
-  .about-version { display: flex; align-items: center; gap: 8px; font-size: 12px; padding-top: 4px; }
+  .about-block {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .about-logo {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .about-glyph {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    flex: 0 0 40px;
+    object-fit: contain;
+  }
+  .about-logo b {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .about-desc {
+    font-size: 12.5px;
+    color: hsl(var(--muted-foreground));
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+  .about-links {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .about-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 13px;
+    background: hsl(var(--card));
+    border-bottom: 1px solid hsl(var(--border));
+    transition: background 0.12s;
+    text-decoration: none;
+    color: inherit;
+  }
+  .about-row:last-child {
+    border-bottom: none;
+  }
+  .about-row:hover {
+    background: hsl(var(--card-hover));
+  }
+  .about-label {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .about-value {
+    font-size: 12px;
+    color: hsl(var(--primary));
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .about-version {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    padding-top: 4px;
+  }
 
   @media (max-width: 700px) {
-    .settings-body { flex-direction: column; }
+    .settings-body {
+      flex-direction: column;
+    }
     .tab-list {
       flex-direction: row;
       width: 100%;
@@ -959,6 +1195,8 @@
       border-right: none;
       border-bottom: 1px solid hsl(var(--border));
     }
-    .tab-content { padding: 16px; }
+    .tab-content {
+      padding: 16px;
+    }
   }
 </style>

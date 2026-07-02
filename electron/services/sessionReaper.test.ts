@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createSessionReaper, readGcPolicy, writeGcPolicy } from './sessionReaper.js'
 import type { ReaperDeps } from './sessionReaper.js'
-import type { GcPolicy, ISessionManager, ISessionStore, LiveSessionInfo, SessionDTO } from '../shared/contract.js'
+import type {
+  GcPolicy,
+  ISessionManager,
+  ISessionStore,
+  LiveSessionInfo,
+  SessionDTO,
+} from '../shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../shared/contract.js'
 import type { IConfigStore } from './configStore.js'
 import type { RunLogger } from './runLogger.js'
@@ -9,8 +15,12 @@ import type { RunLogger } from './runLogger.js'
 function makeConfig(): IConfigStore {
   const map = new Map<string, string>()
   return {
-    get(key) { return map.get(key) },
-    set(key, value) { map.set(key, value) },
+    get(key) {
+      return map.get(key)
+    },
+    set(key, value) {
+      map.set(key, value)
+    },
   }
 }
 
@@ -21,10 +31,18 @@ function makeSession(overrides: Partial<LiveSessionInfo> = {}): LiveSessionInfo 
 function makeStore(): ISessionStore {
   const map = new Map<string, SessionDTO>()
   return {
-    list() { return Array.from(map.values()) },
-    get(id) { return map.get(id) },
-    upsert(s) { map.set(s.id, s) },
-    delete(id) { map.delete(id) },
+    list() {
+      return Array.from(map.values())
+    },
+    get(id) {
+      return map.get(id)
+    },
+    upsert(s) {
+      map.set(s.id, s)
+    },
+    delete(id) {
+      map.delete(id)
+    },
   }
 }
 
@@ -41,7 +59,9 @@ function makeSessionDto(id: string): SessionDTO {
   }
 }
 
-function makeSessionsFake(initial: LiveSessionInfo[] = []): Pick<ISessionManager, 'liveSessions' | 'reap'> & { reaped: string[] } {
+function makeSessionsFake(
+  initial: LiveSessionInfo[] = [],
+): Pick<ISessionManager, 'liveSessions' | 'reap'> & { reaped: string[] } {
   let live = [...initial]
   const reaped: string[] = []
   return {
@@ -66,7 +86,13 @@ describe('readGcPolicy / writeGcPolicy', () => {
   })
 
   it('round-trips a written policy', () => {
-    const policy: GcPolicy = { enabled: false, onlyAbandoned: false, autoStopOnDone: false, idleMs: 5000, maxAgeMs: 60000 }
+    const policy: GcPolicy = {
+      enabled: false,
+      onlyAbandoned: false,
+      autoStopOnDone: false,
+      idleMs: 5000,
+      maxAgeMs: 60000,
+    }
     writeGcPolicy(config, policy)
     expect(readGcPolicy(config)).toEqual(policy)
   })
@@ -77,7 +103,10 @@ describe('readGcPolicy / writeGcPolicy', () => {
   })
 
   it('coerces invalid/partial fields to defaults, field by field', () => {
-    config.set('gc.policy', JSON.stringify({ enabled: false, idleMs: -5, maxAgeMs: 'nope', onlyAbandoned: 'yes' }))
+    config.set(
+      'gc.policy',
+      JSON.stringify({ enabled: false, idleMs: -5, maxAgeMs: 'nope', onlyAbandoned: 'yes' }),
+    )
     expect(readGcPolicy(config)).toEqual({
       ...DEFAULT_GC_POLICY,
       enabled: false,
@@ -91,7 +120,11 @@ describe('createSessionReaper', () => {
   let viewersMap: Map<string, number>
   let logger: RunLogger
 
-  function deps(sessionsFake: ReturnType<typeof makeSessionsFake>, now: () => number, extra: Partial<ReaperDeps> = {}): ReaperDeps {
+  function deps(
+    sessionsFake: ReturnType<typeof makeSessionsFake>,
+    now: () => number,
+    extra: Partial<ReaperDeps> = {},
+  ): ReaperDeps {
     return {
       sessions: sessionsFake,
       store,
@@ -143,35 +176,45 @@ describe('createSessionReaper', () => {
 
   it('reaps a session idle longer than idleMs', () => {
     writeGcPolicy(config, { ...DEFAULT_GC_POLICY, autoStopOnDone: false, idleMs: 1000 })
-    const sessionsFake = makeSessionsFake([makeSession({ id: 's1', status: 'running', lastActivityAt: 0 })])
+    const sessionsFake = makeSessionsFake([
+      makeSession({ id: 's1', status: 'running', lastActivityAt: 0 }),
+    ])
     const reaper = createSessionReaper(deps(sessionsFake, () => 1000))
     expect(reaper.tick()).toEqual(['s1'])
   })
 
   it('does not reap a session idle within idleMs', () => {
     writeGcPolicy(config, { ...DEFAULT_GC_POLICY, autoStopOnDone: false, idleMs: 1000 })
-    const sessionsFake = makeSessionsFake([makeSession({ id: 's1', status: 'running', lastActivityAt: 500 })])
+    const sessionsFake = makeSessionsFake([
+      makeSession({ id: 's1', status: 'running', lastActivityAt: 500 }),
+    ])
     const reaper = createSessionReaper(deps(sessionsFake, () => 1000))
     expect(reaper.tick()).toEqual([])
   })
 
   it('idleMs 0 disables idle reaping', () => {
     writeGcPolicy(config, { ...DEFAULT_GC_POLICY, autoStopOnDone: false, idleMs: 0 })
-    const sessionsFake = makeSessionsFake([makeSession({ id: 's1', status: 'running', lastActivityAt: 0 })])
+    const sessionsFake = makeSessionsFake([
+      makeSession({ id: 's1', status: 'running', lastActivityAt: 0 }),
+    ])
     const reaper = createSessionReaper(deps(sessionsFake, () => 1_000_000))
     expect(reaper.tick()).toEqual([])
   })
 
   it('reaps a session older than maxAgeMs', () => {
     writeGcPolicy(config, { ...DEFAULT_GC_POLICY, autoStopOnDone: false, maxAgeMs: 1000 })
-    const sessionsFake = makeSessionsFake([makeSession({ id: 's1', status: 'running', createdAt: 0, lastActivityAt: 0 })])
+    const sessionsFake = makeSessionsFake([
+      makeSession({ id: 's1', status: 'running', createdAt: 0, lastActivityAt: 0 }),
+    ])
     const reaper = createSessionReaper(deps(sessionsFake, () => 1000))
     expect(reaper.tick()).toEqual(['s1'])
   })
 
   it('maxAgeMs 0 disables age reaping', () => {
     writeGcPolicy(config, { ...DEFAULT_GC_POLICY, autoStopOnDone: false, maxAgeMs: 0 })
-    const sessionsFake = makeSessionsFake([makeSession({ id: 's1', status: 'running', createdAt: 0, lastActivityAt: 0 })])
+    const sessionsFake = makeSessionsFake([
+      makeSession({ id: 's1', status: 'running', createdAt: 0, lastActivityAt: 0 }),
+    ])
     const reaper = createSessionReaper(deps(sessionsFake, () => 1_000_000))
     expect(reaper.tick()).toEqual([])
   })

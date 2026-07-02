@@ -18,9 +18,9 @@ describe('withTrustedDir', () => {
   it('preserves an existing unrelated top-level key', () => {
     const result = withTrustedDir({ numStartups: 5 }, '/some/dir')
     expect(result.numStartups).toBe(5)
-    expect(
-      (result.projects as Record<string, unknown>)['/some/dir'],
-    ).toEqual({ hasTrustDialogAccepted: true })
+    expect((result.projects as Record<string, unknown>)['/some/dir']).toEqual({
+      hasTrustDialogAccepted: true,
+    })
   })
 
   it('preserves an existing unrelated key inside projects[dir]', () => {

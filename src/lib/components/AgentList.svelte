@@ -34,8 +34,13 @@
     </div>
 
     <div class="segs">
-      {#each segs as s}
-        <button type="button" class="seg" class:on={$filter === s.f} on:click={() => filter.set(s.f)}>
+      {#each segs as s (s.f)}
+        <button
+          type="button"
+          class="seg"
+          class:on={$filter === s.f}
+          on:click={() => filter.set(s.f)}
+        >
           {s.label}
           {#if s.f !== 'all' && $counts[s.f]}<span class="n">{$counts[s.f]}</span>{/if}
           {#if s.f === 'all'}<span class="n">{$counts.all}</span>{/if}
@@ -65,9 +70,16 @@
             <span class="muted">draft · pick a repo to start</span>
           {:else}
             {@const r = repoById(s.repo)}
-            <span class="b mono">{@html icons.folder}<span class="br">{r?.org}/{r?.name}</span></span>
-            <span class="b mono">{@html icons.gitBranch}<span class="br">{s.branch?.replace(s.tid + '-', '')}</span></span>
-            <span class="diff mono"><span class="add">+{s.add}</span><span class="del">−{s.del}</span></span>
+            <span class="b mono"
+              >{@html icons.folder}<span class="br">{r?.org}/{r?.name}</span></span
+            >
+            <span class="b mono"
+              >{@html icons.gitBranch}<span class="br">{s.branch?.replace(s.tid + '-', '')}</span
+              ></span
+            >
+            <span class="diff mono"
+              ><span class="add">+{s.add}</span><span class="del">−{s.del}</span></span
+            >
           {/if}
         </div>
       </div>

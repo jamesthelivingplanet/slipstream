@@ -1,27 +1,54 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { transitionKind, createPushService } from './pushService.js'
 import type { PushStore, PushSender } from './pushService.js'
-import type { NotifyPrefs, PushSubscriptionDTO, SessionStatus, ISessionManager, ISessionStore, SessionDTO } from '../shared/contract.js'
+import type {
+  NotifyPrefs,
+  PushSubscriptionDTO,
+  SessionStatus,
+  ISessionManager,
+  ISessionStore,
+  SessionDTO,
+} from '../shared/contract.js'
 import type { IConfigStore } from './configStore.js'
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
-function makeStore(rows: Array<{ endpoint: string; p256dh: string; auth: string; needs: number; done: number; running: number; createdAt: number }> = []): PushStore & { rows: typeof rows } {
+function makeStore(
+  rows: Array<{
+    endpoint: string
+    p256dh: string
+    auth: string
+    needs: number
+    done: number
+    running: number
+    createdAt: number
+  }> = [],
+): PushStore & { rows: typeof rows } {
   const state = { rows }
   const result = {
-    get rows() { return state.rows },
+    get rows() {
+      return state.rows
+    },
     all: () => state.rows,
     upsert(sub: PushSubscriptionDTO, prefs: NotifyPrefs, now: number) {
-      const existing = state.rows.findIndex(r => r.endpoint === sub.endpoint)
-      const row = { endpoint: sub.endpoint, p256dh: sub.keys.p256dh, auth: sub.keys.auth, needs: prefs.needs ? 1 : 0, done: prefs.done ? 1 : 0, running: prefs.running ? 1 : 0, createdAt: now }
+      const existing = state.rows.findIndex((r) => r.endpoint === sub.endpoint)
+      const row = {
+        endpoint: sub.endpoint,
+        p256dh: sub.keys.p256dh,
+        auth: sub.keys.auth,
+        needs: prefs.needs ? 1 : 0,
+        done: prefs.done ? 1 : 0,
+        running: prefs.running ? 1 : 0,
+        createdAt: now,
+      }
       if (existing >= 0) state.rows[existing] = row
       else state.rows.push(row)
     },
     delete(endpoint: string) {
-      state.rows = state.rows.filter(r => r.endpoint !== endpoint)
+      state.rows = state.rows.filter((r) => r.endpoint !== endpoint)
     },
     getPrefs(endpoint: string): NotifyPrefs | null {
-      const row = state.rows.find(r => r.endpoint === endpoint)
+      const row = state.rows.find((r) => r.endpoint === endpoint)
       if (!row) return null
       return { needs: !!row.needs, done: !!row.done, running: !!row.running }
     },
@@ -49,7 +76,7 @@ function makeSessions(): ISessionManager & { _emit: (event: string, ...args: unk
     },
     off(event: string, listener: Listener) {
       if (listeners[event]) {
-        listeners[event] = listeners[event].filter(l => l !== listener)
+        listeners[event] = listeners[event].filter((l) => l !== listener)
       }
     },
     _emit(event: string, ...args: unknown[]) {
@@ -59,7 +86,7 @@ function makeSessions(): ISessionManager & { _emit: (event: string, ...args: unk
 }
 
 function makeSessionStore(sessions: SessionDTO[] = []): ISessionStore {
-  const map = new Map(sessions.map(s => [s.id, s]))
+  const map = new Map(sessions.map((s) => [s.id, s]))
   return {
     list: () => Array.from(map.values()),
     get: (id) => map.get(id),
@@ -72,7 +99,9 @@ function makeConfig(): IConfigStore {
   const data: Record<string, string> = {}
   return {
     get: (key) => data[key],
-    set: (key, value) => { data[key] = value },
+    set: (key, value) => {
+      data[key] = value
+    },
   }
 }
 
@@ -136,7 +165,9 @@ describe('createPushService', () => {
     nowMs = 10000
   })
 
-  function makeService(overrides: { store?: PushStore; send?: PushSender; now?: () => number } = {}) {
+  function makeService(
+    overrides: { store?: PushStore; send?: PushSender; now?: () => number } = {},
+  ) {
     return createPushService({
       config,
       store: overrides.store ?? store,
@@ -188,7 +219,11 @@ describe('createPushService', () => {
     const sub = makeSub()
     store.upsert(sub, { needs: true, done: false, running: true }, 0)
     const svc = makeService()
-    expect(await svc.getPushPrefs(sub.endpoint)).toEqual({ needs: true, done: false, running: true })
+    expect(await svc.getPushPrefs(sub.endpoint)).toEqual({
+      needs: true,
+      done: false,
+      running: true,
+    })
   })
 
   it('sends push when session transitions to needs and sub has needs=1', async () => {
@@ -197,7 +232,7 @@ describe('createPushService', () => {
     makeService()
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
     // Allow microtasks to flush
-    await new Promise(r => setTimeout(r, 10))
+    await new Promise((r) => setTimeout(r, 10))
     expect(send).toHaveBeenCalledOnce()
     const [calledSub, payload] = send.mock.calls[0] as [PushSubscriptionDTO, string]
     expect(calledSub.endpoint).toBe(sub.endpoint)
@@ -209,7 +244,7 @@ describe('createPushService', () => {
     store.upsert(sub, { needs: false, done: true, running: false }, 0)
     makeService()
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
-    await new Promise(r => setTimeout(r, 10))
+    await new Promise((r) => setTimeout(r, 10))
     expect(send).not.toHaveBeenCalled()
   })
 
@@ -218,7 +253,7 @@ describe('createPushService', () => {
     store.upsert(sub, { needs: false, done: false, running: true }, 0)
     makeService()
     sessions._emit('status', 's1', 'running' satisfies SessionStatus)
-    await new Promise(r => setTimeout(r, 10))
+    await new Promise((r) => setTimeout(r, 10))
     expect(send).toHaveBeenCalledOnce()
     const [, payload] = send.mock.calls[0] as [PushSubscriptionDTO, string]
     expect(JSON.parse(payload).status).toBe('running')
@@ -234,7 +269,7 @@ describe('createPushService', () => {
     sessions._emit('status', 's1', 'idle' satisfies SessionStatus)
     // Second transition to needs within 3s window (nowMs unchanged)
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
-    await new Promise(r => setTimeout(r, 10))
+    await new Promise((r) => setTimeout(r, 10))
     expect(send).toHaveBeenCalledOnce()
   })
 
@@ -247,7 +282,7 @@ describe('createPushService', () => {
     sessions._emit('status', 's1', 'idle' satisfies SessionStatus)
     t += 4000
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
-    await new Promise(r => setTimeout(r, 10))
+    await new Promise((r) => setTimeout(r, 10))
     expect(send).toHaveBeenCalledTimes(2)
   })
 
@@ -257,33 +292,47 @@ describe('createPushService', () => {
     const gone = vi.fn().mockResolvedValue({ statusCode: 410 })
     makeService({ send: gone as PushSender })
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
-    await new Promise(r => setTimeout(r, 10))
+    await new Promise((r) => setTimeout(r, 10))
     expect(store.rows).toHaveLength(0)
   })
 
   it('prunes subscription when send throws with statusCode 410', async () => {
     const sub = makeSub()
     store.upsert(sub, { needs: true, done: false, running: false }, 0)
-    const throwGone = vi.fn().mockRejectedValue(Object.assign(new Error('Gone'), { statusCode: 410 }))
+    const throwGone = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('Gone'), { statusCode: 410 }))
     makeService({ send: throwGone as PushSender })
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
-    await new Promise(r => setTimeout(r, 10))
+    await new Promise((r) => setTimeout(r, 10))
     expect(store.rows).toHaveLength(0)
   })
 
   it('uses tid from session store in the notification payload', async () => {
     const sub = makeSub()
     store.upsert(sub, { needs: true, done: false, running: false }, 0)
-    const sessionStore2 = makeSessionStore([{
-      id: 's1', tid: 'FLO-42', title: 'Do work', prompt: 'do it',
-      repoId: 'r1', branch: 'flo-42', status: 'running', createdAt: 0
-    }])
+    const sessionStore2 = makeSessionStore([
+      {
+        id: 's1',
+        tid: 'FLO-42',
+        title: 'Do work',
+        prompt: 'do it',
+        repoId: 'r1',
+        branch: 'flo-42',
+        status: 'running',
+        createdAt: 0,
+      },
+    ])
     createPushService({
-      config, store, sessions, sessionStore: sessionStore2,
-      send: send as PushSender, now: () => nowMs
+      config,
+      store,
+      sessions,
+      sessionStore: sessionStore2,
+      send: send as PushSender,
+      now: () => nowMs,
     })
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
-    await new Promise(r => setTimeout(r, 10))
+    await new Promise((r) => setTimeout(r, 10))
     const [, payload] = send.mock.calls[0] as [PushSubscriptionDTO, string]
     expect(JSON.parse(payload).tid).toBe('FLO-42')
     expect(JSON.parse(payload).body).toBe('Do work')

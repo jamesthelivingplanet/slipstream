@@ -13,7 +13,6 @@
 
   let agentKind: BackendKind = 'claude-code'
 
-
   $: if (session && session.tid !== lastTid) {
     lastTid = session.tid
     prompt = session.prompt ?? `Begin implementing ${session.tid}.`
@@ -44,14 +43,22 @@
   <div class="config-inner">
     <div>
       <label class="lbl-f" for="cfgPrompt">Kickoff prompt</label>
-      <textarea id="cfgPrompt" bind:value={prompt} placeholder="Describe the task for this agent…"></textarea>
-      <p class="cfg-hint">Full ticket details are sent to the agent automatically as context. This is the opening message you can tweak.</p>
+      <textarea id="cfgPrompt" bind:value={prompt} placeholder="Describe the task for this agent…"
+      ></textarea>
+      <p class="cfg-hint">
+        Full ticket details are sent to the agent automatically as context. This is the opening
+        message you can tweak.
+      </p>
     </div>
 
     <div>
       <span class="lbl-f">Repository</span>
       <div class="select" id="cfgRepoSel">
-        <button class="sel-trigger" type="button" on:click|stopPropagation={() => (menuOpen = !menuOpen)}>
+        <button
+          class="sel-trigger"
+          type="button"
+          on:click|stopPropagation={() => (menuOpen = !menuOpen)}
+        >
           {#if chosen}
             <span><span class="muted">{chosen.org}/</span>{chosen.name}</span>
           {:else}
@@ -61,8 +68,16 @@
         </button>
         {#if menuOpen}
           <div class="sel-menu">
-            {#each $repos as r}
-              <button type="button" class="opt" class:sel={repoChoice === r.id} on:click={() => { repoChoice = r.id; menuOpen = false }}>
+            {#each $repos as r (r.id)}
+              <button
+                type="button"
+                class="opt"
+                class:sel={repoChoice === r.id}
+                on:click={() => {
+                  repoChoice = r.id
+                  menuOpen = false
+                }}
+              >
                 <span><span class="muted">{r.org}/</span>{r.name}</span>
                 <span class="badge mono" style="margin-left:8px">{r.base}</span>
                 <span class="check">{@html icons.check}</span>
@@ -71,22 +86,39 @@
           </div>
         {/if}
       </div>
-      <p class="cfg-hint">A fresh worktree is branched from this repo's base branch, and claude starts inside it.</p>
+      <p class="cfg-hint">
+        A fresh worktree is branched from this repo's base branch, and claude starts inside it.
+      </p>
     </div>
-
 
     <div>
       <span class="lbl-f">Agent</span>
       <div class="agent-kind-toggle">
-        <button type="button" class="toggle-opt" class:active={agentKind === 'claude-code'} on:click={() => agentKind = 'claude-code'}>
-          {#if agentKind === 'claude-code'}<span class="check-active">{@html icons.check}</span>{/if}
+        <button
+          type="button"
+          class="toggle-opt"
+          class:active={agentKind === 'claude-code'}
+          on:click={() => (agentKind = 'claude-code')}
+        >
+          {#if agentKind === 'claude-code'}<span class="check-active">{@html icons.check}</span
+            >{/if}
           Claude Code
         </button>
-        <button type="button" class="toggle-opt" class:active={agentKind === 'opencode'} on:click={() => agentKind = 'opencode'}>
+        <button
+          type="button"
+          class="toggle-opt"
+          class:active={agentKind === 'opencode'}
+          on:click={() => (agentKind = 'opencode')}
+        >
           {#if agentKind === 'opencode'}<span class="check-active">{@html icons.check}</span>{/if}
           OpenCode
         </button>
-        <button type="button" class="toggle-opt" class:active={agentKind === 'pi'} on:click={() => agentKind = 'pi'}>
+        <button
+          type="button"
+          class="toggle-opt"
+          class:active={agentKind === 'pi'}
+          on:click={() => (agentKind = 'pi')}
+        >
           {#if agentKind === 'pi'}<span class="check-active">{@html icons.check}</span>{/if}
           Pi
         </button>
@@ -100,9 +132,17 @@
       </p>
     </div>
     <div class="derive">
-      <div class="drow"><span class="k">Base branch</span><span class="v muted">{chosen?.base ?? '—'}</span></div>
-      <div class="drow"><span class="k">New branch</span><span class="v"><b>{branch}</b></span></div>
-      <div class="drow"><span class="k">Worktree</span><span class="v muted">{chosen ? `.worktrees/${chosen.org}-${chosen.name}/${branch}` : '—'}</span></div>
+      <div class="drow">
+        <span class="k">Base branch</span><span class="v muted">{chosen?.base ?? '—'}</span>
+      </div>
+      <div class="drow">
+        <span class="k">New branch</span><span class="v"><b>{branch}</b></span>
+      </div>
+      <div class="drow">
+        <span class="k">Worktree</span><span class="v muted"
+          >{chosen ? `.worktrees/${chosen.org}-${chosen.name}/${branch}` : '—'}</span
+        >
+      </div>
     </div>
 
     <button class="btn btn-primary" style="width:100%;height:40px;font-size:14px" on:click={start}>

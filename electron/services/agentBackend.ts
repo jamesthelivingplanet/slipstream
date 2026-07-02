@@ -15,11 +15,29 @@ import * as path from 'node:path'
 import type { BackendKind, SessionStatus } from '../shared/contract.js'
 import { deliverPrompt, buildAgentsMdContent } from '../shared/promptComposer.js'
 import { writeAgentsMd } from './promptWriter.js'
-import { withOpencodePromptArg, fetchOpencodeMessages, opencodeStatusFromMessages } from './opencodeSessions.js'
-import { capturePiSessionFile, piSessionDirFor, readPiSessionFile, piStatusFromFileContent } from './piSessions.js'
-import { CLAUDE_BIN, OPENCODE_BIN_NAME, CLAUDE_FLAGS, OPENCODE_FLAGS, OPENCODE_STATUS_POLL_MS } from '../shared/agentCli.js'
+import {
+  withOpencodePromptArg,
+  fetchOpencodeMessages,
+  opencodeStatusFromMessages,
+} from './opencodeSessions.js'
+import {
+  capturePiSessionFile,
+  piSessionDirFor,
+  readPiSessionFile,
+  piStatusFromFileContent,
+} from './piSessions.js'
+import {
+  CLAUDE_BIN,
+  OPENCODE_BIN_NAME,
+  CLAUDE_FLAGS,
+  OPENCODE_FLAGS,
+  OPENCODE_STATUS_POLL_MS,
+} from '../shared/agentCli.js'
 
-export interface SpawnSpec { cmd: string; args: string[] }
+export interface SpawnSpec {
+  cmd: string
+  args: string[]
+}
 
 /** PTY-scraped status (StatusDetector) vs polled (opencode server / pi file). */
 export type StatusSource = 'pty' | 'poll'
@@ -92,7 +110,11 @@ const PI_APPROVE_FLAG = '--approve'
 const PI_CONTINUE_FLAG = '--continue'
 
 /** Generic poll loop driven by a status `source`; manager owns timer + emit. */
-function runPoll(handle: StatusHandle, intervalMs: number, source: () => Promise<SessionStatus>): void {
+function runPoll(
+  handle: StatusHandle,
+  intervalMs: number,
+  source: () => Promise<SessionStatus>,
+): void {
   if (handle.polling) return
   const tick = async () => {
     if (handle.disposed) return
@@ -109,7 +131,13 @@ export const claudeCodeBackend: AgentBackend = {
   statusSource: 'pty',
   buildStartArgs({ sessionId, system, user, mcpConfigPath }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
-    const args = [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
+    const args = [
+      CLAUDE_FLAGS.skipPermissions,
+      ...systemArgs,
+      CLAUDE_FLAGS.sessionId,
+      sessionId,
+      userPrompt,
+    ]
     if (mcpConfigPath) {
       args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
     }
@@ -129,7 +157,14 @@ export const claudeCodeBackend: AgentBackend = {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
     const args = hasTranscript
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, CLAUDE_FLAGS.resume, sessionId]
-      : [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
+      : [
+          CLAUDE_FLAGS.skipPermissions,
+          CLAUDE_FLAGS.remoteControl,
+          ...systemArgs,
+          CLAUDE_FLAGS.sessionId,
+          sessionId,
+          userPrompt,
+        ]
     if (mcpConfigPath) {
       args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
     }
@@ -158,7 +193,10 @@ export const opencodeBackend: AgentBackend = {
   },
   buildStartArgs({ system, user, opencodePort }) {
     const { userPrompt } = deliverPrompt('opencode', { system, user })
-    return { cmd: OPENCODE_BIN, args: withOpencodePromptArg(opencodePortArgs(opencodePort), userPrompt) }
+    return {
+      cmd: OPENCODE_BIN,
+      args: withOpencodePromptArg(opencodePortArgs(opencodePort), userPrompt),
+    }
   },
   buildResumeArgs(ctx) {
     return buildOpencodeResume(ctx)

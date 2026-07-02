@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { isMobileWidth, MOBILE_MEDIA_QUERY, MOBILE_BREAKPOINT, DRAWER_DISMISS_PX, shouldDismissDrawer } from './responsive.js'
+import {
+  isMobileWidth,
+  MOBILE_MEDIA_QUERY,
+  MOBILE_BREAKPOINT,
+  DRAWER_DISMISS_PX,
+  shouldDismissDrawer,
+} from './responsive.js'
 
 describe('responsive', () => {
   describe('isMobileWidth', () => {

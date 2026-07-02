@@ -1,18 +1,42 @@
 import { describe, it, expect } from 'vitest'
-import { parseRemote, gitlabProjectPath, redact, buildGitlabCreateMrDescriptor, buildGitlabFindMrDescriptor, buildGithubCreatePrDescriptor, buildGithubFindPrDescriptor } from './gitDriver.js'
+import {
+  parseRemote,
+  gitlabProjectPath,
+  redact,
+  buildGitlabCreateMrDescriptor,
+  buildGitlabFindMrDescriptor,
+  buildGithubCreatePrDescriptor,
+  buildGithubFindPrDescriptor,
+} from './gitDriver.js'
 
 describe('parseRemote', () => {
   it('parses ssh gitlab', () => {
-    expect(parseRemote('git@gitlab.com:org/name.git')).toEqual({ host: 'gitlab', org: 'org', name: 'name' })
+    expect(parseRemote('git@gitlab.com:org/name.git')).toEqual({
+      host: 'gitlab',
+      org: 'org',
+      name: 'name',
+    })
   })
   it('parses ssh github', () => {
-    expect(parseRemote('git@github.com:org/name.git')).toEqual({ host: 'github', org: 'org', name: 'name' })
+    expect(parseRemote('git@github.com:org/name.git')).toEqual({
+      host: 'github',
+      org: 'org',
+      name: 'name',
+    })
   })
   it('parses https gitlab', () => {
-    expect(parseRemote('https://gitlab.com/org/name.git')).toEqual({ host: 'gitlab', org: 'org', name: 'name' })
+    expect(parseRemote('https://gitlab.com/org/name.git')).toEqual({
+      host: 'gitlab',
+      org: 'org',
+      name: 'name',
+    })
   })
   it('parses https github without .git', () => {
-    expect(parseRemote('https://github.com/org/name')).toEqual({ host: 'github', org: 'org', name: 'name' })
+    expect(parseRemote('https://github.com/org/name')).toEqual({
+      host: 'github',
+      org: 'org',
+      name: 'name',
+    })
   })
   it('returns null for unknown host', () => {
     expect(parseRemote('https://bitbucket.org/org/name')).toBeNull()
@@ -39,7 +63,15 @@ describe('redact', () => {
 
 describe('buildGitlabCreateMrDescriptor', () => {
   it('url contains project path and no token', () => {
-    const d = buildGitlabCreateMrDescriptor({ org: 'o', name: 'n', branch: 'b', base: 'main', title: 't', description: 'd', token: 'tok' })
+    const d = buildGitlabCreateMrDescriptor({
+      org: 'o',
+      name: 'n',
+      branch: 'b',
+      base: 'main',
+      title: 't',
+      description: 'd',
+      token: 'tok',
+    })
     expect(d.method).toBe('POST')
     expect(d.url).not.toContain('tok')
     expect(d.headers['PRIVATE-TOKEN']).toBe('tok')
@@ -57,7 +89,15 @@ describe('buildGitlabFindMrDescriptor', () => {
 
 describe('buildGithubCreatePrDescriptor', () => {
   it('url does not contain token', () => {
-    const d = buildGithubCreatePrDescriptor({ org: 'o', name: 'n', branch: 'b', base: 'main', title: 't', body: '', token: 'tok' })
+    const d = buildGithubCreatePrDescriptor({
+      org: 'o',
+      name: 'n',
+      branch: 'b',
+      base: 'main',
+      title: 't',
+      body: '',
+      token: 'tok',
+    })
     expect(d.method).toBe('POST')
     expect(d.url).not.toContain('tok')
     expect(d.headers['Authorization']).toContain('tok')
@@ -66,7 +106,13 @@ describe('buildGithubCreatePrDescriptor', () => {
 
 describe('buildGithubFindPrDescriptor', () => {
   it('url does not contain token', () => {
-    const d = buildGithubFindPrDescriptor({ org: 'o', name: 'n', org_login: 'o', branch: 'b', token: 'tok' })
+    const d = buildGithubFindPrDescriptor({
+      org: 'o',
+      name: 'n',
+      org_login: 'o',
+      branch: 'b',
+      token: 'tok',
+    })
     expect(d.method).toBe('GET')
     expect(d.url).not.toContain('tok')
     expect(d.headers['Authorization']).toContain('tok')

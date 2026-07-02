@@ -64,7 +64,15 @@ describe('createRunLogger', () => {
       const log = createRunLogger(root)
       const sid = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff'
       const longPrompt = 'x'.repeat(1000)
-      expect(() => log.spawn(sid, { agentKind: 'claude-code', cmd: 'c', args: [], cwd: '/x', prompt: longPrompt })).not.toThrow()
+      expect(() =>
+        log.spawn(sid, {
+          agentKind: 'claude-code',
+          cmd: 'c',
+          args: [],
+          cwd: '/x',
+          prompt: longPrompt,
+        }),
+      ).not.toThrow()
       const content = readFileSync(join(root, 'logs', `${sid}.log`), 'utf8')
       expect(content).toContain('[truncated]')
     })
@@ -136,7 +144,12 @@ describe('createRunLogger', () => {
     it('never throws on a spawn when the dir is fine (smoke)', () => {
       const log = createRunLogger(root)
       expect(() =>
-        log.spawn('deadbeef-0000-0000-0000-000000000000', { agentKind: 'claude-code', cmd: 'c', args: ['--x'], cwd: '/x' }),
+        log.spawn('deadbeef-0000-0000-0000-000000000000', {
+          agentKind: 'claude-code',
+          cmd: 'c',
+          args: ['--x'],
+          cwd: '/x',
+        }),
       ).not.toThrow()
     })
   })

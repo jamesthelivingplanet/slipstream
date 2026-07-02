@@ -2,11 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import {
-  resolveDaemonConfig,
-  loadOrCreateLocalIdentity,
-  pickPort,
-} from './daemonManager.js'
+import { resolveDaemonConfig, loadOrCreateLocalIdentity, pickPort } from './daemonManager.js'
 
 // ── resolveDaemonConfig — remote mode ─────────────────────────────────────────
 
@@ -78,9 +74,13 @@ describe('loadOrCreateLocalIdentity', () => {
   })
 
   it('creates daemon.json when absent and returns consistent identity', async () => {
-    const id = await loadOrCreateLocalIdentity(tmpDir, {}, {
-      pickPort: async () => 9999,
-    })
+    const id = await loadOrCreateLocalIdentity(
+      tmpDir,
+      {},
+      {
+        pickPort: async () => 9999,
+      },
+    )
     expect(id.port).toBe(9999)
     expect(typeof id.token).toBe('string')
     expect(id.token.length).toBeGreaterThan(0)
@@ -101,9 +101,13 @@ describe('loadOrCreateLocalIdentity', () => {
   })
 
   it('uses SLIPSTREAM_TOKEN env var when creating', async () => {
-    const id = await loadOrCreateLocalIdentity(tmpDir, { SLIPSTREAM_TOKEN: 'envtoken' }, {
-      pickPort: async () => 7777,
-    })
+    const id = await loadOrCreateLocalIdentity(
+      tmpDir,
+      { SLIPSTREAM_TOKEN: 'envtoken' },
+      {
+        pickPort: async () => 7777,
+      },
+    )
     expect(id.token).toBe('envtoken')
   })
 })
@@ -143,7 +147,9 @@ describe('pickPort', () => {
       expect(port).not.toBe(busyPort)
       expect(port).toBeGreaterThan(0)
     } finally {
-      await new Promise<void>((resolve, reject) => blocker.close((err) => (err ? reject(err) : resolve())))
+      await new Promise<void>((resolve, reject) =>
+        blocker.close((err) => (err ? reject(err) : resolve())),
+      )
     }
   })
 })
