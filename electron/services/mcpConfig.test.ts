@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildAppMcpConfig } from './mcpConfig.js'
+import { buildAppMcpConfig, buildOpencodeMcpConfig } from './mcpConfig.js'
 
 describe('buildAppMcpConfig', () => {
   it('returns correct shape', () => {
@@ -30,5 +30,28 @@ describe('buildAppMcpConfig', () => {
     const serialized = JSON.stringify(config)
     expect(serialized).not.toContain('token')
     expect(serialized).not.toContain('Token')
+  })
+})
+
+describe('buildOpencodeMcpConfig', () => {
+  it('returns correct shape', () => {
+    const config = buildOpencodeMcpConfig({
+      appMcpJsPath: '/dist/app-mcp.js',
+      electronPath: '/usr/bin/electron',
+      dataDir: '/data',
+      sessionId: 'sess-1',
+      base: 'main',
+      branch: 'feature',
+    }) as any
+    expect(config.mcp.slipstream.type).toBe('local')
+    expect(config.mcp.slipstream.command).toEqual(['/usr/bin/electron', '/dist/app-mcp.js'])
+    expect(config.mcp.slipstream.enabled).toBe(true)
+    expect(config.mcp.slipstream.environment).toEqual({
+      ELECTRON_RUN_AS_NODE: '1',
+      SLIPSTREAM_DATA_DIR: '/data',
+      SLIPSTREAM_SESSION_ID: 'sess-1',
+      SLIPSTREAM_BASE: 'main',
+      SLIPSTREAM_BRANCH: 'feature',
+    })
   })
 })

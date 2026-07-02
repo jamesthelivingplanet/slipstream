@@ -175,8 +175,17 @@ export async function main(): Promise<void> {
   const dataDir = process.env.SLIPSTREAM_DATA_DIR ?? ''
   const sessionId = process.env.SLIPSTREAM_SESSION_ID ?? ''
   const base = process.env.SLIPSTREAM_BASE ?? 'main'
-  const branch = process.env.SLIPSTREAM_BRANCH ?? ''
   const cwd = process.cwd()
+
+  let branch = process.env.SLIPSTREAM_BRANCH ?? ''
+  if (!branch) {
+    try {
+      const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])
+      branch = stdout.trim()
+    } catch {
+      branch = ''
+    }
+  }
 
   // Dynamically import to avoid issues at module load time
   const { openDb } = await import('../db/db.js')
@@ -213,6 +222,7 @@ export async function main(): Promise<void> {
       await fs.promises.writeFile(path.join(sentinelDir, 'pr.json'), JSON.stringify({ url }))
     },
     async writeStatus(state: 'running' | 'needs' | 'done', message?: string): Promise<void> {
+      if (!sessionId) return
       const sentinelDir = path.join(dataDir, 'sessions', sessionId)
       await fs.promises.mkdir(sentinelDir, { recursive: true })
       await fs.promises.writeFile(
