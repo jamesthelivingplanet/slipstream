@@ -11,6 +11,7 @@ export default tseslint.config(
       'dist-electron/**',
       'out/**',
       'node_modules/**',
+      '.pnpm-store/**',
       'coverage/**',
       'prototype.html',
       'public/**',

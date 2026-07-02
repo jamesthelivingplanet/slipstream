@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-electron/
 out/
+.pnpm-store/
 .DS_Store
 
 # tdd-guard tooling data (not source)
