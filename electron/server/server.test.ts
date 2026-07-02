@@ -282,6 +282,30 @@ describe('createServer', () => {
     expect(ws.readyState).toBe(WebSocket.CLOSED)
   })
 
+  it('closes with code 4001 on wrong token', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+
+    const ws = wsConnect(port, 'wrong-token')
+    const code = await new Promise<number>((resolve) => {
+      ws.once('close', (c) => resolve(c))
+    })
+    expect(code).toBe(4001)
+  })
+
+  it('closes with code 4001 when no token is provided', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+
+    const ws = wsConnect(port)
+    const code = await new Promise<number>((resolve) => {
+      ws.once('close', (c) => resolve(c))
+    })
+    expect(code).toBe(4001)
+  })
+
   it('accepts a connection with the correct token', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })

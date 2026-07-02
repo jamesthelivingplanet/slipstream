@@ -18,9 +18,24 @@ import '@xterm/xterm/css/xterm.css'
 
 const target = document.getElementById('app')!
 
-async function mountApp() {
+// The single Svelte component currently mounted into #app (App or TokenGate).
+// We swap between them on (re)auth and always destroy the previous one so an
+// auth failure can never leave the app and the gate stacked in the same target.
+let mounted: { $destroy(): void } | null = null
+
+function clearMount(): void {
+  if (mounted) {
+    mounted.$destroy()
+    mounted = null
+  }
+}
+
+async function mountApp(shouldAbort?: () => boolean) {
   const { default: App } = await import('./App.svelte')
-  new App({ target })
+  // If auth failed while we were importing, don't mount the app over the gate.
+  if (shouldAbort?.()) return
+  clearMount()
+  mounted = new App({ target })
 }
 
 async function bootWeb() {
@@ -82,12 +97,16 @@ async function connectWithToken(
     registerServiceWorker()
 
     // Mount the app — ipc.ts will see window.slipstream = truthy
-    mountApp().then(resolve)
+    mountApp(() => authFailed).then(() => {
+      if (authFailed) return // onAuthError already swapped in the gate
+      resolve()
+    })
   })
 }
 
 async function showTokenGate(wsUrl: string, errorMsg: string): Promise<void> {
   const { default: TokenGate } = await import('./lib/components/TokenGate.svelte')
+  clearMount()
 
   return new Promise<void>((resolve) => {
     // Mount the gate into the app target
@@ -96,7 +115,6 @@ async function showTokenGate(wsUrl: string, errorMsg: string): Promise<void> {
       props: {
         error: errorMsg,
         onSubmit: async (token: string) => {
-          gate.$destroy()
           localStorage.setItem('slipstream_token', token)
           const { createWsApi } = await import('./lib/wsApi.js')
           await connectWithToken(wsUrl, token, createWsApi)
@@ -104,6 +122,7 @@ async function showTokenGate(wsUrl: string, errorMsg: string): Promise<void> {
         },
       },
     })
+    mounted = gate
   })
 }
 
