@@ -72,7 +72,10 @@ export function createPushService(deps: {
 
   async function getWebPush() {
     if (!_webpush) {
-      _webpush = await import('web-push')
+      const mod = await import('web-push')
+      // web-push is CJS; ESM dynamic import only hoists a subset of named exports.
+      // Use .default to get the actual module.exports with all functions.
+      _webpush = (mod.default ?? mod) as typeof import('web-push')
     }
     return _webpush
   }
