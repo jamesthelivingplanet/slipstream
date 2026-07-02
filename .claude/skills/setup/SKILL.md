@@ -7,8 +7,13 @@ disable-model-invocation: true
 ## Prerequisites
 
 - **Node 22** — `setup.sh`/`deploy.sh` require it on PATH. If a different version is active,
-  they'll switch via `mise` or `nvm` automatically (whichever is installed); if neither is
-  installed, setup exits with an error and you must install/switch to Node 22 yourself
+  they'll switch automatically via `mise` → `nvm` → `pnpm env use -g 22` (the first one
+  available); since pnpm is always a prerequisite, this last fallback means the scripts can
+  provision Node 22 themselves even on a machine with no other Node manager. `package.json`
+  pins `"engines": { "node": "22.x" }` and `.npmrc` sets `engine-strict=true`, so installing
+  under the wrong Node version fails fast at install time with a clear engine-mismatch line
+  instead of a cryptic native-build ABI error
+  (The shared `with_node22` function now lives in `scripts/lib/node22.sh`.)
 - **pnpm** — required; must be on PATH before running any scripts
 - **`claude` CLI** — must be on PATH and authenticated; the app spawns `claude --dangerously-skip-permissions`
 - **Tailscale** (only if you want phone/remote access) — system-level CLI from https://tailscale.com/download, logged in (`tailscale up`). On macOS use the Homebrew CLI (`brew install tailscale`), **not** the App Store GUI app.
