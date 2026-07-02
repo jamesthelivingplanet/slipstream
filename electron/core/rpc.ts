@@ -151,6 +151,7 @@ export function createRpc(
           repoId: string
           description?: string
           agentKind?: BackendKind
+          sessionId?: string
         }
         const { tid, title, prompt, repoId, description } = input
         const agentKind = input.agentKind
@@ -180,7 +181,7 @@ export function createRpc(
           }
         }
 
-        const sessionId = randomUUID()
+        const sessionId = input.sessionId ?? randomUUID()
         let mcpConfigPath: string | undefined
         const startEnv: Record<string, string> = {}
         if (port !== undefined) startEnv.PORT = String(port)
