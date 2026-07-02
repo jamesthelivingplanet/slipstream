@@ -18,7 +18,11 @@ import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
 import { LOCAL_IDENTITY } from './auth.js'
-import { buildAppMcpConfig, writeAppMcpConfig } from '../services/mcpConfig.js'
+import {
+  buildAppMcpConfig,
+  buildOpencodeMcpConfig,
+  writeAppMcpConfig,
+} from '../services/mcpConfig.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 import { checkAppMcp, lastMcpActivity } from '../services/mcpHealth.js'
 
@@ -175,6 +179,8 @@ export function createRpc(
 
         const sessionId = randomUUID()
         let mcpConfigPath: string | undefined
+        const startEnv: Record<string, string> = {}
+        if (port !== undefined) startEnv.PORT = String(port)
         if (deps.appMcp) {
           mcpConfigPath = path.join(deps.appMcp.configDir, `${sessionId}.json`)
           const config = buildAppMcpConfig({
@@ -186,6 +192,19 @@ export function createRpc(
             branch,
           })
           await writeAppMcpConfig(mcpConfigPath, config)
+
+          if (agentKind === 'opencode') {
+            startEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
+              buildOpencodeMcpConfig({
+                appMcpJsPath: deps.appMcp.appMcpJsPath,
+                electronPath: deps.appMcp.electronPath,
+                dataDir: deps.appMcp.dataDir,
+                sessionId,
+                base: repo.base,
+                branch,
+              }),
+            )
+          }
         }
 
         const startedAt = Date.now()
@@ -196,7 +215,7 @@ export function createRpc(
           repo,
           branch,
           cwd,
-          env: port !== undefined ? { PORT: String(port) } : undefined,
+          env: Object.keys(startEnv).length > 0 ? startEnv : undefined,
           systemPrompt,
           agentKind,
           opencodePort,
@@ -329,10 +348,24 @@ export function createRpc(
             opencodePort = undefined
           }
         }
+        const resumeEnv: Record<string, string> = {}
+        if (port !== undefined) resumeEnv.PORT = String(port)
+        if (persisted.agentKind === 'opencode' && deps.appMcp) {
+          resumeEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
+            buildOpencodeMcpConfig({
+              appMcpJsPath: deps.appMcp.appMcpJsPath,
+              electronPath: deps.appMcp.electronPath,
+              dataDir: deps.appMcp.dataDir,
+              sessionId: id,
+              base: repo.base,
+              branch: persisted.branch,
+            }),
+          )
+        }
         const dto = deps.sessions.resume({
           session: persisted,
           cwd,
-          env: port !== undefined ? { PORT: String(port) } : undefined,
+          env: Object.keys(resumeEnv).length > 0 ? resumeEnv : undefined,
           opencodePort,
         })
         sessionMeta.set(id, { repo, branch: persisted.branch })
@@ -360,10 +393,24 @@ export function createRpc(
             opencodePort = undefined
           }
         }
+        const remoteEnv: Record<string, string> = {}
+        if (port !== undefined) remoteEnv.PORT = String(port)
+        if (persisted.agentKind === 'opencode' && deps.appMcp) {
+          remoteEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
+            buildOpencodeMcpConfig({
+              appMcpJsPath: deps.appMcp.appMcpJsPath,
+              electronPath: deps.appMcp.electronPath,
+              dataDir: deps.appMcp.dataDir,
+              sessionId: id,
+              base: repo.base,
+              branch: persisted.branch,
+            }),
+          )
+        }
         const dto = deps.sessions.attachRemoteControl({
           session: persisted,
           cwd,
-          env: port !== undefined ? { PORT: String(port) } : undefined,
+          env: Object.keys(remoteEnv).length > 0 ? remoteEnv : undefined,
           opencodePort,
         })
         sessionMeta.set(id, { repo, branch: persisted.branch })

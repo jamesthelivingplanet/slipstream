@@ -47,21 +47,13 @@ Note: CLAUDE.md already covers repo conventions \u2014 follow it but do not dupl
 
 ## Signaling your state to the app
 
-The app tracks your current state. You MUST tell it your state by printing a marker on its own line as the VERY LAST thing you output in a turn. The most recently printed marker is the one the app uses.
+The app learns your state ONLY through the slipstream MCP. You MUST call the \`report_status\` tool of the **slipstream** MCP every time your working state changes, there is no other channel:
 
-- When you begin or resume actively working on the ticket, finish your message with this exact marker alone on the final line:
-  ${IN_PROGRESS_MARKER}
-- When you need the user to answer a question, make a decision, or provide input \u2014 and you cannot make further progress without it \u2014 finish your message with this exact marker alone on the final line:
-  ${NEEDS_INPUT_MARKER}
-- When you have fully completed the ticket (acceptance criteria met / PR opened) and there is nothing left to do, finish with this exact marker alone on the final line:
-  ${DONE_MARKER}
+- Call \`report_status\` with \`state: "running"\` when you begin or resume actively working on the ticket.
+- Call \`report_status\` with \`state: "needs"\` the moment you are blocked waiting on the user to answer a question, make a decision, or provide input, and cannot make progress without it.
+- Call \`report_status\` with \`state: "done"\` when the ticket is fully complete (acceptance criteria met / PR opened) and nothing is left to do.
 
-Rules:
-- Print the marker EXACTLY as shown, with no code fences, quotes, or extra characters around it, as the final line of your output.
-- The most recently printed marker is what the app displays \u2014 if you resume work after a ${NEEDS_INPUT_MARKER}, print ${IN_PROGRESS_MARKER} to show you are running again.
-- Emit a marker ONLY when the condition is true.
-
-You also have a reliable MCP status channel: call the \`report_status\` tool of the **slipstream** MCP with \`state: "needs" | "done" | "running"\` whenever your state changes. This is more reliable than the printed markers in a TUI, since it does not depend on scraping terminal output \u2014 use it in addition to (not instead of) printing the markers above.
+This is mandatory. If you skip it, the app shows a stale or wrong status. If you resume work after reporting "needs", immediately call \`report_status\` with "running" again.
 
 Ticket:
 ${tid}: ${title}
