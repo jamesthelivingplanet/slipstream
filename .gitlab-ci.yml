@@ -1,28 +1,64 @@
+# GitLab CI for slipstream — gates every merge request on the same quality
+# checks `pnpm deploy` runs on a dev machine (svelte-check, vitest, build).
+#
+# NOTE: CI deliberately never honors the SKIP_CHECKS / --skip-checks escape
+# hatch. That flag only short-circuits scripts/deploy.sh for local dev; here we
+# invoke `pnpm check` / `pnpm test` / `pnpm build` directly, so MRs are always
+# gated regardless of any local convenience flags.
 image: node:22
+
+# Run exactly one pipeline per change: on merge requests, and on the default
+# branch after merge. Without this, GitLab would create duplicate branch- and
+# MR-pipelines for every push from an open MR.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 stages:
   - verify
 
+variables:
+  # Keep the pnpm content-addressable store inside the project dir so GitLab can
+  # cache it between pipelines (default store lives in $HOME, which is not
+  # cacheable).
+  PNPM_STORE_DIR: '$CI_PROJECT_DIR/.pnpm-store'
+
+# Cache the pnpm store keyed on the lockfile so unchanged deps are restored
+# instead of re-downloaded.
+cache:
+  key:
+    files:
+      - pnpm-lock.yaml
+  paths:
+    - .pnpm-store
+
 before_script:
   - corepack enable
+  - pnpm config set store-dir "$PNPM_STORE_DIR"
   - pnpm install --frozen-lockfile
 
-lint:
+# Shared job scaffold: every verify job cancels if superseded by a newer push.
+.verify:
   stage: verify
+  interruptible: true
+
+lint:
+  extends: .verify
   script:
     - pnpm lint
 
 check:
-  stage: verify
+  extends: .verify
   script:
     - pnpm check
 
 test:
-  stage: verify
+  extends: .verify
   script:
     - pnpm test
 
 build:
-  stage: verify
+  extends: .verify
   script:
     - pnpm build
