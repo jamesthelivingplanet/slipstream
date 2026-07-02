@@ -1,6 +1,10 @@
 import type { SessionStatus } from '../shared/contract.js'
 import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
-import { OPENCODE_FLAGS, OPENCODE_SESSION_CAPTURE_ATTEMPTS, OPENCODE_SESSION_CAPTURE_INTERVAL_MS } from '../shared/agentCli.js'
+import {
+  OPENCODE_FLAGS,
+  OPENCODE_SESSION_CAPTURE_ATTEMPTS,
+  OPENCODE_SESSION_CAPTURE_INTERVAL_MS,
+} from '../shared/agentCli.js'
 
 export interface OpencodeSession {
   id: string
@@ -47,10 +51,7 @@ export function selectNewestSessionSince(
  * up. Returns `args` unchanged when there is no prompt so the TUI opens to an
  * empty input (the resume/continue path, which must not auto-submit).
  */
-export function withOpencodePromptArg(
-  args: string[],
-  prompt: string | null | undefined,
-): string[] {
+export function withOpencodePromptArg(args: string[], prompt: string | null | undefined): string[] {
   return prompt ? [...args, OPENCODE_FLAGS.prompt, prompt] : args
 }
 

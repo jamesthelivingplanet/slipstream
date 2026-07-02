@@ -26,7 +26,17 @@ import { isStartableTicket } from './ticketFilter.js'
 export { sessionsToReconcile } from './reconcile'
 export { isStartableTicket } from './ticketFilter.js'
 
-function dtoToTickets(dtos: { tid: string; src: string; title: string; repoHint?: string; description?: string; status?: { id: string; name: string; type?: string }; done: boolean }[]): Ticket[] {
+function dtoToTickets(
+  dtos: {
+    tid: string
+    src: string
+    title: string
+    repoHint?: string
+    description?: string
+    status?: { id: string; name: string; type?: string }
+    done: boolean
+  }[],
+): Ticket[] {
   return dtos.map((d) => ({
     tid: d.tid,
     src: d.src as 'jira' | 'linear',
@@ -40,10 +50,12 @@ function dtoToTickets(dtos: { tid: string; src: string; title: string; repoHint?
 
 function cleanError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e)
-  return msg
-    .replace(/^Error invoking remote method '[^']*':\s*/, '')
-    .replace(/^(Uncaught\s+)?Error:\s*/, '')
-    .trim() || 'Something went wrong'
+  return (
+    msg
+      .replace(/^Error invoking remote method '[^']*':\s*/, '')
+      .replace(/^(Uncaught\s+)?Error:\s*/, '')
+      .trim() || 'Something went wrong'
+  )
 }
 
 export function openRepoSettings(repoId: string) {
@@ -90,7 +102,7 @@ export async function refreshMcpStatus(): Promise<void> {
 }
 
 export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
-  $id ? $sessions.find((s) => s.tid === $id) ?? null : null,
+  $id ? ($sessions.find((s) => s.tid === $id) ?? null) : null,
 )
 
 export const counts = derived(sessions, ($sessions) => {
@@ -146,7 +158,8 @@ export async function initFromBackend(): Promise<void> {
   const sessionDTOs = await listSessions()
   sessions.set(
     sessionDTOs.map((dto) => {
-      const uiStatus: Status = (dto.status === 'running' || dto.status === 'needs') ? 'detached' : dto.status as Status
+      const uiStatus: Status =
+        dto.status === 'running' || dto.status === 'needs' ? 'detached' : (dto.status as Status)
       return {
         id: dto.id,
         tid: dto.tid,
@@ -161,9 +174,16 @@ export async function initFromBackend(): Promise<void> {
         prompt: dto.prompt,
         port: dto.port,
         prUrl: dto.prUrl,
-        activity: { text: uiStatus === 'interrupted' ? 'Interrupted by restart — open to resume.' : uiStatus === 'reaped' ? 'Reaped by the cost guard.' : 'Detached — open to resume.' },
+        activity: {
+          text:
+            uiStatus === 'interrupted'
+              ? 'Interrupted by restart — open to resume.'
+              : uiStatus === 'reaped'
+                ? 'Reaped by the cost guard.'
+                : 'Detached — open to resume.',
+        },
       }
-    })
+    }),
   )
   await refreshDiffStats().catch(() => {})
 }
@@ -251,13 +271,28 @@ export async function removeRepoById(id: string): Promise<void> {
   }
 }
 
-export function createAgentFromTicket(ticket: Ticket, prompt: string, agentKind: BackendKind = 'claude-code'): string {
+export function createAgentFromTicket(
+  ticket: Ticket,
+  prompt: string,
+  agentKind: BackendKind = 'claude-code',
+): string {
   tickets.update(($t) => $t.filter((t) => t.tid !== ticket.tid))
   sessions.update(($s) => [
     {
-      tid: ticket.tid, src: ticket.src, status: 'idle' as Status, title: ticket.title,
-      repo: null, suggestedRepo: ticket.repo, branch: null, add: 0, del: 0, ago: 'draft',
-      prompt, description: ticket.description, activity: { text: 'Not started.' }, agentKind,
+      tid: ticket.tid,
+      src: ticket.src,
+      status: 'idle' as Status,
+      title: ticket.title,
+      repo: null,
+      suggestedRepo: ticket.repo,
+      branch: null,
+      add: 0,
+      del: 0,
+      ago: 'draft',
+      prompt,
+      description: ticket.description,
+      activity: { text: 'Not started.' },
+      agentKind,
     },
     ...$s,
   ])
@@ -266,10 +301,27 @@ export function createAgentFromTicket(ticket: Ticket, prompt: string, agentKind:
   return ticket.tid
 }
 
-export function createBlankAgent(title: string, prompt: string, tid: string = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`, agentKind: BackendKind = 'claude-code'): string {
+export function createBlankAgent(
+  title: string,
+  prompt: string,
+  tid: string = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
+  agentKind: BackendKind = 'claude-code',
+): string {
   sessions.update(($s) => [
-    { tid, src: 'jira', status: 'idle', title, repo: null, branch: null,
-      add: 0, del: 0, ago: 'draft', prompt, activity: { text: 'Not started.' }, agentKind },
+    {
+      tid,
+      src: 'jira',
+      status: 'idle',
+      title,
+      repo: null,
+      branch: null,
+      add: 0,
+      del: 0,
+      ago: 'draft',
+      prompt,
+      activity: { text: 'Not started.' },
+      agentKind,
+    },
     ...$s,
   ])
   dialogOpen.set(false)
@@ -277,7 +329,12 @@ export function createBlankAgent(title: string, prompt: string, tid: string = `T
   return tid
 }
 
-export async function startAgent(tid: string, repoId: string, prompt: string, agentKind?: BackendKind) {
+export async function startAgent(
+  tid: string,
+  repoId: string,
+  prompt: string,
+  agentKind?: BackendKind,
+) {
   const s = get(sessions).find((x) => x.tid === tid)
   if (!s) return
 
@@ -292,13 +349,20 @@ export async function startAgent(tid: string, repoId: string, prompt: string, ag
       activity: { text: 'Creating worktree & starting claude…' },
     }))
     try {
-      const dto = await startSession({ tid, title: s.title, prompt, repoId, description: s.description, agentKind })
+      const dto = await startSession({
+        tid,
+        title: s.title,
+        prompt,
+        repoId,
+        description: s.description,
+        agentKind,
+      })
       patch(tid, (s) => ({
         ...s,
         id: dto.id,
         branch: dto.branch,
-      port: dto.port,
-      agentKind: dto.agentKind,
+        port: dto.port,
+        agentKind: dto.agentKind,
         repo: repoId,
         status: dto.status,
       }))
@@ -387,7 +451,11 @@ export function removeSession(id: string) {
 }
 
 export function resolveNeedsInput(tid: string) {
-  patch(tid, (s) => ({ ...s, status: 'running', activity: { text: 'Applying decision, writing the fix…' } }))
+  patch(tid, (s) => ({
+    ...s,
+    status: 'running',
+    activity: { text: 'Applying decision, writing the fix…' },
+  }))
 }
 
 /**
@@ -405,7 +473,9 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
     await killSession(s.id)
     let result = await cleanupSession(s.id, { force: false })
     if (!result.removed) {
-      const force = opts?.auto || confirm(`Worktree not clean: ${result.reason ?? 'unknown reason'}. Force remove?`)
+      const force =
+        opts?.auto ||
+        confirm(`Worktree not clean: ${result.reason ?? 'unknown reason'}. Force remove?`)
       if (!force) return false
       result = await cleanupSession(s.id, { force: true })
     }

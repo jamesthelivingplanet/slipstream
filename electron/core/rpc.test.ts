@@ -43,7 +43,15 @@ function makeSession(overrides: Partial<SessionDTO> = {}): SessionDTO {
 }
 
 function makeWorktreeInfo(): WorktreeInfo {
-  return { branch: 'T-1-fix-bug', path: '/wt/T-1-fix-bug', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 }
+  return {
+    branch: 'T-1-fix-bug',
+    path: '/wt/T-1-fix-bug',
+    dirty: false,
+    ahead: 0,
+    behind: 0,
+    added: 0,
+    deleted: 0,
+  }
 }
 
 type Listener = (...args: unknown[]) => void
@@ -114,10 +122,18 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
 
   const sessionStoreMap = new Map<string, SessionDTO>()
   const sessionStore: ISessionStore = {
-    list() { return Array.from(sessionStoreMap.values()) },
-    get(id) { return sessionStoreMap.get(id) },
-    upsert(s) { sessionStoreMap.set(s.id, s) },
-    delete(id) { sessionStoreMap.delete(id) },
+    list() {
+      return Array.from(sessionStoreMap.values())
+    },
+    get(id) {
+      return sessionStoreMap.get(id)
+    },
+    upsert(s) {
+      sessionStoreMap.set(s.id, s)
+    },
+    delete(id) {
+      sessionStoreMap.delete(id)
+    },
   }
 
   const editor = { open: vi.fn().mockResolvedValue(undefined) } as unknown as IEditorLauncher
@@ -159,9 +175,13 @@ describe('createRpc', () => {
   beforeEach(() => {
     deps = makeFakeDeps()
     emitted = []
-    rpc = createRpc(deps, (channel, ...args) => {
-      emitted.push([channel, ...args])
-    }, { coalesceMs: 0 })
+    rpc = createRpc(
+      deps,
+      (channel, ...args) => {
+        emitted.push([channel, ...args])
+      },
+      { coalesceMs: 0 },
+    )
   })
 
   it('routes listRepos to repos.list()', async () => {
@@ -188,9 +208,9 @@ describe('createRpc', () => {
   })
 
   it('routes startSession — creates worktree, claims port, starts session', async () => {
-    const result = await rpc.handle(IPC.startSession, [
+    const result = (await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
-    ]) as SessionDTO & { port?: number }
+    ])) as SessionDTO & { port?: number }
 
     expect(deps.worktrees.create).toHaveBeenCalledWith(makeRepo(), 'T-1-fix-bug')
     expect(deps.ports.claim).toHaveBeenCalled()
@@ -199,19 +219,19 @@ describe('createRpc', () => {
     expect(result.port).toBe(3001)
   })
   it('startSession passes agentKind to sessions.start', async () => {
-    await rpc.handle(IPC.startSession, [
+    ;(await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', agentKind: 'opencode' },
-    ]) as SessionDTO & { port?: number }
+    ])) as SessionDTO & { port?: number }
 
     expect(deps.sessions.start).toHaveBeenCalledWith(
-      expect.objectContaining({ agentKind: 'opencode' })
+      expect.objectContaining({ agentKind: 'opencode' }),
     )
   })
 
   it('startSession defaults agentKind to undefined when not provided', async () => {
-    await rpc.handle(IPC.startSession, [
+    ;(await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
-    ]) as SessionDTO & { port?: number }
+    ])) as SessionDTO & { port?: number }
 
     const callArgs = (deps.sessions.start as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(callArgs.agentKind).toBeUndefined()
@@ -270,7 +290,9 @@ describe('createRpc', () => {
   it('coalesces session:data bursts into a single timed flush', () => {
     vi.useFakeTimers()
     const out: Array<[string, ...unknown[]]> = []
-    const rpc2 = createRpc(deps, (channel, ...args) => out.push([channel, ...args]), { coalesceMs: 40 })
+    const rpc2 = createRpc(deps, (channel, ...args) => out.push([channel, ...args]), {
+      coalesceMs: 40,
+    })
     deps._emit('data', 's1', 'a', 1)
     deps._emit('data', 's1', 'b', 2)
     deps._emit('data', 's1', 'c', 3)
@@ -311,13 +333,17 @@ describe('createRpc', () => {
   })
 
   it('startSession persists session to sessionStore', async () => {
-    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
     expect(deps.sessionStore.list()).toHaveLength(1)
     expect(deps.sessionStore.list()[0].id).toBe('s1')
   })
 
   it('listSessions returns persisted rows', async () => {
-    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
     const result = await rpc.handle(IPC.listSessions, [])
     expect(result).toHaveLength(1)
   })
@@ -326,7 +352,7 @@ describe('createRpc', () => {
     deps.sessionStore.upsert(makeSession())
     ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
 
-    const result = await rpc.handle(IPC.resumeSession, ['s1']) as SessionDTO
+    const result = (await rpc.handle(IPC.resumeSession, ['s1'])) as SessionDTO
     expect(deps.sessions.resume).toHaveBeenCalled()
     expect(result.id).toBe('s1')
   })
@@ -340,7 +366,9 @@ describe('createRpc', () => {
   })
 
   it('cleanupSession deletes from sessionStore after worktree removed', async () => {
-    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
     expect(deps.sessionStore.list()).toHaveLength(1)
     await rpc.handle(IPC.cleanupSession, ['s1'])
     expect(deps.sessionStore.list()).toHaveLength(0)
@@ -357,14 +385,18 @@ describe('createRpc', () => {
   it('attachRemoteControl calls sessions.attachRemoteControl and upserts status running', async () => {
     deps.sessionStore.upsert(makeSession())
 
-    const result = await rpc.handle(IPC.attachRemoteControl, ['s1']) as SessionDTO & { port?: number }
+    const result = (await rpc.handle(IPC.attachRemoteControl, ['s1'])) as SessionDTO & {
+      port?: number
+    }
     expect(deps.sessions.attachRemoteControl).toHaveBeenCalled()
     expect(result.id).toBe('s1')
     expect(deps.sessionStore.get('s1')?.status).toBe('running')
   })
 
   it('attachRemoteControl throws when session is not in store', async () => {
-    await expect(rpc.handle(IPC.attachRemoteControl, ['missing'])).rejects.toThrow('Session not found: missing')
+    await expect(rpc.handle(IPC.attachRemoteControl, ['missing'])).rejects.toThrow(
+      'Session not found: missing',
+    )
   })
 
   it('routes worktreeStatus to worktrees.status with resolved repo and branch', async () => {
@@ -375,8 +407,12 @@ describe('createRpc', () => {
   })
 
   it('worktreeStatus throws for unknown repo', async () => {
-    ;(deps.repos as unknown as { get: ReturnType<typeof vi.fn> }).get.mockResolvedValueOnce(undefined)
-    await expect(rpc.handle(IPC.worktreeStatus, ['unknown', 'branch'])).rejects.toThrow('Unknown repo: unknown')
+    ;(deps.repos as unknown as { get: ReturnType<typeof vi.fn> }).get.mockResolvedValueOnce(
+      undefined,
+    )
+    await expect(rpc.handle(IPC.worktreeStatus, ['unknown', 'branch'])).rejects.toThrow(
+      'Unknown repo: unknown',
+    )
   })
 
   it('startSession passes systemPrompt containing the ticket id to sessions.start', async () => {
@@ -384,7 +420,7 @@ describe('createRpc', () => {
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ])
     expect(deps.sessions.start).toHaveBeenCalledWith(
-      expect.objectContaining({ systemPrompt: expect.stringContaining('T-1') })
+      expect.objectContaining({ systemPrompt: expect.stringContaining('T-1') }),
     )
   })
 
@@ -396,10 +432,12 @@ describe('createRpc', () => {
   })
 
   it('startSession still succeeds when startTicket rejects', async () => {
-    ;(deps.tickets.startTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('linear down'))
-    const result = await rpc.handle(IPC.startSession, [
+    ;(deps.tickets.startTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('linear down'),
+    )
+    const result = (await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
-    ]) as SessionDTO
+    ])) as SessionDTO
     expect(result.id).toBe('s1')
   })
 
@@ -412,8 +450,13 @@ describe('createRpc', () => {
   })
 
   it('startSession surfaces resolvePath errors (clear failure, not silent)', async () => {
-    ;(deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }).resolvePath
-      .mockRejectedValueOnce(new Error('Repository path no longer exists: /gone/repo. Re-register it or restore the directory.'))
+    ;(
+      deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }
+    ).resolvePath.mockRejectedValueOnce(
+      new Error(
+        'Repository path no longer exists: /gone/repo. Re-register it or restore the directory.',
+      ),
+    )
     await expect(
       rpc.handle(IPC.startSession, [
         { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
@@ -424,8 +467,9 @@ describe('createRpc', () => {
 
   it('startSession uses the resolved (healed) repo path for worktree creation', async () => {
     const healed = makeRepo({ path: '/new-location/api' })
-    ;(deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }).resolvePath
-      .mockResolvedValueOnce(healed)
+    ;(
+      deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }
+    ).resolvePath.mockResolvedValueOnce(healed)
     await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ])
@@ -435,20 +479,33 @@ describe('createRpc', () => {
   it('resumeSession calls resolvePath and throws clearly when repo is gone', async () => {
     deps.sessionStore.upsert(makeSession())
     ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
-    ;(deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }).resolvePath
-      .mockRejectedValueOnce(new Error('Repository path no longer exists: /gone. Re-register it or restore the directory.'))
-    await expect(rpc.handle(IPC.resumeSession, ['s1'])).rejects.toThrow(/Repository path no longer exists/)
+    ;(
+      deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }
+    ).resolvePath.mockRejectedValueOnce(
+      new Error(
+        'Repository path no longer exists: /gone. Re-register it or restore the directory.',
+      ),
+    )
+    await expect(rpc.handle(IPC.resumeSession, ['s1'])).rejects.toThrow(
+      /Repository path no longer exists/,
+    )
   })
 
   it('cleanupSession resets the linked ticket back to to-do (resetTicket)', async () => {
-    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
     await rpc.handle(IPC.cleanupSession, ['s1'])
     expect(deps.tickets.resetTicket).toHaveBeenCalledWith('T-1')
   })
 
   it('cleanupSession still succeeds when resetTicket rejects', async () => {
-    ;(deps.tickets.resetTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('linear down'))
-    await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+    ;(deps.tickets.resetTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('linear down'),
+    )
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
     const result = await rpc.handle(IPC.cleanupSession, ['s1'])
     expect(result).toEqual({ removed: true })
   })
@@ -456,7 +513,10 @@ describe('createRpc', () => {
   describe('editor config', () => {
     it('getEditorConfig returns defaults when config.get returns undefined', async () => {
       ;(deps.config.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined)
-      const result = await rpc.handle(IPC.getEditorConfig, []) as { command: string; mobileCommand: string }
+      const result = (await rpc.handle(IPC.getEditorConfig, [])) as {
+        command: string
+        mobileCommand: string
+      }
       expect(result).toEqual({ command: 'code', mobileCommand: '' })
     })
 
@@ -488,7 +548,9 @@ describe('createRpc', () => {
 
     it('openInEditor throws for unknown repo', async () => {
       ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined)
-      await expect(rpc.handle(IPC.openInEditor, [{ repoId: 'bad', branch: 'b' }])).rejects.toThrow('Unknown repo: bad')
+      await expect(rpc.handle(IPC.openInEditor, [{ repoId: 'bad', branch: 'b' }])).rejects.toThrow(
+        'Unknown repo: bad',
+      )
     })
   })
 
@@ -511,22 +573,30 @@ describe('createRpc', () => {
   })
 
   it('runApp with a startCmd calls appRunner.run and returns { started: true, port }', async () => {
-    ;(deps.repos.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ installCmd: '', startCmd: 'pnpm dev' })
-    const result = await rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'main' }]) as { started: boolean; port?: number }
+    ;(deps.repos.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      installCmd: '',
+      startCmd: 'pnpm dev',
+    })
+    const result = (await rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'main' }])) as {
+      started: boolean
+      port?: number
+    }
     expect(deps.appRunner.run).toHaveBeenCalledWith('/wt/t-1-fix-bug', 'pnpm dev', { PORT: '3001' })
     expect(result).toEqual({ started: true, port: 3001 })
   })
 
   describe('owner filter (identity seam)', () => {
     it('startSession stamps the caller identity as ownerId', async () => {
-      await rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])
+      await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+      ])
       expect(deps.sessionStore.get('s1')?.ownerId).toBe('local')
     })
 
     it('listSessions returns rows owned by the caller (default local sees local rows)', async () => {
       deps.sessionStore.upsert(makeSession({ id: 'mine', ownerId: 'local' }))
       deps.sessionStore.upsert(makeSession({ id: 'legacy' })) // no ownerId → treated as local
-      const result = await rpc.handle(IPC.listSessions, []) as SessionDTO[]
+      const result = (await rpc.handle(IPC.listSessions, [])) as SessionDTO[]
       expect(result.map((s) => s.id).sort()).toEqual(['legacy', 'mine'])
     })
 
@@ -534,7 +604,7 @@ describe('createRpc', () => {
       const aliceRpc = createRpc(deps, () => {}, { coalesceMs: 0, identity: { id: 'alice' } })
       deps.sessionStore.upsert(makeSession({ id: 'mine', ownerId: 'local' }))
       deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
-      const result = await aliceRpc.handle(IPC.listSessions, []) as SessionDTO[]
+      const result = (await aliceRpc.handle(IPC.listSessions, [])) as SessionDTO[]
       expect(result.map((s) => s.id)).toEqual(['hers'])
       aliceRpc.dispose()
     })
@@ -545,7 +615,7 @@ describe('createRpc', () => {
         makeRepo({ id: 'hers', ownerId: 'alice' }),
         makeRepo({ id: 'legacy' }), // no ownerId → local
       ])
-      const result = await rpc.handle(IPC.listRepos, []) as RepoDTO[]
+      const result = (await rpc.handle(IPC.listRepos, [])) as RepoDTO[]
       expect(result.map((r) => r.id).sort()).toEqual(['legacy', 'mine'])
     })
   })
@@ -569,52 +639,80 @@ describe('createRpc', () => {
       await expect(rpc.handle(IPC.resumeSession, ['s1'])).rejects.toThrow('Session not found: s1')
     })
 
-    it('attachRemoteControl throws not-found for another identity\'s session', async () => {
+    it("attachRemoteControl throws not-found for another identity's session", async () => {
       deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
-      await expect(rpc.handle(IPC.attachRemoteControl, ['s1'])).rejects.toThrow('Session not found: s1')
+      await expect(rpc.handle(IPC.attachRemoteControl, ['s1'])).rejects.toThrow(
+        'Session not found: s1',
+      )
     })
 
-    it('cleanupSession reports not-found for another identity\'s session', async () => {
-      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice', repoId: 'r1', branch: 't-1-fix-bug' }))
+    it("cleanupSession reports not-found for another identity's session", async () => {
+      deps.sessionStore.upsert(
+        makeSession({ id: 's1', ownerId: 'alice', repoId: 'r1', branch: 't-1-fix-bug' }),
+      )
       const result = await rpc.handle(IPC.cleanupSession, ['s1'])
       expect(result).toEqual({ removed: false, reason: 'session not found' })
       expect(deps.worktrees.remove).not.toHaveBeenCalled()
     })
 
-    it('getSessionBuffer throws not-found for another identity\'s session', async () => {
+    it("getSessionBuffer throws not-found for another identity's session", async () => {
       deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
-      await expect(rpc.handle(IPC.getSessionBuffer, ['s1'])).rejects.toThrow('Session not found: s1')
+      await expect(rpc.handle(IPC.getSessionBuffer, ['s1'])).rejects.toThrow(
+        'Session not found: s1',
+      )
     })
 
-    it('worktreeStatus throws Unknown repo for another identity\'s repo', async () => {
-      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
+    it("worktreeStatus throws Unknown repo for another identity's repo", async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
       await expect(rpc.handle(IPC.worktreeStatus, ['r1', 'b'])).rejects.toThrow('Unknown repo: r1')
     })
 
-    it('openInEditor throws Unknown repo for another identity\'s repo', async () => {
-      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
-      await expect(rpc.handle(IPC.openInEditor, [{ repoId: 'r1', branch: 'b' }])).rejects.toThrow('Unknown repo: r1')
+    it("openInEditor throws Unknown repo for another identity's repo", async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
+      await expect(rpc.handle(IPC.openInEditor, [{ repoId: 'r1', branch: 'b' }])).rejects.toThrow(
+        'Unknown repo: r1',
+      )
     })
 
-    it('runApp throws Unknown repo for another identity\'s repo', async () => {
-      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
-      await expect(rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'b' }])).rejects.toThrow('Unknown repo: r1')
+    it("runApp throws Unknown repo for another identity's repo", async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
+      await expect(rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'b' }])).rejects.toThrow(
+        'Unknown repo: r1',
+      )
     })
 
-    it('getRepoSettings throws Unknown repo for another identity\'s repo', async () => {
-      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
+    it("getRepoSettings throws Unknown repo for another identity's repo", async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
       await expect(rpc.handle(IPC.getRepoSettings, ['r1'])).rejects.toThrow('Unknown repo: r1')
     })
 
-    it('setRepoSettings throws Unknown repo for another identity\'s repo', async () => {
-      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
-      await expect(rpc.handle(IPC.setRepoSettings, ['r1', { installCmd: '', startCmd: '' }])).rejects.toThrow('Unknown repo: r1')
+    it("setRepoSettings throws Unknown repo for another identity's repo", async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
+      await expect(
+        rpc.handle(IPC.setRepoSettings, ['r1', { installCmd: '', startCmd: '' }]),
+      ).rejects.toThrow('Unknown repo: r1')
       expect(deps.repos.setSettings).not.toHaveBeenCalled()
     })
 
     it('startSession throws Unknown repo when the repo is owned by another identity', async () => {
-      ;(deps.repos.resolvePath as ReturnType<typeof vi.fn>).mockResolvedValue(makeRepo({ id: 'r1', ownerId: 'alice' }))
-      await expect(rpc.handle(IPC.startSession, [{ tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' }])).rejects.toThrow('Unknown repo: r1')
+      ;(deps.repos.resolvePath as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
+      await expect(
+        rpc.handle(IPC.startSession, [
+          { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+        ]),
+      ).rejects.toThrow('Unknown repo: r1')
       expect(deps.worktrees.create).not.toHaveBeenCalled()
     })
   })
@@ -633,13 +731,25 @@ describe('createRpc', () => {
       sharedDeps.writeCoordinator = coord
       emittedA = []
       emittedB = []
-      rpcA = createRpc(sharedDeps, (channel, ...args) => { emittedA.push([channel, ...args]) }, { coalesceMs: 0, clientId: 'client-a' })
-      rpcB = createRpc(sharedDeps, (channel, ...args) => { emittedB.push([channel, ...args]) }, { coalesceMs: 0, clientId: 'client-b' })
+      rpcA = createRpc(
+        sharedDeps,
+        (channel, ...args) => {
+          emittedA.push([channel, ...args])
+        },
+        { coalesceMs: 0, clientId: 'client-a' },
+      )
+      rpcB = createRpc(
+        sharedDeps,
+        (channel, ...args) => {
+          emittedB.push([channel, ...args])
+        },
+        { coalesceMs: 0, clientId: 'client-b' },
+      )
     })
 
     it('grants the write lock to the first client to attach, view-only for the second', async () => {
-      const lockA = await rpcA.handle(IPC.attachSession, ['s1']) as WriteLockState
-      const lockB = await rpcB.handle(IPC.attachSession, ['s1']) as WriteLockState
+      const lockA = (await rpcA.handle(IPC.attachSession, ['s1'])) as WriteLockState
+      const lockB = (await rpcB.handle(IPC.attachSession, ['s1'])) as WriteLockState
 
       expect(lockA.canWrite).toBe(true)
       expect(lockB.canWrite).toBe(false)
@@ -663,7 +773,7 @@ describe('createRpc', () => {
       emittedA.length = 0
       emittedB.length = 0
 
-      const lockB = await rpcB.handle(IPC.takeWrite, ['s1']) as WriteLockState
+      const lockB = (await rpcB.handle(IPC.takeWrite, ['s1'])) as WriteLockState
       expect(lockB.canWrite).toBe(true)
 
       const pushA = emittedA.find(([ch]) => ch === IPC.sessionWriteLock)

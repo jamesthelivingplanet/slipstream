@@ -98,7 +98,11 @@
           <span class="chev">{@html icons.chevronDown}</span>
         </button>
       {:else}
-        <button class="sel-trigger status-trigger" type="button" on:click|stopPropagation={onTriggerClick}>
+        <button
+          class="sel-trigger status-trigger"
+          type="button"
+          on:click|stopPropagation={onTriggerClick}
+        >
           <span>{current?.name ?? 'Set status'}</span>
           <span class="chev">{@html icons.chevronDown}</span>
         </button>

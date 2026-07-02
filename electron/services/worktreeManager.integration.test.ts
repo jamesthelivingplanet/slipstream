@@ -11,8 +11,7 @@ import type { RepoDTO } from '../shared/contract.js'
  * the live "start agent" / "clean up" flow. No native modules, so it runs under
  * plain node/vitest.
  */
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', args, { cwd, encoding: 'utf8' })
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' })
 
 let root: string
 let repo: RepoDTO

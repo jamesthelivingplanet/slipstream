@@ -26,7 +26,8 @@
     return `${day}d`
   }
 
-  $: state = $mcpStatus === null ? ($mcpChecking ? 'checking' : 'unknown') : $mcpStatus.up ? 'up' : 'down'
+  $: state =
+    $mcpStatus === null ? ($mcpChecking ? 'checking' : 'unknown') : $mcpStatus.up ? 'up' : 'down'
   $: dotLabel = state === 'up' ? 'MCP: up' : state === 'down' ? 'MCP: unreachable' : 'MCP: checking'
 </script>
 
@@ -39,20 +40,34 @@
     aria-label={dotLabel}
     on:click|stopPropagation={() => (open = !open)}
   >
-    <span class="mcp-dot" class:up={state === 'up'} class:down={state === 'down'} class:checking={state === 'checking' || state === 'unknown'}></span>
+    <span
+      class="mcp-dot"
+      class:up={state === 'up'}
+      class:down={state === 'down'}
+      class:checking={state === 'checking' || state === 'unknown'}
+    ></span>
   </button>
 
   {#if open}
     <div class="pop mcp-pop">
       <div class="mcp-head">
-        <span class="mcp-dot" class:up={state === 'up'} class:down={state === 'down'} class:checking={state === 'checking' || state === 'unknown'}></span>
+        <span
+          class="mcp-dot"
+          class:up={state === 'up'}
+          class:down={state === 'down'}
+          class:checking={state === 'checking' || state === 'unknown'}
+        ></span>
         <span class="mcp-title">MCP server</span>
-        <span class="mcp-state">{state === 'up' ? 'Up' : state === 'down' ? 'Unreachable' : 'Checking'}</span>
+        <span class="mcp-state"
+          >{state === 'up' ? 'Up' : state === 'down' ? 'Unreachable' : 'Checking'}</span
+        >
       </div>
 
       {#if $mcpStatus?.serverName || $mcpStatus?.protocolVersion}
         <div class="mcp-meta mono muted">
-          {$mcpStatus?.serverName ?? ''}{$mcpStatus?.serverName && $mcpStatus?.protocolVersion ? ' · ' : ''}{$mcpStatus?.protocolVersion ?? ''}
+          {$mcpStatus?.serverName ?? ''}{$mcpStatus?.serverName && $mcpStatus?.protocolVersion
+            ? ' · '
+            : ''}{$mcpStatus?.protocolVersion ?? ''}
         </div>
       {/if}
 
@@ -77,7 +92,11 @@
         <div class="mcp-error">{$mcpStatus.error}</div>
       {/if}
 
-      <button class="btn btn-outline btn-sm mcp-recheck" on:click={() => refreshMcpStatus()} disabled={$mcpChecking}>
+      <button
+        class="btn btn-outline btn-sm mcp-recheck"
+        on:click={() => refreshMcpStatus()}
+        disabled={$mcpChecking}
+      >
         {$mcpChecking ? 'Checking…' : 'Recheck'}
       </button>
     </div>
@@ -92,37 +111,88 @@
     border-radius: 50%;
     background: hsl(var(--muted-foreground));
   }
-  .mcp-dot.up { background: hsl(var(--st-done)); }
-  .mcp-dot.down { background: hsl(var(--st-error)); }
-  .mcp-dot.checking { background: hsl(var(--st-needs)); animation: mcp-pulse 1.6s ease-in-out infinite; }
+  .mcp-dot.up {
+    background: hsl(var(--st-done));
+  }
+  .mcp-dot.down {
+    background: hsl(var(--st-error));
+  }
+  .mcp-dot.checking {
+    background: hsl(var(--st-needs));
+    animation: mcp-pulse 1.6s ease-in-out infinite;
+  }
   @media (prefers-reduced-motion: reduce) {
-    .mcp-dot.checking { animation: none; }
+    .mcp-dot.checking {
+      animation: none;
+    }
   }
   @keyframes mcp-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: .4; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
   }
 
-  .mcp-pop { width: 240px; left: 0; right: auto; }
-
-  .mcp-head { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
-  .mcp-title { font-size: 12.5px; font-weight: 600; }
-  .mcp-state { margin-left: auto; font-size: 11px; color: hsl(var(--muted-foreground)); }
-
-  .mcp-meta { font-size: 11px; margin-bottom: 8px; word-break: break-word; }
-
-  .mcp-tools { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
-  .mcp-tool {
-    font-size: 10.5px; padding: 2px 6px; border-radius: 6px;
-    border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground));
+  .mcp-pop {
+    width: 240px;
+    left: 0;
+    right: auto;
   }
 
-  .mcp-line { font-size: 11.5px; margin-bottom: 2px; }
+  .mcp-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 8px;
+  }
+  .mcp-title {
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .mcp-state {
+    margin-left: auto;
+    font-size: 11px;
+    color: hsl(var(--muted-foreground));
+  }
 
-  .mcp-error {
-    font-size: 11.5px; color: hsl(var(--st-error)); margin-top: 4px; margin-bottom: 4px;
+  .mcp-meta {
+    font-size: 11px;
+    margin-bottom: 8px;
     word-break: break-word;
   }
 
-  .mcp-recheck { width: 100%; margin-top: 8px; }
+  .mcp-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 8px;
+  }
+  .mcp-tool {
+    font-size: 10.5px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--muted-foreground));
+  }
+
+  .mcp-line {
+    font-size: 11.5px;
+    margin-bottom: 2px;
+  }
+
+  .mcp-error {
+    font-size: 11.5px;
+    color: hsl(var(--st-error));
+    margin-top: 4px;
+    margin-bottom: 4px;
+    word-break: break-word;
+  }
+
+  .mcp-recheck {
+    width: 100%;
+    margin-top: 8px;
+  }
 </style>

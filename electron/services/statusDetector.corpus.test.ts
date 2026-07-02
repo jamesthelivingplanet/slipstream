@@ -23,7 +23,9 @@ function makeClock(initial = 0) {
   let t = initial
   return {
     now: () => t,
-    advance: (ms: number) => { t += ms },
+    advance: (ms: number) => {
+      t += ms
+    },
   }
 }
 

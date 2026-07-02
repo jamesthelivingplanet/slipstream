@@ -12,24 +12,31 @@
  *   <root>     → app data dir (see paths.ts, owned by integration layer)
  */
 
-export type SessionStatus = 'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted' | 'reaped'
+export type SessionStatus =
+  'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted' | 'reaped'
 export type TicketSource = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi'
 export type GitHost = 'github' | 'gitlab'
 
 /** Resolved caller identity. Single-user today ({ id: 'local' }); the seam
  *  exists so a future multi-user tier can map tokens → distinct owners. */
-export interface Identity { id: string }
+export interface Identity {
+  id: string
+}
 
-export interface NotifyPrefs { needs: boolean; done: boolean; running: boolean }
+export interface NotifyPrefs {
+  needs: boolean
+  done: boolean
+  running: boolean
+}
 
 /** Session GC / cost-guard policy (FLO-52). Reaps idle/abandoned/finished PTYs. */
 export interface GcPolicy {
-  enabled: boolean        // master switch
-  onlyAbandoned: boolean  // only reap sessions with 0 attached clients (viewers)
+  enabled: boolean // master switch
+  onlyAbandoned: boolean // only reap sessions with 0 attached clients (viewers)
   autoStopOnDone: boolean // reap a live session whose status is 'done'
-  idleMs: number          // reap after this much output silence; 0 = disabled
-  maxAgeMs: number        // reap after this age regardless; 0 = disabled
+  idleMs: number // reap after this much output silence; 0 = disabled
+  maxAgeMs: number // reap after this age regardless; 0 = disabled
 }
 export const DEFAULT_GC_POLICY: GcPolicy = {
   enabled: true,
@@ -42,13 +49,13 @@ export const DEFAULT_GC_POLICY: GcPolicy = {
  *  server (electron/mcp/appMcp.ts). Never spawned inside an agent session —
  *  see McpHealthParams / checkAppMcp — so it adds no agent context. */
 export interface McpStatusDTO {
-  up: boolean               // true iff the app's self-test handshake succeeded
-  serverName?: string       // serverInfo.name from initialize
-  protocolVersion?: string  // protocolVersion from initialize
-  tools: string[]           // tool names from tools/list
-  checkedAt: number         // epoch ms of this self-test
-  error?: string            // present when up === false
-  lastActivityAt?: number   // epoch ms of most recent real MCP activity (status.json/pr.json mtime across sessions), if any
+  up: boolean // true iff the app's self-test handshake succeeded
+  serverName?: string // serverInfo.name from initialize
+  protocolVersion?: string // protocolVersion from initialize
+  tools: string[] // tool names from tools/list
+  checkedAt: number // epoch ms of this self-test
+  error?: string // present when up === false
+  lastActivityAt?: number // epoch ms of most recent real MCP activity (status.json/pr.json mtime across sessions), if any
 }
 
 export interface PushSubscriptionDTO {
@@ -57,51 +64,51 @@ export interface PushSubscriptionDTO {
 }
 
 export interface RepoDTO {
-  id: string          // slug, e.g. "acme-api"
+  id: string // slug, e.g. "acme-api"
   org: string
   name: string
-  base: string        // base branch: main | master | develop | …
-  path: string        // absolute path to the repo checkout under .repositories
-  remoteUrl?: string  // git origin URL — stable identity used to self-heal a moved checkout
-  ownerId?: string  // owner identity; 'local' for the single-user tier
+  base: string // base branch: main | master | develop | …
+  path: string // absolute path to the repo checkout under .repositories
+  remoteUrl?: string // git origin URL — stable identity used to self-heal a moved checkout
+  ownerId?: string // owner identity; 'local' for the single-user tier
 }
 
 export interface RepoSettings {
-  installCmd: string   // '' when undefined
-  startCmd: string     // '' when undefined
+  installCmd: string // '' when undefined
+  startCmd: string // '' when undefined
 }
 
 export interface WorktreeInfo {
   branch: string
-  path: string        // absolute path under .worktrees
-  dirty: boolean      // uncommitted changes present
-  ahead: number       // commits ahead of base
+  path: string // absolute path under .worktrees
+  dirty: boolean // uncommitted changes present
+  ahead: number // commits ahead of base
   behind: number
-  added: number       // diff stat vs base
+  added: number // diff stat vs base
   deleted: number
 }
 
 export interface SessionDTO {
-  id: string          // uuid
-  tid: string         // ticket id, e.g. "PROJ-128"
+  id: string // uuid
+  tid: string // ticket id, e.g. "PROJ-128"
   title: string
   prompt: string
   repoId: string
   branch: string
   status: SessionStatus
-  port?: number       // assigned by floo on start
+  port?: number // assigned by floo on start
   systemPrompt?: string
   agentKind?: BackendKind
   opencodeSid?: string
   createdAt: number
-  ownerId?: string  // owner identity; 'local' for the single-user tier
-  prUrl?: string  // MR/PR URL opened for this session's branch
+  ownerId?: string // owner identity; 'local' for the single-user tier
+  prUrl?: string // MR/PR URL opened for this session's branch
 }
 
 export interface WorkflowState {
   id: string
   name: string
-  type?: string   // linear: backlog|unstarted|started|completed|canceled
+  type?: string // linear: backlog|unstarted|started|completed|canceled
 }
 export interface TicketDTO {
   id: string
@@ -109,28 +116,28 @@ export interface TicketDTO {
   src: TicketSource
   title: string
   description?: string
-  done: boolean       // ticket's workflow state is completed
-  repoHint?: string   // repo id this ticket likely maps to
+  done: boolean // ticket's workflow state is completed
+  repoHint?: string // repo id this ticket likely maps to
   status?: WorkflowState
 }
 
 export interface EditorConfig {
-  command: string        // desktop editor command, e.g. "code" or "zed"
-  mobileCommand: string  // optional mobile editor command; "" when unset
+  command: string // desktop editor command, e.g. "code" or "zed"
+  mobileCommand: string // optional mobile editor command; "" when unset
 }
 
 export interface WriteLockState {
   sessionId: string
-  canWrite: boolean   // does THIS client currently hold the write lock
-  viewers: number     // number of clients attached to this session
+  canWrite: boolean // does THIS client currently hold the write lock
+  viewers: number // number of clients attached to this session
 }
 
 /** Live-session snapshot for the GC reaper (electron/services/sessionReaper.ts). */
 export interface LiveSessionInfo {
   id: string
   status: SessionStatus
-  createdAt: number        // ms epoch when the session started
-  lastActivityAt: number   // ms epoch of last PTY output (spawn time if none yet)
+  createdAt: number // ms epoch when the session started
+  lastActivityAt: number // ms epoch of last PTY output (spawn time if none yet)
 }
 
 /* ───────── main-process service interfaces ───────── */
@@ -159,7 +166,11 @@ export interface IWorktreeManager {
   pathFor(repo: RepoDTO, branch: string): string
   create(repo: RepoDTO, branch: string): Promise<WorktreeInfo>
   /** Refuses (removed:false, reason) when dirty/unmerged unless opts.force. */
-  remove(repo: RepoDTO, branch: string, opts?: { force?: boolean }): Promise<{ removed: boolean; reason?: string }>
+  remove(
+    repo: RepoDTO,
+    branch: string,
+    opts?: { force?: boolean },
+  ): Promise<{ removed: boolean; reason?: string }>
   status(repo: RepoDTO, branch: string): Promise<WorktreeInfo>
   list(repo: RepoDTO): Promise<WorktreeInfo[]>
 }
@@ -177,7 +188,7 @@ export interface StartSessionInput {
   prompt: string
   repo: RepoDTO
   branch: string
-  cwd: string         // worktree path (created by caller before start)
+  cwd: string // worktree path (created by caller before start)
   env?: Record<string, string>
   systemPrompt?: string
   agentKind?: BackendKind
@@ -250,7 +261,9 @@ export interface ITicketProvider {
   readonly id: string
   listTickets(): Promise<TicketDTO[]>
   /** tid is the human identifier e.g. "FLO-17". */
-  getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
+  getTicketStatus(
+    tid: string,
+  ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
   setTicketStatus(tid: string, stateId: string): Promise<WorkflowState>
   /**
    * Transition the ticket to this provider's "in progress" / started state
@@ -282,7 +295,9 @@ export interface SlipstreamApi {
   pickAndRegisterRepo(): Promise<RepoDTO | null>
   removeRepo(id: string): Promise<void>
   listTickets(): Promise<TicketDTO[]>
-  getTicketStatus(tid: string): Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
+  getTicketStatus(
+    tid: string,
+  ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
   setTicketStatus(tid: string, stateId: string): Promise<WorkflowState>
   getLinearKey(): Promise<string | null>
   setLinearKey(key: string): Promise<void>
@@ -292,11 +307,21 @@ export interface SlipstreamApi {
   openInEditor(input: { repoId: string; branch: string; mobile?: boolean }): Promise<void>
 
   /** Creates the worktree, claims a port, spawns claude. Returns the session. */
-  startSession(input: { tid: string; title: string; prompt: string; repoId: string; description?: string; agentKind?: BackendKind }): Promise<SessionDTO>
+  startSession(input: {
+    tid: string
+    title: string
+    prompt: string
+    repoId: string
+    description?: string
+    agentKind?: BackendKind
+  }): Promise<SessionDTO>
   writeSession(id: string, data: string): void
   resizeSession(id: string, cols: number, rows: number): void
   killSession(id: string): Promise<void>
-  cleanupSession(id: string, opts?: { force?: boolean }): Promise<{ removed: boolean; reason?: string }>
+  cleanupSession(
+    id: string,
+    opts?: { force?: boolean },
+  ): Promise<{ removed: boolean; reason?: string }>
   listSessions(): Promise<SessionDTO[]>
   resumeSession(id: string): Promise<SessionDTO>
   attachRemoteControl(id: string): Promise<SessionDTO>
@@ -308,7 +333,10 @@ export interface SlipstreamApi {
   getSessionBuffer(id: string): Promise<{ data: string; seq: number }>
   getRepoSettings(id: string): Promise<RepoSettings>
   setRepoSettings(id: string, settings: RepoSettings): Promise<void>
-  runApp(input: { repoId: string; branch: string }): Promise<{ started: boolean; reason?: string; port?: number }>
+  runApp(input: {
+    repoId: string
+    branch: string
+  }): Promise<{ started: boolean; reason?: string; port?: number }>
   getVapidPublicKey(): Promise<string>
   savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void>
   deletePushSubscription(endpoint: string): Promise<void>
@@ -353,7 +381,7 @@ export const IPC = {
   listSessions: 'session:list',
   resumeSession: 'session:resume',
   attachRemoteControl: 'session:attachRemoteControl',
-  sessionData: 'session:data',     // main → renderer
+  sessionData: 'session:data', // main → renderer
   sessionStatus: 'session:status', // main → renderer
   getSessionBuffer: 'session:buffer',
   worktreeStatus: 'worktree:status',
@@ -371,7 +399,7 @@ export const IPC = {
   getPushPrefs: 'push:prefs',
   getGitToken: 'config:getGitToken',
   setGitToken: 'config:setGitToken',
-  sessionPr: 'session:pr',   // main → renderer push
+  sessionPr: 'session:pr', // main → renderer push
   attachSession: 'session:attach',
   detachSession: 'session:detach',
   takeWrite: 'session:takeWrite',

@@ -41,8 +41,7 @@ async function mountApp(shouldAbort?: () => boolean) {
 async function bootWeb() {
   const { createWsApi } = await import('./lib/wsApi.js')
 
-  const wsUrl =
-    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/rpc`
+  const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/rpc`
 
   // -- Token resolution --
   // Priority: ?token= query param > localStorage
@@ -156,11 +155,15 @@ interface BeforeInstallPromptEvent extends Event {
 
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault()
-  ;(window as unknown as { __deferredInstallPrompt?: BeforeInstallPromptEvent }).__deferredInstallPrompt = e as BeforeInstallPromptEvent
+  ;(
+    window as unknown as { __deferredInstallPrompt?: BeforeInstallPromptEvent }
+  ).__deferredInstallPrompt = e as BeforeInstallPromptEvent
   window.dispatchEvent(new Event('slipstream:installable'))
 })
 window.addEventListener('appinstalled', () => {
-  ;(window as unknown as { __deferredInstallPrompt?: BeforeInstallPromptEvent | null }).__deferredInstallPrompt = null
+  ;(
+    window as unknown as { __deferredInstallPrompt?: BeforeInstallPromptEvent | null }
+  ).__deferredInstallPrompt = null
   window.dispatchEvent(new Event('slipstream:installed'))
 })
 
@@ -177,7 +180,8 @@ async function bootElectron(daemon: { url: string; token: string }): Promise<voi
   await mountApp()
 }
 
-const daemon = (window as unknown as { __slipstreamDaemon?: { url: string; token: string } | null }).__slipstreamDaemon
+const daemon = (window as unknown as { __slipstreamDaemon?: { url: string; token: string } | null })
+  .__slipstreamDaemon
 if (daemon) {
   bootElectron(daemon)
 } else if (typeof window !== 'undefined' && window.slipstream) {

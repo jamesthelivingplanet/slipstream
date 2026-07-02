@@ -15,10 +15,10 @@ import { randomBytes } from 'node:crypto'
 
 export interface DaemonConfig {
   mode: 'local' | 'remote'
-  wsUrl: string     // ws(s)://host:port/rpc — passed to renderer
-  httpBase: string  // http(s)://host:port   — for healthz polling
+  wsUrl: string // ws(s)://host:port/rpc — passed to renderer
+  httpBase: string // http(s)://host:port   — for healthz polling
   token: string
-  port?: number     // local only
+  port?: number // local only
 }
 
 export interface LocalIdentity {
@@ -61,15 +61,25 @@ export async function loadOrCreateLocalIdentity(
   env: Record<string, string | undefined>,
   deps?: IdentityDeps,
 ): Promise<LocalIdentity> {
-  const readFile = deps?.readFile ?? ((p: string) => {
-    try { return fs.readFileSync(p, 'utf8') } catch { return null }
-  })
-  const writeFile = deps?.writeFile ?? ((p: string, data: string) => {
-    fs.writeFileSync(p, data, 'utf8')
-  })
-  const mkdir = deps?.mkdir ?? ((p: string) => {
-    fs.mkdirSync(p, { recursive: true })
-  })
+  const readFile =
+    deps?.readFile ??
+    ((p: string) => {
+      try {
+        return fs.readFileSync(p, 'utf8')
+      } catch {
+        return null
+      }
+    })
+  const writeFile =
+    deps?.writeFile ??
+    ((p: string, data: string) => {
+      fs.writeFileSync(p, data, 'utf8')
+    })
+  const mkdir =
+    deps?.mkdir ??
+    ((p: string) => {
+      fs.mkdirSync(p, { recursive: true })
+    })
   const pick = deps?.pickPort ?? pickPort
 
   const daemonFile = path.join(dataDir, 'daemon.json')
@@ -110,9 +120,7 @@ export interface ResolveDaemonConfigOpts {
   ) => Promise<LocalIdentity>
 }
 
-export async function resolveDaemonConfig(
-  opts: ResolveDaemonConfigOpts,
-): Promise<DaemonConfig> {
+export async function resolveDaemonConfig(opts: ResolveDaemonConfigOpts): Promise<DaemonConfig> {
   const { env, dataDir } = opts
   const loadIdentity = opts.loadIdentity ?? loadOrCreateLocalIdentity
 
@@ -148,7 +156,10 @@ export function isHealthy(httpBase: string, timeoutMs = 500): Promise<boolean> {
     const lib = url.startsWith('https') ? https : http
     let settled = false
     const done = (v: boolean) => {
-      if (!settled) { settled = true; resolve(v) }
+      if (!settled) {
+        settled = true
+        resolve(v)
+      }
     }
     try {
       const req = lib.get(url, { timeout: timeoutMs }, (res) => {
@@ -156,7 +167,10 @@ export function isHealthy(httpBase: string, timeoutMs = 500): Promise<boolean> {
         res.resume()
       })
       req.on('error', () => done(false))
-      req.on('timeout', () => { req.destroy(); done(false) })
+      req.on('timeout', () => {
+        req.destroy()
+        done(false)
+      })
       setTimeout(() => done(false), timeoutMs + 100)
     } catch {
       done(false)
@@ -204,13 +218,21 @@ export async function ensureLocalDaemon(
         child,
         reused: false,
         kill() {
-          try { child.kill() } catch { /* already gone */ }
+          try {
+            child.kill()
+          } catch {
+            /* already gone */
+          }
         },
       }
     }
   }
 
   // If we get here, the daemon never came up — kill the child and reject
-  try { child.kill() } catch { /* ignore */ }
+  try {
+    child.kill()
+  } catch {
+    /* ignore */
+  }
   throw new Error(`Local daemon at ${cfg.httpBase} did not become healthy within 15 s`)
 }

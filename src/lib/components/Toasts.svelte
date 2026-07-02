@@ -33,25 +33,31 @@
     cursor: pointer;
     border: 1px solid transparent;
     border-left-width: 3px;
-    animation: slideIn .22s cubic-bezier(.2,.8,.2,1);
+    animation: slideIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
   .toast.success {
-    background: hsl(var(--st-done) / .1);
-    border-color: hsl(var(--st-done) / .35);
+    background: hsl(var(--st-done) / 0.1);
+    border-color: hsl(var(--st-done) / 0.35);
     border-left-color: hsl(var(--st-done));
     color: hsl(var(--foreground));
   }
 
   .toast.error {
-    background: hsl(var(--st-error) / .1);
-    border-color: hsl(var(--st-error) / .35);
+    background: hsl(var(--st-error) / 0.1);
+    border-color: hsl(var(--st-error) / 0.35);
     border-left-color: hsl(var(--st-error));
     color: hsl(var(--foreground));
   }
 
   @keyframes slideIn {
-    from { opacity: 0; transform: translateX(12px); }
-    to   { opacity: 1; transform: translateX(0); }
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 </style>

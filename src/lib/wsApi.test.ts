@@ -194,7 +194,11 @@ describe('wsApi', () => {
       const received: [string, string][] = []
       api.onSessionPr((id, prUrl) => received.push([id, prUrl]))
 
-      ws.simulateMessage({ t: 'push', channel: IPC.sessionPr, args: ['sess-3', 'https://example.com/mr/1'] })
+      ws.simulateMessage({
+        t: 'push',
+        channel: IPC.sessionPr,
+        args: ['sess-3', 'https://example.com/mr/1'],
+      })
       expect(received).toEqual([['sess-3', 'https://example.com/mr/1']])
     })
 
@@ -233,7 +237,11 @@ describe('wsApi', () => {
       const received: unknown[] = []
       api.onSessionWriteLock((state) => received.push(state))
 
-      ws.simulateMessage({ t: 'push', channel: IPC.sessionWriteLock, args: [{ sessionId: 'sess-1', canWrite: false, viewers: 2 }] })
+      ws.simulateMessage({
+        t: 'push',
+        channel: IPC.sessionWriteLock,
+        args: [{ sessionId: 'sess-1', canWrite: false, viewers: 2 }],
+      })
       expect(received).toEqual([{ sessionId: 'sess-1', canWrite: false, viewers: 2 }])
     })
 
@@ -247,7 +255,12 @@ describe('wsApi', () => {
       expect(req.channel).toBe(IPC.getSessionBuffer)
       expect(req.args).toEqual(['sess-abc'])
 
-      ws.simulateMessage({ t: 'res', id: req.id, ok: true, result: { data: 'prior output', seq: 12 } })
+      ws.simulateMessage({
+        t: 'res',
+        id: req.id,
+        ok: true,
+        result: { data: 'prior output', seq: 12 },
+      })
       const result = await promise
       expect(result).toEqual({ data: 'prior output', seq: 12 })
     })

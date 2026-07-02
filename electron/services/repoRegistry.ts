@@ -2,7 +2,14 @@ import { execFileSync } from 'node:child_process'
 import { basename, join } from 'node:path'
 import { mkdirSync, rmSync, existsSync } from 'node:fs'
 import Database from 'better-sqlite3'
-import { upsertRepo, allRepos, getRepo, deleteRepo, getRepoSettings, setRepoSettings } from '../db/db.js'
+import {
+  upsertRepo,
+  allRepos,
+  getRepo,
+  deleteRepo,
+  getRepoSettings,
+  setRepoSettings,
+} from '../db/db.js'
 import { getRemoteUrl, resolveRepoPath, cloneRepo, isWorkTree } from './repoResolve.js'
 import type { IRepoRegistry, RepoDTO, RepoSettings } from '../shared/contract.js'
 
@@ -48,7 +55,10 @@ function detectBase(absPath: string): string {
 
 /** Backfill remoteUrl for legacy rows registered before the column existed. */
 function backfillRemoteUrls(db: Database.Database): void {
-  const rows = db.prepare('SELECT id, path FROM repos WHERE remoteUrl IS NULL').all() as { id: string; path: string }[]
+  const rows = db.prepare('SELECT id, path FROM repos WHERE remoteUrl IS NULL').all() as {
+    id: string
+    path: string
+  }[]
   for (const row of rows) {
     const url = getRemoteUrl(row.path)
     if (url) db.prepare('UPDATE repos SET remoteUrl = ? WHERE id = ?').run(url, row.id)
@@ -79,7 +89,7 @@ export function createRepoRegistry(db: Database.Database, root: string): IRepoRe
       } catch (err: unknown) {
         // execFileSync throws on non-zero exit (i.e. not a git repo).
         if (err instanceof Error && err.message === 'Not a git repository.') throw err
-        throw new Error('Not a git repository.')
+        throw new Error('Not a git repository.', { cause: err })
       }
 
       // Validate: must have at least one commit.

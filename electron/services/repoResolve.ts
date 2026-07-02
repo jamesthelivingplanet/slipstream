@@ -26,7 +26,12 @@ export function cloneRepo(remoteUrl: string, dest: string): void {
     })
   } catch (err: unknown) {
     const e = err as { stderr?: string; message?: string }
-    throw new Error(`Failed to clone ${remoteUrl}: ${(e.stderr ?? e.message ?? String(err)).trim()}`)
+    throw new Error(
+      `Failed to clone ${remoteUrl}: ${(e.stderr ?? e.message ?? String(err)).trim()}`,
+      {
+        cause: err,
+      },
+    )
   }
 }
 
@@ -34,9 +39,11 @@ export function cloneRepo(remoteUrl: string, dest: string): void {
 export function isWorkTree(absPath: string): boolean {
   if (!existsSync(absPath)) return false
   try {
-    return execFileSync('git', ['-C', absPath, 'rev-parse', '--is-inside-work-tree'], {
-      encoding: 'utf8',
-    }).trim() === 'true'
+    return (
+      execFileSync('git', ['-C', absPath, 'rev-parse', '--is-inside-work-tree'], {
+        encoding: 'utf8',
+      }).trim() === 'true'
+    )
   } catch {
     return false
   }

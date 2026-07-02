@@ -1,12 +1,23 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { get } from 'svelte/store'
 import { isStartableTicket } from './ticketFilter.js'
-import { sessions, tickets, createBlankAgent, createAgentFromTicket, setSessionPrUrl, contentLoading, contentResolvedAt, contentRefreshNonce } from './stores.js'
+import {
+  sessions,
+  tickets,
+  createBlankAgent,
+  createAgentFromTicket,
+  setSessionPrUrl,
+  contentLoading,
+  contentResolvedAt,
+  contentRefreshNonce,
+} from './stores.js'
 import type { Ticket } from './types.js'
 
 describe('isStartableTicket', () => {
   it('keeps a backlog ticket (type backlog, done false)', () => {
-    expect(isStartableTicket({ done: false, status: { id: '1', name: 'Backlog', type: 'backlog' } })).toBe(true)
+    expect(
+      isStartableTicket({ done: false, status: { id: '1', name: 'Backlog', type: 'backlog' } }),
+    ).toBe(true)
   })
 
   it('keeps a ticket with no status type (done false)', () => {
@@ -14,7 +25,9 @@ describe('isStartableTicket', () => {
   })
 
   it('keeps a ticket with status type unstarted', () => {
-    expect(isStartableTicket({ done: false, status: { id: '2', name: 'Todo', type: 'unstarted' } })).toBe(true)
+    expect(
+      isStartableTicket({ done: false, status: { id: '2', name: 'Todo', type: 'unstarted' } }),
+    ).toBe(true)
   })
 
   it('excludes a ticket with done: true', () => {
@@ -22,11 +35,15 @@ describe('isStartableTicket', () => {
   })
 
   it('excludes a ticket with status.type === started (In Progress)', () => {
-    expect(isStartableTicket({ done: false, status: { id: '3', name: 'In Progress', type: 'started' } })).toBe(false)
+    expect(
+      isStartableTicket({ done: false, status: { id: '3', name: 'In Progress', type: 'started' } }),
+    ).toBe(false)
   })
 
   it('excludes a ticket with status.type === canceled', () => {
-    expect(isStartableTicket({ done: false, status: { id: '4', name: 'Canceled', type: 'canceled' } })).toBe(false)
+    expect(
+      isStartableTicket({ done: false, status: { id: '4', name: 'Canceled', type: 'canceled' } }),
+    ).toBe(false)
   })
 })
 
@@ -77,8 +94,32 @@ describe('setSessionPrUrl', () => {
 
   it('updates the prUrl of the matching session by backend id', () => {
     sessions.set([
-      { id: 'abc', tid: 'FLO-1', src: 'linear', status: 'running', title: 'A', repo: null, branch: null, add: 0, del: 0, ago: '', activity: { text: '' } },
-      { id: 'def', tid: 'FLO-2', src: 'linear', status: 'running', title: 'B', repo: null, branch: null, add: 0, del: 0, ago: '', activity: { text: '' } },
+      {
+        id: 'abc',
+        tid: 'FLO-1',
+        src: 'linear',
+        status: 'running',
+        title: 'A',
+        repo: null,
+        branch: null,
+        add: 0,
+        del: 0,
+        ago: '',
+        activity: { text: '' },
+      },
+      {
+        id: 'def',
+        tid: 'FLO-2',
+        src: 'linear',
+        status: 'running',
+        title: 'B',
+        repo: null,
+        branch: null,
+        add: 0,
+        del: 0,
+        ago: '',
+        activity: { text: '' },
+      },
     ])
     setSessionPrUrl('abc', 'https://github.com/acme/repo/pull/1')
     const all = get(sessions)
@@ -88,7 +129,19 @@ describe('setSessionPrUrl', () => {
 
   it('leaves the store unchanged when no session matches the id', () => {
     sessions.set([
-      { id: 'abc', tid: 'FLO-1', src: 'linear', status: 'running', title: 'A', repo: null, branch: null, add: 0, del: 0, ago: '', activity: { text: '' } },
+      {
+        id: 'abc',
+        tid: 'FLO-1',
+        src: 'linear',
+        status: 'running',
+        title: 'A',
+        repo: null,
+        branch: null,
+        add: 0,
+        del: 0,
+        ago: '',
+        activity: { text: '' },
+      },
     ])
     setSessionPrUrl('zzz', 'https://gitlab.com/acme/repo/-/merge_requests/1')
     expect(get(sessions)[0].prUrl).toBeUndefined()

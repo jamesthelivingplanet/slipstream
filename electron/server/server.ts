@@ -85,9 +85,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
         //  - index.html and other non-asset files: no-cache (always revalidate)
         //  - /assets/* (content-hashed filenames): immutable, cache for 1 year
         const isHashedAsset = url.pathname.startsWith('/assets/')
-        const cacheControl = isHashedAsset
-          ? 'public, max-age=31536000, immutable'
-          : 'no-cache'
+        const cacheControl = isHashedAsset ? 'public, max-age=31536000, immutable' : 'no-cache'
         res.writeHead(200, {
           'Content-Type': mime[ext] ?? 'application/octet-stream',
           'Cache-Control': cacheControl,
@@ -141,39 +139,46 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     })
   })
 
-  wss.on('connection', (ws: WebSocket, _req: http.IncomingMessage, identity: Identity = LOCAL_IDENTITY) => {
-    const clientId = randomUUID()
-    const rpc = createRpc(deps, (channel, ...args) => {
-      if (ws.readyState !== WebSocket.OPEN) return
-      ws.send(JSON.stringify({ t: 'push', channel, args } as WirePush))
-    }, { identity, clientId })
-
-    ws.on('message', (raw) => {
-      let req: WireReq
-      try {
-        req = JSON.parse(String(raw)) as WireReq
-      } catch {
-        return // ignore malformed frames
-      }
-
-      if (req.t !== 'req') return
-
-      rpc.handle(req.channel, req.args).then(
-        (result) => {
-          const res: WireRes = { t: 'res', id: req.id, ok: true, result }
-          ws.send(JSON.stringify(res))
+  wss.on(
+    'connection',
+    (ws: WebSocket, _req: http.IncomingMessage, identity: Identity = LOCAL_IDENTITY) => {
+      const clientId = randomUUID()
+      const rpc = createRpc(
+        deps,
+        (channel, ...args) => {
+          if (ws.readyState !== WebSocket.OPEN) return
+          ws.send(JSON.stringify({ t: 'push', channel, args } as WirePush))
         },
-        (err: unknown) => {
-          const error = err instanceof Error ? err.message : String(err)
-          const res: WireRes = { t: 'res', id: req.id, ok: false, error }
-          ws.send(JSON.stringify(res))
-        },
+        { identity, clientId },
       )
-    })
 
-    ws.on('close', () => rpc.dispose())
-    ws.on('error', () => rpc.dispose())
-  })
+      ws.on('message', (raw) => {
+        let req: WireReq
+        try {
+          req = JSON.parse(String(raw)) as WireReq
+        } catch {
+          return // ignore malformed frames
+        }
+
+        if (req.t !== 'req') return
+
+        rpc.handle(req.channel, req.args).then(
+          (result) => {
+            const res: WireRes = { t: 'res', id: req.id, ok: true, result }
+            ws.send(JSON.stringify(res))
+          },
+          (err: unknown) => {
+            const error = err instanceof Error ? err.message : String(err)
+            const res: WireRes = { t: 'res', id: req.id, ok: false, error }
+            ws.send(JSON.stringify(res))
+          },
+        )
+      })
+
+      ws.on('close', () => rpc.dispose())
+      ws.on('error', () => rpc.dispose())
+    },
+  )
 
   httpServer.listen(port, bind, () => {
     console.log(`[slipstream-server] Listening on http://${bind}:${port}`)
@@ -215,5 +220,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1',
     port: process.env.SLIPSTREAM_PORT ? Number(process.env.SLIPSTREAM_PORT) : 7421,
   })
-  logger?.server('info', 'server listening', { bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1', port: process.env.SLIPSTREAM_PORT ?? 7421 })
+  logger?.server('info', 'server listening', {
+    bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1',
+    port: process.env.SLIPSTREAM_PORT ?? 7421,
+  })
 }

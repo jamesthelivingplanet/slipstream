@@ -4,10 +4,18 @@ import type { ISessionStore, SessionDTO } from '../shared/contract.js'
 
 export function createSessionStore(db: Database.Database): ISessionStore {
   return {
-    list() { return allSessions(db) },
-    get(id) { return getSession(db, id) },
-    upsert(s) { upsertSession(db, s) },
-    delete(id) { deleteSession(db, id) },
+    list() {
+      return allSessions(db)
+    },
+    get(id) {
+      return getSession(db, id)
+    },
+    upsert(s) {
+      upsertSession(db, s)
+    },
+    delete(id) {
+      deleteSession(db, id)
+    },
   }
 }
 

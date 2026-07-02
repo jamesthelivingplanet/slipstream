@@ -21,17 +21,25 @@ function makeSession(overrides: Partial<SessionDTO> = {}): SessionDTO {
 function makeFakes() {
   const emitter = new EventEmitter()
   const sessions = {
-    on: (e: string, l: (...a: unknown[]) => void) => { emitter.on(e, l) },
-    off: (e: string, l: (...a: unknown[]) => void) => { emitter.removeListener(e, l) },
+    on: (e: string, l: (...a: unknown[]) => void) => {
+      emitter.on(e, l)
+    },
+    off: (e: string, l: (...a: unknown[]) => void) => {
+      emitter.removeListener(e, l)
+    },
   } as unknown as Pick<ISessionManager, 'on' | 'off'>
 
   const map = new Map<string, SessionDTO>()
-  const upsert = vi.fn((s: SessionDTO) => { map.set(s.id, s) })
+  const upsert = vi.fn((s: SessionDTO) => {
+    map.set(s.id, s)
+  })
   const store: ISessionStore = {
     list: () => Array.from(map.values()),
     get: (id) => map.get(id),
     upsert,
-    delete: (id) => { map.delete(id) },
+    delete: (id) => {
+      map.delete(id)
+    },
   }
   return { emitter, sessions, store, map, upsert }
 }

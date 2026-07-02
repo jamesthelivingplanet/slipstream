@@ -20,17 +20,21 @@ const shot = (win, name) => win.screenshot({ path: `/tmp/e2e-persist-${name}.png
 fs.rmSync(userDataDir, { recursive: true, force: true })
 fs.rmSync(repoDir, { recursive: true, force: true })
 fs.mkdirSync(repoDir, { recursive: true })
-const git = (...a) => execFileSync('git', ['-C', repoDir, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { stdio: 'pipe' })
+const git = (...a) =>
+  execFileSync('git', ['-C', repoDir, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], {
+    stdio: 'pipe',
+  })
 git('init', '-b', 'main')
 fs.writeFileSync(path.join(repoDir, 'README.md'), '# persist demo\n')
 git('add', '.')
 git('commit', '-m', 'init')
 
-const launch = () => electron.launch({
-  executablePath: electronPath,
-  args: [root, `--user-data-dir=${userDataDir}`],
-  env: { ...process.env, SLIPSTREAM_DAEMON_EPHEMERAL: '1' },
-})
+const launch = () =>
+  electron.launch({
+    executablePath: electronPath,
+    args: [root, `--user-data-dir=${userDataDir}`],
+    env: { ...process.env, SLIPSTREAM_DAEMON_EPHEMERAL: '1' },
+  })
 
 // ── Instance 1: start an agent ──────────────────────────────────────────────
 let app = await launch()
@@ -41,7 +45,13 @@ await win.waitForTimeout(1500)
 const repo = await win.evaluate((p) => window.slipstream.registerRepo(p), repoDir)
 console.log('registered repo:', JSON.stringify(repo))
 const dto = await win.evaluate(
-  (rid) => window.slipstream.startSession({ tid: 'TASK-PERSIST', title: 'Persisted agent demo', prompt: 'print a short hello', repoId: rid }),
+  (rid) =>
+    window.slipstream.startSession({
+      tid: 'TASK-PERSIST',
+      title: 'Persisted agent demo',
+      prompt: 'print a short hello',
+      repoId: rid,
+    }),
   repo.id,
 )
 console.log('started session:', JSON.stringify(dto))
@@ -59,4 +69,6 @@ console.log('persisted after restart:', JSON.stringify(persisted))
 await shot(win, '2-after-restart')
 await app.close()
 
-console.log(persisted.length === 1 ? 'PASS: session survived restart' : 'FAIL: expected 1 persisted session')
+console.log(
+  persisted.length === 1 ? 'PASS: session survived restart' : 'FAIL: expected 1 persisted session',
+)

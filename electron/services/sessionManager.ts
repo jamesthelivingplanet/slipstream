@@ -26,11 +26,21 @@ import { OutputBuffer } from './outputBuffer.js'
 import { ScrollbackStore } from './scrollbackStore.js'
 import { trustDirectory } from './claudeTrust.js'
 import { hasTranscript } from './transcripts.js'
-import { selectBackend, type AgentBackend, type SpawnSpec, type StatusHandle } from './agentBackend.js'
+import {
+  selectBackend,
+  type AgentBackend,
+  type SpawnSpec,
+  type StatusHandle,
+} from './agentBackend.js'
 import type { RunLogger } from './runLogger.js'
 import { parseStatusSentinel, STATUS_SENTINEL_FILE } from './statusSentinel.js'
 
-function spawnAgent(cmd: string, args: string[], cwd: string, env?: Record<string, string>): pty.IPty {
+function spawnAgent(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  env?: Record<string, string>,
+): pty.IPty {
   return pty.spawn(cmd, args, {
     name: 'xterm-color',
     cols: 80,
@@ -207,56 +217,63 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     // Set up fs.watch for pr.json sentinel if root is provided
     if (root) {
       const sentinelDir = path.join(root, 'sessions', id)
-      void fs.promises.mkdir(sentinelDir, { recursive: true }).then(() => {
-        const emittedPrUrl = new Set<string>()
-        let lastStatusTs = 0
-        try {
-          const watcher = fs.watch(sentinelDir, { persistent: false }, (_event, filename) => {
-            if (filename !== 'pr.json' && filename !== STATUS_SENTINEL_FILE) return
+      void fs.promises
+        .mkdir(sentinelDir, { recursive: true })
+        .then(() => {
+          const emittedPrUrl = new Set<string>()
+          let lastStatusTs = 0
+          try {
+            const watcher = fs.watch(sentinelDir, { persistent: false }, (_event, filename) => {
+              if (filename !== 'pr.json' && filename !== STATUS_SENTINEL_FILE) return
 
-            if (filename === 'pr.json') {
-              const filePath = path.join(sentinelDir, 'pr.json')
+              if (filename === 'pr.json') {
+                const filePath = path.join(sentinelDir, 'pr.json')
+                try {
+                  const content = fs.readFileSync(filePath, 'utf8')
+                  const parsed = JSON.parse(content) as { url?: string }
+                  if (parsed.url && !emittedPrUrl.has(parsed.url)) {
+                    emittedPrUrl.add(parsed.url)
+                    emit('pr', id, parsed.url)
+                  }
+                } catch {
+                  // Ignore read/parse errors (file may be partially written)
+                }
+                return
+              }
+
+              // filename === STATUS_SENTINEL_FILE
+              const filePath = path.join(sentinelDir, STATUS_SENTINEL_FILE)
               try {
                 const content = fs.readFileSync(filePath, 'utf8')
-                const parsed = JSON.parse(content) as { url?: string }
-                if (parsed.url && !emittedPrUrl.has(parsed.url)) {
-                  emittedPrUrl.add(parsed.url)
-                  emit('pr', id, parsed.url)
+                const parsed = parseStatusSentinel(content)
+                if (parsed && parsed.ts > lastStatusTs) {
+                  lastStatusTs = parsed.ts
+                  const ptyDriven = rec.backend.statusSource === 'pty'
+                  if (ptyDriven) {
+                    detector.applySignal(parsed.state)
+                    const s = detector.status()
+                    rec.dto.status = s
+                    emit('status', id, s)
+                  } else {
+                    rec.dto.status = parsed.state
+                    emit('status', id, parsed.state)
+                  }
                 }
               } catch {
                 // Ignore read/parse errors (file may be partially written)
               }
-              return
-            }
-
-            // filename === STATUS_SENTINEL_FILE
-            const filePath = path.join(sentinelDir, STATUS_SENTINEL_FILE)
-            try {
-              const content = fs.readFileSync(filePath, 'utf8')
-              const parsed = parseStatusSentinel(content)
-              if (parsed && parsed.ts > lastStatusTs) {
-                lastStatusTs = parsed.ts
-                const ptyDriven = rec.backend.statusSource === 'pty'
-                if (ptyDriven) {
-                  detector.applySignal(parsed.state)
-                  const s = detector.status()
-                  rec.dto.status = s
-                  emit('status', id, s)
-                } else {
-                  rec.dto.status = parsed.state
-                  emit('status', id, parsed.state)
-                }
-              }
-            } catch {
-              // Ignore read/parse errors (file may be partially written)
-            }
-          })
-          watcher.on('error', () => { /* ignore */ })
-          rec.watcher = watcher
-        } catch {
-          // Ignore watch errors
-        }
-      }).catch(() => { /* ignore mkdir errors */ })
+            })
+            watcher.on('error', () => {
+              /* ignore */
+            })
+            rec.watcher = watcher
+          } catch {
+            // Ignore watch errors
+          }
+        })
+        .catch(() => {
+          /* ignore mkdir errors */
+        })
     }
 
     wire(id, rec)
@@ -277,7 +294,13 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     const id = input.sessionId ?? randomUUID()
     const backend = selectBackend(input.agentKind)
     const system = input.systemPrompt ?? ''
-    const spec = backend.buildStartArgs({ sessionId: id, system, user: input.prompt, opencodePort: input.opencodePort, mcpConfigPath: input.mcpConfigPath })
+    const spec = backend.buildStartArgs({
+      sessionId: id,
+      system,
+      user: input.prompt,
+      opencodePort: input.opencodePort,
+      mcpConfigPath: input.mcpConfigPath,
+    })
 
     const dto: SessionDTO = {
       id,
@@ -292,7 +315,17 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       createdAt: Date.now(),
     }
 
-    return launch({ id, cwd: input.cwd, env: input.env, system, dto, backend, spec, opencodePort: input.opencodePort, isInitialStart: true })
+    return launch({
+      id,
+      cwd: input.cwd,
+      env: input.env,
+      system,
+      dto,
+      backend,
+      spec,
+      opencodePort: input.opencodePort,
+      isInitialStart: true,
+    })
   }
 
   function resume(input: ResumeSessionInput): SessionDTO {
@@ -314,7 +347,18 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
-    return launch({ id, cwd: input.cwd, env: input.env, system, dto, backend, spec, opencodePort: input.opencodePort, opencodeSid: input.session.opencodeSid, isInitialStart: false })
+    return launch({
+      id,
+      cwd: input.cwd,
+      env: input.env,
+      system,
+      dto,
+      backend,
+      spec,
+      opencodePort: input.opencodePort,
+      opencodeSid: input.session.opencodeSid,
+      isInitialStart: false,
+    })
   }
 
   function attachRemoteControl(input: ResumeSessionInput): SessionDTO {
@@ -340,7 +384,18 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
-    return launch({ id, cwd: input.cwd, env: input.env, system, dto, backend, spec, opencodePort: input.opencodePort, opencodeSid: input.session.opencodeSid, isInitialStart: false })
+    return launch({
+      id,
+      cwd: input.cwd,
+      env: input.env,
+      system,
+      dto,
+      backend,
+      spec,
+      opencodePort: input.opencodePort,
+      opencodeSid: input.session.opencodeSid,
+      isInitialStart: false,
+    })
   }
 
   function has(sessionId: string): boolean {
@@ -370,17 +425,11 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     sessions.delete(sessionId)
   }
 
-  function on<E extends keyof SessionEvents>(
-    event: E,
-    listener: SessionEvents[E]
-  ): void {
+  function on<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void {
     emitter.on(event, listener as (...args: unknown[]) => void)
   }
 
-  function off<E extends keyof SessionEvents>(
-    event: E,
-    listener: SessionEvents[E]
-  ): void {
+  function off<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void {
     emitter.removeListener(event, listener as (...args: unknown[]) => void)
   }
 
@@ -403,7 +452,11 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       rec.watcher?.close()
       rec.watcher = undefined
       rec.disposed = true
-      try { rec.pty.kill() } catch { /* already gone */ }
+      try {
+        rec.pty.kill()
+      } catch {
+        /* already gone */
+      }
     }
     sessions.clear()
   }
@@ -411,7 +464,12 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
   function liveSessions(): LiveSessionInfo[] {
     const out: LiveSessionInfo[] = []
     for (const [id, rec] of sessions) {
-      out.push({ id, status: rec.dto.status, createdAt: rec.dto.createdAt, lastActivityAt: rec.lastActivityAt })
+      out.push({
+        id,
+        status: rec.dto.status,
+        createdAt: rec.dto.createdAt,
+        lastActivityAt: rec.lastActivityAt,
+      })
     }
     return out
   }
@@ -425,7 +483,11 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     rec.disposed = true // suppress the onExit status/exit emission
     rec.dto.status = 'reaped'
     emit('status', sessionId, 'reaped')
-    try { rec.pty.kill() } catch { /* already gone */ }
+    try {
+      rec.pty.kill()
+    } catch {
+      /* already gone */
+    }
     sessions.delete(sessionId)
   }
 
@@ -444,5 +506,20 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     })
   }
 
-  return { start, resume, attachRemoteControl, has, write, resize, kill, killAll, on, off, getBuffer, setOpencodeSid, liveSessions, reap }
+  return {
+    start,
+    resume,
+    attachRemoteControl,
+    has,
+    write,
+    resize,
+    kill,
+    killAll,
+    on,
+    off,
+    getBuffer,
+    setOpencodeSid,
+    liveSessions,
+    reap,
+  }
 }

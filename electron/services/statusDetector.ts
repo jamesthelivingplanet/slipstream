@@ -12,6 +12,7 @@ import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/p
 
 // ─── ANSI stripping ─────────────────────────────────────────────────────────
 
+// eslint-disable-next-line no-control-regex -- intentionally matches the ESC control char to strip ANSI/VT escapes
 const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
 
 /** Strip ANSI/VT escape sequences from a string. */
@@ -37,9 +38,9 @@ export const NEEDS_PATTERNS: RegExp[] = [
   /Proceed\?/i,
   /Would you like\b/i,
   /\bpress\s+(enter|return|any key)\b/i,
-  /❯\s*\d+[.)]/,  // arrow pointing at a numbered menu option (e.g. permission select box)
-  /\?\s*$/,       // ends with a question mark (optionally trailing whitespace)
-  /[❯>]\s*$/,     // trailing prompt glyph
+  /❯\s*\d+[.)]/, // arrow pointing at a numbered menu option (e.g. permission select box)
+  /\?\s*$/, // ends with a question mark (optionally trailing whitespace)
+  /[❯>]\s*$/, // trailing prompt glyph
 ]
 
 /**
@@ -48,7 +49,7 @@ export const NEEDS_PATTERNS: RegExp[] = [
  */
 export function looksLikeQuestion(tail: string): boolean {
   const t = stripAnsi(tail).trim()
-  return NEEDS_PATTERNS.some(re => re.test(t))
+  return NEEDS_PATTERNS.some((re) => re.test(t))
 }
 
 /**
@@ -88,7 +89,7 @@ export function tailSignal(tail: string): 'needs' | 'done' | 'running' | null {
 
 // ─── Buffer constants ────────────────────────────────────────────────────────
 
-const MAX_BUFFER = 4096  // ~4 KB of recent output retained
+const MAX_BUFFER = 4096 // ~4 KB of recent output retained
 
 // ─── StatusDetector ──────────────────────────────────────────────────────────
 
