@@ -460,8 +460,10 @@ export function resolveNeedsInput(tid: string) {
 
 /**
  * Shared agent teardown: kill the PTY, remove worktree+branch via the backend,
- * and drop it from the sidebar. `auto` (refresh-driven) force-removes without
- * prompting; the manual trash path confirms before forcing a dirty/unmerged tree.
+ * and drop it from the sidebar. `auto` (refresh-driven) SKIPS a dirty/unmerged
+ * worktree and surfaces a warning instead of removing it — force-destroying
+ * unpushed agent work behind the user's back is a data-loss bug. Only the
+ * manual trash path force-removes, and only after the user confirms.
  */
 export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promise<boolean> {
   if (!hasBackend || !s.id) {
@@ -473,10 +475,15 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
     await killSession(s.id)
     let result = await cleanupSession(s.id, { force: false })
     if (!result.removed) {
-      const force =
-        opts?.auto ||
-        confirm(`Worktree not clean: ${result.reason ?? 'unknown reason'}. Force remove?`)
-      if (!force) return false
+      const reason = result.reason ?? 'uncommitted changes or unmerged commits'
+      if (opts?.auto) {
+        // Never force-destroy a dirty/unmerged worktree during auto-reconcile —
+        // that silently discards unpushed agent work. Skip and surface a warning.
+        patch(s.tid, (x) => ({ ...x, reconcileWarning: reason }))
+        pushToast('warning', `Kept ${s.tid}: worktree not clean (${reason})`)
+        return false
+      }
+      if (!confirm(`Worktree not clean: ${reason}. Force remove?`)) return false
       result = await cleanupSession(s.id, { force: true })
     }
     if (result.removed) {

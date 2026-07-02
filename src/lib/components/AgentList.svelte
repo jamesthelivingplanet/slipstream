@@ -80,6 +80,9 @@
             <span class="diff mono"
               ><span class="add">+{s.add}</span><span class="del">−{s.del}</span></span
             >
+            {#if s.reconcileWarning}
+              <span class="warn-badge" title={s.reconcileWarning}>⚠ not clean</span>
+            {/if}
           {/if}
         </div>
       </div>
