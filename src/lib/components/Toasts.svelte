@@ -50,6 +50,13 @@
     color: hsl(var(--foreground));
   }
 
+  .toast.warning {
+    background: hsl(var(--st-needs) / 0.1);
+    border-color: hsl(var(--st-needs) / 0.35);
+    border-left-color: hsl(var(--st-needs));
+    color: hsl(var(--foreground));
+  }
+
   @keyframes slideIn {
     from {
       opacity: 0;

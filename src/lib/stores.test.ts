@@ -1,17 +1,40 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { isStartableTicket } from './ticketFilter.js'
+
+vi.mock('./ipc', () => ({
+  hasBackend: true,
+  listRepos: vi.fn(),
+  listTickets: vi.fn(),
+  listSessions: vi.fn(),
+  pickAndRegisterRepo: vi.fn(),
+  registerRepo: vi.fn(),
+  registerRepoByUrl: vi.fn(),
+  removeRepo: vi.fn(),
+  startSession: vi.fn(),
+  killSession: vi.fn(),
+  cleanupSession: vi.fn(),
+  worktreeStatus: vi.fn(),
+  runApp: vi.fn(),
+  onSessionStatus: vi.fn(),
+  onSessionPr: vi.fn(),
+  getMcpStatus: vi.fn(),
+}))
+
+import { cleanupSession, killSession } from './ipc'
 import {
   sessions,
   tickets,
   createBlankAgent,
   createAgentFromTicket,
   setSessionPrUrl,
+  cleanupAgent,
   contentLoading,
   contentResolvedAt,
   contentRefreshNonce,
 } from './stores.js'
-import type { Ticket } from './types.js'
+import { toasts } from './toast.js'
+import type { Ticket, Session } from './types.js'
 
 describe('isStartableTicket', () => {
   it('keeps a backlog ticket (type backlog, done false)', () => {
@@ -153,5 +176,63 @@ describe('FLO-56 content stores', () => {
     expect(get(contentLoading)).toBe(false)
     expect(get(contentResolvedAt)).toBe(0)
     expect(get(contentRefreshNonce)).toBe(0)
+  })
+})
+
+describe('cleanupAgent auto-reconcile', () => {
+  function makeSession(overrides: Partial<Session> = {}): Session {
+    return {
+      id: 'u1',
+      tid: 'A',
+      src: 'linear',
+      status: 'done',
+      title: 'Some task',
+      repo: 'repo1',
+      branch: 'A-branch',
+      add: 0,
+      del: 0,
+      ago: '',
+      activity: { text: '' },
+      ...overrides,
+    } as Session
+  }
+
+  beforeEach(() => {
+    sessions.set([makeSession()])
+    toasts.set([])
+    vi.clearAllMocks()
+    vi.mocked(killSession).mockResolvedValue(undefined)
+  })
+
+  it('skips (does not force-remove) a dirty/unmerged worktree and surfaces a warning', async () => {
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: false, reason: '2 files changed' })
+    const session = makeSession()
+
+    const result = await cleanupAgent(session, { auto: true })
+
+    expect(result).toBe(false)
+    expect(cleanupSession).toHaveBeenCalledTimes(1)
+    for (const call of vi.mocked(cleanupSession).mock.calls) {
+      expect(call[1]).toEqual({ force: false })
+    }
+
+    const stored = get(sessions).find((s) => s.tid === 'A')
+    expect(stored).toBeDefined()
+    expect(stored?.reconcileWarning).toBe('2 files changed')
+
+    const warningToast = get(toasts).find((t) => t.type === 'warning')
+    expect(warningToast).toBeDefined()
+  })
+
+  it('still auto-removes a clean worktree', async () => {
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: true })
+    const session = makeSession()
+
+    const result = await cleanupAgent(session, { auto: true })
+
+    expect(result).toBe(true)
+    expect(get(sessions).find((s) => s.tid === 'A')).toBeUndefined()
+    expect(cleanupSession).toHaveBeenCalledTimes(1)
+    expect(cleanupSession).toHaveBeenCalledWith('u1', { force: false })
   })
 })

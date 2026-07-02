@@ -44,6 +44,8 @@ export interface Session {
   port?: number
   agentKind?: BackendKind
   prUrl?: string
+  // set when auto-reconcile skipped removing a dirty/unmerged worktree
+  reconcileWarning?: string
   activity: { text: string; q?: boolean }
 }
 
