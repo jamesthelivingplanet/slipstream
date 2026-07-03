@@ -3,8 +3,10 @@
 Hard-won, non-obvious notes for this repo — start with
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
-Use **pnpm**. Run `pnpm check` (svelte-check) and `pnpm test` before committing. `pnpm deploy`
-builds, then restarts the systemd `slipstream.service` and hits a healthz check.
+Use **pnpm**. Run `pnpm check` (svelte-check), `pnpm test`, and `pnpm lint` (eslint +
+`prettier --check`) before committing — `pnpm lint` gates the MR, so don't skip it; use
+`pnpm lint:fix` to auto-fix formatting. `pnpm deploy` builds, then restarts the systemd
+`slipstream.service` and hits a healthz check.
 
 If a change touches `scripts/setup.sh`, `scripts/deploy.sh`, `package.json` (scripts/engines),
 or how the app is bootstrapped/deployed, check whether `.claude/skills/setup/SKILL.md` still

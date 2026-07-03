@@ -48,7 +48,7 @@ function dtoToTickets(
   }))
 }
 
-function cleanError(e: unknown): string {
+export function cleanError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e)
   return (
     msg

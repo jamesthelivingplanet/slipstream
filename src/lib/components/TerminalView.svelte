@@ -10,6 +10,7 @@
     setSessionStatus,
     cleanupAgent,
     runAppForSession,
+    cleanError,
   } from '../stores'
   import {
     hasBackend,
@@ -289,12 +290,7 @@
       term.write(snap.data)
       pushToast('success', 'Remote control attached.')
     } catch (e) {
-      pushToast(
-        'error',
-        e instanceof Error
-          ? e.message.replace(/^Error invoking remote method '[^']*':\s*/, '')
-          : String(e),
-      )
+      pushToast('error', cleanError(e))
     }
   }
 
@@ -321,11 +317,7 @@
       await openInEditor({ repoId: session.repo, branch: session.branch, mobile })
       pushToast('success', 'Opening in editor…')
     } catch (e) {
-      const msg =
-        e instanceof Error
-          ? e.message.replace(/^Error invoking remote method '[^']*':\s*/, '')
-          : String(e)
-      pushToast('error', msg)
+      pushToast('error', cleanError(e))
     }
   }
 </script>
