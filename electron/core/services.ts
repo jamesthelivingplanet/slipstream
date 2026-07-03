@@ -7,7 +7,7 @@ import { createRepoRegistry } from '../services/repoRegistry.js'
 import { createWorktreeManager } from '../services/worktreeManager.js'
 import { createSessionManager } from '../services/sessionManager.js'
 import { createPortBroker } from '../services/portBroker.js'
-import { createConfigStore } from '../services/configStore.js'
+import { createConfigStore, createSafeStorageEncryptor } from '../services/configStore.js'
 import { createLinearProvider } from '../tickets/linearProvider.js'
 import { createSessionStore, restoreInterruptedSessions } from '../services/sessionStore.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
@@ -47,8 +47,13 @@ export function resolveDataDir(): string {
 /** Construct all backend services wired to the given data root. */
 export function createServices(root: string): IpcDeps {
   fs.mkdirSync(root, { recursive: true })
+  try {
+    fs.chmodSync(root, 0o700)
+  } catch {
+    // best-effort: non-POSIX filesystems / Windows may not support chmod
+  }
   const db = openDb(path.join(root, 'slipstream.db'))
-  const configStore = createConfigStore(db)
+  const configStore = createConfigStore(db, { encryptor: createSafeStorageEncryptor() })
   const sessionStore = createSessionStore(db)
   // FLO-46: mark orphaned in-flight sessions as interrupted on boot
   restoreInterruptedSessions(sessionStore)

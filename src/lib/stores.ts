@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store'
-import type { Filter, Repo, Session, Status, Ticket, BackendKind } from './types'
-import type { McpStatusDTO, DiagnosticsDTO } from '../../electron/shared/contract.js'
+import type { Filter, Repo, Session, Status, Ticket, BackendKind, Source } from './types'
+import type { McpStatusDTO, DiagnosticsDTO, SessionDTO } from '../../electron/shared/contract.js'
 import { branchFor } from './branch'
 import {
   hasBackend,
@@ -49,6 +49,37 @@ function dtoToTickets(
     status: d.status,
     done: d.done,
   }))
+}
+
+/** Map a persisted SessionDTO to the renderer Session model. Exported so the
+ *  src round-trip is unit-testable. Legacy rows with no persisted source
+ *  default to 'jira'. */
+export function dtoToSession(dto: SessionDTO): Session {
+  const uiStatus: Status =
+    dto.status === 'running' || dto.status === 'needs' ? 'detached' : (dto.status as Status)
+  return {
+    id: dto.id,
+    tid: dto.tid,
+    src: (dto.src ?? 'jira') as Source,
+    status: uiStatus,
+    title: dto.title,
+    repo: dto.repoId,
+    branch: dto.branch,
+    add: 0,
+    del: 0,
+    ago: '',
+    prompt: dto.prompt,
+    port: dto.port,
+    prUrl: dto.prUrl,
+    activity: {
+      text:
+        uiStatus === 'interrupted'
+          ? 'Interrupted by restart — open to resume.'
+          : uiStatus === 'reaped'
+            ? 'Reaped by the cost guard.'
+            : 'Detached — open to resume.',
+    },
+  }
 }
 
 export function cleanError(e: unknown): string {
@@ -187,35 +218,7 @@ export async function initFromBackend(): Promise<void> {
   tickets.set(dtoToTickets(ticketDTOs).filter(isStartableTicket))
 
   const sessionDTOs = await listSessions()
-  sessions.set(
-    sessionDTOs.map((dto) => {
-      const uiStatus: Status =
-        dto.status === 'running' || dto.status === 'needs' ? 'detached' : (dto.status as Status)
-      return {
-        id: dto.id,
-        tid: dto.tid,
-        src: 'jira' as const,
-        status: uiStatus,
-        title: dto.title,
-        repo: dto.repoId,
-        branch: dto.branch,
-        add: 0,
-        del: 0,
-        ago: '',
-        prompt: dto.prompt,
-        port: dto.port,
-        prUrl: dto.prUrl,
-        activity: {
-          text:
-            uiStatus === 'interrupted'
-              ? 'Interrupted by restart — open to resume.'
-              : uiStatus === 'reaped'
-                ? 'Reaped by the cost guard.'
-                : 'Detached — open to resume.',
-        },
-      }
-    }),
-  )
+  sessions.set(sessionDTOs.map(dtoToSession))
   await refreshDiffStats().catch(() => {})
 }
 
@@ -392,6 +395,7 @@ export async function startAgent(
         description: s.description,
         agentKind,
         sessionId: id,
+        src: s.src,
       })
       patch(id, (s) => ({
         ...s,

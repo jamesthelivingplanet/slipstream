@@ -313,6 +313,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       systemPrompt: input.systemPrompt,
       agentKind: input.agentKind,
       createdAt: Date.now(),
+      src: input.src,
     }
 
     return launch({

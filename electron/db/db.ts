@@ -1,83 +1,12 @@
 import Database from 'better-sqlite3'
 import type { RepoDTO, SessionDTO, RepoSettings } from '../shared/contract.js'
-
-// Inlined (not read from schema.sql) so the bundled main.js has no runtime
-// dependency on a sibling file the bundler doesn't copy.
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS repos (
-  id        TEXT PRIMARY KEY,
-  org       TEXT NOT NULL,
-  name      TEXT NOT NULL,
-  base      TEXT NOT NULL,
-  path      TEXT NOT NULL,
-  remoteUrl TEXT,
-  ownerId   TEXT DEFAULT 'local'
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-  id        TEXT PRIMARY KEY,
-  tid       TEXT NOT NULL,
-  title     TEXT NOT NULL,
-  prompt    TEXT NOT NULL,
-  repoId    TEXT NOT NULL,
-  branch    TEXT NOT NULL,
-  status    TEXT NOT NULL DEFAULT 'idle',
-  port      INTEGER,
-  systemPrompt TEXT,
-  agentKind TEXT NOT NULL DEFAULT 'claude-code',
-  opencodeSid TEXT,
-  createdAt INTEGER NOT NULL,
-  ownerId   TEXT DEFAULT 'local',
-  prUrl     TEXT
-);
-
-CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-
-CREATE TABLE IF NOT EXISTS repo_settings (
-  repoId     TEXT PRIMARY KEY,
-  installCmd TEXT NOT NULL DEFAULT '',
-  startCmd   TEXT NOT NULL DEFAULT ''
-);
-
-CREATE TABLE IF NOT EXISTS push_subscriptions (
-  endpoint   TEXT PRIMARY KEY,
-  p256dh     TEXT NOT NULL,
-  auth       TEXT NOT NULL,
-  needs      INTEGER NOT NULL DEFAULT 1,
-  done       INTEGER NOT NULL DEFAULT 1,
-  running    INTEGER NOT NULL DEFAULT 0,
-  createdAt  INTEGER NOT NULL
-);
-`
+import { runMigrations } from './migrations.js'
 
 /** Open (or create) a SQLite database at `file` and apply the schema. */
 export function openDb(file: string): Database.Database {
   const db = new Database(file)
   db.pragma('journal_mode = WAL')
-  db.exec(SCHEMA)
-  const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]
-  if (!cols.some((c) => c.name === 'systemPrompt')) {
-    db.exec(`ALTER TABLE sessions ADD COLUMN systemPrompt TEXT`)
-  }
-  if (!cols.some((c) => c.name === 'agentKind')) {
-    db.exec(`ALTER TABLE sessions ADD COLUMN agentKind TEXT NOT NULL DEFAULT 'claude-code'`)
-  }
-  if (!cols.some((c) => c.name === 'opencodeSid')) {
-    db.exec(`ALTER TABLE sessions ADD COLUMN opencodeSid TEXT`)
-  }
-  if (!cols.some((c) => c.name === 'ownerId')) {
-    db.exec(`ALTER TABLE sessions ADD COLUMN ownerId TEXT DEFAULT 'local'`)
-  }
-  if (!cols.some((c) => c.name === 'prUrl')) {
-    db.exec(`ALTER TABLE sessions ADD COLUMN prUrl TEXT`)
-  }
-  const repoCols = db.prepare(`PRAGMA table_info(repos)`).all() as { name: string }[]
-  if (!repoCols.some((c) => c.name === 'remoteUrl')) {
-    db.exec(`ALTER TABLE repos ADD COLUMN remoteUrl TEXT`)
-  }
-  if (!repoCols.some((c) => c.name === 'ownerId')) {
-    db.exec(`ALTER TABLE repos ADD COLUMN ownerId TEXT DEFAULT 'local'`)
-  }
+  runMigrations(db)
   return db
 }
 
@@ -114,8 +43,8 @@ export function getRepo(db: Database.Database, id: string): RepoDTO | undefined 
 export function upsertSession(db: Database.Database, session: SessionDTO): void {
   db.prepare(
     `
-    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt, ownerId, prUrl)
-    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt, @ownerId, @prUrl)
+    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt, ownerId, prUrl, src)
+    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt, @ownerId, @prUrl, @src)
     ON CONFLICT(id) DO UPDATE SET
       tid          = excluded.tid,
       title        = excluded.title,
@@ -129,7 +58,8 @@ export function upsertSession(db: Database.Database, session: SessionDTO): void 
       opencodeSid  = excluded.opencodeSid,
       createdAt    = excluded.createdAt,
       ownerId      = excluded.ownerId,
-      prUrl        = excluded.prUrl
+      prUrl        = excluded.prUrl,
+      src          = excluded.src
   `,
   ).run({
     ...session,
@@ -139,6 +69,7 @@ export function upsertSession(db: Database.Database, session: SessionDTO): void 
     opencodeSid: session.opencodeSid ?? null,
     ownerId: session.ownerId ?? 'local',
     prUrl: session.prUrl ?? null,
+    src: session.src ?? null,
   })
 }
 

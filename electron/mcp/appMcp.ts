@@ -189,11 +189,12 @@ export async function main(): Promise<void> {
 
   // Dynamically import to avoid issues at module load time
   const { openDb } = await import('../db/db.js')
-  const { createConfigStore } = await import('../services/configStore.js')
+  const { createConfigStore, createSafeStorageEncryptor } =
+    await import('../services/configStore.js')
 
   const dbPath = path.join(dataDir, 'slipstream.db')
   const db = openDb(dbPath)
-  const configStore = createConfigStore(db)
+  const configStore = createConfigStore(db, { encryptor: createSafeStorageEncryptor() })
 
   const driver = createGitDriver()
 
