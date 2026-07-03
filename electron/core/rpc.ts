@@ -215,7 +215,7 @@ export function createRpc(
           }
         }
 
-        const startedAt = Date.now()
+
         const session = deps.sessions.start({
           tid,
           title,
@@ -240,8 +240,8 @@ export function createRpc(
           ownerId: identity.id,
         })
 
-        if (agentKind === 'opencode' && opencodePort) {
-          void captureOpencodeSessionId(opencodePort, startedAt - 1000).then((sid) => {
+        if (agentKind === 'opencode') {
+          void captureOpencodeSessionId().then((sid) => {
             if (!sid) return
             deps.sessions.setOpencodeSid(session.id, sid)
             const cur = deps.sessionStore.get(session.id)

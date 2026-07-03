@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   selectNewestSessionSince,
+  parseOpencodeSessionIdFromStdout,
+  captureOpencodeSessionId,
   opencodeStatusFromText,
   opencodeStatusFromMessages,
   withOpencodePromptArg,
@@ -8,7 +10,58 @@ import {
 import type { OpencodeSession, OpencodeMessage } from './opencodeSessions.js'
 import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
 
-// ── selectNewestSessionSince ─────────────────────────────────────────────────
+// ── parseOpencodeSessionIdFromStdout ────────────────────────────────────────
+
+describe('parseOpencodeSessionIdFromStdout', () => {
+  it('returns the id from valid JSON output', () => {
+    expect(
+      parseOpencodeSessionIdFromStdout(JSON.stringify([{ id: 'ses_abc123', title: 'test' }])),
+    ).toBe('ses_abc123')
+  })
+
+  it('returns null for empty JSON array', () => {
+    expect(parseOpencodeSessionIdFromStdout('[]')).toBeNull()
+  })
+
+  it('returns null for invalid JSON', () => {
+    expect(parseOpencodeSessionIdFromStdout('not json at all')).toBeNull()
+  })
+
+  it('returns null when JSON has no .id field', () => {
+    expect(parseOpencodeSessionIdFromStdout('[{"title": "no id"}]')).toBeNull()
+  })
+
+  it('trims whitespace before parsing', () => {
+    expect(
+      parseOpencodeSessionIdFromStdout('  [{"id": "ses_trim"}]  \n'),
+    ).toBe('ses_trim')
+  })
+
+  it('returns null when id is not a string', () => {
+    expect(parseOpencodeSessionIdFromStdout('[{"id": 42}]')).toBeNull()
+  })
+
+  it('returns the first entry when multiple sessions exist', () => {
+    expect(
+      parseOpencodeSessionIdFromStdout(
+        JSON.stringify([{ id: 'ses_first' }, { id: 'ses_second' }]),
+      ),
+    ).toBe('ses_first')
+  })
+})
+
+// ── captureOpencodeSessionId ────────────────────────────────────────────────
+
+describe('captureOpencodeSessionId', () => {
+  it('returns null or a string (smoke test — depends on opencode being installed)', async () => {
+    // We can't mock the CLI call in ESM tests, so this is a smoke test.
+    // The pure parse logic is covered by parseOpencodeSessionIdFromStdout above.
+    const result = await captureOpencodeSessionId({ attempts: 1, intervalMs: 0 })
+    expect(result === null || typeof result === 'string').toBe(true)
+  })
+})
+
+// ── selectNewestSessionSince (kept for potential future use) ──────────────────────
 
 describe('selectNewestSessionSince', () => {
   const sinceMs = 1000

@@ -1,10 +1,21 @@
+import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
+
 import type { SessionStatus } from '../shared/contract.js'
 import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
 import {
   OPENCODE_FLAGS,
   OPENCODE_SESSION_CAPTURE_ATTEMPTS,
   OPENCODE_SESSION_CAPTURE_INTERVAL_MS,
+  OPENCODE_BIN_NAME,
 } from '../shared/agentCli.js'
+
+/** Resolve the opencode binary, preferring a local node_modules/.bin copy. */
+const OPENCODE_BIN = (() => {
+  const local = path.join(process.cwd(), 'node_modules', '.bin', 'opencode')
+  return existsSync(local) ? local : OPENCODE_BIN_NAME
+})()
 
 export interface OpencodeSession {
   id: string
@@ -71,19 +82,60 @@ export async function listOpencodeSessions(port: number): Promise<OpencodeSessio
 }
 
 /**
- * Poll the opencode server for the session id created at/after sinceMs. The TUI
- * creates its session shortly after launch (and on first message), so this
- * retries until the server is up and the session appears, or attempts run out.
+ * Parse the stdout of `opencode session list --format json -n 1` into a session
+ * id. Returns null on any parse failure or empty result.
+ * Pure — exported so it's unit-testable without spawning processes.
+ */
+export function parseOpencodeSessionIdFromStdout(stdout: string): string | null {
+  try {
+    const arr = JSON.parse(stdout.trim())
+    if (Array.isArray(arr) && arr.length > 0 && typeof arr[0].id === 'string') {
+      return arr[0].id
+    }
+  } catch {
+    // parse failure — session file may not exist yet
+  }
+  return null
+}
+
+/**
+ * Shell out to `opencode session list --format json -n 1` to read the newest
+ * session id from opencode's on-disk session store. Returns null on any error
+ * (binary missing, no sessions yet, parse failure).
+ *
+ * This reads from disk — it does NOT require the opencode HTTP server to be
+ * running, which makes it reliable even during slow TUI startup.
+ */
+export async function queryOpencodeSessionIdFromCli(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      OPENCODE_BIN,
+      ['session', 'list', '--format', 'json', '-n', '1'],
+      { timeout: 10_000 },
+      (err, stdout) => {
+        if (err) return resolve(null)
+        resolve(parseOpencodeSessionIdFromStdout(stdout))
+      },
+    )
+    child.on('error', () => resolve(null))
+  })
+}
+
+/**
+ * Poll `opencode session list` until a session appears. The TUI creates its
+ * session shortly after launch (and on first message), so this retries until
+ * the on-disk session store has an entry, or attempts run out.
+ *
+ * Uses the CLI instead of the HTTP server, so it works even when the embedded
+ * server is slow to start.
  */
 export async function captureOpencodeSessionId(
-  port: number,
-  sinceMs: number,
   opts: { attempts?: number; intervalMs?: number } = {},
 ): Promise<string | null> {
   const attempts = opts.attempts ?? OPENCODE_SESSION_CAPTURE_ATTEMPTS
   const intervalMs = opts.intervalMs ?? OPENCODE_SESSION_CAPTURE_INTERVAL_MS
   for (let i = 0; i < attempts; i++) {
-    const id = selectNewestSessionSince(await listOpencodeSessions(port), sinceMs)
+    const id = await queryOpencodeSessionIdFromCli()
     if (id) return id
     await new Promise((r) => setTimeout(r, intervalMs))
   }
