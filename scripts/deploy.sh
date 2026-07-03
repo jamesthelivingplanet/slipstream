@@ -31,6 +31,21 @@ cd "$REPO_ROOT"
 source "$SCRIPT_DIR/lib/node22.sh"
 
 # ---------------------------------------------------------------------------
+# Onboarding QR code — printed at the end of each success path so a phone can
+# scan straight into the (optionally tokenized) app URL.
+# ---------------------------------------------------------------------------
+print_onboarding_qr() {
+  local url="$1"
+  echo ""
+  echo "  Onboarding URL : ${url}"
+  if command -v qrencode &>/dev/null; then
+    qrencode -t ansiutf8 "${url}"
+  else
+    echo "  (install qrencode to show a scannable QR code)"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Parse flags
 # ---------------------------------------------------------------------------
 SKIP_CHECKS="${SKIP_CHECKS:-0}"
@@ -159,6 +174,12 @@ if [[ "${SLIPSTREAM_SERVE:-tailscale}" == "none" ]]; then
   echo "  re-run 'pnpm setup' and choose Tailscale."
   echo ""
   echo "✔ Deploy complete (local-only)."
+  if [[ -n "${SLIPSTREAM_TOKEN:-}" ]]; then
+    url="http://${BIND}:${PORT}/?token=${SLIPSTREAM_TOKEN}"
+    print_onboarding_qr "$url"
+  else
+    echo "  (no SLIPSTREAM_TOKEN found in server.env — skipping tokenized onboarding URL)"
+  fi
   exit 0
 fi
 
@@ -202,6 +223,12 @@ if [[ -n "$TS_DNS" ]]; then
   echo "  Access URL         : https://${TS_DNS}/"
   echo ""
   echo "  Mobile devices: reload the browser tab to pick up the latest UI."
+  if [[ -n "${SLIPSTREAM_TOKEN:-}" ]]; then
+    url="https://${TS_DNS}/?token=${SLIPSTREAM_TOKEN}"
+    print_onboarding_qr "$url"
+  else
+    echo "  (no SLIPSTREAM_TOKEN found in server.env — skipping tokenized onboarding URL)"
+  fi
 else
   echo "✔ Tailscale HTTPS serve is active!"
   echo "  (Could not derive tailnet DNS name — current serve config:)"

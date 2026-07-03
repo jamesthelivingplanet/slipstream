@@ -108,6 +108,13 @@ Phases:
 locally. Remote or phone access requires a BYO HTTPS origin — e.g. a Cloudflare Tunnel, or
 a reverse proxy with Let's Encrypt in front of port 7421.
 
+At the end of both the local-only and Tailscale success paths, `pnpm deploy` prints a
+tokenized onboarding URL (`?token=<SLIPSTREAM_TOKEN>`) and, if `qrencode` is installed, a
+scannable terminal QR code for it (`print_onboarding_qr` in `scripts/deploy.sh`). If no
+`SLIPSTREAM_TOKEN` is found in `server.env`, it skips the QR/tokenized URL and prints a
+note instead — install `qrencode` (e.g. `apt install qrencode` / `brew install qrencode`)
+to get the QR code.
+
 To skip quality gates for a hot fix:
 
 ```sh
@@ -125,6 +132,22 @@ pnpm deploy --skip-checks
 
 Push notifications and PWA install only work over HTTPS or localhost — they will not work
 over plain `http://` on a remote origin.
+
+## Desktop packaging
+
+`pnpm package` (`pnpm build && electron-builder --publish never`) builds installers into
+`release/` — an AppImage on Linux, a `.dmg` on macOS — configured in
+`electron-builder.yml` at the repo root. `npmRebuild: true` there means electron-builder
+rebuilds native modules (`better-sqlite3`, `node-pty`) for Electron's ABI automatically as
+part of packaging, so you don't need a manual `@electron/rebuild` step first.
+
+## Alternative deploy path: published Docker image
+
+In addition to `pnpm deploy` (systemd/launchd) and the Tailscale-sidecar pod
+(`docker-compose.yml`, see `docs/POD-DEPLOY.md`), CI publishes the production server image
+to the GitLab Container Registry (`registry.gitlab.com/ajlebaron/slipstream:latest`)
+automatically on every merge to the default branch. See the README's "Run the published
+image directly" section for a plain `docker run` invocation.
 
 ## Troubleshooting
 

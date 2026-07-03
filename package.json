@@ -1,7 +1,8 @@
 {
   "name": "slipstream",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "main": "dist-electron/main.js",
   "engines": {
@@ -15,6 +16,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "serve": "ELECTRON_RUN_AS_NODE=1 electron dist-electron/server.js",
+    "package": "pnpm build && electron-builder --publish never",
     "deploy": "bash scripts/deploy.sh",
     "setup": "bash scripts/setup.sh",
     "lint": "eslint . && prettier --check .",
@@ -39,6 +41,7 @@
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.20",
     "electron": "^33.2.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.0",
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",

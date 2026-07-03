@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store'
 import type { Filter, Repo, Session, Status, Ticket, BackendKind } from './types'
-import type { McpStatusDTO } from '../../electron/shared/contract.js'
+import type { McpStatusDTO, DiagnosticsDTO } from '../../electron/shared/contract.js'
 import { branchFor } from './branch'
 import {
   hasBackend,
@@ -21,6 +21,7 @@ import {
   onSessionStatus,
   onSessionPr,
   getMcpStatus as ipcGetMcpStatus,
+  getDiagnostics as ipcGetDiagnostics,
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
@@ -116,6 +117,22 @@ export async function refreshMcpStatus(): Promise<void> {
     mcpStatus.set({ up: false, tools: [], checkedAt: Date.now(), error: cleanError(e) })
   } finally {
     mcpChecking.set(false)
+  }
+}
+
+// FLO-81: Settings → Diagnostics tab data — daemon/version/repo-consistency info.
+export const diagnostics = writable<DiagnosticsDTO | null>(null)
+export const diagChecking = writable(false)
+
+export async function refreshDiagnostics(): Promise<void> {
+  if (!hasBackend) return
+  diagChecking.set(true)
+  try {
+    diagnostics.set(await ipcGetDiagnostics())
+  } catch {
+    diagnostics.set(null)
+  } finally {
+    diagChecking.set(false)
   }
 }
 

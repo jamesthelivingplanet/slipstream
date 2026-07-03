@@ -22,6 +22,7 @@ import type {
   WriteLockState,
   GcPolicy,
   McpStatusDTO,
+  DiagnosticsDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
 
@@ -277,4 +278,11 @@ export function setGcPolicy(policy: GcPolicy): Promise<void> {
 export function getMcpStatus(): Promise<McpStatusDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.getMcpStatus()
+}
+
+// ── Diagnostics ──────────────────────────────────────────────────────────
+
+export function getDiagnostics(): Promise<DiagnosticsDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.getDiagnostics()
 }
