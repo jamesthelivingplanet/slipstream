@@ -23,6 +23,7 @@
   let pathPending = false
   let urlInput = ''
   let urlPending = false
+  let showPathEntry = false
 
   async function addByPath() {
     const p = pathInput.trim()
@@ -128,25 +129,36 @@
     {@html icons.plus} Clone
   </button>
 </div>
+{#if isWeb}
+  <div class="cfg-hint">
+    Clone by remote URL — recommended. The repo is cloned into the managed location on the server.
+  </div>
+{/if}
 
 {#if isWeb}
-  <div class="path-add">
-    <input
-      type="text"
-      class="path-input"
-      placeholder="Absolute path, e.g. /home/user/projects/my-repo"
-      bind:value={pathInput}
-      on:keydown={pathKeydown}
-      disabled={pathPending}
-    />
-    <button
-      class="btn btn-outline btn-sm"
-      on:click={addByPath}
-      disabled={!pathInput.trim() || pathPending}
-    >
-      {@html icons.plus} Add
+  {#if !showPathEntry}
+    <button type="button" class="path-toggle" on:click={() => (showPathEntry = true)}>
+      Add by server path instead
     </button>
-  </div>
+  {:else}
+    <div class="path-add">
+      <input
+        type="text"
+        class="path-input"
+        placeholder="Absolute path, e.g. /home/user/projects/my-repo"
+        bind:value={pathInput}
+        on:keydown={pathKeydown}
+        disabled={pathPending}
+      />
+      <button
+        class="btn btn-outline btn-sm"
+        on:click={addByPath}
+        disabled={!pathInput.trim() || pathPending}
+      >
+        {@html icons.plus} Add
+      </button>
+    </div>
+  {/if}
 {/if}
 
 {#if $repos.length === 0}
@@ -260,6 +272,22 @@
     padding: 32px 0;
     text-align: center;
     line-height: 1.5;
+  }
+
+  .path-toggle {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 6px 0 4px;
+    font-size: 12.5px;
+    color: hsl(var(--muted-foreground));
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  .path-toggle:hover {
+    color: hsl(var(--foreground));
   }
 
   .repo-settings-panel {

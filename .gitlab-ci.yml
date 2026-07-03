@@ -14,6 +14,7 @@ workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule"
 
 stages:
   - verify
@@ -59,11 +60,55 @@ test:
   script:
     - pnpm test
 
+# Coverage visibility — kept separate from `test` so the gating job stays fast.
+# Publishes a browsable HTML report plus a Cobertura report GitLab renders as
+# inline diff annotations, and sets the MR coverage badge via the `coverage:`
+# regex below (matches vitest's v8 text reporter "All files" summary row).
+coverage:
+  extends: .verify
+  script:
+    - pnpm test:coverage
+  coverage: '/All files[^|]*\|\s*([\d.]+)/'
+  artifacts:
+    paths:
+      - coverage/
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+
 build:
   extends: .verify
   script:
     - pnpm build
     - node scripts/check-preload-cjs.mjs
+
+# CI smoke driver (scripts/e2e/smoke-add-repo.mjs): launches the built desktop
+# app under xvfb and exercises the Add-repo flow end to end, including the
+# window.slipstream preload-bridge check. Too slow/flaky-prone for every MR,
+# so it only runs on scheduled pipelines (set one up in GitLab: Build > Pipeline
+# schedules) and is otherwise available `when: manual` so it never blocks a
+# merge. Uses the Playwright image for its bundled browser system libs, and
+# overrides before_script (like publish-image) since it needs its own install
+# + native-rebuild + build sequence instead of the default `pnpm install`.
+e2e-smoke:
+  stage: verify
+  image: mcr.microsoft.com/playwright:v1.60.0-jammy
+  interruptible: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+  before_script: []
+  script:
+    - apt-get update && apt-get install -y xvfb || true
+    - corepack enable
+    - pnpm config set store-dir "$PNPM_STORE_DIR"
+    - pnpm install --frozen-lockfile
+    - pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty
+    - pnpm build
+    - xvfb-run -a node scripts/e2e/smoke-add-repo.mjs
 
 # Publish the production server image to the GitLab Container Registry on every
 # merge to the default branch, as an alternative deploy path to the systemd/

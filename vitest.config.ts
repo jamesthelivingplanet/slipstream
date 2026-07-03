@@ -6,9 +6,22 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['electron/**/*.test.ts', 'src/**/*.test.ts'],
-    reporters: [
-      'default',
-      ['tdd-guard-vitest', { projectRoot: '/home/jamesthelivingplanet/.repositories/slipstream' }],
-    ],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'json-summary', 'cobertura'],
+      reportsDirectory: 'coverage',
+      include: ['electron/**', 'src/**'],
+      exclude: [
+        '**/*.test.ts',
+        '**/*.d.ts',
+        'scripts/**',
+        '**/*.config.*',
+        'dist/**',
+        'dist-electron/**',
+        'node_modules/**',
+        'release/**',
+        'out/**',
+      ],
+    },
   },
 })

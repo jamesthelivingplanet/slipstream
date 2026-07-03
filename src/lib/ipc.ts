@@ -23,6 +23,7 @@ import type {
   GcPolicy,
   McpStatusDTO,
   DiagnosticsDTO,
+  AgentCliCheck,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
 
@@ -286,4 +287,15 @@ export function getMcpStatus(): Promise<McpStatusDTO> {
 export function getDiagnostics(): Promise<DiagnosticsDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.getDiagnostics()
+}
+
+// ── Agent CLI preflight ──────────────────────────────────────────────────
+
+/** Checks whether `kind`'s CLI binary is on the daemon's PATH. In design
+ *  mode (no backend), resolves `found: true` so the UI doesn't nag when
+ *  there's no real daemon to check against. */
+export function checkAgentCli(kind: BackendKind): Promise<AgentCliCheck> {
+  return hasBackend
+    ? window.slipstream.checkAgentCli(kind)
+    : Promise.resolve({ kind, bin: '', found: true })
 }
