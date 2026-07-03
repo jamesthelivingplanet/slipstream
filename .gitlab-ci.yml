@@ -62,3 +62,4 @@ build:
   extends: .verify
   script:
     - pnpm build
+    - node scripts/check-preload-esm.mjs
