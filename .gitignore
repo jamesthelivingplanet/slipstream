@@ -11,3 +11,4 @@ release/
 
 # pod deploy secrets (docker compose reads .env)
 .env
+.claude/tdd-guard/data/
