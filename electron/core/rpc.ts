@@ -13,6 +13,7 @@ import type {
   PushSubscriptionDTO,
   WriteLockState,
   GcPolicy,
+  TicketSource,
 } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
@@ -153,6 +154,7 @@ export function createRpc(
           description?: string
           agentKind?: BackendKind
           sessionId?: string
+          src?: TicketSource
         }
         const { tid, title, prompt, repoId, description } = input
         const agentKind = input.agentKind
@@ -226,6 +228,7 @@ export function createRpc(
           opencodePort,
           sessionId,
           mcpConfigPath,
+          src: input.src,
         })
 
         sessionMeta.set(session.id, { repo, branch })

@@ -50,6 +50,16 @@ If a fresh machine has trouble with native modules or the Electron binary, see t
 **Troubleshooting** section in [CLAUDE.md](CLAUDE.md) — it covers Electron binary
 extraction, `@electron/rebuild` for the ABI, and Node 24 quirks.
 
+## Secrets & data directory
+
+Secrets (Linear API key, GitHub/GitLab tokens) are stored in the SQLite `config` table
+inside the app's data directory. On desktop, they're encrypted at rest with the OS keychain
+via Electron `safeStorage` when available. The headless server (`pnpm serve`, and the
+detached daemon) runs under `ELECTRON_RUN_AS_NODE`, where safeStorage isn't reachable, so
+there secrets stay plaintext in `<dataDir>/slipstream.db`, protected only by the data
+directory's 0700 permissions — restrict host/filesystem access accordingly on a shared or
+remote machine.
+
 ## Run it on your phone / as a server
 
 The headless server runs on any machine (Linux/macOS) and serves the UI to any browser.

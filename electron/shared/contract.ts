@@ -134,6 +134,7 @@ export interface SessionDTO {
   createdAt: number
   ownerId?: string // owner identity; 'local' for the single-user tier
   prUrl?: string // MR/PR URL opened for this session's branch
+  src?: TicketSource // ticket source this session came from; persisted so it round-trips on reload (FLO-83)
 }
 
 export interface WorkflowState {
@@ -216,6 +217,7 @@ export interface SessionEvents {
 export interface StartSessionInput {
   tid: string
   title: string
+  src?: TicketSource
   prompt: string
   repo: RepoDTO
   branch: string
@@ -359,6 +361,7 @@ export interface SlipstreamApi {
     repoId: string
     description?: string
     agentKind?: BackendKind
+    src?: TicketSource
   }): Promise<SessionDTO>
   writeSession(id: string, data: string): void
   resizeSession(id: string, cols: number, rows: number): void

@@ -44,9 +44,11 @@ import {
   appRunKey,
   runAppForSession,
   stopAppForSession,
+  dtoToSession,
 } from './stores.js'
 import { toasts } from './toast.js'
 import type { Ticket, Session } from './types.js'
+import type { SessionDTO } from '../../electron/shared/contract.js'
 
 describe('isStartableTicket', () => {
   it('keeps a backlog ticket (type backlog, done false)', () => {
@@ -316,6 +318,37 @@ describe('cleanupAgent auto-reconcile', () => {
     expect(result).toBe(false)
     expect(cleanupSession).toHaveBeenCalledTimes(1)
     expect(get(sessions).find((s) => s.tid === 'A')).toBeDefined()
+  })
+})
+
+describe('dtoToSession (FLO-83 src round-trip)', () => {
+  it('maps a linear-sourced session DTO to a Session with src intact', () => {
+    const dto: SessionDTO = {
+      id: 's1',
+      tid: 'T-1',
+      title: 't',
+      prompt: 'p',
+      repoId: 'r',
+      branch: 'b',
+      status: 'idle',
+      createdAt: 0,
+      src: 'linear',
+    }
+    expect(dtoToSession(dto).src).toBe('linear')
+  })
+
+  it('defaults a legacy session DTO with no persisted src to jira', () => {
+    const dto: SessionDTO = {
+      id: 's2',
+      tid: 'T-2',
+      title: 't',
+      prompt: 'p',
+      repoId: 'r',
+      branch: 'b',
+      status: 'idle',
+      createdAt: 0,
+    }
+    expect(dtoToSession(dto).src).toBe('jira')
   })
 })
 

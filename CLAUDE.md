@@ -105,6 +105,14 @@ describes the current behavior and update it in the same change.
   filters enumerations and guards single-item reads by `ownerId`; it's a deliberate no-op
   for the single user (legacy rows coalesce to `'local'`). Don't add a read of a
   `sessions`/`repos` row without scoping it by owner. See `docs/IDENTITY-SEAM.md`.
+- **Secrets at rest**: config-table secrets (Linear API key, GitHub/GitLab tokens) are
+  encrypted with Electron `safeStorage` only where a real Electron process + OS keychain is
+  available. The detached daemon and the headless `pnpm serve` server both run under
+  `ELECTRON_RUN_AS_NODE`, where safeStorage is unavailable, so there they stay **plaintext**
+  in `<dataDir>/slipstream.db`, protected only by the 0700 data dir. VAPID keys live there
+  too — that's expected (server credentials, not user secrets). `configStore.ts` handles this
+  transparently via a marker prefix (`ss1:`); legacy plaintext values keep working and are
+  left as-is.
 
 ## Troubleshooting native setup
 

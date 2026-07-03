@@ -25,6 +25,7 @@ import type {
   GcPolicy,
   McpStatusDTO,
   DiagnosticsDTO,
+  TicketSource,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -306,6 +307,7 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       prompt: string
       repoId: string
       agentKind?: BackendKind
+      src?: TicketSource
     }): Promise<SessionDTO> {
       return request(IPC.startSession, [input]) as Promise<SessionDTO>
     },
