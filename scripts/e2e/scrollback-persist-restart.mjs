@@ -71,7 +71,7 @@ await win.screenshot({ path: win1, fullPage: true })
 await app.close() // kills the claude PTY — simulates closing the app
 
 // ── Verify scrollback file exists on disk ────────────────────────────────
-const scrollbackPath = path.join(userDataDir, 'scrollback', `${dto.id}.log`)
+const scrollbackPath = path.join(userDataDir, 'logs', `${dto.id}.log`)
 let scrollbackExists = fs.existsSync(scrollbackPath)
 console.log('scrollback file exists:', scrollbackExists)
 if (scrollbackExists) {

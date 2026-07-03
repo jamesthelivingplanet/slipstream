@@ -1,19 +1,23 @@
 /**
- * ScrollbackStore — bounded rolling file for PTY session scrollback.
- *
- * Appends PTY output chunks to a per-session file under `<root>/scrollback/<id>.log`.
- * Bounds total file size to MAX_CHARS (256 KB) consistent with the in-memory
- * OutputBuffer. Writes synchronously after each append — low-frequency data.
- * Provides a read snapshot for replay on session resume/restart.
- */
+  * ScrollbackStore — bounded rolling file for PTY session scrollback.
+  *
+  * Appends PTY output chunks to a per-session file under `<root>/logs/<id>.log`.
+  * Bounds total file size to MAX_CHARS (256 KB) consistent with the in-memory
+  * OutputBuffer. Writes synchronously after each append — low-frequency data.
+  * Provides a read snapshot for replay on session resume/restart.
+  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 
 const MAX_CHARS = 256 * 1024 // 256 KB
-const SUBDIR = 'scrollback'
+const SUBDIR = 'logs'
 
 export class ScrollbackStore {
+  /**
+   * Append a chunk of PTY output to the session's scrollback file.
+   * Bounds the file to MAX_CHARS by keeping only the tail when exceeded.
+   */
   private root: string
 
   constructor(root: string) {
