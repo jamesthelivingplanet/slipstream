@@ -5,6 +5,7 @@
   import SettingsIntegrations from './settings/SettingsIntegrations.svelte'
   import SettingsBehavior from './settings/SettingsBehavior.svelte'
   import SettingsNotifications from './settings/SettingsNotifications.svelte'
+  import SettingsDiagnostics from './settings/SettingsDiagnostics.svelte'
   import SettingsAbout from './settings/SettingsAbout.svelte'
 
   let activeTab = 'repositories'
@@ -63,6 +64,14 @@
         <button
           type="button"
           class="tab-item"
+          class:active={activeTab === 'diagnostics'}
+          on:click={() => (activeTab = 'diagnostics')}
+        >
+          Diagnostics
+        </button>
+        <button
+          type="button"
+          class="tab-item"
           class:active={activeTab === 'about'}
           on:click={() => (activeTab = 'about')}
         >
@@ -85,6 +94,10 @@
 
         {#if activeTab === 'notifications'}
           <SettingsNotifications />
+        {/if}
+
+        {#if activeTab === 'diagnostics'}
+          <SettingsDiagnostics />
         {/if}
 
         {#if activeTab === 'about'}

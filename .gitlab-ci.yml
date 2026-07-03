@@ -17,6 +17,7 @@ workflow:
 
 stages:
   - verify
+  - publish
 
 variables:
   # Keep the pnpm content-addressable store inside the project dir so GitLab can
@@ -63,3 +64,20 @@ build:
   script:
     - pnpm build
     - node scripts/check-preload-esm.mjs
+
+# Publish the production server image to the GitLab Container Registry on every
+# merge to the default branch, as an alternative deploy path to the systemd/
+# launchd flow (pnpm deploy) and the Tailscale-sidecar pod (docker-compose.yml).
+publish-image:
+  stage: publish
+  image: docker:cli
+  services:
+    - docker:dind
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script: []
+  script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker build -t "$CI_REGISTRY_IMAGE:latest" -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
+    - docker push "$CI_REGISTRY_IMAGE:latest"
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"

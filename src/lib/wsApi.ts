@@ -24,6 +24,7 @@ import type {
   WriteLockState,
   GcPolicy,
   McpStatusDTO,
+  DiagnosticsDTO,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -466,6 +467,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     getMcpStatus(): Promise<McpStatusDTO> {
       return request(IPC.getMcpStatus, []) as Promise<McpStatusDTO>
+    },
+
+    getDiagnostics(): Promise<DiagnosticsDTO> {
+      return request(IPC.getDiagnostics, []) as Promise<DiagnosticsDTO>
     },
   }
 }

@@ -58,6 +58,37 @@ export interface McpStatusDTO {
   lastActivityAt?: number // epoch ms of most recent real MCP activity (status.json/pr.json mtime across sessions), if any
 }
 
+export interface RepoDiagnostic {
+  id: string
+  org: string
+  name: string
+  path: string
+  exists: boolean // path exists on disk
+  isWorktree: boolean // `git rev-parse --is-inside-work-tree` succeeds at path
+  configuredRemote?: string // remoteUrl stored in the DB (RepoDTO.remoteUrl)
+  actualRemote?: string // `git remote get-url origin` at path, if resolvable
+  remoteMatches: boolean // configured === actual after normalization; true when both absent
+}
+
+export interface DiagnosticsDTO {
+  daemon: {
+    wsUrl: string
+    httpBase: string
+    port?: number
+    pid: number // the daemon process pid (process.pid inside the daemon)
+    mode: 'local' | 'remote'
+    dataDir: string
+    dbPath: string
+  }
+  versions: {
+    node: string
+    electron?: string
+    v8: string
+    chrome?: string
+  }
+  repos: RepoDiagnostic[]
+}
+
 export interface PushSubscriptionDTO {
   endpoint: string
   keys: { p256dh: string; auth: string }
@@ -378,6 +409,11 @@ export interface SlipstreamApi {
    *  and runs the initialize/tools-list handshake outside of any agent
    *  session, so it never adds anything to an agent's context. */
   getMcpStatus(): Promise<McpStatusDTO>
+
+  /** Everything a Settings → Diagnostics tab needs: daemon identity, runtime
+   *  versions, and per-repo path/remote health. Extends (does not duplicate)
+   *  getMcpStatus — call that separately for the MCP self-test section. */
+  getDiagnostics(): Promise<DiagnosticsDTO>
 }
 
 export const IPC = {
@@ -425,13 +461,14 @@ export const IPC = {
   getGcPolicy: 'gc:getPolicy',
   setGcPolicy: 'gc:setPolicy',
   getMcpStatus: 'mcp:status',
+  getDiagnostics: 'diag:get',
 } as const
 
 declare global {
   interface Window {
     slipstream: SlipstreamApi
     __slipstreamWeb?: boolean
-    __slipstreamDaemon?: { url: string; token: string } | null
+    __slipstreamDaemon?: { url: string; token: string; reused?: boolean } | null
     __slipstreamNative?: { pickFolder(): Promise<string | null> }
   }
 }

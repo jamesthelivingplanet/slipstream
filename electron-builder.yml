@@ -1,0 +1,20 @@
+appId: com.slipstream.app
+productName: Slipstream
+electronVersion: 33.2.1
+npmRebuild: true
+
+directories:
+  output: release
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+linux:
+  target: AppImage
+  category: Development
+  icon: public/icons/icon-512.png
+
+mac:
+  target: dmg

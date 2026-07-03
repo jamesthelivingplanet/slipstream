@@ -25,6 +25,7 @@ import {
 } from '../services/mcpConfig.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 import { checkAppMcp, lastMcpActivity } from '../services/mcpHealth.js'
+import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -576,6 +577,31 @@ export function createRpc(
         })
         const lastActivityAt = await lastMcpActivity(deps.appMcp.dataDir)
         return { ...res, checkedAt: Date.now(), lastActivityAt }
+      }
+
+      case IPC.getDiagnostics: {
+        const port = Number(process.env.SLIPSTREAM_PORT) || undefined
+        const bind = process.env.SLIPSTREAM_BIND ?? '127.0.0.1'
+        const dataDir = deps.appMcp?.dataDir ?? ''
+        const repos = (await deps.repos.list()).filter(ownedByCaller)
+        return {
+          daemon: {
+            wsUrl: `ws://${bind}:${port}/rpc`,
+            httpBase: `http://${bind}:${port}`,
+            port,
+            pid: process.pid,
+            mode: process.env.SLIPSTREAM_DAEMON_URL ? 'remote' : 'local',
+            dataDir,
+            dbPath: dataDir ? path.join(dataDir, 'slipstream.db') : '',
+          },
+          versions: {
+            node: process.versions.node,
+            electron: process.versions.electron,
+            v8: process.versions.v8,
+            chrome: process.versions.chrome,
+          },
+          repos: diagnoseRepos(repos, realRepoProbes),
+        }
       }
 
       case IPC.pickRepo:

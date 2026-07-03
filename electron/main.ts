@@ -16,11 +16,12 @@ const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 let win: BrowserWindow | null = null
 let daemonHandle: DaemonHandle | null = null
 let resolvedCfg: DaemonConfig | null = null
+let resolvedReused = false
 
-function createWindow(cfg: DaemonConfig): void {
+function createWindow(cfg: DaemonConfig, reused: boolean): void {
   const daemonArg =
     '--slipstream-daemon=' +
-    Buffer.from(JSON.stringify({ url: cfg.wsUrl, token: cfg.token })).toString('base64')
+    Buffer.from(JSON.stringify({ url: cfg.wsUrl, token: cfg.token, reused })).toString('base64')
 
   win = new BrowserWindow({
     width: 1320,
@@ -100,7 +101,8 @@ app.whenReady().then(async () => {
     },
     showApp: (cfg) => {
       resolvedCfg = cfg
-      createWindow(cfg)
+      resolvedReused = daemonHandle?.reused ?? false
+      createWindow(cfg, resolvedReused)
     },
     showError: (outcome) => {
       const detail = outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
@@ -133,6 +135,8 @@ app.on('before-quit', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0 && resolvedCfg) {
-    createWindow(resolvedCfg)
+    // A relaunch here always reattaches to the already-running daemon from
+    // this app session, so it's a reuse from the renderer's perspective.
+    createWindow(resolvedCfg, true)
   }
 })

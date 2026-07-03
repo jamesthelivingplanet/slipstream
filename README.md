@@ -87,6 +87,24 @@ This is idempotent — safe to re-run. It will:
   a Cloudflare Tunnel, or a reverse proxy (Caddy/nginx) with a Let's Encrypt cert in
   front of `http://127.0.0.1:7421`.
 
+### Run the published image directly
+
+CI publishes the production server image to the GitLab Container Registry on every merge
+to `master`. If you don't need the Tailscale sidecar, run it directly:
+
+```sh
+docker run -d \
+  -e SLIPSTREAM_TOKEN=your-token \
+  -e ANTHROPIC_API_KEY=your-key \
+  -v slipstream-data:/home/slipstream \
+  -p 7421:7421 \
+  registry.gitlab.com/ajlebaron/slipstream:latest
+```
+
+The volume persists `/home/slipstream` (SQLite DB, worktrees, logs) across restarts. This
+gives you local/LAN access only — for full phone access over HTTPS, use the
+docker-compose (Tailscale-sidecar) path below instead.
+
 ### Deploy to a pod (Docker)
 
 To run Slipstream on a server you own and drive it from your phone, use the

@@ -6,6 +6,7 @@ allowBuilds:
   '@ast-grep/lang-rust': true
   better-sqlite3: true
   electron: true
+  electron-winstaller: true
   esbuild: true
   node-pty: true
   opencode-ai: true

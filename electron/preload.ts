@@ -6,6 +6,7 @@ const daemon = arg
   ? (JSON.parse(Buffer.from(arg.slice('--slipstream-daemon='.length), 'base64').toString()) as {
       url: string
       token: string
+      reused?: boolean
     })
   : null
 
