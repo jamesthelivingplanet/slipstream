@@ -186,9 +186,22 @@ export function setRepoSettings(id: string, settings: RepoSettings): Promise<voi
 export function runApp(input: {
   repoId: string
   branch: string
-}): Promise<{ started: boolean; reason?: string; port?: number }> {
+}): Promise<{ started: boolean; reason?: string; port?: number; pid?: number; reused?: boolean }> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.runApp(input)
+}
+
+export function stopApp(input: { repoId: string; branch: string }): Promise<{ stopped: boolean }> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.stopApp(input)
+}
+
+export function appStatus(input: {
+  repoId: string
+  branch: string
+}): Promise<{ running: boolean }> {
+  if (!hasBackend) return Promise.resolve({ running: false })
+  return window.slipstream.appStatus(input)
 }
 
 // ── Push notifications ─────────────────────────────────────────────────────

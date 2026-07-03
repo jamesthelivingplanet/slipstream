@@ -28,22 +28,58 @@ export interface LocalIdentity {
 
 // ── pickPort ──────────────────────────────────────────────────────────────────
 
-export function pickPort(preferred = 7421): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer()
-    server.listen({ host: '127.0.0.1', port: preferred }, () => {
-      const addr = server.address() as net.AddressInfo
-      server.close(() => resolve(addr.port))
-    })
-    server.on('error', () => {
-      // preferred is busy — bind to any free port
-      const fallback = net.createServer()
-      fallback.listen({ host: '127.0.0.1', port: 0 }, () => {
-        const addr = fallback.address() as net.AddressInfo
-        fallback.close(() => resolve(addr.port))
+/**
+ * Picks a port for the local daemon to bind.
+ *
+ * IMPORTANT — this cannot be made truly race-free: `pickPort` only *checks*
+ * that a port is bindable (by binding it ourselves and immediately closing
+ * it) — it does not, and cannot, hold the port. The daemon process that
+ * actually binds the port is spawned separately, after this function
+ * resolves. That gap between "we verified it's free" and "the daemon binds
+ * it for real" is an inherent TOCTOU (time-of-check to time-of-use) race:
+ * some other process on the machine could grab the port in between. There is
+ * no cross-process atomic "reserve a port" primitive on POSIX/Windows — the
+ * OS only lets a single process hold a bind at a time, so any check-then-use
+ * scheme has this gap by construction.
+ *
+ * Mitigations (this is a "make it rare", not a "make it impossible"):
+ *  - Prefer a fixed, well-known port (`preferred`) first, since on a typical
+ *    dev machine nothing else contends for it 99% of the time.
+ *  - When `preferred` is busy (or racily taken), fall back to an OS-assigned
+ *    ephemeral port (`port: 0`), which the OS guarantees was free at bind
+ *    time and picks from a range unlikely to collide with another such probe
+ *    landing on the exact same number a moment later.
+ *  - Retry the ephemeral-port probe up to `attempts` times: if two callers
+ *    happen to race on the *same* ephemeral port (astronomically unlikely,
+ *    but the retry is cheap insurance), we just ask the OS for another one.
+ *  - The daemon itself must still handle EADDRINUSE when it actually binds
+ *    (belt-and-braces) — this function only narrows the race window, it
+ *    doesn't close it.
+ */
+export function pickPort(preferred = 7421, attempts = 3): Promise<number> {
+  function probe(port: number): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer()
+      server.once('error', reject)
+      server.listen({ host: '127.0.0.1', port }, () => {
+        const addr = server.address() as net.AddressInfo
+        server.close(() => resolve(addr.port))
       })
-      fallback.on('error', reject)
     })
+  }
+
+  return probe(preferred).catch(async () => {
+    // preferred is busy — fall back to an OS-assigned ephemeral port,
+    // retrying a couple of times in case of a rare race.
+    let lastErr: unknown
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await probe(0)
+      } catch (err) {
+        lastErr = err
+      }
+    }
+    throw lastErr
   })
 }
 

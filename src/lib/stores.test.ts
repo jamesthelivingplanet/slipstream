@@ -16,12 +16,14 @@ vi.mock('./ipc', () => ({
   cleanupSession: vi.fn(),
   worktreeStatus: vi.fn(),
   runApp: vi.fn(),
+  stopApp: vi.fn(),
+  appStatus: vi.fn(),
   onSessionStatus: vi.fn(),
   onSessionPr: vi.fn(),
   getMcpStatus: vi.fn(),
 }))
 
-import { cleanupSession, killSession } from './ipc'
+import { cleanupSession, killSession, runApp, stopApp } from './ipc'
 import {
   sessions,
   tickets,
@@ -37,6 +39,11 @@ import {
   setSessionStatus,
   removeSession,
   selected,
+  confirmState,
+  runningApps,
+  appRunKey,
+  runAppForSession,
+  stopAppForSession,
 } from './stores.js'
 import { toasts } from './toast.js'
 import type { Ticket, Session } from './types.js'
@@ -285,5 +292,78 @@ describe('cleanupAgent auto-reconcile', () => {
     expect(get(sessions).find((s) => s.tid === 'A')).toBeUndefined()
     expect(cleanupSession).toHaveBeenCalledTimes(1)
     expect(cleanupSession).toHaveBeenCalledWith('u1', { force: false })
+  })
+
+  it('manual path: not-clean worktree opens the confirm dialog and resolving false does not force-remove', async () => {
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: false, reason: '2 files changed' })
+    const session = makeSession()
+
+    const pending = cleanupAgent(session, { auto: false })
+
+    // Wait for the confirmDialog request to be registered (killSession + cleanupSession
+    // resolve as microtasks first).
+    for (let i = 0; i < 10 && get(confirmState) === null; i++) {
+      await Promise.resolve()
+    }
+    const req = get(confirmState)
+    expect(req).not.toBeNull()
+    expect(req?.detail).toBe('2 files changed')
+
+    req?.resolve(false)
+    confirmState.set(null)
+    const result = await pending
+
+    expect(result).toBe(false)
+    expect(cleanupSession).toHaveBeenCalledTimes(1)
+    expect(get(sessions).find((s) => s.tid === 'A')).toBeDefined()
+  })
+})
+
+describe('runApp / stopApp store integration', () => {
+  function makeSession(overrides: Partial<Session> = {}): Session {
+    return {
+      id: 'u1',
+      tid: 'A',
+      src: 'linear',
+      status: 'running',
+      title: 'Some task',
+      repo: 'repo1',
+      branch: 'A-branch',
+      add: 0,
+      del: 0,
+      ago: '',
+      activity: { text: '' },
+      ...overrides,
+    } as Session
+  }
+
+  beforeEach(() => {
+    sessions.set([makeSession()])
+    toasts.set([])
+    runningApps.set(new Set())
+    vi.clearAllMocks()
+  })
+
+  it('runAppForSession adds the session key to runningApps on started', async () => {
+    vi.mocked(runApp).mockResolvedValue({ started: true, port: 3000 })
+    const session = makeSession()
+
+    await runAppForSession(session)
+
+    expect(get(runningApps).has(appRunKey(session) as string)).toBe(true)
+  })
+
+  it('stopAppForSession calls stopApp and removes the session key from runningApps', async () => {
+    vi.mocked(runApp).mockResolvedValue({ started: true, port: 3000 })
+    vi.mocked(stopApp).mockResolvedValue({ stopped: true })
+    const session = makeSession()
+
+    await runAppForSession(session)
+    expect(get(runningApps).has(appRunKey(session) as string)).toBe(true)
+
+    await stopAppForSession(session)
+
+    expect(stopApp).toHaveBeenCalledWith({ repoId: 'repo1', branch: 'A-branch' })
+    expect(get(runningApps).has(appRunKey(session) as string)).toBe(false)
   })
 })

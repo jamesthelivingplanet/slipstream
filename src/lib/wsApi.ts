@@ -390,15 +390,26 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     setRepoSettings(id: string, settings: RepoSettings): Promise<void> {
       return request(IPC.setRepoSettings, [id, settings]) as Promise<void>
     },
-    runApp(input: {
-      repoId: string
-      branch: string
-    }): Promise<{ started: boolean; reason?: string; port?: number }> {
+    runApp(input: { repoId: string; branch: string }): Promise<{
+      started: boolean
+      reason?: string
+      port?: number
+      pid?: number
+      reused?: boolean
+    }> {
       return request(IPC.runApp, [input]) as Promise<{
         started: boolean
         reason?: string
         port?: number
+        pid?: number
+        reused?: boolean
       }>
+    },
+    stopApp(input: { repoId: string; branch: string }): Promise<{ stopped: boolean }> {
+      return request(IPC.stopApp, [input]) as Promise<{ stopped: boolean }>
+    },
+    appStatus(input: { repoId: string; branch: string }): Promise<{ running: boolean }> {
+      return request(IPC.appStatus, [input]) as Promise<{ running: boolean }>
     },
     getVapidPublicKey(): Promise<string> {
       return request(IPC.getVapidPublicKey, []) as Promise<string>

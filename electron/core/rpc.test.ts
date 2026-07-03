@@ -138,7 +138,9 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
 
   const editor = { open: vi.fn().mockResolvedValue(undefined) } as unknown as IEditorLauncher
   const appRunner = {
-    run: vi.fn().mockResolvedValue({ pid: 1234 }),
+    run: vi.fn().mockResolvedValue({ pid: 1234, reused: false }),
+    stop: vi.fn().mockResolvedValue(true),
+    isRunning: vi.fn().mockReturnValue(false),
   }
 
   const push: IPushService = {
@@ -583,9 +585,13 @@ describe('createRpc', () => {
     const result = (await rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'main' }])) as {
       started: boolean
       port?: number
+      pid?: number
+      reused?: boolean
     }
-    expect(deps.appRunner.run).toHaveBeenCalledWith('/wt/t-1-fix-bug', 'pnpm dev', { PORT: '3001' })
-    expect(result).toEqual({ started: true, port: 3001 })
+    expect(deps.appRunner.run).toHaveBeenCalledWith('r1 main', '/wt/t-1-fix-bug', 'pnpm dev', {
+      PORT: '3001',
+    })
+    expect(result).toEqual({ started: true, port: 3001, pid: 1234, reused: false })
   })
 
   describe('owner filter (identity seam)', () => {

@@ -136,7 +136,11 @@ function makeFakeDeps(): IpcDeps {
     config,
     sessionStore,
     editor,
-    appRunner: { run: vi.fn().mockResolvedValue({ pid: 1234 }) },
+    appRunner: {
+      run: vi.fn().mockResolvedValue({ pid: 1234, reused: false }),
+      stop: vi.fn().mockResolvedValue(true),
+      isRunning: vi.fn().mockReturnValue(false),
+    },
     push,
   }
 }
@@ -265,7 +269,11 @@ function makeSurvivalDeps(): {
     config,
     sessionStore,
     editor,
-    appRunner: { run: vi.fn().mockResolvedValue({ pid: 1234 }) },
+    appRunner: {
+      run: vi.fn().mockResolvedValue({ pid: 1234, reused: false }),
+      stop: vi.fn().mockResolvedValue(true),
+      isRunning: vi.fn().mockReturnValue(false),
+    },
     push,
   }
 

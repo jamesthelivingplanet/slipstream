@@ -253,8 +253,22 @@ export interface IPortBroker {
 }
 
 export interface IAppRunner {
-  /** Spawn `command` as a detached shell process in `cwd` with `env` merged over process.env. Returns the spawned pid. */
-  run(cwd: string, command: string, env?: Record<string, string>): Promise<{ pid: number }>
+  /**
+   * Spawn `command` as a detached shell process in `cwd`, tracked under `key`
+   * (repo+branch). If a live process for `key` already exists, no new process
+   * is spawned and the existing pid is returned with reused=true — repeated
+   * "Run" clicks dedup instead of accumulating orphaned dev servers.
+   */
+  run(
+    key: string,
+    cwd: string,
+    command: string,
+    env?: Record<string, string>,
+  ): Promise<{ pid: number; reused: boolean }>
+  /** Kill the tracked process group for `key`. Returns true if one was running. */
+  stop(key: string): Promise<boolean>
+  /** Whether a live tracked process exists for `key`. */
+  isRunning(key: string): boolean
 }
 
 export interface ITicketProvider {
@@ -336,7 +350,9 @@ export interface SlipstreamApi {
   runApp(input: {
     repoId: string
     branch: string
-  }): Promise<{ started: boolean; reason?: string; port?: number }>
+  }): Promise<{ started: boolean; reason?: string; port?: number; pid?: number; reused?: boolean }>
+  stopApp(input: { repoId: string; branch: string }): Promise<{ stopped: boolean }>
+  appStatus(input: { repoId: string; branch: string }): Promise<{ running: boolean }>
   getVapidPublicKey(): Promise<string>
   savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void>
   deletePushSubscription(endpoint: string): Promise<void>
@@ -393,6 +409,8 @@ export const IPC = {
   getRepoSettings: 'repos:getSettings',
   setRepoSettings: 'repos:setSettings',
   runApp: 'app:run',
+  stopApp: 'app:stop',
+  appStatus: 'app:status',
   getVapidPublicKey: 'push:vapidKey',
   savePushSubscription: 'push:save',
   deletePushSubscription: 'push:delete',
