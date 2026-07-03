@@ -39,7 +39,18 @@ export default defineConfig({
       },
       preload: {
         input: 'electron/preload.ts',
-        vite: { build: { rollupOptions: { external, output: { format: 'es' } } } },
+        vite: {
+          build: {
+            rollupOptions: {
+              external,
+              // CJS (not ESM) so the preload can load with sandbox: true — Electron's
+              // sandboxed preload loader requires CommonJS. package.json has
+              // "type": "module", so the .cjs extension is required to force Node/
+              // Electron to treat this one file as CommonJS despite that.
+              output: { format: 'cjs', entryFileNames: '[name].cjs' },
+            },
+          },
+        },
       },
       renderer: {},
     }),

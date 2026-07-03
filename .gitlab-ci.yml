@@ -63,7 +63,7 @@ build:
   extends: .verify
   script:
     - pnpm build
-    - node scripts/check-preload-esm.mjs
+    - node scripts/check-preload-cjs.mjs
 
 # Publish the production server image to the GitLab Container Registry on every
 # merge to the default branch, as an alternative deploy path to the systemd/

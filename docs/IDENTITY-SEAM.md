@@ -75,3 +75,62 @@ callers.
 Remaining genuine follow-ups: give `resolveIdentity` a real token → owner
 store (today every valid token maps to `LOCAL_IDENTITY`), and decide between
 per-owner data-dir vs row-level isolation for the eventual multi-user tier.
+
+## Readiness for per-device / per-user tokens
+
+FLO-84. A security-review pass over auth flagged the single static token as
+the first thing to change for a multi-user tier — this section records what
+that change touches and what it doesn't, so it isn't re-derived later. See
+also [docs/SECURITY.md](SECURITY.md) for the one-time WS ticket design this
+seam also needs to accommodate.
+
+### What's already there
+
+- `resolveIdentity(token)` (`electron/core/auth.ts`) — the single choke point
+  that maps a bearer token to an `Identity`. Called exactly once per
+  connection, at WebSocket upgrade (`electron/server/server.ts`), and threaded
+  into `createRpc({ identity })` from there. No other entry path exists.
+- `ownerId` columns — nullable `ownerId TEXT DEFAULT 'local'` on both `repos`
+  and `sessions`, added as additive `ALTER TABLE` migrations, with legacy
+  `NULL` rows coalescing to `'local'` at the predicate level.
+- `ownedByCaller(row)` predicate, enumeration filtering (`listRepos`,
+  `listSessions` in `electron/core/rpc.ts` only return rows the caller owns),
+  and the single-item guards (`ownedSession`, `requireOwnedRepo`) covering
+  every read/write call site listed above.
+- The no-existence-leak invariant: a cross-owner access gets the identical
+  error a missing row would (`Session not found` / `Unknown repo`), so
+  ownership can't be probed by comparing error messages.
+
+Net effect: **every downstream call site is already owner-scoped.** Going
+multi-user is a change *at the seam* (`resolveIdentity` and whatever feeds it),
+not a change at any of the ~15 guarded call sites — those don't need to know
+or care how many distinct identities exist.
+
+### What multi-user token rotation still needs
+
+1. **A real token → owner store.** Today `resolveIdentity(_token)` ignores its
+   argument and always returns `LOCAL_IDENTITY` — there is exactly one owner.
+   Multi-user needs this to become a lookup (DB table or similar) mapping each
+   issued token to a distinct owner id.
+2. **Per-device/per-user token issuance + onboarding.** A way to mint a new
+   token for a new device/user and get it onto that device — today onboarding
+   is "here's the one `SLIPSTREAM_TOKEN` value, put it in the URL or
+   localStorage" (see `scripts/deploy.sh`'s QR-code onboarding flow).
+3. **Revocation granularity.** Today "rotate" means edit `server.env` and
+   re-onboard *every* device, because there's only one token. Multi-user needs
+   to revoke one token (one compromised device, one departing user) without
+   disturbing any other token's validity.
+4. **Integration with the one-time WS ticket endpoint** (docs/SECURITY.md,
+   §3 — design only, not yet implemented). Tickets need to be minted per-token,
+   not per-deployment: `POST /rpc-ticket`'s `Authorization: Bearer` check
+   resolves an identity via this same seam, and the ticket's stored `identity`
+   field is what the upgrade handler uses on redemption. The ticket design
+   composes with per-user tokens for free *if* the token store from item 1
+   above is in place first — the ticket endpoint doesn't need its own identity
+   logic, just to call `resolveIdentity()` like the upgrade handler already
+   does.
+5. **The still-open per-owner-data-dir vs. row-level-isolation decision**
+   (carried over from the "Known follow-up" section above) — multi-user token
+   rotation is orthogonal to this, but both land in the same eventual
+   multi-user milestone and should be designed together rather than
+   sequentially discovering conflicts.
