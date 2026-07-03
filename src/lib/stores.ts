@@ -16,6 +16,8 @@ import {
   cleanupSession,
   worktreeStatus,
   runApp,
+  stopApp,
+  appStatus,
   onSessionStatus,
   onSessionPr,
   getMcpStatus as ipcGetMcpStatus,
@@ -61,6 +63,22 @@ export function cleanError(e: unknown): string {
 export function openRepoSettings(repoId: string) {
   settingsRepoId.set(repoId)
   settingsOpen.set(true)
+}
+
+/** In-app replacement for window.confirm — surfaces via <ConfirmDialog />. */
+export interface ConfirmRequest {
+  title: string
+  message: string
+  detail?: string // e.g. the dirty/unmerged reason string
+  confirmLabel?: string // default "Confirm"
+  cancelLabel?: string // default "Cancel"
+  danger?: boolean
+}
+export const confirmState = writable<(ConfirmRequest & { resolve: (ok: boolean) => void }) | null>(
+  null,
+)
+export function confirmDialog(req: ConfirmRequest): Promise<boolean> {
+  return new Promise((resolve) => confirmState.set({ ...req, resolve }))
 }
 
 export const repos = writable<Repo[]>([])
@@ -487,7 +505,14 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
         pushToast('warning', `Kept ${s.tid}: worktree not clean (${reason})`)
         return false
       }
-      if (!confirm(`Worktree not clean: ${reason}. Force remove?`)) return false
+      const ok = await confirmDialog({
+        title: 'Force remove worktree?',
+        message: `The worktree for ${s.tid} isn't clean. Force-removing discards any uncommitted changes and unmerged commits.`,
+        detail: reason,
+        confirmLabel: 'Force remove',
+        danger: true,
+      })
+      if (!ok) return false
       result = await cleanupSession(s.id, { force: true })
     }
     if (result.removed) {
@@ -520,14 +545,39 @@ export async function refreshAndReconcile(): Promise<void> {
   await refreshDiffStats().catch(() => {})
 }
 
+/** Sessions with a currently running dev-server app, keyed by "<repo> <branch>"
+ *  (matching the backend's app-runner key). Svelte 4 reactivity on a Set needs
+ *  reassignment, so `add`/`remove` always replace the Set instance. */
+export const runningApps = writable<Set<string>>(new Set())
+
+/** Stable key for the runningApps set. Returns null when repo/branch aren't set yet. */
+export function appRunKey(s: Session): string | null {
+  return s.repo && s.branch ? `${s.repo} ${s.branch}` : null
+}
+
+function setAppRunning(key: string, running: boolean) {
+  runningApps.update(($r) => {
+    const next = new Set($r)
+    if (running) next.add(key)
+    else next.delete(key)
+    return next
+  })
+}
+
 /** Run the app for a started session via its repo's start command. Opens that
  *  repo's settings if no start command is configured. */
 export async function runAppForSession(s: Session): Promise<void> {
   if (!s.repo || !s.branch) return
+  const key = appRunKey(s)
   try {
     const res = await runApp({ repoId: s.repo, branch: s.branch })
     if (res.started) {
-      pushToast('success', res.port ? `Launched app on port ${res.port}` : 'Launched app')
+      if (key) setAppRunning(key, true)
+      if (res.reused) {
+        pushToast('success', 'App already running')
+      } else {
+        pushToast('success', res.port ? `Launched app on port ${res.port}` : 'Launched app')
+      }
     } else if (res.reason === 'no-start-command') {
       pushToast('error', 'No start command set for this repository. Configure it in settings.')
       openRepoSettings(s.repo)
@@ -536,5 +586,40 @@ export async function runAppForSession(s: Session): Promise<void> {
     }
   } catch (e) {
     pushToast('error', cleanError(e))
+  }
+}
+
+/** Stop the running dev-server app for a session. */
+export async function stopAppForSession(s: Session): Promise<void> {
+  if (!hasBackend || !s.repo || !s.branch) return
+  const key = appRunKey(s)
+  try {
+    const res = await stopApp({ repoId: s.repo, branch: s.branch })
+    if (res.stopped) {
+      if (key) setAppRunning(key, false)
+      pushToast('success', 'Stopped app')
+    }
+  } catch (e) {
+    pushToast('error', cleanError(e))
+  }
+}
+
+/** Stop then restart the running dev-server app for a session. */
+export async function restartAppForSession(s: Session): Promise<void> {
+  await stopAppForSession(s)
+  await runAppForSession(s)
+}
+
+/** Hydrate runningApps for a session from the backend — call when a session's
+ *  terminal is opened/changed so the Run/Stop buttons reflect reality after reload. */
+export async function refreshAppStatus(s: Session): Promise<void> {
+  if (!hasBackend || !s.repo || !s.branch) return
+  const key = appRunKey(s)
+  if (!key) return
+  try {
+    const res = await appStatus({ repoId: s.repo, branch: s.branch })
+    setAppRunning(key, res.running)
+  } catch {
+    // leave existing state on failure
   }
 }

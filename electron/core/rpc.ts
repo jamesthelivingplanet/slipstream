@@ -500,18 +500,35 @@ export function createRpc(
         const settings = await deps.repos.getSettings(repoId)
         if (!settings.startCmd.trim()) return { started: false, reason: 'no-start-command' }
         const cwd = deps.worktrees.pathFor(repo, branch)
+        const key = `${repoId} ${branch}`
         let port: number | undefined
         try {
           port = await deps.ports.claim(cwd, 'web')
         } catch {
           port = undefined
         }
-        await deps.appRunner.run(
+        const { pid, reused } = await deps.appRunner.run(
+          key,
           cwd,
           settings.startCmd,
           port !== undefined ? { PORT: String(port) } : undefined,
         )
-        return { started: true, port }
+        return { started: true, port, pid, reused }
+      }
+
+      case IPC.stopApp: {
+        const { repoId, branch } = args[0] as { repoId: string; branch: string }
+        await requireOwnedRepo(repoId)
+        const key = `${repoId} ${branch}`
+        const stopped = await deps.appRunner.stop(key)
+        return { stopped }
+      }
+
+      case IPC.appStatus: {
+        const { repoId, branch } = args[0] as { repoId: string; branch: string }
+        await requireOwnedRepo(repoId)
+        const key = `${repoId} ${branch}`
+        return { running: deps.appRunner.isRunning(key) }
       }
 
       case IPC.getVapidPublicKey:

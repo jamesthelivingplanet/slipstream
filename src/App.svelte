@@ -22,6 +22,7 @@
   import NewAgentDialog from './lib/components/NewAgentDialog.svelte'
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import Toasts from './lib/components/Toasts.svelte'
+  import ConfirmDialog from './lib/components/ConfirmDialog.svelte'
   import InstallNudge from './lib/components/InstallNudge.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
   import McpStatus from './lib/components/McpStatus.svelte'
@@ -180,6 +181,7 @@
   <NewAgentDialog />
   <SettingsModal />
   <Toasts />
+  <ConfirmDialog />
   <InstallNudge />
 </div>
 

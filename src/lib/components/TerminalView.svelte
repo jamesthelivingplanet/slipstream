@@ -10,6 +10,11 @@
     setSessionStatus,
     cleanupAgent,
     runAppForSession,
+    stopAppForSession,
+    restartAppForSession,
+    refreshAppStatus,
+    runningApps,
+    appRunKey,
     cleanError,
   } from '../stores'
   import {
@@ -57,10 +62,19 @@
       ? 'hsl(var(--muted-foreground))'
       : `hsl(var(--st-${session.status === 'needs' ? 'needs' : session.status === 'running' ? 'run' : session.status === 'done' ? 'done' : 'error'}))`
 
+  $: runKey = appRunKey(session)
+  $: appRunning = runKey ? $runningApps.has(runKey) : false
+
   // Use the live backend PTY whenever a backend is present. The session.id
   // arrives asynchronously (after startSession resolves), so we must not gate
   // on it here — data/status callbacks filter by id once it's set.
   const liveMode = hasBackend
+
+  let statusCheckedFor: string | null = null
+  $: if (hasBackend && session.id && session.id !== statusCheckedFor) {
+    statusCheckedFor = session.id
+    refreshAppStatus(session)
+  }
 
   onMount(() => {
     term = new Terminal({
@@ -344,13 +358,30 @@
     </div>
   </div>
   <div class="spacer"></div>
-  <button
-    class="btn btn-outline btn-sm"
-    title="Run the app using this repository's start command"
-    disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-    on:click={() => runAppForSession(session)}
-    >{@html icons.play} <span class="btn-label">Run</span></button
-  >
+  {#if appRunning}
+    <button
+      class="btn btn-outline btn-sm"
+      title="Stop the running app"
+      disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+      on:click={() => stopAppForSession(session)}
+      >{@html icons.stop} <span class="btn-label">Stop</span></button
+    >
+    <button
+      class="btn btn-outline btn-sm"
+      title="Restart the running app"
+      disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+      on:click={() => restartAppForSession(session)}
+      >{@html icons.refresh} <span class="btn-label">Restart</span></button
+    >
+  {:else}
+    <button
+      class="btn btn-outline btn-sm"
+      title="Run the app using this repository's start command"
+      disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+      on:click={() => runAppForSession(session)}
+      >{@html icons.play} <span class="btn-label">Run</span></button
+    >
+  {/if}
   <button
     class="btn btn-outline btn-sm"
     title="Relaunch this agent with Claude Code Remote Control"
