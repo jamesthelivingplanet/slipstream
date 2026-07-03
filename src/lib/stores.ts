@@ -431,14 +431,17 @@ export function setSessionStatus(id: string, status: Status) {
   }
 }
 
-/** Best-effort desktop notification; silently no-ops if unavailable/denied. */
+/**
+ * Best-effort desktop notification; silently no-ops if unavailable/not yet granted.
+ * Permission is requested only from a user gesture in the settings UI
+ * (src/lib/push.ts `enablePush`, invoked from SettingsNotifications.svelte's Enable
+ * button) — browsers require a gesture for Notification.requestPermission(), so this
+ * status-transition handler must never call it itself.
+ */
 function notifyTransition(status: 'needs' | 'done', title?: string) {
   try {
     if (typeof Notification === 'undefined') return
-    if (Notification.permission !== 'granted') {
-      if (Notification.permission !== 'denied') void Notification.requestPermission()
-      return
-    }
+    if (Notification.permission !== 'granted') return
     const heading = status === 'needs' ? 'Agent needs you' : 'Agent finished'
     new Notification(heading, { body: title ?? '' })
   } catch {
