@@ -456,6 +456,34 @@ describe('createServer', () => {
     ws.close()
   })
 
+  it('replies to an application-level ping with a pong', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const ws = wsConnect(port, 'secret')
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', resolve)
+      ws.once('error', reject)
+    })
+
+    const pong = await new Promise<unknown>((resolve, reject) => {
+      ws.once('message', (raw) => {
+        try {
+          resolve(JSON.parse(String(raw)))
+        } catch (e) {
+          reject(e)
+        }
+      })
+      ws.send(JSON.stringify({ t: 'ping' }))
+    })
+    expect(pong).toEqual({ t: 'pong' })
+
+    ws.close()
+  })
+
   it('GET /healthz returns { ok: true }', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })

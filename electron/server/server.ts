@@ -1,16 +1,31 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash, timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { IpcDeps } from '../ipc.js'
 import { createRpc } from '../core/rpc.js'
-import type { WireReq, WireRes, WirePush } from '../shared/wire.js'
+import type { WireReq, WireRes, WirePush, WirePing } from '../shared/wire.js'
 import { resolveIdentity, LOCAL_IDENTITY } from '../core/auth.js'
 import type { Identity } from '../shared/contract.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// Constant-time comparison against fixed-length SHA-256 hashes so a wrong
+// token doesn't leak the expected token's length via timing.
+function tokensMatch(provided: string | undefined, expected: string): boolean {
+  const a = createHash('sha256')
+    .update(provided ?? '')
+    .digest()
+  const b = createHash('sha256').update(expected).digest()
+  return timingSafeEqual(a, b)
+}
+
+// Interval for server-side ws-protocol pings that reap dead sockets whose
+// close/error events never fired (e.g. a client that vanished without a
+// clean TCP close).
+const HEARTBEAT_INTERVAL_MS = 30_000
 
 export interface ServerOptions {
   token: string
@@ -108,6 +123,26 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
   // noServer: true — we drive the upgrade lifecycle manually so we can authenticate first.
   const wss = new WebSocketServer({ noServer: true })
 
+  // ws-protocol heartbeat: reaps sockets that never fired close/error (e.g. the
+  // client machine dropped off the network mid-connection). Browsers can't observe
+  // ws ping/pong frames directly, which is why there's also an app-level ping/pong
+  // below for the renderer to detect a half-dead socket itself.
+  const heartbeat = setInterval(() => {
+    for (const client of wss.clients) {
+      const live = client as WebSocket & { isAlive?: boolean }
+      if (live.isAlive === false) {
+        client.terminate()
+        continue
+      }
+      live.isAlive = false
+      client.ping()
+    }
+  }, HEARTBEAT_INTERVAL_MS)
+  heartbeat.unref?.()
+
+  wss.on('close', () => clearInterval(heartbeat))
+  httpServer.on('close', () => clearInterval(heartbeat))
+
   httpServer.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
 
@@ -130,7 +165,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     // opened socket with 4001 gives the client an unambiguous "auth failed"
     // signal it can act on (see wsApi.ts onAuthError → main.ts re-gate).
     wss.handleUpgrade(req, socket, head, (ws) => {
-      if (provided !== token) {
+      if (!provided || !tokensMatch(provided, token)) {
         ws.close(4001, 'Unauthorized')
         return
       }
@@ -143,6 +178,13 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     'connection',
     (ws: WebSocket, _req: http.IncomingMessage, identity: Identity = LOCAL_IDENTITY) => {
       const clientId = randomUUID()
+
+      const live = ws as WebSocket & { isAlive?: boolean }
+      live.isAlive = true
+      ws.on('pong', () => {
+        live.isAlive = true
+      })
+
       const rpc = createRpc(
         deps,
         (channel, ...args) => {
@@ -153,11 +195,16 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
       )
 
       ws.on('message', (raw) => {
-        let req: WireReq
+        let req: WireReq | WirePing
         try {
-          req = JSON.parse(String(raw)) as WireReq
+          req = JSON.parse(String(raw)) as WireReq | WirePing
         } catch {
           return // ignore malformed frames
+        }
+
+        if (req.t === 'ping') {
+          ws.send(JSON.stringify({ t: 'pong' }))
+          return
         }
 
         if (req.t !== 'req') return

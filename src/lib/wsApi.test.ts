@@ -8,10 +8,16 @@
  *  - pre-open requests queue and flush on open
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createWsApi } from './wsApi.js'
 import type { WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
+
+// Mirrors the private constants in wsApi.ts (not exported — kept as an implementation
+// detail). Keep these in sync if the module's timing constants change.
+const REQUEST_TIMEOUT_MS = 30_000
+const HEARTBEAT_INTERVAL_MS = 15_000
+const PONG_TIMEOUT_MS = 10_000
 
 // ─── Fake WebSocket ───────────────────────────────────────────────────────────
 
@@ -321,7 +327,7 @@ describe('wsApi', () => {
   })
 
   describe('fire-and-forget methods', () => {
-    it('writeSession sends a WireReq but returns void', () => {
+    it('writeSession sends a WireReq but returns void when the socket is open', () => {
       const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
       const ws = openWs()
       const ret = api.writeSession('sess-1', 'input data')
@@ -330,6 +336,19 @@ describe('wsApi', () => {
       expect(req.t).toBe('req')
       expect(req.channel).toBe(IPC.writeSession)
       expect(req.args).toEqual(['sess-1', 'input data'])
+    })
+
+    it('writeSession drops the frame (does not queue) while the socket is down', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = getWs()
+      // Socket never opened — writeSession must drop, not queue, stale input.
+      api.writeSession('sess-1', 'stale keystrokes')
+      expect(ws.sentMessages.length).toBe(0)
+
+      // Opening the socket later must NOT flush a writeSession frame — it was dropped,
+      // not queued.
+      ws.simulateOpen()
+      expect(ws.sentMessages.some((m) => JSON.parse(m).channel === IPC.writeSession)).toBe(false)
     })
 
     it('resizeSession sends a WireReq but returns void', () => {
@@ -363,6 +382,91 @@ describe('wsApi', () => {
       ws.simulateOpen()
       ws.simulateClose(4001)
       expect(onAuthError).toHaveBeenCalledOnce()
+    })
+  })
+
+  describe('request timeout starts on send, not on queue', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('does not time out a queued request during reconnect backoff, only after it is actually sent', async () => {
+      vi.useFakeTimers()
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = getWs()
+
+      let rejected = false
+      let resolved = false
+      const promise = api.listRepos()
+      promise.then(
+        () => {
+          resolved = true
+        },
+        () => {
+          rejected = true
+        },
+      )
+
+      // Not open yet — request sits in the queue. Advance well past the timeout: it
+      // must NOT reject, because the timer hasn't started yet.
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 5_000)
+      expect(rejected).toBe(false)
+      expect(resolved).toBe(false)
+      expect(ws.sentMessages.length).toBe(0)
+
+      // Now open — the queued frame flushes and the timer arms at this point.
+      ws.simulateOpen()
+      expect(ws.sentMessages.length).toBe(1)
+
+      // Answer heartbeat pings along the way so the pong-timeout doesn't close the
+      // socket first — this test isolates the per-request timeout only.
+      let answeredUpTo = ws.sentMessages.length
+      let elapsed = 0
+      const step = 1_000
+      while (elapsed < REQUEST_TIMEOUT_MS + 1) {
+        await vi.advanceTimersByTimeAsync(step)
+        elapsed += step
+        for (; answeredUpTo < ws.sentMessages.length; answeredUpTo++) {
+          if (JSON.parse(ws.sentMessages[answeredUpTo]).t === 'ping') {
+            ws.simulateMessage({ t: 'pong' } as unknown as WireRes)
+          }
+        }
+      }
+      expect(rejected).toBe(true)
+      await expect(promise).rejects.toThrow(/timed out/)
+    })
+  })
+
+  describe('heartbeat', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('sends a ping after HEARTBEAT_INTERVAL_MS and closes the socket if no pong arrives', async () => {
+      vi.useFakeTimers()
+      createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+      ws.sentMessages.length = 0
+
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS)
+      const ping = JSON.parse(ws.sentMessages.at(-1)!)
+      expect(ping).toEqual({ t: 'ping' })
+      expect(ws.readyState).not.toBe(3) // not yet closed
+
+      await vi.advanceTimersByTimeAsync(PONG_TIMEOUT_MS)
+      expect(ws.readyState).toBe(3) // CLOSED — no pong arrived in time
+    })
+
+    it('does not close the socket when a pong arrives before the pong timeout', async () => {
+      vi.useFakeTimers()
+      createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS)
+      ws.simulateMessage({ t: 'pong' } as unknown as WireRes)
+
+      await vi.advanceTimersByTimeAsync(PONG_TIMEOUT_MS)
+      expect(ws.readyState).not.toBe(3)
     })
   })
 })

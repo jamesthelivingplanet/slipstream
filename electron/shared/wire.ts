@@ -22,3 +22,13 @@ export interface WirePush {
   channel: string
   args: unknown[]
 }
+
+/** Client → server: liveness probe (application-level heartbeat). */
+export interface WirePing {
+  t: 'ping'
+}
+
+/** Server → client: response to a WirePing. */
+export interface WirePong {
+  t: 'pong'
+}

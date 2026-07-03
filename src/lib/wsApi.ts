@@ -31,6 +31,12 @@ import { genId } from './id.js'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const RECONNECT_DELAYS = [500, 1000, 2000, 5000, 10000]
+// Application-level heartbeat: the browser WebSocket API can't observe ws-protocol
+// ping/pong frames, so we send a JSON { t: 'ping' } and expect a { t: 'pong' } back.
+// If no pong arrives within PONG_TIMEOUT_MS, the connection is treated as half-dead
+// and force-closed to trigger the existing reconnect path.
+const HEARTBEAT_INTERVAL_MS = 15_000
+const PONG_TIMEOUT_MS = 10_000
 
 export interface WsApiOpts {
   url: string // e.g. ws://host:port/rpc
@@ -44,7 +50,10 @@ export interface WsApiOpts {
 type PendingReq = {
   resolve: (result: unknown) => void
   reject: (err: Error) => void
-  timer: ReturnType<typeof setTimeout>
+  channel: string
+  // Undefined until the frame is actually sent — see armTimeout(). Requests that are
+  // only queued (socket down) must not start ticking down while sitting in the queue.
+  timer: ReturnType<typeof setTimeout> | undefined
 }
 
 type DataCb = (id: string, data: string, seq: number) => void
@@ -58,6 +67,8 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   let open = false
   const destroyed = false
   let reconnectAttempt = 0
+  let heartbeatInterval: ReturnType<typeof setInterval> | undefined
+  let pongTimeout: ReturnType<typeof setTimeout> | undefined
 
   // In-flight request map
   const pending = new Map<string, PendingReq>()
@@ -72,6 +83,50 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   const prListeners = new Set<PrCb>()
   type WriteLockCb = (state: WriteLockState) => void
   const writeLockListeners = new Set<WriteLockCb>()
+
+  function isOpen(): boolean {
+    return open && !!ws && ws.readyState === WS.OPEN
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatInterval !== undefined) {
+      clearInterval(heartbeatInterval)
+      heartbeatInterval = undefined
+    }
+    if (pongTimeout !== undefined) {
+      clearTimeout(pongTimeout)
+      pongTimeout = undefined
+    }
+  }
+
+  function startHeartbeat() {
+    // Guard against stacking intervals/timeouts if onopen fires again after a reconnect.
+    stopHeartbeat()
+    heartbeatInterval = setInterval(() => {
+      if (!ws) return
+      ws.send(JSON.stringify({ t: 'ping' }))
+      if (pongTimeout === undefined) {
+        pongTimeout = setTimeout(() => {
+          pongTimeout = undefined
+          // No pong within the deadline — the connection is half-dead. Force-close so
+          // the existing onclose -> scheduleReconnect() path kicks in.
+          ws?.close()
+        }, PONG_TIMEOUT_MS)
+      }
+    }, HEARTBEAT_INTERVAL_MS)
+  }
+
+  // Arms the per-request timeout at the moment the frame is actually sent (not when
+  // queued) so requests waiting in `queue` during reconnect backoff don't falsely
+  // time out before they've even reached the wire.
+  function armTimeout(id: string) {
+    const p = pending.get(id)
+    if (!p || p.timer !== undefined) return
+    p.timer = setTimeout(() => {
+      pending.delete(id)
+      p.reject(new Error(`Request timed out: ${p.channel}`))
+    }, REQUEST_TIMEOUT_MS)
+  }
 
   function connect() {
     if (destroyed) return
@@ -88,15 +143,25 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       // Flush queued requests
       for (const req of queue) {
         ws!.send(JSON.stringify(req))
+        armTimeout(req.id)
       }
       queue.length = 0
+      startHeartbeat()
     }
 
     ws.onmessage = (evt: MessageEvent) => {
-      let msg: WireRes | WirePush
+      let msg: WireRes | WirePush | { t: 'pong' }
       try {
         msg = JSON.parse(evt.data as string)
       } catch {
+        return
+      }
+
+      if (msg.t === 'pong') {
+        if (pongTimeout !== undefined) {
+          clearTimeout(pongTimeout)
+          pongTimeout = undefined
+        }
         return
       }
 
@@ -104,7 +169,7 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
         const p = pending.get(msg.id)
         if (!p) return
         pending.delete(msg.id)
-        clearTimeout(p.timer)
+        if (p.timer !== undefined) clearTimeout(p.timer)
         if (msg.ok) {
           p.resolve(msg.result)
         } else {
@@ -129,9 +194,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     ws.onclose = (evt: CloseEvent) => {
       open = false
+      stopHeartbeat()
       // Reject all in-flight requests
       for (const [, p] of pending) {
-        clearTimeout(p.timer)
+        if (p.timer !== undefined) clearTimeout(p.timer)
         p.reject(new Error('WebSocket closed'))
       }
       pending.clear()
@@ -162,8 +228,9 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   }
 
   function send(req: WireReq): void {
-    if (open && ws && ws.readyState === WS.OPEN) {
-      ws.send(JSON.stringify(req))
+    if (isOpen()) {
+      ws!.send(JSON.stringify(req))
+      armTimeout(req.id)
     } else {
       queue.push(req)
     }
@@ -172,11 +239,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   function request(channel: string, args: unknown[]): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const id = genId()
-      const timer = setTimeout(() => {
-        pending.delete(id)
-        reject(new Error(`Request timed out: ${channel}`))
-      }, REQUEST_TIMEOUT_MS)
-      pending.set(id, { resolve, reject, timer })
+      // Register without a timer — armTimeout() starts the clock only once the frame
+      // is actually sent (in send() when open, or at flush time in onopen), so a
+      // request queued during reconnect backoff doesn't falsely time out.
+      pending.set(id, { resolve, reject, channel, timer: undefined })
       send({ t: 'req', id, channel, args })
     })
   }
@@ -244,7 +310,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     },
 
     writeSession(id: string, data: string): void {
-      // Fire-and-forget: send but don't await
+      // Fire-and-forget: drop the frame while the socket is down instead of queuing
+      // it — replaying stale keystrokes into a live PTY seconds later on reconnect
+      // is worse than silently losing input the user typed while disconnected.
+      if (!isOpen()) return
       const req: WireReq = { t: 'req', id: genId(), channel: IPC.writeSession, args: [id, data] }
       send(req)
     },
