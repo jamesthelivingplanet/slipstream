@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { Terminal, type IDisposable } from '@xterm/xterm'
   import { FitAddon } from '@xterm/addon-fit'
+  import { WebLinksAddon } from '@xterm/addon-web-links'
   import { buildScript, C, terminalTheme } from '../term'
   import {
     repoById,
@@ -65,15 +66,8 @@
   $: runKey = appRunKey(session)
   $: appRunning = runKey ? $runningApps.has(runKey) : false
 
-  // Use the live backend PTY whenever a backend is present. The session.id
-  // arrives asynchronously (after startSession resolves), so we must not gate
-  // on it here — data/status callbacks filter by id once it's set.
-  const liveMode = hasBackend
-
-  let statusCheckedFor: string | null = null
-  $: if (hasBackend && session.id && session.id !== statusCheckedFor) {
-    statusCheckedFor = session.id
-    refreshAppStatus(session)
+  function openLink(_event: MouseEvent, uri: string) {
+    window.open(uri, '_blank', 'noopener,noreferrer')
   }
 
   onMount(() => {
@@ -87,6 +81,7 @@
     })
     fit = new FitAddon()
     term.loadAddon(fit)
+    term.loadAddon(new WebLinksAddon(openLink))
     term.open(mountEl)
     try {
       fit.fit()
@@ -107,6 +102,14 @@
       unsub()
     }
   })
+
+  const liveMode = hasBackend
+
+  let statusCheckedFor: string | null = null
+  $: if (hasBackend && session.id && session.id !== statusCheckedFor) {
+    statusCheckedFor = session.id
+    refreshAppStatus(session)
+  }
 
   $: if (liveMode && session.id && session.id !== liveId) startLive()
   $: if (!liveMode && !simStarted) {
@@ -132,7 +135,6 @@
     if (liveId !== null && liveId !== session.id) cleanupListeners()
     liveId = session.id
 
-    // Lazily respawn a detached session when the user opens it.
     if (session.id && !resumedIds.has(session.id)) {
       resumedIds.add(session.id)
       try {
@@ -150,7 +152,6 @@
       term.focus()
     }, 40)
 
-    // Subscribe first, hold pre-backlog chunks, then replay snapshot, then flush held.
     let snapSeq = -1
     const held: Array<[string, number]> = []
     offData = onSessionData((sid, chunk, seq) => {
@@ -169,7 +170,6 @@
     held.length = 0
     snapSeq = snap.seq
 
-    // Track the write lock so only one client can control the PTY at a time.
     offWriteLock = onSessionWriteLock((state) => {
       if (state.sessionId !== session.id) return
       canWrite = state.canWrite
@@ -181,12 +181,10 @@
       viewers = lock.viewers
     }
 
-    // Forward keypresses to the PTY (only when this client holds the write lock).
     onDataSub = term.onData((d) => {
       if (session.id && canWrite) writeSession(session.id, d)
     })
 
-    // Keep the PTY sized to the panel (window + element resizes).
     const sendResize = () => {
       try {
         fit.fit()
