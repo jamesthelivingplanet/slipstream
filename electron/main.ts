@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { resolveDaemonConfig, ensureLocalDaemon } from './core/daemonManager.js'
 import type { DaemonConfig, DaemonHandle } from './core/daemonManager.js'
+import { runBootstrap, renderDaemonErrorPage, daemonErrorMessage } from './core/bootstrap.js'
+import type { BootstrapDeps, BootOutcome } from './core/bootstrap.js'
 import { IPC } from './shared/contract.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -47,6 +49,29 @@ function createWindow(cfg: DaemonConfig): void {
   })
 }
 
+function createErrorWindow(outcome: Extract<BootOutcome, { ok: false }>): void {
+  win = new BrowserWindow({
+    width: 1320,
+    height: 860,
+    minWidth: 960,
+    minHeight: 600,
+    backgroundColor: '#09090b',
+    title: 'Slipstream',
+    autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: true,
+    },
+  })
+
+  const html = renderDaemonErrorPage(outcome)
+  void win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+}
+
 ipcMain.handle(IPC.pickRepo, async () => {
   if (!win) return null
   const res = await dialog.showOpenDialog(win, {
@@ -60,35 +85,36 @@ app.whenReady().then(async () => {
   const dataDir = app.getPath('userData')
   const ephemeral = process.env.SLIPSTREAM_DAEMON_EPHEMERAL === '1'
 
-  try {
-    resolvedCfg = await resolveDaemonConfig({ env: process.env, dataDir })
-  } catch (err) {
-    console.error('[slipstream] Failed to resolve daemon config:', err)
-    resolvedCfg = {
-      mode: 'local',
-      wsUrl: 'ws://127.0.0.1:7421/rpc',
-      httpBase: 'http://127.0.0.1:7421',
-      token: 'error',
-      port: 7421,
-    }
-  }
-
-  if (resolvedCfg.mode === 'local') {
-    try {
-      daemonHandle = await ensureLocalDaemon(resolvedCfg, {
+  const deps: BootstrapDeps = {
+    resolveConfig: () => resolveDaemonConfig({ env: process.env, dataDir }),
+    ensureDaemon: async (cfg) => {
+      daemonHandle = await ensureLocalDaemon(cfg, {
         serverEntry: path.join(__dirname, 'server.js'),
         dataDir,
         ephemeral,
       })
       console.log(
-        `[slipstream] daemon ${daemonHandle.reused ? 'reused' : 'spawned'} at ${resolvedCfg.httpBase}`,
+        `[slipstream] daemon ${daemonHandle.reused ? 'reused' : 'spawned'} at ${cfg.httpBase}`,
       )
-    } catch (err) {
-      console.error('[slipstream] Failed to start local daemon:', err)
-    }
+      return daemonHandle
+    },
+    showApp: (cfg) => {
+      resolvedCfg = cfg
+      createWindow(cfg)
+    },
+    showError: (outcome) => {
+      const detail = outcome.error instanceof Error ? outcome.error.message : String(outcome.error)
+      console.error(`[slipstream] boot failed (${outcome.stage}):`, outcome.error)
+      // Blocking dialog so the failure is impossible to miss...
+      dialog.showErrorBox(
+        'Slipstream could not start',
+        `${daemonErrorMessage(outcome.stage)}\n\n${detail}\n\nSee CLAUDE.md → Troubleshooting native setup, or check <data dir>/logs/server.log.`,
+      )
+      createErrorWindow(outcome)
+    },
   }
 
-  createWindow(resolvedCfg)
+  await runBootstrap(deps)
 })
 
 app.on('window-all-closed', () => {
