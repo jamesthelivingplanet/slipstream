@@ -29,7 +29,9 @@ describes the current behavior and update it in the same change.
 - **ESM preload**: `preload.ts` builds to `preload.mjs`. It only loads with
   `sandbox: false` (set in `main.ts`) **and** ESM output — `vite.config.ts` forces
   `output.format: 'es'`. Symptom if broken: `window.slipstream` is `undefined`,
-  `Add repo`/everything silently no-ops (falls back to mock-less empty state).
+  `Add repo`/everything silently no-ops (falls back to mock-less empty state). This
+  invariant is enforced as a post-build check (`scripts/check-preload-esm.mjs`), run in
+  the GitLab CI `build` job and in `deploy.sh` phase 2 (moved out of vitest per FLO-80).
 - **Bundled main has no sibling files.** Anything `main.js` needs at runtime must be
   inlined or bundled — e.g. the DB schema is a `SCHEMA` string in `db.ts`, not a `.sql`
   file (which the bundler won't copy). Symptom if broken: `No handler registered for ...`

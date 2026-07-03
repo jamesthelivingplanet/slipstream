@@ -62,6 +62,10 @@ fi
 echo "▶ Building (pnpm build)…"
 with_node22 pnpm build
 
+# Assert the ESM preload invariant post-build (FLO-80): preload.mjs must load
+# as ESM with no bare require() calls, or window.slipstream never loads.
+node scripts/check-preload-esm.mjs
+
 # ---------------------------------------------------------------------------
 # Phase 3: Restart the service (OS-aware: systemd on Linux, launchd on macOS)
 # ---------------------------------------------------------------------------
