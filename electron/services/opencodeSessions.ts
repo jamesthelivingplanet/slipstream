@@ -103,15 +103,17 @@ export function parseOpencodeSessionIdFromStdout(stdout: string): string | null 
  * session id from opencode's on-disk session store. Returns null on any error
  * (binary missing, no sessions yet, parse failure).
  *
- * This reads from disk — it does NOT require the opencode HTTP server to be
- * running, which makes it reliable even during slow TUI startup.
+ * Must run in the worktree directory so opencode scopes to the correct
+ * project — opencode sessions are per-directory, not global.
  */
-export async function queryOpencodeSessionIdFromCli(): Promise<string | null> {
+export async function queryOpencodeSessionIdFromCli(
+  cwd: string,
+): Promise<string | null> {
   return new Promise((resolve) => {
     const child = execFile(
       OPENCODE_BIN,
       ['session', 'list', '--format', 'json', '-n', '1'],
-      { timeout: 10_000 },
+      { timeout: 10_000, cwd },
       (err, stdout) => {
         if (err) return resolve(null)
         resolve(parseOpencodeSessionIdFromStdout(stdout))
@@ -130,12 +132,12 @@ export async function queryOpencodeSessionIdFromCli(): Promise<string | null> {
  * server is slow to start.
  */
 export async function captureOpencodeSessionId(
-  opts: { attempts?: number; intervalMs?: number } = {},
+  opts: { cwd: string; attempts?: number; intervalMs?: number },
 ): Promise<string | null> {
   const attempts = opts.attempts ?? OPENCODE_SESSION_CAPTURE_ATTEMPTS
   const intervalMs = opts.intervalMs ?? OPENCODE_SESSION_CAPTURE_INTERVAL_MS
   for (let i = 0; i < attempts; i++) {
-    const id = await queryOpencodeSessionIdFromCli()
+    const id = await queryOpencodeSessionIdFromCli(opts.cwd)
     if (id) return id
     await new Promise((r) => setTimeout(r, intervalMs))
   }

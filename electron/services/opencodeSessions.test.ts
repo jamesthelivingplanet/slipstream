@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import {
   selectNewestSessionSince,
   parseOpencodeSessionIdFromStdout,
@@ -56,7 +56,7 @@ describe('captureOpencodeSessionId', () => {
   it('returns null or a string (smoke test — depends on opencode being installed)', async () => {
     // We can't mock the CLI call in ESM tests, so this is a smoke test.
     // The pure parse logic is covered by parseOpencodeSessionIdFromStdout above.
-    const result = await captureOpencodeSessionId({ attempts: 1, intervalMs: 0 })
+    const result = await captureOpencodeSessionId({ cwd: process.cwd(), attempts: 1, intervalMs: 0 })
     expect(result === null || typeof result === 'string').toBe(true)
   })
 })

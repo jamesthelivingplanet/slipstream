@@ -241,7 +241,7 @@ export function createRpc(
         })
 
         if (agentKind === 'opencode') {
-          void captureOpencodeSessionId().then((sid) => {
+          void captureOpencodeSessionId({ cwd }).then((sid) => {
             if (!sid) return
             deps.sessions.setOpencodeSid(session.id, sid)
             const cur = deps.sessionStore.get(session.id)

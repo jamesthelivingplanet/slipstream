@@ -1,0 +1,2616 @@
+{
+  "testModules": [
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/preload-esm.test.ts",
+      "tests": [
+        {
+          "name": "is valid ESM — no bare require() calls",
+          "fullName": "preload build output > is valid ESM — no bare require() calls",
+          "state": "skipped"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/promptWriter.test.ts",
+      "tests": [
+        {
+          "name": "resolveInfoExclude points at an info/exclude path",
+          "fullName": "promptWriter (real git) > resolveInfoExclude points at an info/exclude path",
+          "state": "passed"
+        },
+        {
+          "name": "resolveInfoExclude returns null for a non-git directory",
+          "fullName": "promptWriter (real git) > resolveInfoExclude returns null for a non-git directory",
+          "state": "passed"
+        },
+        {
+          "name": "writes AGENTS.md and keeps the worktree clean (FLO-36)",
+          "fullName": "promptWriter (real git) > writes AGENTS.md and keeps the worktree clean (FLO-36)",
+          "state": "passed"
+        },
+        {
+          "name": "does not modify the tracked .gitignore",
+          "fullName": "promptWriter (real git) > does not modify the tracked .gitignore",
+          "state": "passed"
+        },
+        {
+          "name": "is idempotent — a second write does not duplicate the ignore entry",
+          "fullName": "promptWriter (real git) > is idempotent — a second write does not duplicate the ignore entry",
+          "state": "passed"
+        },
+        {
+          "name": "keeps the worktree clean even when the repo has no .gitignore",
+          "fullName": "promptWriter (real git) > keeps the worktree clean even when the repo has no .gitignore",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/repoResolve.test.ts",
+      "tests": [
+        {
+          "name": "getRemoteUrl returns the origin url for a repo with a remote",
+          "fullName": "repoResolve helpers > getRemoteUrl returns the origin url for a repo with a remote",
+          "state": "passed"
+        },
+        {
+          "name": "getRemoteUrl returns null for a missing path",
+          "fullName": "repoResolve helpers > getRemoteUrl returns null for a missing path",
+          "state": "passed"
+        },
+        {
+          "name": "isWorkTree is true for a real checkout and false for a missing path",
+          "fullName": "repoResolve helpers > isWorkTree is true for a real checkout and false for a missing path",
+          "state": "passed"
+        },
+        {
+          "name": "fast-path: returns the repo unchanged when the stored path is still valid and remote matches",
+          "fullName": "resolveRepoPath > fast-path: returns the repo unchanged when the stored path is still valid and remote matches",
+          "state": "passed"
+        },
+        {
+          "name": "self-heals when the checkout dir was renamed (flotilla -> slipstream case)",
+          "fullName": "resolveRepoPath > self-heals when the checkout dir was renamed (flotilla -> slipstream case)",
+          "state": "passed"
+        },
+        {
+          "name": "findSiblingCheckout locates a sibling with the matching remote",
+          "fullName": "resolveRepoPath > findSiblingCheckout locates a sibling with the matching remote",
+          "state": "passed"
+        },
+        {
+          "name": "returns null (clear error upstream) when the dir is deleted and no sibling matches",
+          "fullName": "resolveRepoPath > returns null (clear error upstream) when the dir is deleted and no sibling matches",
+          "state": "passed"
+        },
+        {
+          "name": "clones a local repo into dest and makes it a work tree with the correct remote",
+          "fullName": "cloneRepo > clones a local repo into dest and makes it a work tree with the correct remote",
+          "state": "passed"
+        },
+        {
+          "name": "throws a clear Error when given a bogus path",
+          "fullName": "cloneRepo > throws a clear Error when given a bogus path",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/worktreeManager.integration.test.ts",
+      "tests": [
+        {
+          "name": "creates a worktree under .worktrees/<org>-<name>/<branch>, clean",
+          "fullName": "worktreeManager (real git) > creates a worktree under .worktrees/<org>-<name>/<branch>, clean",
+          "state": "passed"
+        },
+        {
+          "name": "removes a clean, unmerged-free worktree without force",
+          "fullName": "worktreeManager (real git) > removes a clean, unmerged-free worktree without force",
+          "state": "passed"
+        },
+        {
+          "name": "create() is idempotent on an already-registered worktree",
+          "fullName": "worktreeManager (real git) > create() is idempotent on an already-registered worktree",
+          "state": "passed"
+        },
+        {
+          "name": "create() checks out an existing branch whose worktree was removed",
+          "fullName": "worktreeManager (real git) > create() checks out an existing branch whose worktree was removed",
+          "state": "passed"
+        },
+        {
+          "name": "detects a dirty worktree and refuses removal without force",
+          "fullName": "worktreeManager (real git) > detects a dirty worktree and refuses removal without force",
+          "state": "passed"
+        },
+        {
+          "name": "reports ahead count and refuses removal of an unmerged branch",
+          "fullName": "worktreeManager (real git) > reports ahead count and refuses removal of an unmerged branch",
+          "state": "passed"
+        },
+        {
+          "name": "removes worktree, prunes stale entries, and deletes the branch",
+          "fullName": "worktreeManager (real git) > removes worktree, prunes stale entries, and deletes the branch",
+          "state": "passed"
+        },
+        {
+          "name": "lists active worktrees (excluding the main checkout)",
+          "fullName": "worktreeManager (real git) > lists active worktrees (excluding the main checkout)",
+          "state": "passed"
+        },
+        {
+          "name": "reports added/deleted > 0 after committing changes in a worktree",
+          "fullName": "worktreeManager (real git) > reports added/deleted > 0 after committing changes in a worktree",
+          "state": "passed"
+        },
+        {
+          "name": "removes gracefully when the worktree directory was deleted out-of-band (detached agent)",
+          "fullName": "worktreeManager (real git) > removes gracefully when the worktree directory was deleted out-of-band (detached agent)",
+          "state": "passed"
+        },
+        {
+          "name": "remove is idempotent — a second remove of an already-gone worktree still succeeds",
+          "fullName": "worktreeManager (real git) > remove is idempotent — a second remove of an already-gone worktree still succeeds",
+          "state": "passed"
+        },
+        {
+          "name": "status() returns +0/-0 without throwing for a missing worktree",
+          "fullName": "worktreeManager (real git) > status() returns +0/-0 without throwing for a missing worktree",
+          "state": "passed"
+        },
+        {
+          "name": "cuts a new branch from the latest remote base (pulls first)",
+          "fullName": "worktreeManager pull-before-create (real git + remote) > cuts a new branch from the latest remote base (pulls first)",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/runLogger.test.ts",
+      "tests": [
+        {
+          "name": "creates the logs/ dir on construction",
+          "fullName": "createRunLogger > creates the logs/ dir on construction",
+          "state": "passed"
+        },
+        {
+          "name": "writes a session log file with the spawn details",
+          "fullName": "createRunLogger > spawn > writes a session log file with the spawn details",
+          "state": "passed"
+        },
+        {
+          "name": "appends to the same session file on a second call",
+          "fullName": "createRunLogger > spawn > appends to the same session file on a second call",
+          "state": "passed"
+        },
+        {
+          "name": "never throws when the prompt is very long (truncates)",
+          "fullName": "createRunLogger > spawn > never throws when the prompt is very long (truncates)",
+          "state": "passed"
+        },
+        {
+          "name": "logs exit code, signal, status, and tail",
+          "fullName": "createRunLogger > exit > logs exit code, signal, status, and tail",
+          "state": "passed"
+        },
+        {
+          "name": "truncates the tail to a reasonable size",
+          "fullName": "createRunLogger > exit > truncates the tail to a reasonable size",
+          "state": "passed"
+        },
+        {
+          "name": "omits signal when it is 0/undefined",
+          "fullName": "createRunLogger > exit > omits signal when it is 0/undefined",
+          "state": "passed"
+        },
+        {
+          "name": "appends timestamped lines to server.log",
+          "fullName": "createRunLogger > server > appends timestamped lines to server.log",
+          "state": "passed"
+        },
+        {
+          "name": "serializes Error objects with name/message/stack",
+          "fullName": "createRunLogger > server > serializes Error objects with name/message/stack",
+          "state": "passed"
+        },
+        {
+          "name": "never throws on a spawn when the dir is fine (smoke)",
+          "fullName": "createRunLogger > robustness > never throws on a spawn when the dir is fine (smoke)",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/pushService.test.ts",
+      "tests": [
+        {
+          "name": "returns needs when transitioning to needs from non-needs",
+          "fullName": "transitionKind > returns needs when transitioning to needs from non-needs",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when already at needs",
+          "fullName": "transitionKind > returns null when already at needs",
+          "state": "passed"
+        },
+        {
+          "name": "returns done when transitioning to done from non-done",
+          "fullName": "transitionKind > returns done when transitioning to done from non-done",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when already at done",
+          "fullName": "transitionKind > returns null when already at done",
+          "state": "passed"
+        },
+        {
+          "name": "returns running when transitioning to running from non-running",
+          "fullName": "transitionKind > returns running when transitioning to running from non-running",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when already at running",
+          "fullName": "transitionKind > returns null when already at running",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for idle and errored transitions",
+          "fullName": "transitionKind > returns null for idle and errored transitions",
+          "state": "passed"
+        },
+        {
+          "name": "getVapidPublicKey generates and stores VAPID keys on first call",
+          "fullName": "createPushService > getVapidPublicKey generates and stores VAPID keys on first call",
+          "state": "passed"
+        },
+        {
+          "name": "savePushSubscription upserts the subscription",
+          "fullName": "createPushService > savePushSubscription upserts the subscription",
+          "state": "passed"
+        },
+        {
+          "name": "deletePushSubscription removes the subscription",
+          "fullName": "createPushService > deletePushSubscription removes the subscription",
+          "state": "passed"
+        },
+        {
+          "name": "getPushPrefs returns null for unknown endpoint",
+          "fullName": "createPushService > getPushPrefs returns null for unknown endpoint",
+          "state": "passed"
+        },
+        {
+          "name": "getPushPrefs returns prefs for known endpoint",
+          "fullName": "createPushService > getPushPrefs returns prefs for known endpoint",
+          "state": "passed"
+        },
+        {
+          "name": "sends push when session transitions to needs and sub has needs=1",
+          "fullName": "createPushService > sends push when session transitions to needs and sub has needs=1",
+          "state": "passed"
+        },
+        {
+          "name": "does NOT send push for needs when sub has needs=0",
+          "fullName": "createPushService > does NOT send push for needs when sub has needs=0",
+          "state": "passed"
+        },
+        {
+          "name": "sends push when session transitions to running and sub has running=1",
+          "fullName": "createPushService > sends push when session transitions to running and sub has running=1",
+          "state": "passed"
+        },
+        {
+          "name": "deduplicates sends within 3 seconds",
+          "fullName": "createPushService > deduplicates sends within 3 seconds",
+          "state": "passed"
+        },
+        {
+          "name": "does NOT deduplicate sends after 3 seconds",
+          "fullName": "createPushService > does NOT deduplicate sends after 3 seconds",
+          "state": "passed"
+        },
+        {
+          "name": "prunes subscription on 410 response",
+          "fullName": "createPushService > prunes subscription on 410 response",
+          "state": "passed"
+        },
+        {
+          "name": "prunes subscription when send throws with statusCode 410",
+          "fullName": "createPushService > prunes subscription when send throws with statusCode 410",
+          "state": "passed"
+        },
+        {
+          "name": "uses tid from session store in the notification payload",
+          "fullName": "createPushService > uses tid from session store in the notification payload",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/core/rpc.test.ts",
+      "tests": [
+        {
+          "name": "routes listRepos to repos.list()",
+          "fullName": "createRpc > routes listRepos to repos.list()",
+          "state": "passed"
+        },
+        {
+          "name": "routes registerRepo with the correct arg",
+          "fullName": "createRpc > routes registerRepo with the correct arg",
+          "state": "passed"
+        },
+        {
+          "name": "routes removeRepo",
+          "fullName": "createRpc > routes removeRepo",
+          "state": "passed"
+        },
+        {
+          "name": "routes listTickets",
+          "fullName": "createRpc > routes listTickets",
+          "state": "passed"
+        },
+        {
+          "name": "routes startSession — creates worktree, claims port, starts session",
+          "fullName": "createRpc > routes startSession — creates worktree, claims port, starts session",
+          "state": "passed"
+        },
+        {
+          "name": "startSession passes agentKind to sessions.start",
+          "fullName": "createRpc > startSession passes agentKind to sessions.start",
+          "state": "passed"
+        },
+        {
+          "name": "startSession defaults agentKind to undefined when not provided",
+          "fullName": "createRpc > startSession defaults agentKind to undefined when not provided",
+          "state": "passed"
+        },
+        {
+          "name": "startSession stores agentKind in sessionStore",
+          "fullName": "createRpc > startSession stores agentKind in sessionStore",
+          "state": "passed"
+        },
+        {
+          "name": "routes killSession",
+          "fullName": "createRpc > routes killSession",
+          "state": "passed"
+        },
+        {
+          "name": "routes cleanupSession — returns not found when no meta",
+          "fullName": "createRpc > routes cleanupSession — returns not found when no meta",
+          "state": "passed"
+        },
+        {
+          "name": "routes cleanupSession — removes worktree after startSession",
+          "fullName": "createRpc > routes cleanupSession — removes worktree after startSession",
+          "state": "passed"
+        },
+        {
+          "name": "routes writeSession (fire-and-forget)",
+          "fullName": "createRpc > routes writeSession (fire-and-forget)",
+          "state": "passed"
+        },
+        {
+          "name": "routes resizeSession",
+          "fullName": "createRpc > routes resizeSession",
+          "state": "passed"
+        },
+        {
+          "name": "throws for pickRepo (desktop-only)",
+          "fullName": "createRpc > throws for pickRepo (desktop-only)",
+          "state": "passed"
+        },
+        {
+          "name": "throws for unknown channel",
+          "fullName": "createRpc > throws for unknown channel",
+          "state": "passed"
+        },
+        {
+          "name": "forwards session data events to emit (3-arg form with seq)",
+          "fullName": "createRpc > forwards session data events to emit (3-arg form with seq)",
+          "state": "passed"
+        },
+        {
+          "name": "coalesces session:data bursts into a single timed flush",
+          "fullName": "createRpc > coalesces session:data bursts into a single timed flush",
+          "state": "passed"
+        },
+        {
+          "name": "routes getSessionBuffer to sessions.getBuffer",
+          "fullName": "createRpc > routes getSessionBuffer to sessions.getBuffer",
+          "state": "passed"
+        },
+        {
+          "name": "forwards session status events to emit",
+          "fullName": "createRpc > forwards session status events to emit",
+          "state": "passed"
+        },
+        {
+          "name": "dispose() removes event listeners",
+          "fullName": "createRpc > dispose() removes event listeners",
+          "state": "passed"
+        },
+        {
+          "name": "dispose() does not throw (regression: sessions.off must exist)",
+          "fullName": "createRpc > dispose() does not throw (regression: sessions.off must exist)",
+          "state": "passed"
+        },
+        {
+          "name": "dispose() calls sessions.off for data and status",
+          "fullName": "createRpc > dispose() calls sessions.off for data and status",
+          "state": "passed"
+        },
+        {
+          "name": "startSession persists session to sessionStore",
+          "fullName": "createRpc > startSession persists session to sessionStore",
+          "state": "passed"
+        },
+        {
+          "name": "listSessions returns persisted rows",
+          "fullName": "createRpc > listSessions returns persisted rows",
+          "state": "passed"
+        },
+        {
+          "name": "resumeSession respawns a missing session (not in has())",
+          "fullName": "createRpc > resumeSession respawns a missing session (not in has())",
+          "state": "passed"
+        },
+        {
+          "name": "resumeSession is a no-op when has() is true",
+          "fullName": "createRpc > resumeSession is a no-op when has() is true",
+          "state": "passed"
+        },
+        {
+          "name": "cleanupSession deletes from sessionStore after worktree removed",
+          "fullName": "createRpc > cleanupSession deletes from sessionStore after worktree removed",
+          "state": "passed"
+        },
+        {
+          "name": "cleanupSession works post-restart when sessionMeta is cleared",
+          "fullName": "createRpc > cleanupSession works post-restart when sessionMeta is cleared",
+          "state": "passed"
+        },
+        {
+          "name": "attachRemoteControl calls sessions.attachRemoteControl and upserts status running",
+          "fullName": "createRpc > attachRemoteControl calls sessions.attachRemoteControl and upserts status running",
+          "state": "passed"
+        },
+        {
+          "name": "attachRemoteControl throws when session is not in store",
+          "fullName": "createRpc > attachRemoteControl throws when session is not in store",
+          "state": "passed"
+        },
+        {
+          "name": "routes worktreeStatus to worktrees.status with resolved repo and branch",
+          "fullName": "createRpc > routes worktreeStatus to worktrees.status with resolved repo and branch",
+          "state": "passed"
+        },
+        {
+          "name": "worktreeStatus throws for unknown repo",
+          "fullName": "createRpc > worktreeStatus throws for unknown repo",
+          "state": "passed"
+        },
+        {
+          "name": "startSession passes systemPrompt containing the ticket id to sessions.start",
+          "fullName": "createRpc > startSession passes systemPrompt containing the ticket id to sessions.start",
+          "state": "passed"
+        },
+        {
+          "name": "startSession transitions the linked ticket to in-progress (startTicket)",
+          "fullName": "createRpc > startSession transitions the linked ticket to in-progress (startTicket)",
+          "state": "passed"
+        },
+        {
+          "name": "startSession still succeeds when startTicket rejects",
+          "fullName": "createRpc > startSession still succeeds when startTicket rejects",
+          "state": "passed"
+        },
+        {
+          "name": "startSession calls repos.resolvePath (not get) before creating the worktree",
+          "fullName": "createRpc > startSession calls repos.resolvePath (not get) before creating the worktree",
+          "state": "passed"
+        },
+        {
+          "name": "startSession surfaces resolvePath errors (clear failure, not silent)",
+          "fullName": "createRpc > startSession surfaces resolvePath errors (clear failure, not silent)",
+          "state": "passed"
+        },
+        {
+          "name": "startSession uses the resolved (healed) repo path for worktree creation",
+          "fullName": "createRpc > startSession uses the resolved (healed) repo path for worktree creation",
+          "state": "passed"
+        },
+        {
+          "name": "resumeSession calls resolvePath and throws clearly when repo is gone",
+          "fullName": "createRpc > resumeSession calls resolvePath and throws clearly when repo is gone",
+          "state": "passed"
+        },
+        {
+          "name": "cleanupSession resets the linked ticket back to to-do (resetTicket)",
+          "fullName": "createRpc > cleanupSession resets the linked ticket back to to-do (resetTicket)",
+          "state": "passed"
+        },
+        {
+          "name": "cleanupSession still succeeds when resetTicket rejects",
+          "fullName": "createRpc > cleanupSession still succeeds when resetTicket rejects",
+          "state": "passed"
+        },
+        {
+          "name": "getEditorConfig returns defaults when config.get returns undefined",
+          "fullName": "createRpc > editor config > getEditorConfig returns defaults when config.get returns undefined",
+          "state": "passed"
+        },
+        {
+          "name": "setEditorConfig calls config.set for both keys",
+          "fullName": "createRpc > editor config > setEditorConfig calls config.set for both keys",
+          "state": "passed"
+        },
+        {
+          "name": "openInEditor uses desktop command by default",
+          "fullName": "createRpc > editor config > openInEditor uses desktop command by default",
+          "state": "passed"
+        },
+        {
+          "name": "openInEditor uses mobile command when mobile=true and mobileCommand is set",
+          "fullName": "createRpc > editor config > openInEditor uses mobile command when mobile=true and mobileCommand is set",
+          "state": "passed"
+        },
+        {
+          "name": "openInEditor throws for unknown repo",
+          "fullName": "createRpc > editor config > openInEditor throws for unknown repo",
+          "state": "passed"
+        },
+        {
+          "name": "getRepoSettings routes to repos.getSettings",
+          "fullName": "createRpc > getRepoSettings routes to repos.getSettings",
+          "state": "passed"
+        },
+        {
+          "name": "setRepoSettings routes to repos.setSettings with id and settings",
+          "fullName": "createRpc > setRepoSettings routes to repos.setSettings with id and settings",
+          "state": "passed"
+        },
+        {
+          "name": "runApp returns { started: false, reason: \"no-start-command\" } when startCmd is empty",
+          "fullName": "createRpc > runApp returns { started: false, reason: \"no-start-command\" } when startCmd is empty",
+          "state": "passed"
+        },
+        {
+          "name": "runApp with a startCmd calls appRunner.run and returns { started: true, port }",
+          "fullName": "createRpc > runApp with a startCmd calls appRunner.run and returns { started: true, port }",
+          "state": "passed"
+        },
+        {
+          "name": "startSession stamps the caller identity as ownerId",
+          "fullName": "createRpc > owner filter (identity seam) > startSession stamps the caller identity as ownerId",
+          "state": "passed"
+        },
+        {
+          "name": "listSessions returns rows owned by the caller (default local sees local rows)",
+          "fullName": "createRpc > owner filter (identity seam) > listSessions returns rows owned by the caller (default local sees local rows)",
+          "state": "passed"
+        },
+        {
+          "name": "listSessions excludes rows owned by a different identity",
+          "fullName": "createRpc > owner filter (identity seam) > listSessions excludes rows owned by a different identity",
+          "state": "passed"
+        },
+        {
+          "name": "listRepos filters by caller identity",
+          "fullName": "createRpc > owner filter (identity seam) > listRepos filters by caller identity",
+          "state": "passed"
+        },
+        {
+          "name": "registerRepo stamps the caller identity",
+          "fullName": "createRpc > ownership guards (identity seam) > registerRepo stamps the caller identity",
+          "state": "passed"
+        },
+        {
+          "name": "resumeSession throws not-found for a session owned by another identity",
+          "fullName": "createRpc > ownership guards (identity seam) > resumeSession throws not-found for a session owned by another identity",
+          "state": "passed"
+        },
+        {
+          "name": "resumeSession does not return a hot session owned by another identity",
+          "fullName": "createRpc > ownership guards (identity seam) > resumeSession does not return a hot session owned by another identity",
+          "state": "passed"
+        },
+        {
+          "name": "attachRemoteControl throws not-found for another identity's session",
+          "fullName": "createRpc > ownership guards (identity seam) > attachRemoteControl throws not-found for another identity's session",
+          "state": "passed"
+        },
+        {
+          "name": "cleanupSession reports not-found for another identity's session",
+          "fullName": "createRpc > ownership guards (identity seam) > cleanupSession reports not-found for another identity's session",
+          "state": "passed"
+        },
+        {
+          "name": "getSessionBuffer throws not-found for another identity's session",
+          "fullName": "createRpc > ownership guards (identity seam) > getSessionBuffer throws not-found for another identity's session",
+          "state": "passed"
+        },
+        {
+          "name": "worktreeStatus throws Unknown repo for another identity's repo",
+          "fullName": "createRpc > ownership guards (identity seam) > worktreeStatus throws Unknown repo for another identity's repo",
+          "state": "passed"
+        },
+        {
+          "name": "openInEditor throws Unknown repo for another identity's repo",
+          "fullName": "createRpc > ownership guards (identity seam) > openInEditor throws Unknown repo for another identity's repo",
+          "state": "passed"
+        },
+        {
+          "name": "runApp throws Unknown repo for another identity's repo",
+          "fullName": "createRpc > ownership guards (identity seam) > runApp throws Unknown repo for another identity's repo",
+          "state": "passed"
+        },
+        {
+          "name": "getRepoSettings throws Unknown repo for another identity's repo",
+          "fullName": "createRpc > ownership guards (identity seam) > getRepoSettings throws Unknown repo for another identity's repo",
+          "state": "passed"
+        },
+        {
+          "name": "setRepoSettings throws Unknown repo for another identity's repo",
+          "fullName": "createRpc > ownership guards (identity seam) > setRepoSettings throws Unknown repo for another identity's repo",
+          "state": "passed"
+        },
+        {
+          "name": "startSession throws Unknown repo when the repo is owned by another identity",
+          "fullName": "createRpc > ownership guards (identity seam) > startSession throws Unknown repo when the repo is owned by another identity",
+          "state": "passed"
+        },
+        {
+          "name": "grants the write lock to the first client to attach, view-only for the second",
+          "fullName": "createRpc > multi-client write lock > grants the write lock to the first client to attach, view-only for the second",
+          "state": "passed"
+        },
+        {
+          "name": "blocks writeSession from a view-only client but allows the holder",
+          "fullName": "createRpc > multi-client write lock > blocks writeSession from a view-only client but allows the holder",
+          "state": "passed"
+        },
+        {
+          "name": "takeWrite flips the lock and pushes session:writeLock to both attached clients",
+          "fullName": "createRpc > multi-client write lock > takeWrite flips the lock and pushes session:writeLock to both attached clients",
+          "state": "passed"
+        },
+        {
+          "name": "resizeSession is blocked for a view-only client",
+          "fullName": "createRpc > multi-client write lock > resizeSession is blocked for a view-only client",
+          "state": "passed"
+        },
+        {
+          "name": "detachSession on dispose frees the lock for remaining viewers",
+          "fullName": "createRpc > multi-client write lock > detachSession on dispose frees the lock for remaining viewers",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/src/lib/wsApi.test.ts",
+      "tests": [
+        {
+          "name": "connects with token in URL",
+          "fullName": "wsApi > connects with token in URL",
+          "state": "passed"
+        },
+        {
+          "name": "encodes special chars in the token",
+          "fullName": "wsApi > encodes special chars in the token",
+          "state": "passed"
+        },
+        {
+          "name": "resolves with result when ok:true",
+          "fullName": "wsApi > request/response correlation > resolves with result when ok:true",
+          "state": "passed"
+        },
+        {
+          "name": "rejects with error message when ok:false",
+          "fullName": "wsApi > request/response correlation > rejects with error message when ok:false",
+          "state": "passed"
+        },
+        {
+          "name": "ignores responses with unknown ids",
+          "fullName": "wsApi > request/response correlation > ignores responses with unknown ids",
+          "state": "passed"
+        },
+        {
+          "name": "delivers session:data to onSessionData callbacks (with seq)",
+          "fullName": "wsApi > push frames > delivers session:data to onSessionData callbacks (with seq)",
+          "state": "passed"
+        },
+        {
+          "name": "delivers session:status to onSessionStatus callbacks",
+          "fullName": "wsApi > push frames > delivers session:status to onSessionStatus callbacks",
+          "state": "passed"
+        },
+        {
+          "name": "delivers session:pr to onSessionPr callbacks",
+          "fullName": "wsApi > push frames > delivers session:pr to onSessionPr callbacks",
+          "state": "passed"
+        },
+        {
+          "name": "unsubscribe stops push delivery",
+          "fullName": "wsApi > push frames > unsubscribe stops push delivery",
+          "state": "passed"
+        },
+        {
+          "name": "multiple subscribers all receive the push",
+          "fullName": "wsApi > push frames > multiple subscribers all receive the push",
+          "state": "passed"
+        },
+        {
+          "name": "delivers session:writeLock to onSessionWriteLock callbacks",
+          "fullName": "wsApi > push frames > delivers session:writeLock to onSessionWriteLock callbacks",
+          "state": "passed"
+        },
+        {
+          "name": "getSessionBuffer sends a request on session:buffer and resolves result",
+          "fullName": "wsApi > push frames > getSessionBuffer sends a request on session:buffer and resolves result",
+          "state": "passed"
+        },
+        {
+          "name": "queues requests and flushes them when the socket opens",
+          "fullName": "wsApi > request queueing before open > queues requests and flushes them when the socket opens",
+          "state": "passed"
+        },
+        {
+          "name": "can queue multiple requests and flush all",
+          "fullName": "wsApi > request queueing before open > can queue multiple requests and flush all",
+          "state": "passed"
+        },
+        {
+          "name": "resolves null without touching the wire",
+          "fullName": "wsApi > pickAndRegisterRepo > resolves null without touching the wire",
+          "state": "passed"
+        },
+        {
+          "name": "writeSession sends a WireReq but returns void",
+          "fullName": "wsApi > fire-and-forget methods > writeSession sends a WireReq but returns void",
+          "state": "passed"
+        },
+        {
+          "name": "resizeSession sends a WireReq but returns void",
+          "fullName": "wsApi > fire-and-forget methods > resizeSession sends a WireReq but returns void",
+          "state": "passed"
+        },
+        {
+          "name": "rejects in-flight requests when the socket closes",
+          "fullName": "wsApi > close handling > rejects in-flight requests when the socket closes",
+          "state": "passed"
+        },
+        {
+          "name": "calls onAuthError when close code is 4001",
+          "fullName": "wsApi > auth error > calls onAuthError when close code is 4001",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/core/daemonManager.test.ts",
+      "tests": [
+        {
+          "name": "derives wsUrl and httpBase from SLIPSTREAM_DAEMON_URL (http)",
+          "fullName": "resolveDaemonConfig — remote mode > derives wsUrl and httpBase from SLIPSTREAM_DAEMON_URL (http)",
+          "state": "passed"
+        },
+        {
+          "name": "uses wss for https base URLs",
+          "fullName": "resolveDaemonConfig — remote mode > uses wss for https base URLs",
+          "state": "passed"
+        },
+        {
+          "name": "throws a clear error when SLIPSTREAM_TOKEN is unset in remote mode",
+          "fullName": "resolveDaemonConfig — remote mode > throws a clear error when SLIPSTREAM_TOKEN is unset in remote mode",
+          "state": "passed"
+        },
+        {
+          "name": "returns correct wsUrl/httpBase from injected identity",
+          "fullName": "resolveDaemonConfig — local mode > returns correct wsUrl/httpBase from injected identity",
+          "state": "passed"
+        },
+        {
+          "name": "creates daemon.json when absent and returns consistent identity",
+          "fullName": "loadOrCreateLocalIdentity > creates daemon.json when absent and returns consistent identity",
+          "state": "passed"
+        },
+        {
+          "name": "reads existing daemon.json unchanged",
+          "fullName": "loadOrCreateLocalIdentity > reads existing daemon.json unchanged",
+          "state": "passed"
+        },
+        {
+          "name": "uses SLIPSTREAM_TOKEN env var when creating",
+          "fullName": "loadOrCreateLocalIdentity > uses SLIPSTREAM_TOKEN env var when creating",
+          "state": "passed"
+        },
+        {
+          "name": "returns a free port that can be bound",
+          "fullName": "pickPort > returns a free port that can be bound",
+          "state": "passed"
+        },
+        {
+          "name": "falls back when preferred port is busy",
+          "fullName": "pickPort > falls back when preferred port is busy",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/server/server.test.ts",
+      "tests": [
+        {
+          "name": "refuses to connect without token (query param)",
+          "fullName": "createServer > refuses to connect without token (query param)",
+          "state": "passed"
+        },
+        {
+          "name": "refuses to connect with wrong token",
+          "fullName": "createServer > refuses to connect with wrong token",
+          "state": "passed"
+        },
+        {
+          "name": "accepts a connection with the correct token",
+          "fullName": "createServer > accepts a connection with the correct token",
+          "state": "passed"
+        },
+        {
+          "name": "routes listRepos and returns a WireRes with repos",
+          "fullName": "createServer > routes listRepos and returns a WireRes with repos",
+          "state": "passed"
+        },
+        {
+          "name": "returns WireRes with ok:false for unknown channel",
+          "fullName": "createServer > returns WireRes with ok:false for unknown channel",
+          "state": "passed"
+        },
+        {
+          "name": "GET /healthz returns { ok: true }",
+          "fullName": "createServer > GET /healthz returns { ok: true }",
+          "state": "passed"
+        },
+        {
+          "name": "session survives across zero connected clients — output replays on reconnect, PTY not reaped",
+          "fullName": "createServer > session survives across zero connected clients — output replays on reconnect, PTY not reaped",
+          "state": "passed"
+        },
+        {
+          "name": "returns 404 for missing /assets/*.js instead of SPA-fallback HTML (prevents MIME mismatch blank screen)",
+          "fullName": "createServer > returns 404 for missing /assets/*.js instead of SPA-fallback HTML (prevents MIME mismatch blank screen)",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/tickets/linearProvider.test.ts",
+      "tests": [
+        {
+          "name": "returns [] when no API key is set",
+          "fullName": "createLinearProvider > returns [] when no API key is set",
+          "state": "passed"
+        },
+        {
+          "name": "maps Linear nodes to TicketDTOs correctly",
+          "fullName": "createLinearProvider > maps Linear nodes to TicketDTOs correctly",
+          "state": "passed"
+        },
+        {
+          "name": "sends Authorization header without Bearer prefix",
+          "fullName": "createLinearProvider > sends Authorization header without Bearer prefix",
+          "state": "passed"
+        },
+        {
+          "name": "throws on non-ok HTTP response",
+          "fullName": "createLinearProvider > throws on non-ok HTTP response",
+          "state": "passed"
+        },
+        {
+          "name": "throws on GraphQL errors",
+          "fullName": "createLinearProvider > throws on GraphQL errors",
+          "state": "passed"
+        },
+        {
+          "name": "maps a completed node to done: true",
+          "fullName": "createLinearProvider > maps a completed node to done: true",
+          "state": "passed"
+        },
+        {
+          "name": "handles missing team gracefully (repoHint undefined)",
+          "fullName": "createLinearProvider > handles missing team gracefully (repoHint undefined)",
+          "state": "passed"
+        },
+        {
+          "name": "getTicketStatus resolves issue then returns current + available states",
+          "fullName": "createLinearProvider > getTicketStatus resolves issue then returns current + available states",
+          "state": "passed"
+        },
+        {
+          "name": "setTicketStatus resolves issue then updates with issueUpdate",
+          "fullName": "createLinearProvider > setTicketStatus resolves issue then updates with issueUpdate",
+          "state": "passed"
+        },
+        {
+          "name": "transitions to started state when issue is not yet started",
+          "fullName": "createLinearProvider > startTicket > transitions to started state when issue is not yet started",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when issue is already in a started state",
+          "fullName": "createLinearProvider > startTicket > returns null when issue is already in a started state",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when no started state exists in the team workflow",
+          "fullName": "createLinearProvider > startTicket > returns null when no started state exists in the team workflow",
+          "state": "passed"
+        },
+        {
+          "name": "transitions to unstarted state when issue is currently started",
+          "fullName": "createLinearProvider > resetTicket > transitions to unstarted state when issue is currently started",
+          "state": "passed"
+        },
+        {
+          "name": "prefers unstarted over backlog when both exist",
+          "fullName": "createLinearProvider > resetTicket > prefers unstarted over backlog when both exist",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when issue is already in an unstarted state",
+          "fullName": "createLinearProvider > resetTicket > returns null when issue is already in an unstarted state",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when issue is completed (does not reopen done tickets)",
+          "fullName": "createLinearProvider > resetTicket > returns null when issue is completed (does not reopen done tickets)",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when no unstarted/backlog state exists in the team workflow",
+          "fullName": "createLinearProvider > resetTicket > returns null when no unstarted/backlog state exists in the team workflow",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/sessionReaper.test.ts",
+      "tests": [
+        {
+          "name": "returns the default policy when nothing is stored",
+          "fullName": "readGcPolicy / writeGcPolicy > returns the default policy when nothing is stored",
+          "state": "passed"
+        },
+        {
+          "name": "round-trips a written policy",
+          "fullName": "readGcPolicy / writeGcPolicy > round-trips a written policy",
+          "state": "passed"
+        },
+        {
+          "name": "falls back to defaults on malformed JSON",
+          "fullName": "readGcPolicy / writeGcPolicy > falls back to defaults on malformed JSON",
+          "state": "passed"
+        },
+        {
+          "name": "coerces invalid/partial fields to defaults, field by field",
+          "fullName": "readGcPolicy / writeGcPolicy > coerces invalid/partial fields to defaults, field by field",
+          "state": "passed"
+        },
+        {
+          "name": "reaps nothing when disabled",
+          "fullName": "createSessionReaper > reaps nothing when disabled",
+          "state": "passed"
+        },
+        {
+          "name": "autoStopOnDone reaps a live done session with 0 viewers",
+          "fullName": "createSessionReaper > autoStopOnDone reaps a live done session with 0 viewers",
+          "state": "passed"
+        },
+        {
+          "name": "does not reap a done session with viewers when onlyAbandoned is true",
+          "fullName": "createSessionReaper > does not reap a done session with viewers when onlyAbandoned is true",
+          "state": "passed"
+        },
+        {
+          "name": "reaps a done session with viewers when onlyAbandoned is false",
+          "fullName": "createSessionReaper > reaps a done session with viewers when onlyAbandoned is false",
+          "state": "passed"
+        },
+        {
+          "name": "reaps a session idle longer than idleMs",
+          "fullName": "createSessionReaper > reaps a session idle longer than idleMs",
+          "state": "passed"
+        },
+        {
+          "name": "does not reap a session idle within idleMs",
+          "fullName": "createSessionReaper > does not reap a session idle within idleMs",
+          "state": "passed"
+        },
+        {
+          "name": "idleMs 0 disables idle reaping",
+          "fullName": "createSessionReaper > idleMs 0 disables idle reaping",
+          "state": "passed"
+        },
+        {
+          "name": "reaps a session older than maxAgeMs",
+          "fullName": "createSessionReaper > reaps a session older than maxAgeMs",
+          "state": "passed"
+        },
+        {
+          "name": "maxAgeMs 0 disables age reaping",
+          "fullName": "createSessionReaper > maxAgeMs 0 disables age reaping",
+          "state": "passed"
+        },
+        {
+          "name": "persists status \"reaped\" to the store and logs the reap",
+          "fullName": "createSessionReaper > persists status \"reaped\" to the store and logs the reap",
+          "state": "passed"
+        },
+        {
+          "name": "tick returns the ids of every reaped session",
+          "fullName": "createSessionReaper > tick returns the ids of every reaped session",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/statusDetector.test.ts",
+      "tests": [
+        {
+          "name": "removes CSI color sequences",
+          "fullName": "stripAnsi > removes CSI color sequences",
+          "state": "passed"
+        },
+        {
+          "name": "removes cursor movement sequences",
+          "fullName": "stripAnsi > removes cursor movement sequences",
+          "state": "passed"
+        },
+        {
+          "name": "leaves plain text untouched",
+          "fullName": "stripAnsi > leaves plain text untouched",
+          "state": "passed"
+        },
+        {
+          "name": "matches [y/n] variants",
+          "fullName": "looksLikeQuestion > matches [y/n] variants",
+          "state": "passed"
+        },
+        {
+          "name": "matches \"Should I\"",
+          "fullName": "looksLikeQuestion > matches \"Should I\"",
+          "state": "passed"
+        },
+        {
+          "name": "matches \"Do you want\"",
+          "fullName": "looksLikeQuestion > matches \"Do you want\"",
+          "state": "passed"
+        },
+        {
+          "name": "matches \"Continue?\" / \"Proceed?\"",
+          "fullName": "looksLikeQuestion > matches \"Continue?\" / \"Proceed?\"",
+          "state": "passed"
+        },
+        {
+          "name": "matches trailing ? (with whitespace)",
+          "fullName": "looksLikeQuestion > matches trailing ? (with whitespace)",
+          "state": "passed"
+        },
+        {
+          "name": "matches trailing prompt glyph ❯",
+          "fullName": "looksLikeQuestion > matches trailing prompt glyph ❯",
+          "state": "passed"
+        },
+        {
+          "name": "matches trailing prompt glyph >",
+          "fullName": "looksLikeQuestion > matches trailing prompt glyph >",
+          "state": "passed"
+        },
+        {
+          "name": "matches \"Press enter\"",
+          "fullName": "looksLikeQuestion > matches \"Press enter\"",
+          "state": "passed"
+        },
+        {
+          "name": "does NOT match plain progress output",
+          "fullName": "looksLikeQuestion > does NOT match plain progress output",
+          "state": "passed"
+        },
+        {
+          "name": "strips ANSI before matching",
+          "fullName": "looksLikeQuestion > strips ANSI before matching",
+          "state": "passed"
+        },
+        {
+          "name": "returns running while output is recent",
+          "fullName": "StatusDetector > fresh output → running > returns running while output is recent",
+          "state": "passed"
+        },
+        {
+          "name": "returns running immediately after construction (no output yet)",
+          "fullName": "StatusDetector > fresh output → running > returns running immediately after construction (no output yet)",
+          "state": "passed"
+        },
+        {
+          "name": "returns needs when output goes idle and tail looks like a question",
+          "fullName": "StatusDetector > idle + question tail → needs > returns needs when output goes idle and tail looks like a question",
+          "state": "passed"
+        },
+        {
+          "name": "returns needs for [y/n] prompt after idle",
+          "fullName": "StatusDetector > idle + question tail → needs > returns needs for [y/n] prompt after idle",
+          "state": "passed"
+        },
+        {
+          "name": "returns needs for trailing ❯ glyph after idle",
+          "fullName": "StatusDetector > idle + question tail → needs > returns needs for trailing ❯ glyph after idle",
+          "state": "passed"
+        },
+        {
+          "name": "returns running when output is idle but tail is not a question",
+          "fullName": "StatusDetector > idle + plain tail → still running > returns running when output is idle but tail is not a question",
+          "state": "passed"
+        },
+        {
+          "name": "returns done on exit code 0",
+          "fullName": "StatusDetector > markExit > returns done on exit code 0",
+          "state": "passed"
+        },
+        {
+          "name": "returns errored on non-zero exit code",
+          "fullName": "StatusDetector > markExit > returns errored on non-zero exit code",
+          "state": "passed"
+        },
+        {
+          "name": "exit takes priority over idle inspection",
+          "fullName": "StatusDetector > markExit > exit takes priority over idle inspection",
+          "state": "passed"
+        },
+        {
+          "name": "strips ANSI before idle inspection so patterns still fire",
+          "fullName": "StatusDetector > ANSI in stream > strips ANSI before idle inspection so patterns still fire",
+          "state": "passed"
+        },
+        {
+          "name": "does not blow up with very large output",
+          "fullName": "StatusDetector > buffer bounding > does not blow up with very large output",
+          "state": "passed"
+        },
+        {
+          "name": "still detects question in tail after large output",
+          "fullName": "StatusDetector > buffer bounding > still detects question in tail after large output",
+          "state": "passed"
+        },
+        {
+          "name": "is a non-empty array of RegExp",
+          "fullName": "StatusDetector > NEEDS_PATTERNS export > is a non-empty array of RegExp",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"needs\" when tail ends with NEEDS_INPUT_MARKER",
+          "fullName": "tailSignal / explicit markers > returns \"needs\" when tail ends with NEEDS_INPUT_MARKER",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"needs\" when tail ends with NEEDS_INPUT_MARKER followed by trailing newline",
+          "fullName": "tailSignal / explicit markers > returns \"needs\" when tail ends with NEEDS_INPUT_MARKER followed by trailing newline",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"needs\" when tail ends with NEEDS_INPUT_MARKER followed by trailing whitespace",
+          "fullName": "tailSignal / explicit markers > returns \"needs\" when tail ends with NEEDS_INPUT_MARKER followed by trailing whitespace",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"needs\" when tail ends with NEEDS_INPUT_MARKER followed by a trailing ❯ glyph",
+          "fullName": "tailSignal / explicit markers > returns \"needs\" when tail ends with NEEDS_INPUT_MARKER followed by a trailing ❯ glyph",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"done\" when tail ends with DONE_MARKER",
+          "fullName": "tailSignal / explicit markers > returns \"done\" when tail ends with DONE_MARKER",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"done\" when tail ends with DONE_MARKER followed by trailing whitespace",
+          "fullName": "tailSignal / explicit markers > returns \"done\" when tail ends with DONE_MARKER followed by trailing whitespace",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when alphanumeric output follows the marker (marker not at tail)",
+          "fullName": "tailSignal / explicit markers > returns null when alphanumeric output follows the marker (marker not at tail)",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when alphanumeric follows DONE_MARKER",
+          "fullName": "tailSignal / explicit markers > returns null when alphanumeric follows DONE_MARKER",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for plain output with no marker",
+          "fullName": "tailSignal / explicit markers > returns null for plain output with no marker",
+          "state": "passed"
+        },
+        {
+          "name": "strips ANSI before matching (marker wrapped in color codes)",
+          "fullName": "tailSignal / explicit markers > strips ANSI before matching (marker wrapped in color codes)",
+          "state": "passed"
+        },
+        {
+          "name": "StatusDetector.status() returns \"needs\" immediately after pushing a NEEDS_INPUT_MARKER tail WITHOUT advancing the clock",
+          "fullName": "tailSignal / explicit markers > StatusDetector.status() returns \"needs\" immediately after pushing a NEEDS_INPUT_MARKER tail WITHOUT advancing the clock",
+          "state": "passed"
+        },
+        {
+          "name": "StatusDetector.status() returns \"done\" for a DONE_MARKER tail without exit",
+          "fullName": "tailSignal / explicit markers > StatusDetector.status() returns \"done\" for a DONE_MARKER tail without exit",
+          "state": "passed"
+        },
+        {
+          "name": "after a needs marker, pushing further normal output returns \"running\" (within idle window)",
+          "fullName": "tailSignal / explicit markers > after a needs marker, pushing further normal output returns \"running\" (within idle window)",
+          "state": "passed"
+        },
+        {
+          "name": "markExit still takes priority (exit code 0 → \"done\" even if NEEDS marker is in the tail)",
+          "fullName": "tailSignal / explicit markers > markExit still takes priority (exit code 0 → \"done\" even if NEEDS marker is in the tail)",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"running\" when tail ends with IN_PROGRESS_MARKER",
+          "fullName": "tailSignal / explicit markers > returns \"running\" when tail ends with IN_PROGRESS_MARKER",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"running\" when tail ends with IN_PROGRESS_MARKER followed by trailing whitespace/newline",
+          "fullName": "tailSignal / explicit markers > returns \"running\" when tail ends with IN_PROGRESS_MARKER followed by trailing whitespace/newline",
+          "state": "passed"
+        },
+        {
+          "name": "last marker wins: NEEDS_INPUT_MARKER earlier, IN_PROGRESS_MARKER at tail → \"running\"",
+          "fullName": "tailSignal / explicit markers > last marker wins: NEEDS_INPUT_MARKER earlier, IN_PROGRESS_MARKER at tail → \"running\"",
+          "state": "passed"
+        },
+        {
+          "name": "last marker wins: IN_PROGRESS_MARKER earlier, DONE_MARKER at tail → \"done\"",
+          "fullName": "tailSignal / explicit markers > last marker wins: IN_PROGRESS_MARKER earlier, DONE_MARKER at tail → \"done\"",
+          "state": "passed"
+        },
+        {
+          "name": "StatusDetector.status() returns \"running\" immediately after pushing an IN_PROGRESS_MARKER tail WITHOUT advancing the clock",
+          "fullName": "tailSignal / explicit markers > StatusDetector.status() returns \"running\" immediately after pushing an IN_PROGRESS_MARKER tail WITHOUT advancing the clock",
+          "state": "passed"
+        },
+        {
+          "name": "a \"needs\" signal is sticky until strictly-newer PTY output arrives",
+          "fullName": "applySignal / MCP channel > a \"needs\" signal is sticky until strictly-newer PTY output arrives",
+          "state": "passed"
+        },
+        {
+          "name": "a \"done\" signal is sticky even after later plain output is pushed",
+          "fullName": "applySignal / MCP channel > a \"done\" signal is sticky even after later plain output is pushed",
+          "state": "passed"
+        },
+        {
+          "name": "a strictly-newer PTY marker wins over an older applySignal",
+          "fullName": "applySignal / MCP channel > a strictly-newer PTY marker wins over an older applySignal",
+          "state": "passed"
+        },
+        {
+          "name": "a signal strictly newer than the last output wins over a stale tail state",
+          "fullName": "applySignal / MCP channel > a signal strictly newer than the last output wins over a stale tail state",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/agentBackend.test.ts",
+      "tests": [
+        {
+          "name": "returns claudeCodeBackend for \"claude-code\"",
+          "fullName": "selectBackend > returns claudeCodeBackend for \"claude-code\"",
+          "state": "passed"
+        },
+        {
+          "name": "returns claudeCodeBackend for undefined (default)",
+          "fullName": "selectBackend > returns claudeCodeBackend for undefined (default)",
+          "state": "passed"
+        },
+        {
+          "name": "returns opencodeBackend for \"opencode\"",
+          "fullName": "selectBackend > returns opencodeBackend for \"opencode\"",
+          "state": "passed"
+        },
+        {
+          "name": "returns piBackend for \"pi\"",
+          "fullName": "selectBackend > returns piBackend for \"pi\"",
+          "state": "passed"
+        },
+        {
+          "name": "claude-code uses pty",
+          "fullName": "statusSource > claude-code uses pty",
+          "state": "passed"
+        },
+        {
+          "name": "opencode uses poll",
+          "fullName": "statusSource > opencode uses poll",
+          "state": "passed"
+        },
+        {
+          "name": "pi uses poll",
+          "fullName": "statusSource > pi uses poll",
+          "state": "passed"
+        },
+        {
+          "name": "cmd is \"claude\"",
+          "fullName": "claudeCodeBackend.buildStartArgs > cmd is \"claude\"",
+          "state": "passed"
+        },
+        {
+          "name": "args include --dangerously-skip-permissions, --session-id, sessionId, and user prompt last",
+          "fullName": "claudeCodeBackend.buildStartArgs > args include --dangerously-skip-permissions, --session-id, sessionId, and user prompt last",
+          "state": "passed"
+        },
+        {
+          "name": "with non-empty system, args include --append-system-prompt followed by system text",
+          "fullName": "claudeCodeBackend.buildStartArgs > with non-empty system, args include --append-system-prompt followed by system text",
+          "state": "passed"
+        },
+        {
+          "name": "with empty system, args do NOT include --append-system-prompt",
+          "fullName": "claudeCodeBackend.buildStartArgs > with empty system, args do NOT include --append-system-prompt",
+          "state": "passed"
+        },
+        {
+          "name": "hasTranscript:true → args are [--dangerously-skip-permissions, --resume, id] only",
+          "fullName": "claudeCodeBackend.buildResumeArgs > hasTranscript:true → args are [--dangerously-skip-permissions, --resume, id] only",
+          "state": "passed"
+        },
+        {
+          "name": "hasTranscript:false → uses --session-id + prompt",
+          "fullName": "claudeCodeBackend.buildResumeArgs > hasTranscript:false → uses --session-id + prompt",
+          "state": "passed"
+        },
+        {
+          "name": "includes --remote-control",
+          "fullName": "claudeCodeBackend.buildRemoteControlArgs > includes --remote-control",
+          "state": "passed"
+        },
+        {
+          "name": "hasTranscript:true → uses --resume",
+          "fullName": "claudeCodeBackend.buildRemoteControlArgs > hasTranscript:true → uses --resume",
+          "state": "passed"
+        },
+        {
+          "name": "hasTranscript:false → uses --session-id",
+          "fullName": "claudeCodeBackend.buildRemoteControlArgs > hasTranscript:false → uses --session-id",
+          "state": "passed"
+        },
+        {
+          "name": "includes --prompt with user text",
+          "fullName": "opencodeBackend.buildStartArgs > includes --prompt with user text",
+          "state": "passed"
+        },
+        {
+          "name": "includes --port with port string when opencodePort given",
+          "fullName": "opencodeBackend.buildStartArgs > includes --port with port string when opencodePort given",
+          "state": "passed"
+        },
+        {
+          "name": "omits --port when opencodePort not given",
+          "fullName": "opencodeBackend.buildStartArgs > omits --port when opencodePort not given",
+          "state": "passed"
+        },
+        {
+          "name": "with opencodeSid → includes [\"--session\", sid] and NO --prompt",
+          "fullName": "opencodeBackend.buildResumeArgs > with opencodeSid → includes [\"--session\", sid] and NO --prompt",
+          "state": "passed"
+        },
+        {
+          "name": "without opencodeSid → includes --continue",
+          "fullName": "opencodeBackend.buildResumeArgs > without opencodeSid → includes --continue",
+          "state": "passed"
+        },
+        {
+          "name": "behaves identically to buildResumeArgs: with sid → --session; without → --continue",
+          "fullName": "opencodeBackend.buildRemoteControlArgs > behaves identically to buildResumeArgs: with sid → --session; without → --continue",
+          "state": "passed"
+        },
+        {
+          "name": "cmd ends with \"pi\"",
+          "fullName": "piBackend.buildStartArgs > cmd ends with \"pi\"",
+          "state": "passed"
+        },
+        {
+          "name": "args start with --approve and end with the user prompt",
+          "fullName": "piBackend.buildStartArgs > args start with --approve and end with the user prompt",
+          "state": "passed"
+        },
+        {
+          "name": "with non-empty system, args include --append-system-prompt followed by system text",
+          "fullName": "piBackend.buildStartArgs > with non-empty system, args include --append-system-prompt followed by system text",
+          "state": "passed"
+        },
+        {
+          "name": "buildResumeArgs is [--approve, --continue]",
+          "fullName": "piBackend resume / remote-control > buildResumeArgs is [--approve, --continue]",
+          "state": "passed"
+        },
+        {
+          "name": "buildRemoteControlArgs is [--approve, --continue]",
+          "fullName": "piBackend resume / remote-control > buildRemoteControlArgs is [--approve, --continue]",
+          "state": "passed"
+        },
+        {
+          "name": "opencodeBackend.beginStatusTracking is a function",
+          "fullName": "beginStatusTracking presence > opencodeBackend.beginStatusTracking is a function",
+          "state": "passed"
+        },
+        {
+          "name": "piBackend.beginStatusTracking is a function",
+          "fullName": "beginStatusTracking presence > piBackend.beginStatusTracking is a function",
+          "state": "passed"
+        },
+        {
+          "name": "claudeCodeBackend.beginStatusTracking is undefined (PTY-driven)",
+          "fullName": "beginStatusTracking presence > claudeCodeBackend.beginStatusTracking is undefined (PTY-driven)",
+          "state": "passed"
+        },
+        {
+          "name": "opencodeBackend.prepareWorktree is a function",
+          "fullName": "prepareWorktree presence > opencodeBackend.prepareWorktree is a function",
+          "state": "passed"
+        },
+        {
+          "name": "claudeCodeBackend.prepareWorktree is undefined",
+          "fullName": "prepareWorktree presence > claudeCodeBackend.prepareWorktree is undefined",
+          "state": "passed"
+        },
+        {
+          "name": "piBackend.prepareWorktree is undefined",
+          "fullName": "prepareWorktree presence > piBackend.prepareWorktree is undefined",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/writeCoordinator.test.ts",
+      "tests": [
+        {
+          "name": "grants the write lock to the first client that attaches",
+          "fullName": "createWriteCoordinator > grants the write lock to the first client that attaches",
+          "state": "passed"
+        },
+        {
+          "name": "makes a second attaching client view-only",
+          "fullName": "createWriteCoordinator > makes a second attaching client view-only",
+          "state": "passed"
+        },
+        {
+          "name": "counts viewers",
+          "fullName": "createWriteCoordinator > counts viewers",
+          "state": "passed"
+        },
+        {
+          "name": "isViewer reflects attachment",
+          "fullName": "createWriteCoordinator > isViewer reflects attachment",
+          "state": "passed"
+        },
+        {
+          "name": "take transfers the lock and fires change",
+          "fullName": "createWriteCoordinator > take transfers the lock and fires change",
+          "state": "passed"
+        },
+        {
+          "name": "take adds a non-viewer as a viewer and grants the lock",
+          "fullName": "createWriteCoordinator > take adds a non-viewer as a viewer and grants the lock",
+          "state": "passed"
+        },
+        {
+          "name": "detach of the holder reassigns to a remaining viewer",
+          "fullName": "createWriteCoordinator > detach of the holder reassigns to a remaining viewer",
+          "state": "passed"
+        },
+        {
+          "name": "detach of the last viewer frees the lock and zeroes viewers",
+          "fullName": "createWriteCoordinator > detach of the last viewer frees the lock and zeroes viewers",
+          "state": "passed"
+        },
+        {
+          "name": "noteWrite auto-claims a free lock",
+          "fullName": "createWriteCoordinator > noteWrite auto-claims a free lock",
+          "state": "passed"
+        },
+        {
+          "name": "noteWrite returns false for a non-holder and does not steal the lock",
+          "fullName": "createWriteCoordinator > noteWrite returns false for a non-holder and does not steal the lock",
+          "state": "passed"
+        },
+        {
+          "name": "dropClient removes a client from all sessions and reassigns held locks",
+          "fullName": "createWriteCoordinator > dropClient removes a client from all sessions and reassigns held locks",
+          "state": "passed"
+        },
+        {
+          "name": "emits change events scoped to the affected sessionId",
+          "fullName": "createWriteCoordinator > emits change events scoped to the affected sessionId",
+          "state": "passed"
+        },
+        {
+          "name": "off removes the listener",
+          "fullName": "createWriteCoordinator > off removes the listener",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/mcp/appMcp.test.ts",
+      "tests": [
+        {
+          "name": "returns correct protocolVersion for initialize",
+          "fullName": "handleRpc > returns correct protocolVersion for initialize",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for notification (no id)",
+          "fullName": "handleRpc > returns null for notification (no id)",
+          "state": "passed"
+        },
+        {
+          "name": "tools/list returns 2 tools",
+          "fullName": "handleRpc > tools/list returns 2 tools",
+          "state": "passed"
+        },
+        {
+          "name": "unknown method returns error -32601",
+          "fullName": "handleRpc > unknown method returns error -32601",
+          "state": "passed"
+        },
+        {
+          "name": "tools/call open_merge_request calls openMergeRequest and writeSentinel",
+          "fullName": "handleRpc > tools/call open_merge_request calls openMergeRequest and writeSentinel",
+          "state": "passed"
+        },
+        {
+          "name": "tools/call open_merge_request still succeeds when push fails (best-effort)",
+          "fullName": "handleRpc > tools/call open_merge_request still succeeds when push fails (best-effort)",
+          "state": "passed"
+        },
+        {
+          "name": "tools/call report_status calls writeStatus and returns success text containing the state",
+          "fullName": "handleRpc > tools/call report_status calls writeStatus and returns success text containing the state",
+          "state": "passed"
+        },
+        {
+          "name": "tools/call report_status with invalid state returns a tool error and does not call writeStatus",
+          "fullName": "handleRpc > tools/call report_status with invalid state returns a tool error and does not call writeStatus",
+          "state": "passed"
+        },
+        {
+          "name": "tools/call report_status with only state works (message undefined)",
+          "fullName": "handleRpc > tools/call report_status with only state works (message undefined)",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/src/lib/stores.test.ts",
+      "tests": [
+        {
+          "name": "keeps a backlog ticket (type backlog, done false)",
+          "fullName": "isStartableTicket > keeps a backlog ticket (type backlog, done false)",
+          "state": "passed"
+        },
+        {
+          "name": "keeps a ticket with no status type (done false)",
+          "fullName": "isStartableTicket > keeps a ticket with no status type (done false)",
+          "state": "passed"
+        },
+        {
+          "name": "keeps a ticket with status type unstarted",
+          "fullName": "isStartableTicket > keeps a ticket with status type unstarted",
+          "state": "passed"
+        },
+        {
+          "name": "excludes a ticket with done: true",
+          "fullName": "isStartableTicket > excludes a ticket with done: true",
+          "state": "passed"
+        },
+        {
+          "name": "excludes a ticket with status.type === started (In Progress)",
+          "fullName": "isStartableTicket > excludes a ticket with status.type === started (In Progress)",
+          "state": "passed"
+        },
+        {
+          "name": "excludes a ticket with status.type === canceled",
+          "fullName": "isStartableTicket > excludes a ticket with status.type === canceled",
+          "state": "passed"
+        },
+        {
+          "name": "returns a tid and adds an idle session to the store",
+          "fullName": "createBlankAgent > returns a tid and adds an idle session to the store",
+          "state": "passed"
+        },
+        {
+          "name": "honours an explicit tid when provided",
+          "fullName": "createBlankAgent > honours an explicit tid when provided",
+          "state": "passed"
+        },
+        {
+          "name": "returns the ticket tid, seeds a session, and consumes the ticket",
+          "fullName": "createAgentFromTicket > returns the ticket tid, seeds a session, and consumes the ticket",
+          "state": "passed"
+        },
+        {
+          "name": "updates the prUrl of the matching session by backend id",
+          "fullName": "setSessionPrUrl > updates the prUrl of the matching session by backend id",
+          "state": "passed"
+        },
+        {
+          "name": "leaves the store unchanged when no session matches the id",
+          "fullName": "setSessionPrUrl > leaves the store unchanged when no session matches the id",
+          "state": "passed"
+        },
+        {
+          "name": "default to false/0/0",
+          "fullName": "FLO-56 content stores > default to false/0/0",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/outputBuffer.test.ts",
+      "tests": [
+        {
+          "name": "returns chunk.length as seq after first push",
+          "fullName": "OutputBuffer > push — cumulative seq > returns chunk.length as seq after first push",
+          "state": "passed"
+        },
+        {
+          "name": "accumulates seq across multiple pushes",
+          "fullName": "OutputBuffer > push — cumulative seq > accumulates seq across multiple pushes",
+          "state": "passed"
+        },
+        {
+          "name": "returns empty data and seq 0 before any push",
+          "fullName": "OutputBuffer > snapshot — data and seq > returns empty data and seq 0 before any push",
+          "state": "passed"
+        },
+        {
+          "name": "returns the pushed data and current seq",
+          "fullName": "OutputBuffer > snapshot — data and seq > returns the pushed data and current seq",
+          "state": "passed"
+        },
+        {
+          "name": "snapshot does not mutate the buffer",
+          "fullName": "OutputBuffer > snapshot — data and seq > snapshot does not mutate the buffer",
+          "state": "passed"
+        },
+        {
+          "name": "retains only the last 256 KB when total exceeds the cap",
+          "fullName": "OutputBuffer > bounding — 256 KB cap > retains only the last 256 KB when total exceeds the cap",
+          "state": "passed"
+        },
+        {
+          "name": "seq reflects the full total even when data is trimmed",
+          "fullName": "OutputBuffer > bounding — 256 KB cap > seq reflects the full total even when data is trimmed",
+          "state": "passed"
+        },
+        {
+          "name": "push return value matches snapshot seq",
+          "fullName": "OutputBuffer > bounding — 256 KB cap > push return value matches snapshot seq",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/src/lib/responsive.test.ts",
+      "tests": [
+        {
+          "name": "returns true for 699 (below breakpoint)",
+          "fullName": "responsive > isMobileWidth > returns true for 699 (below breakpoint)",
+          "state": "passed"
+        },
+        {
+          "name": "returns true for 700 (at breakpoint, inclusive)",
+          "fullName": "responsive > isMobileWidth > returns true for 700 (at breakpoint, inclusive)",
+          "state": "passed"
+        },
+        {
+          "name": "returns false for 701 (above breakpoint)",
+          "fullName": "responsive > isMobileWidth > returns false for 701 (above breakpoint)",
+          "state": "passed"
+        },
+        {
+          "name": "returns true for 0 (extreme low)",
+          "fullName": "responsive > isMobileWidth > returns true for 0 (extreme low)",
+          "state": "passed"
+        },
+        {
+          "name": "returns true for 320 (phone width)",
+          "fullName": "responsive > isMobileWidth > returns true for 320 (phone width)",
+          "state": "passed"
+        },
+        {
+          "name": "returns false for 1024 (tablet/desktop)",
+          "fullName": "responsive > isMobileWidth > returns false for 1024 (tablet/desktop)",
+          "state": "passed"
+        },
+        {
+          "name": "returns false for 1920 (desktop)",
+          "fullName": "responsive > isMobileWidth > returns false for 1920 (desktop)",
+          "state": "passed"
+        },
+        {
+          "name": "MOBILE_MEDIA_QUERY equals \"(max-width: 700px)\"",
+          "fullName": "responsive > MOBILE_MEDIA_QUERY equals \"(max-width: 700px)\"",
+          "state": "passed"
+        },
+        {
+          "name": "MOBILE_BREAKPOINT equals 700",
+          "fullName": "responsive > MOBILE_BREAKPOINT equals 700",
+          "state": "passed"
+        },
+        {
+          "name": "DRAWER_DISMISS_PX equals 72",
+          "fullName": "drawer dismiss > DRAWER_DISMISS_PX equals 72",
+          "state": "passed"
+        },
+        {
+          "name": "does not dismiss a drag below the threshold",
+          "fullName": "drawer dismiss > does not dismiss a drag below the threshold",
+          "state": "passed"
+        },
+        {
+          "name": "dismisses at or above the threshold",
+          "fullName": "drawer dismiss > dismisses at or above the threshold",
+          "state": "passed"
+        },
+        {
+          "name": "does not dismiss upward (negative) drags",
+          "fullName": "drawer dismiss > does not dismiss upward (negative) drags",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/piSessions.test.ts",
+      "tests": [
+        {
+          "name": "encodes cwd by replacing / with - and wrapping in -",
+          "fullName": "piSessionDirName > encodes cwd by replacing / with - and wrapping in -",
+          "state": "passed"
+        },
+        {
+          "name": "encodes a nested worktree path",
+          "fullName": "piSessionDirName > encodes a nested worktree path",
+          "state": "passed"
+        },
+        {
+          "name": "joins the root with the encoded dir name",
+          "fullName": "piSessionDirFor > joins the root with the encoded dir name",
+          "state": "passed"
+        },
+        {
+          "name": "returns the file with the highest mtime",
+          "fullName": "selectNewestPiSessionFile > returns the file with the highest mtime",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for an empty list",
+          "fullName": "selectNewestPiSessionFile > returns null for an empty list",
+          "state": "passed"
+        },
+        {
+          "name": "defaults to running when no marker is present",
+          "fullName": "piStatusFromText > defaults to running when no marker is present",
+          "state": "passed"
+        },
+        {
+          "name": "returns done when DONE_MARKER is present",
+          "fullName": "piStatusFromText > returns done when DONE_MARKER is present",
+          "state": "passed"
+        },
+        {
+          "name": "returns needs when NEEDS_INPUT_MARKER is present",
+          "fullName": "piStatusFromText > returns needs when NEEDS_INPUT_MARKER is present",
+          "state": "passed"
+        },
+        {
+          "name": "returns running when only IN_PROGRESS_MARKER is present",
+          "fullName": "piStatusFromText > returns running when only IN_PROGRESS_MARKER is present",
+          "state": "passed"
+        },
+        {
+          "name": "last marker wins (NEEDS then IN_PROGRESS → running)",
+          "fullName": "piStatusFromText > last marker wins (NEEDS then IN_PROGRESS → running)",
+          "state": "passed"
+        },
+        {
+          "name": "last marker wins (IN_PROGRESS then DONE → done)",
+          "fullName": "piStatusFromText > last marker wins (IN_PROGRESS then DONE → done)",
+          "state": "passed"
+        },
+        {
+          "name": "returns running for empty content",
+          "fullName": "piStatusFromFileContent > returns running for empty content",
+          "state": "passed"
+        },
+        {
+          "name": "ignores header and user messages",
+          "fullName": "piStatusFromFileContent > ignores header and user messages",
+          "state": "passed"
+        },
+        {
+          "name": "classifies done from assistant text blocks",
+          "fullName": "piStatusFromFileContent > classifies done from assistant text blocks",
+          "state": "passed"
+        },
+        {
+          "name": "classifies needs from assistant text",
+          "fullName": "piStatusFromFileContent > classifies needs from assistant text",
+          "state": "passed"
+        },
+        {
+          "name": "ignores non-text content blocks (thinking, toolCall)",
+          "fullName": "piStatusFromFileContent > ignores non-text content blocks (thinking, toolCall)",
+          "state": "passed"
+        },
+        {
+          "name": "honors the most recent marker across multiple assistant turns",
+          "fullName": "piStatusFromFileContent > honors the most recent marker across multiple assistant turns",
+          "state": "passed"
+        },
+        {
+          "name": "skips malformed JSON lines",
+          "fullName": "piStatusFromFileContent > skips malformed JSON lines",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/worktreeManager.test.ts",
+      "tests": [
+        {
+          "name": "returns false for empty output (clean)",
+          "fullName": "parsePorcelainDirty > returns false for empty output (clean)",
+          "state": "passed"
+        },
+        {
+          "name": "returns true when there are changed files",
+          "fullName": "parsePorcelainDirty > returns true when there are changed files",
+          "state": "passed"
+        },
+        {
+          "name": "parses behind\tahead correctly",
+          "fullName": "parseRevListCount > parses behind\tahead correctly",
+          "state": "passed"
+        },
+        {
+          "name": "handles zero values",
+          "fullName": "parseRevListCount > handles zero values",
+          "state": "passed"
+        },
+        {
+          "name": "handles spaces instead of tabs (robustness)",
+          "fullName": "parseRevListCount > handles spaces instead of tabs (robustness)",
+          "state": "passed"
+        },
+        {
+          "name": "defaults to 0 on garbage input",
+          "fullName": "parseRevListCount > defaults to 0 on garbage input",
+          "state": "passed"
+        },
+        {
+          "name": "parses a full shortstat line",
+          "fullName": "parseShortstat > parses a full shortstat line",
+          "state": "passed"
+        },
+        {
+          "name": "parses insertions-only output",
+          "fullName": "parseShortstat > parses insertions-only output",
+          "state": "passed"
+        },
+        {
+          "name": "parses deletions-only output",
+          "fullName": "parseShortstat > parses deletions-only output",
+          "state": "passed"
+        },
+        {
+          "name": "returns zeros for empty output (no diff)",
+          "fullName": "parseShortstat > returns zeros for empty output (no diff)",
+          "state": "passed"
+        },
+        {
+          "name": "parses all stanzas",
+          "fullName": "parsePorcelainWorktreeList > parses all stanzas",
+          "state": "passed"
+        },
+        {
+          "name": "strips refs/heads/ prefix from branch names",
+          "fullName": "parsePorcelainWorktreeList > strips refs/heads/ prefix from branch names",
+          "state": "passed"
+        },
+        {
+          "name": "captures the correct paths",
+          "fullName": "parsePorcelainWorktreeList > captures the correct paths",
+          "state": "passed"
+        },
+        {
+          "name": "returns empty array for empty input",
+          "fullName": "parsePorcelainWorktreeList > returns empty array for empty input",
+          "state": "passed"
+        },
+        {
+          "name": "ignores detached HEAD stanzas (no branch line)",
+          "fullName": "parsePorcelainWorktreeList > ignores detached HEAD stanzas (no branch line)",
+          "state": "passed"
+        },
+        {
+          "name": "produces the correct path",
+          "fullName": "pathFor > produces the correct path",
+          "state": "passed"
+        },
+        {
+          "name": "is pure — same inputs, same output",
+          "fullName": "pathFor > is pure — same inputs, same output",
+          "state": "passed"
+        },
+        {
+          "name": "uses org-name as the intermediate directory",
+          "fullName": "pathFor > uses org-name as the intermediate directory",
+          "state": "passed"
+        },
+        {
+          "name": "returns true for \"not a working tree\" errors",
+          "fullName": "isMissingWorktreeError > returns true for \"not a working tree\" errors",
+          "state": "passed"
+        },
+        {
+          "name": "returns true for \"No such file or directory\" errors",
+          "fullName": "isMissingWorktreeError > returns true for \"No such file or directory\" errors",
+          "state": "passed"
+        },
+        {
+          "name": "returns true for \"not a git repository\" errors",
+          "fullName": "isMissingWorktreeError > returns true for \"not a git repository\" errors",
+          "state": "passed"
+        },
+        {
+          "name": "returns false for other git errors",
+          "fullName": "isMissingWorktreeError > returns false for other git errors",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/shared/promptComposer.test.ts",
+      "tests": [
+        {
+          "name": "returns \"Begin implementing <tid>.\"",
+          "fullName": "defaultUserPrompt > returns \"Begin implementing <tid>.\"",
+          "state": "passed"
+        },
+        {
+          "name": "includes the tid in the output",
+          "fullName": "buildSystemPrompt > includes the tid in the output",
+          "state": "passed"
+        },
+        {
+          "name": "includes the title in the output",
+          "fullName": "buildSystemPrompt > includes the title in the output",
+          "state": "passed"
+        },
+        {
+          "name": "includes the description in the output",
+          "fullName": "buildSystemPrompt > includes the description in the output",
+          "state": "passed"
+        },
+        {
+          "name": "uses \"No description provided.\" when description is missing",
+          "fullName": "buildSystemPrompt > uses \"No description provided.\" when description is missing",
+          "state": "passed"
+        },
+        {
+          "name": "uses \"No description provided.\" when description is empty string",
+          "fullName": "buildSystemPrompt > uses \"No description provided.\" when description is empty string",
+          "state": "passed"
+        },
+        {
+          "name": "uses \"No description provided.\" when description is whitespace only",
+          "fullName": "buildSystemPrompt > uses \"No description provided.\" when description is whitespace only",
+          "state": "passed"
+        },
+        {
+          "name": "includes process framing word \"worktree\"",
+          "fullName": "buildSystemPrompt > includes process framing word \"worktree\"",
+          "state": "passed"
+        },
+        {
+          "name": "includes process framing word \"PR\" or \"pull request\"",
+          "fullName": "buildSystemPrompt > includes process framing word \"PR\" or \"pull request\"",
+          "state": "passed"
+        },
+        {
+          "name": "includes process framing word \"tests\"",
+          "fullName": "buildSystemPrompt > includes process framing word \"tests\"",
+          "state": "passed"
+        },
+        {
+          "name": "returns --append-system-prompt args when system is present",
+          "fullName": "deliverPrompt > returns --append-system-prompt args when system is present",
+          "state": "passed"
+        },
+        {
+          "name": "returns empty systemArgs when system is empty",
+          "fullName": "deliverPrompt > returns empty systemArgs when system is empty",
+          "state": "passed"
+        },
+        {
+          "name": "default fallback branch prepends system to user with empty systemArgs",
+          "fullName": "deliverPrompt > default fallback branch prepends system to user with empty systemArgs",
+          "state": "passed"
+        },
+        {
+          "name": "returns the system prompt as-is",
+          "fullName": "buildAgentsMdContent > returns the system prompt as-is",
+          "state": "passed"
+        },
+        {
+          "name": "handles multi-line system prompts",
+          "fullName": "buildAgentsMdContent > handles multi-line system prompts",
+          "state": "passed"
+        },
+        {
+          "name": "returns empty systemArgs when system is present (system goes via AGENTS.md)",
+          "fullName": "deliverPrompt with opencode > returns empty systemArgs when system is present (system goes via AGENTS.md)",
+          "state": "passed"
+        },
+        {
+          "name": "returns empty systemArgs when system is empty",
+          "fullName": "deliverPrompt with opencode > returns empty systemArgs when system is empty",
+          "state": "passed"
+        },
+        {
+          "name": "returns --append-system-prompt args when system is present",
+          "fullName": "deliverPrompt with pi > returns --append-system-prompt args when system is present",
+          "state": "passed"
+        },
+        {
+          "name": "returns empty systemArgs when system is empty",
+          "fullName": "deliverPrompt with pi > returns empty systemArgs when system is empty",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/opencodeSessions.test.ts",
+      "tests": [
+        {
+          "name": "returns null for empty array",
+          "fullName": "selectNewestSessionSince > returns null for empty array",
+          "state": "passed"
+        },
+        {
+          "name": "returns null when no session is at or after sinceMs",
+          "fullName": "selectNewestSessionSince > returns null when no session is at or after sinceMs",
+          "state": "passed"
+        },
+        {
+          "name": "returns the newest among several at or after sinceMs",
+          "fullName": "selectNewestSessionSince > returns the newest among several at or after sinceMs",
+          "state": "passed"
+        },
+        {
+          "name": "returns the single qualifying session when older ones exist",
+          "fullName": "selectNewestSessionSince > returns the single qualifying session when older ones exist",
+          "state": "passed"
+        },
+        {
+          "name": "ignores sessions older than sinceMs regardless of id",
+          "fullName": "selectNewestSessionSince > ignores sessions older than sinceMs regardless of id",
+          "state": "passed"
+        },
+        {
+          "name": "treats a session exactly equal to sinceMs as qualifying",
+          "fullName": "selectNewestSessionSince > treats a session exactly equal to sinceMs as qualifying",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"done\" when DONE_MARKER is present",
+          "fullName": "opencodeStatusFromText > returns \"done\" when DONE_MARKER is present",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"needs\" when NEEDS_INPUT_MARKER is present",
+          "fullName": "opencodeStatusFromText > returns \"needs\" when NEEDS_INPUT_MARKER is present",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"running\" when only IN_PROGRESS_MARKER is present",
+          "fullName": "opencodeStatusFromText > returns \"running\" when only IN_PROGRESS_MARKER is present",
+          "state": "passed"
+        },
+        {
+          "name": "defaults to \"running\" when no marker is present",
+          "fullName": "opencodeStatusFromText > defaults to \"running\" when no marker is present",
+          "state": "passed"
+        },
+        {
+          "name": "last marker wins (NEEDS then IN_PROGRESS → running)",
+          "fullName": "opencodeStatusFromText > last marker wins (NEEDS then IN_PROGRESS → running)",
+          "state": "passed"
+        },
+        {
+          "name": "last marker wins (IN_PROGRESS then DONE → done)",
+          "fullName": "opencodeStatusFromText > last marker wins (IN_PROGRESS then DONE → done)",
+          "state": "passed"
+        },
+        {
+          "name": "last marker wins (DONE then NEEDS → needs)",
+          "fullName": "opencodeStatusFromText > last marker wins (DONE then NEEDS → needs)",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"running\" for an empty message list",
+          "fullName": "opencodeStatusFromMessages > returns \"running\" for an empty message list",
+          "state": "passed"
+        },
+        {
+          "name": "ignores user messages and classifies from assistant text",
+          "fullName": "opencodeStatusFromMessages > ignores user messages and classifies from assistant text",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"needs\" when the last assistant message ends with NEEDS_INPUT_MARKER",
+          "fullName": "opencodeStatusFromMessages > returns \"needs\" when the last assistant message ends with NEEDS_INPUT_MARKER",
+          "state": "passed"
+        },
+        {
+          "name": "honors the most recent marker across multiple assistant turns",
+          "fullName": "opencodeStatusFromMessages > honors the most recent marker across multiple assistant turns",
+          "state": "passed"
+        },
+        {
+          "name": "ignores non-text parts",
+          "fullName": "opencodeStatusFromMessages > ignores non-text parts",
+          "state": "passed"
+        },
+        {
+          "name": "returns \"running\" when only user messages exist (agent has not replied yet)",
+          "fullName": "opencodeStatusFromMessages > returns \"running\" when only user messages exist (agent has not replied yet)",
+          "state": "passed"
+        },
+        {
+          "name": "appends --prompt <prompt> after the base args",
+          "fullName": "withOpencodePromptArg > appends --prompt <prompt> after the base args",
+          "state": "passed"
+        },
+        {
+          "name": "returns args unchanged when prompt is null (resume/continue path)",
+          "fullName": "withOpencodePromptArg > returns args unchanged when prompt is null (resume/continue path)",
+          "state": "passed"
+        },
+        {
+          "name": "returns args unchanged when prompt is undefined",
+          "fullName": "withOpencodePromptArg > returns args unchanged when prompt is undefined",
+          "state": "passed"
+        },
+        {
+          "name": "returns args unchanged when prompt is empty (blank agent)",
+          "fullName": "withOpencodePromptArg > returns args unchanged when prompt is empty (blank agent)",
+          "state": "passed"
+        },
+        {
+          "name": "does not mutate the input args array",
+          "fullName": "withOpencodePromptArg > does not mutate the input args array",
+          "state": "passed"
+        },
+        {
+          "name": "keeps a multi-line prompt intact as a single argv value",
+          "fullName": "withOpencodePromptArg > keeps a multi-line prompt intact as a single argv value",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/sessionStore.test.ts",
+      "tests": [
+        {
+          "name": "marks running sessions as interrupted",
+          "fullName": "restoreInterruptedSessions > marks running sessions as interrupted",
+          "state": "passed"
+        },
+        {
+          "name": "marks needs sessions as interrupted",
+          "fullName": "restoreInterruptedSessions > marks needs sessions as interrupted",
+          "state": "passed"
+        },
+        {
+          "name": "leaves done sessions unchanged",
+          "fullName": "restoreInterruptedSessions > leaves done sessions unchanged",
+          "state": "passed"
+        },
+        {
+          "name": "leaves errored sessions unchanged",
+          "fullName": "restoreInterruptedSessions > leaves errored sessions unchanged",
+          "state": "passed"
+        },
+        {
+          "name": "leaves idle sessions unchanged",
+          "fullName": "restoreInterruptedSessions > leaves idle sessions unchanged",
+          "state": "passed"
+        },
+        {
+          "name": "leaves already-interrupted sessions unchanged",
+          "fullName": "restoreInterruptedSessions > leaves already-interrupted sessions unchanged",
+          "state": "passed"
+        },
+        {
+          "name": "returns only changed sessions when mixed statuses",
+          "fullName": "restoreInterruptedSessions > returns only changed sessions when mixed statuses",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/gitDriver.test.ts",
+      "tests": [
+        {
+          "name": "parses ssh gitlab",
+          "fullName": "parseRemote > parses ssh gitlab",
+          "state": "passed"
+        },
+        {
+          "name": "parses ssh github",
+          "fullName": "parseRemote > parses ssh github",
+          "state": "passed"
+        },
+        {
+          "name": "parses https gitlab",
+          "fullName": "parseRemote > parses https gitlab",
+          "state": "passed"
+        },
+        {
+          "name": "parses https github without .git",
+          "fullName": "parseRemote > parses https github without .git",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for unknown host",
+          "fullName": "parseRemote > returns null for unknown host",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for bad url",
+          "fullName": "parseRemote > returns null for bad url",
+          "state": "passed"
+        },
+        {
+          "name": "encodes org/name with slash",
+          "fullName": "gitlabProjectPath > encodes org/name with slash",
+          "state": "passed"
+        },
+        {
+          "name": "replaces token in string",
+          "fullName": "redact > replaces token in string",
+          "state": "passed"
+        },
+        {
+          "name": "returns string unchanged when token is empty",
+          "fullName": "redact > returns string unchanged when token is empty",
+          "state": "passed"
+        },
+        {
+          "name": "url contains project path and no token",
+          "fullName": "buildGitlabCreateMrDescriptor > url contains project path and no token",
+          "state": "passed"
+        },
+        {
+          "name": "url does not contain token",
+          "fullName": "buildGitlabFindMrDescriptor > url does not contain token",
+          "state": "passed"
+        },
+        {
+          "name": "url does not contain token",
+          "fullName": "buildGithubCreatePrDescriptor > url does not contain token",
+          "state": "passed"
+        },
+        {
+          "name": "url does not contain token",
+          "fullName": "buildGithubFindPrDescriptor > url does not contain token",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/transcripts.test.ts",
+      "tests": [
+        {
+          "name": "returns true when <projectsDir>/<sub>/<id>.jsonl exists",
+          "fullName": "hasTranscript > returns true when <projectsDir>/<sub>/<id>.jsonl exists",
+          "state": "passed"
+        },
+        {
+          "name": "returns false when no matching file exists",
+          "fullName": "hasTranscript > returns false when no matching file exists",
+          "state": "passed"
+        },
+        {
+          "name": "returns false when projectsDir does not exist",
+          "fullName": "hasTranscript > returns false when projectsDir does not exist",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/mcpHealth.test.ts",
+      "tests": [
+        {
+          "name": "returns two valid JSON-RPC request lines",
+          "fullName": "buildHealthRequests > returns two valid JSON-RPC request lines",
+          "state": "passed"
+        },
+        {
+          "name": "extracts serverName, protocolVersion, and tools from valid responses",
+          "fullName": "interpretResponses > extracts serverName, protocolVersion, and tools from valid responses",
+          "state": "passed"
+        },
+        {
+          "name": "tolerates junk and unparseable lines",
+          "fullName": "interpretResponses > tolerates junk and unparseable lines",
+          "state": "passed"
+        },
+        {
+          "name": "returns tools: [] when tools/list response is missing",
+          "fullName": "interpretResponses > returns tools: [] when tools/list response is missing",
+          "state": "passed"
+        },
+        {
+          "name": "returns empty result for empty input",
+          "fullName": "interpretResponses > returns empty result for empty input",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/statusDetector.corpus.test.ts",
+      "tests": [
+        {
+          "name": "classifies a claude permission prompt as needs after idle",
+          "fullName": "StatusDetector / TUI corpus > classifies a claude permission prompt as needs after idle",
+          "state": "passed"
+        },
+        {
+          "name": "does not false-positive a thinking spinner as needs",
+          "fullName": "StatusDetector / TUI corpus > does not false-positive a thinking spinner as needs",
+          "state": "passed"
+        },
+        {
+          "name": "classifies plain tool output stream as running after idle",
+          "fullName": "StatusDetector / TUI corpus > classifies plain tool output stream as running after idle",
+          "state": "passed"
+        },
+        {
+          "name": "classifies a plain free-text question as needs after idle",
+          "fullName": "StatusDetector / TUI corpus > classifies a plain free-text question as needs after idle",
+          "state": "passed"
+        },
+        {
+          "name": "classifies a DONE_MARKER tail as done without idle/exit",
+          "fullName": "StatusDetector / TUI corpus > classifies a DONE_MARKER tail as done without idle/exit",
+          "state": "passed"
+        },
+        {
+          "name": "classifies a NEEDS_INPUT_MARKER tail as needs without idle",
+          "fullName": "StatusDetector / TUI corpus > classifies a NEEDS_INPUT_MARKER tail as needs without idle",
+          "state": "passed"
+        },
+        {
+          "name": "applySignal(\"needs\") with no new output returns needs immediately (no clock advance)",
+          "fullName": "StatusDetector / TUI corpus > MCP signal reconciliation > applySignal(\"needs\") with no new output returns needs immediately (no clock advance)",
+          "state": "passed"
+        },
+        {
+          "name": "applySignal(\"done\") is sticky even when later plain output is pushed",
+          "fullName": "StatusDetector / TUI corpus > MCP signal reconciliation > applySignal(\"done\") is sticky even when later plain output is pushed",
+          "state": "passed"
+        },
+        {
+          "name": "a strictly-newer PTY DONE marker overrides an earlier applySignal(\"needs\")",
+          "fullName": "StatusDetector / TUI corpus > MCP signal reconciliation > a strictly-newer PTY DONE marker overrides an earlier applySignal(\"needs\")",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/statusSentinel.test.ts",
+      "tests": [
+        {
+          "name": "parses a valid \"needs\" sentinel",
+          "fullName": "parseStatusSentinel > parses a valid \"needs\" sentinel",
+          "state": "passed"
+        },
+        {
+          "name": "parses a valid \"done\" sentinel",
+          "fullName": "parseStatusSentinel > parses a valid \"done\" sentinel",
+          "state": "passed"
+        },
+        {
+          "name": "parses a valid \"running\" sentinel",
+          "fullName": "parseStatusSentinel > parses a valid \"running\" sentinel",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for malformed JSON",
+          "fullName": "parseStatusSentinel > returns null for malformed JSON",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for an unknown state",
+          "fullName": "parseStatusSentinel > returns null for an unknown state",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for a missing ts",
+          "fullName": "parseStatusSentinel > returns null for a missing ts",
+          "state": "passed"
+        },
+        {
+          "name": "returns null for a non-number ts",
+          "fullName": "parseStatusSentinel > returns null for a non-number ts",
+          "state": "passed"
+        },
+        {
+          "name": "preserves an optional message when present",
+          "fullName": "parseStatusSentinel > preserves an optional message when present",
+          "state": "passed"
+        },
+        {
+          "name": "omits message when absent",
+          "fullName": "parseStatusSentinel > omits message when absent",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/editorLauncher.test.ts",
+      "tests": [
+        {
+          "name": "simple command: code → bin=code, args=[path]",
+          "fullName": "parseEditorCommand > simple command: code → bin=code, args=[path]",
+          "state": "passed"
+        },
+        {
+          "name": "command with args: code serve-web → bin=code, args=[serve-web, path]",
+          "fullName": "parseEditorCommand > command with args: code serve-web → bin=code, args=[serve-web, path]",
+          "state": "passed"
+        },
+        {
+          "name": "trims extra whitespace",
+          "fullName": "parseEditorCommand > trims extra whitespace",
+          "state": "passed"
+        },
+        {
+          "name": "throws for blank command",
+          "fullName": "parseEditorCommand > throws for blank command",
+          "state": "passed"
+        },
+        {
+          "name": "throws for whitespace-only command",
+          "fullName": "parseEditorCommand > throws for whitespace-only command",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/src/pwa.test.ts",
+      "tests": [
+        {
+          "name": "ships a valid web app manifest",
+          "fullName": "PWA assets > ships a valid web app manifest",
+          "state": "passed"
+        },
+        {
+          "name": "ships a service worker with install/activate/fetch handlers",
+          "fullName": "PWA assets > ships a service worker with install/activate/fetch handlers",
+          "state": "passed"
+        },
+        {
+          "name": "links the manifest and apple-touch-icon from index.html",
+          "fullName": "PWA assets > links the manifest and apple-touch-icon from index.html",
+          "state": "passed"
+        },
+        {
+          "name": "registers the service worker only after window.slipstream is set (web mode)",
+          "fullName": "PWA assets > registers the service worker only after window.slipstream is set (web mode)",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/mcpConfig.test.ts",
+      "tests": [
+        {
+          "name": "returns correct shape",
+          "fullName": "buildAppMcpConfig > returns correct shape",
+          "state": "passed"
+        },
+        {
+          "name": "JSON.stringify of result contains NO token key (security assertion)",
+          "fullName": "buildAppMcpConfig > JSON.stringify of result contains NO token key (security assertion)",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/services/claudeTrust.test.ts",
+      "tests": [
+        {
+          "name": "creates projects and the dir entry when config is empty",
+          "fullName": "withTrustedDir > creates projects and the dir entry when config is empty",
+          "state": "passed"
+        },
+        {
+          "name": "preserves an existing unrelated top-level key",
+          "fullName": "withTrustedDir > preserves an existing unrelated top-level key",
+          "state": "passed"
+        },
+        {
+          "name": "preserves an existing unrelated key inside projects[dir]",
+          "fullName": "withTrustedDir > preserves an existing unrelated key inside projects[dir]",
+          "state": "passed"
+        },
+        {
+          "name": "preserves sibling project entries",
+          "fullName": "withTrustedDir > preserves sibling project entries",
+          "state": "passed"
+        },
+        {
+          "name": "is idempotent — applying twice equals applying once",
+          "fullName": "withTrustedDir > is idempotent — applying twice equals applying once",
+          "state": "passed"
+        },
+        {
+          "name": "does not mutate the input object",
+          "fullName": "withTrustedDir > does not mutate the input object",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/src/lib/reconcile.test.ts",
+      "tests": [
+        {
+          "name": "returns sessions whose tid matches a done=true dto",
+          "fullName": "sessionsToReconcile > returns sessions whose tid matches a done=true dto",
+          "state": "passed"
+        },
+        {
+          "name": "ignores done dtos with no matching session",
+          "fullName": "sessionsToReconcile > ignores done dtos with no matching session",
+          "state": "passed"
+        },
+        {
+          "name": "ignores sessions whose dto is done=false",
+          "fullName": "sessionsToReconcile > ignores sessions whose dto is done=false",
+          "state": "passed"
+        },
+        {
+          "name": "ignores sessions with no dto at all",
+          "fullName": "sessionsToReconcile > ignores sessions with no dto at all",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "moduleId": "/home/jamesthelivingplanet/.repositories/slipstream/electron/core/auth.test.ts",
+      "tests": [
+        {
+          "name": "maps any valid token to the local owner today",
+          "fullName": "resolveIdentity > maps any valid token to the local owner today",
+          "state": "passed"
+        }
+      ]
+    }
+  ],
+  "unhandledErrors": [],
+  "reason": "failed"
+}
