@@ -77,9 +77,10 @@ fi
 echo "▶ Building (pnpm build)…"
 with_node22 pnpm build
 
-# Assert the ESM preload invariant post-build (FLO-80): preload.mjs must load
-# as ESM with no bare require() calls, or window.slipstream never loads.
-node scripts/check-preload-esm.mjs
+# Assert the CJS preload invariant post-build (FLO-80, flipped by FLO-84):
+# preload.cjs must load as CommonJS with no top-level import/export, or
+# window.slipstream never loads.
+node scripts/check-preload-cjs.mjs
 
 # ---------------------------------------------------------------------------
 # Phase 3: Restart the service (OS-aware: systemd on Linux, launchd on macOS)

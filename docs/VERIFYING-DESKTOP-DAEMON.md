@@ -5,7 +5,7 @@ remote) daemon, that the daemon survives app-close, and that the existing e2e fl
 Introduced with FLO-47 (P7/D2). See [ARCHITECTURE.md](ARCHITECTURE.md) for the process model.
 
 The automated gates run with `pnpm check` (svelte-check), `pnpm test` (unit + integration, incl.
-the `daemonManager` and `preload-esm` guards), and `pnpm build`. Everything below covers the
+the `daemonManager` and `preload-cjs` guards), and `pnpm build`. Everything below covers the
 parts that require launching the real app.
 
 ## 0. Prerequisite — rebuild natives for Electron's ABI

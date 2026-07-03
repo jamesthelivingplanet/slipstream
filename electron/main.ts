@@ -32,8 +32,10 @@ function createWindow(cfg: DaemonConfig, reused: boolean): void {
     title: 'Slipstream',
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.mjs'),
-      sandbox: false,
+      // CJS preload (preload.cjs) so the Chromium sandbox can stay on — see
+      // vite.config.ts (format: 'cjs') and CLAUDE.md's preload gotcha.
+      preload: path.join(__dirname, 'preload.cjs'),
+      sandbox: true,
       additionalArguments: [daemonArg],
     },
   })

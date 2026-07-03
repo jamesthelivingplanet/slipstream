@@ -32,7 +32,7 @@ _Last updated: 2026-06-30._
 
 **Verification**
 - 56 tests: `statusDetector` (26), `worktreeManager` pure (18) + real-git integration (5),
-  `preload-esm` build guard (1), `claudeTrust` (6).
+  `preload-cjs` build guard (1), `claudeTrust` (6).
 - Playwright drivers in `scripts/e2e/` exercise add-repo, settings/repos, and blank-agent
   flows against the built app (verified via screenshots).
 

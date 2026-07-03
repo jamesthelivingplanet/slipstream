@@ -34,9 +34,13 @@ Electron main  ──spawns──▶  daemon (ELECTRON_RUN_AS_NODE=1, server.js)
   `registerIpc` Electron adapter has been removed — the renderer now reaches all services
   over WebSocket, the same path as web mode.
 
-> ⚠️ The preload is ESM (`preload.mjs`). Electron only loads an ESM preload when
-> `sandbox: false`, and the bundler must emit ESM (`output.format: 'es'`) or it writes
-> `require()` into a `.mjs` and the bridge silently fails to load.
+> ⚠️ The preload is CJS (`preload.cjs`), compiled via `output.format: 'cjs'` +
+> `entryFileNames: '[name].cjs'` in `vite.config.ts` (package.json has
+> `"type": "module"`, so the `.cjs` extension is what forces CJS loading). This
+> lets the `BrowserWindow` run with `sandbox: true` — restored per FLO-84 now
+> that the preload only parses `--slipstream-daemon=` and exposes the folder
+> picker. If the bundler ever emits a top-level ESM `import`/`export` into the
+> output, the sandboxed preload fails to load and the bridge silently fails.
 
 ## Data model (`contract.ts`)
 
