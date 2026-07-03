@@ -134,6 +134,35 @@ function pullBaseStartPoint(repoPath: string, base: string): string {
   return base
 }
 
+/**
+ * Detect a SQUASH merge: the branch's individual commits are absent from base
+ * (different SHAs), but base already contains an equivalent patch. Synthesize a
+ * single commit holding the branch's cumulative diff on top of the merge-base,
+ * then ask `git cherry` whether base already has that patch (`-` prefix means it
+ * does). Best-effort — returns false if any git step fails.
+ */
+function isSquashMerged(repoPath: string, base: string, branch: string): boolean {
+  try {
+    const mergeBase = git(['-C', repoPath, 'merge-base', base, branch]).trim()
+    if (!mergeBase) return false
+    const tree = git(['-C', repoPath, 'rev-parse', `${branch}^{tree}`]).trim()
+    const dangling = git([
+      '-C',
+      repoPath,
+      'commit-tree',
+      tree,
+      '-p',
+      mergeBase,
+      '-m',
+      'squash-merge-check',
+    ]).trim()
+    const cherry = git(['-C', repoPath, 'cherry', base, dangling])
+    return cherry.split('\n').some((line) => line.startsWith('-'))
+  } catch {
+    return false
+  }
+}
+
 export function createWorktreeManager(root: string): IWorktreeManager {
   return {
     // Pure, synchronous — no git calls.
@@ -196,15 +225,19 @@ export function createWorktreeManager(root: string): IWorktreeManager {
         }
 
         // Unmerged-commit guard: the branch ref still exists even when the
-        // worktree directory is gone, so always honour it.
+        // worktree directory is gone, so always honour it. Refresh base first so
+        // a squash merge that landed on the remote base is visible locally.
+        const baseRef = pullBaseStartPoint(repo.path, repo.base)
         let countOut = ''
         try {
-          countOut = git(['-C', repo.path, 'rev-list', '--count', `${repo.base}..${branch}`])
+          countOut = git(['-C', repo.path, 'rev-list', '--count', `${baseRef}..${branch}`])
         } catch {
           // swallow — be permissive if we can't determine
         }
         const unmerged = parseInt(countOut.trim(), 10)
-        if (!isNaN(unmerged) && unmerged > 0) {
+        // A squash merge leaves the branch's original commits unmatched by SHA but
+        // its cumulative patch already in base — treat that as merged (FLO-91).
+        if (!isNaN(unmerged) && unmerged > 0 && !isSquashMerged(repo.path, baseRef, branch)) {
           return {
             removed: false,
             reason: `Branch has ${unmerged} commit(s) not merged into ${repo.base}.`,
