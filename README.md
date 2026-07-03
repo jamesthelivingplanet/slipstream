@@ -38,9 +38,13 @@ Prereqs: Node 22+, pnpm, the `claude` CLI on your PATH (to actually run agents).
 ```sh
 pnpm install          # native build scripts are allowlisted in pnpm-workspace.yaml
 pnpm dev              # launch Vite + Electron
+pnpm dev:backend      # after editing server.ts / electron backend: rebuild + restart the daemon
 pnpm check            # svelte-check typecheck
 pnpm test             # vitest: unit + real-git worktree integration
 ```
+
+`pnpm dev` does not hot-reload the backend daemon — run `pnpm dev:backend` after editing
+`server.ts` or `electron/services/*` / `electron/core/*` code for the change to take effect.
 
 If a fresh machine has trouble with native modules or the Electron binary, see the
 **Troubleshooting** section in [CLAUDE.md](CLAUDE.md) — it covers Electron binary

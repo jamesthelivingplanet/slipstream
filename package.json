@@ -11,6 +11,7 @@
   "description": "Desktop console for managing many parallel Claude Code agents",
   "scripts": {
     "dev": "node scripts/build-server.mjs && vite",
+    "dev:backend": "node scripts/dev-backend.mjs",
     "build": "vite build && node scripts/build-server.mjs",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
