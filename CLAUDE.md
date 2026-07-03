@@ -85,14 +85,21 @@ describes the current behavior and update it in the same change.
   `/healthz` and **reuses** it. To fully reset (free the port, drop live sessions, pick up new
   daemon/server code): kill the daemon process (it's the `ELECTRON_RUN_AS_NODE` `server.js`
   listening on the `daemon.json` port), or launch with `SLIPSTREAM_DAEMON_EPHEMERAL=1` to tie
-  its lifetime to the window. Symptom if forgotten: relaunch reattaches to stale sessions, or
-  "port in use", or backend edits seem to have no effect.
+  its lifetime to the window — `pnpm dev:backend` automates the rebuild+kill+respawn part of
+  this for the normal dev loop. Symptom if forgotten: relaunch reattaches to stale sessions, or
+  "port in use", or backend edits seem to have no effect. `SLIPSTREAM_DAEMON_EPHEMERAL=1` is a
+  dev-only env flag (used by the e2e drivers) — the systemd `pnpm serve` service and the
+  Docker/pod image never set it, and `main.ts` only reads it from the environment, so it can't
+  leak into production daemon startup.
 - **`pnpm dev` builds `server.js` once, up front — it does not hot-reload.** The `dev` script
   is `node scripts/build-server.mjs && vite`; the daemon is the *built* `dist-electron/server.js`.
   Vite hot-reloads the renderer and restarts `main`, but a restarted `main` just *reuses* the
   already-running daemon (via `/healthz`). So edits to `server.ts` or any `electron/services/*`
   / `electron/core/*` code the daemon runs **won't take effect** until you rebuild server.js
-  *and* kill the running daemon so a fresh one spawns. Renderer-only work doesn't need this.
+  *and* kill the running daemon so a fresh one spawns. Use **`pnpm dev:backend`** to do this in
+  one step — it rebuilds `server.js`, kills the daemon on the `daemon.json` port, and respawns
+  a fresh one so your backend edits take effect (reload the app window if it's open).
+  Renderer-only work doesn't need this.
 - **Identity seam (`ownerId`)**: every RPC request carries a resolved `Identity` (today
   always `{ id: 'local' }` via `resolveIdentity` in `electron/core/auth.ts`). `createRpc`
   filters enumerations and guards single-item reads by `ownerId`; it's a deliberate no-op
