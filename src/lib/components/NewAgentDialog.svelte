@@ -14,7 +14,9 @@
   import ResponsivePanel from './ResponsivePanel.svelte'
   import { branchFor } from '../branch'
   import { icons } from '../icons'
+  import { checkAgentCli } from '../ipc'
   import type { Ticket, BackendKind } from '../types'
+  import type { AgentCliCheck } from '../../../electron/shared/contract'
 
   let picked: Ticket | null = null
   let title = ''
@@ -25,6 +27,21 @@
   let wasOpen = false
   let loadingTickets = false
   let agentKind: BackendKind = 'claude-code'
+  let cliCheck: AgentCliCheck | null = null
+
+  function runCliCheck(kind: BackendKind) {
+    cliCheck = null
+    checkAgentCli(kind).then((res) => {
+      if (kind === agentKind) cliCheck = res
+    })
+  }
+
+  function selectAgentKind(kind: BackendKind) {
+    agentKind = kind
+    runCliCheck(kind)
+  }
+
+  $: cliMissing = cliCheck !== null && cliCheck.found === false
 
   $: chosen = repoChoice ? repoById(repoChoice) : undefined
   $: previewTid = picked ? picked.tid : draftTid
@@ -38,6 +55,7 @@
     menuOpen = false
     draftTid = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`
     wasOpen = true
+    runCliCheck(agentKind)
     // refresh tickets when dialog opens
     loadingTickets = true
     refreshTickets().finally(() => {
@@ -95,7 +113,7 @@
             type="button"
             class="toggle-opt"
             class:active={agentKind === 'claude-code'}
-            on:click={() => (agentKind = 'claude-code')}
+            on:click={() => selectAgentKind('claude-code')}
           >
             Claude Code
           </button>
@@ -103,7 +121,7 @@
             type="button"
             class="toggle-opt"
             class:active={agentKind === 'opencode'}
-            on:click={() => (agentKind = 'opencode')}
+            on:click={() => selectAgentKind('opencode')}
           >
             OpenCode
           </button>
@@ -111,11 +129,17 @@
             type="button"
             class="toggle-opt"
             class:active={agentKind === 'pi'}
-            on:click={() => (agentKind = 'pi')}
+            on:click={() => selectAgentKind('pi')}
           >
             Pi
           </button>
         </div>
+        {#if cliMissing}
+          <p class="cfg-hint cli-warn">
+            <b>{cliCheck?.bin}</b> was not found on PATH. Install it and make sure it's on the daemon's
+            PATH before starting an agent.
+          </p>
+        {/if}
       </div>
 
       {#if loadingTickets || $tickets.length > 0}
@@ -225,8 +249,10 @@
 
     <svelte:fragment slot="footer">
       <button class="btn btn-ghost" on:click={() => dialogOpen.set(false)}>Cancel</button>
-      <button class="btn btn-primary" disabled={!title.trim() || !repoChoice} on:click={start}
-        >{@html icons.play} Start agent</button
+      <button
+        class="btn btn-primary"
+        disabled={!title.trim() || !repoChoice || cliMissing}
+        on:click={start}>{@html icons.play} Start agent</button
       >
     </svelte:fragment>
   </ResponsivePanel>
@@ -237,5 +263,14 @@
     color: hsl(var(--primary));
     text-decoration: underline;
     cursor: pointer;
+  }
+
+  .cli-warn {
+    margin-top: 6px;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    border: 1px solid hsl(var(--st-needs) / 0.4);
+    background: hsl(var(--st-needs) / 0.1);
+    color: hsl(var(--st-needs));
   }
 </style>

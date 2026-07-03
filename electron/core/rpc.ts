@@ -27,6 +27,7 @@ import {
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 import { checkAppMcp, lastMcpActivity } from '../services/mcpHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
+import { findOnPath, binForKind } from '../services/cliProbe.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -605,6 +606,13 @@ export function createRpc(
           },
           repos: diagnoseRepos(repos, realRepoProbes),
         }
+      }
+
+      case IPC.checkAgentCli: {
+        const kind = args[0] as BackendKind
+        const bin = binForKind(kind)
+        const found = findOnPath(bin)
+        return { kind, bin, found: found !== null, path: found ?? undefined }
       }
 
       case IPC.pickRepo:

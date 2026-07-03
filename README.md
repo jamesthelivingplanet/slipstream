@@ -11,6 +11,9 @@ installable PWA, with push notifications when an agent changes status.
 > agent → start it in a fresh worktree → live terminal). See [docs/ROADMAP.md](docs/ROADMAP.md)
 > for what's done and what's next.
 
+> New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) — a single
+> fresh-machine → phone-connected walkthrough.
+
 ## What it is
 
 Two-pane desktop app: a list of **agents** on the left, the selected agent's **terminal**
@@ -41,6 +44,7 @@ pnpm dev              # launch Vite + Electron
 pnpm dev:backend      # after editing server.ts / electron backend: rebuild + restart the daemon
 pnpm check            # svelte-check typecheck
 pnpm test             # vitest: unit + real-git worktree integration
+pnpm test:coverage    # vitest with a v8 coverage report (text + html + cobertura)
 ```
 
 `pnpm dev` does not hot-reload the backend daemon — run `pnpm dev:backend` after editing
@@ -179,6 +183,7 @@ prototype.html            original design reference (not used at runtime)
 
 ## Docs
 
+- [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) — fresh-machine → phone-connected walkthrough
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data model, the contract seam, services, IPC, conventions, decisions
 - [docs/ROADMAP.md](docs/ROADMAP.md) — status by phase, what's next, known refinements
 - [CLAUDE.md](CLAUDE.md) — contributor notes: commands, conventions, gotchas, native module troubleshooting

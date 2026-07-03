@@ -147,3 +147,8 @@ Every driver launches with `env: { SLIPSTREAM_DAEMON_EPHEMERAL: '1' }` so the da
 `app.close()` — without it, each run would leave an orphan daemon holding a port. The one
 exception is `daemon-survival-flow.mjs`, which deliberately omits the flag to prove the daemon
 outlives the UI and is reused on relaunch (so it leaves a daemon running — kill it afterward).
+
+- **`smoke-add-repo.mjs`** is the CI smoke driver — no screenshots, asserts
+  `window.slipstream` is present and the repo count increases after Add repo, and exits
+  nonzero on any failed assertion. It runs unattended in the `e2e-smoke` GitLab CI job
+  under `xvfb-run`, on a nightly schedule and `when: manual` on merge requests.

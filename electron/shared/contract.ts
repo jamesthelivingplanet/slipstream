@@ -89,6 +89,14 @@ export interface DiagnosticsDTO {
   repos: RepoDiagnostic[]
 }
 
+/** Result of a New Agent dialog PATH preflight for an agent's CLI binary. */
+export interface AgentCliCheck {
+  kind: BackendKind
+  bin: string
+  found: boolean
+  path?: string
+}
+
 export interface PushSubscriptionDTO {
   endpoint: string
   keys: { p256dh: string; auth: string }
@@ -417,6 +425,11 @@ export interface SlipstreamApi {
    *  versions, and per-repo path/remote health. Extends (does not duplicate)
    *  getMcpStatus — call that separately for the MCP self-test section. */
   getDiagnostics(): Promise<DiagnosticsDTO>
+
+  /** Preflight check for the New Agent dialog: is `kind`'s CLI binary on PATH
+   *  on the daemon/server machine? Lets the UI warn before Start rather than
+   *  failing only at spawn time with a red bubble. */
+  checkAgentCli(kind: BackendKind): Promise<AgentCliCheck>
 }
 
 export const IPC = {
@@ -465,6 +478,7 @@ export const IPC = {
   setGcPolicy: 'gc:setPolicy',
   getMcpStatus: 'mcp:status',
   getDiagnostics: 'diag:get',
+  checkAgentCli: 'agent:checkCli',
 } as const
 
 declare global {

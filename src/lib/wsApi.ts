@@ -26,6 +26,7 @@ import type {
   McpStatusDTO,
   DiagnosticsDTO,
   TicketSource,
+  AgentCliCheck,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -473,6 +474,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     getDiagnostics(): Promise<DiagnosticsDTO> {
       return request(IPC.getDiagnostics, []) as Promise<DiagnosticsDTO>
+    },
+
+    checkAgentCli(kind): Promise<AgentCliCheck> {
+      return request(IPC.checkAgentCli, [kind]) as Promise<AgentCliCheck>
     },
   }
 }
