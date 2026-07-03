@@ -105,6 +105,23 @@ describe('worktreeManager (real git)', () => {
     expect(forced.removed).toBe(true)
   })
 
+  it('treats a squash-merged branch as merged and allows removal without force', async () => {
+    const info = await wm.create(repo, 'feat-squash')
+    writeFileSync(join(info.path, 'squash-a.txt'), 'first\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'first squash commit')
+    writeFileSync(join(info.path, 'squash-b.txt'), 'second\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'second squash commit')
+
+    // Squash-merge into base from the main repo checkout.
+    git(repo.path, 'merge', '--squash', 'feat-squash')
+    git(repo.path, 'commit', '-m', 'FLO-91: squashed feat-squash')
+
+    const res = await wm.remove(repo, 'feat-squash')
+    expect(res.removed).toBe(true)
+  })
+
   it('removes worktree, prunes stale entries, and deletes the branch', async () => {
     await wm.create(repo, 'feat-teardown')
     const wtPath = join(root, '.worktrees', 'acme-demo', 'feat-teardown')
