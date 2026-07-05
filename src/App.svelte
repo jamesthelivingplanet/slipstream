@@ -18,6 +18,7 @@
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
+  import MissionControl from './lib/components/MissionControl.svelte'
   import TerminalView from './lib/components/TerminalView.svelte'
   import NewAgentDialog from './lib/components/NewAgentDialog.svelte'
   import SettingsModal from './lib/components/SettingsModal.svelte'
@@ -158,13 +159,7 @@
 
     <section class="term-pane">
       {#if !$selected}
-        <div class="empty">
-          <div>
-            <div class="ic">{@html icons.terminal}</div>
-            <h3>No agent selected</h3>
-            <p>Pick an agent on the left to view its terminal, or start a new one.</p>
-          </div>
-        </div>
+        <MissionControl />
       {:else}
         <TicketStatusBar session={$selected} />
         {#if $selected.status === 'idle'}

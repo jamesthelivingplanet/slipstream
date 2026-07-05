@@ -441,35 +441,6 @@ html[data-mode='light'] .seg.on {
   overflow: hidden;
   background: hsl(var(--background));
 }
-.empty {
-  flex: 1;
-  display: grid;
-  place-items: center;
-  text-align: center;
-  color: hsl(var(--muted-foreground));
-}
-.empty .ic {
-  width: 46px;
-  height: 46px;
-  margin: 0 auto 14px;
-  border-radius: 12px;
-  border: 1px solid hsl(var(--border));
-  display: grid;
-  place-items: center;
-  color: hsl(var(--muted-foreground));
-}
-.empty h3 {
-  color: hsl(var(--foreground));
-  font-weight: 600;
-  font-size: 15px;
-  margin-bottom: 6px;
-}
-.empty p {
-  font-size: 13px;
-  max-width: 280px;
-  line-height: 1.5;
-}
-
 .term-head {
   height: 56px;
   flex: 0 0 56px;
