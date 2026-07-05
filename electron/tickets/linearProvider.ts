@@ -1,4 +1,4 @@
-import type { ITicketProvider, TicketDTO, WorkflowState } from '../shared/contract.js'
+import type { ITicketProvider, ScopeOption, TicketDTO, WorkflowState } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 
 interface LinearNode {
@@ -15,12 +15,16 @@ interface LinearResponse {
   errors?: Array<{ message: string }>
 }
 
-const QUERY = `
-  query {
-    issues(filter: { and: [
-      { state: { type: { neq: "canceled" } } },
-      { or: [ { assignee: { isMe: { eq: true } } }, { assignee: { null: true } } ] }
-    ] }, orderBy: updatedAt, first: 50) {
+function parseTeamKeys(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0)
+}
+
+const LIST_QUERY = `
+  query($filter: IssueFilter, $first: Int!) {
+    issues(filter: $filter, orderBy: updatedAt, first: $first) {
       nodes {
         id
         identifier
@@ -96,11 +100,42 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
   return {
     id: 'linear',
 
+    async listScopes(): Promise<ScopeOption[]> {
+      const apiKey = config.get('linear.apiKey')
+      if (!apiKey) throw new Error('Linear API key not set')
+
+      const data = await gql(
+        apiKey,
+        `
+        query {
+          teams(first: 100) {
+            nodes { id key name }
+          }
+        }
+      `,
+      )
+
+      const teams = data.teams as
+        { nodes: Array<{ id: string; key: string; name: string }> } | undefined
+      return (teams?.nodes ?? []).map((t) => ({ id: t.id, key: t.key, name: t.name }))
+    },
+
     async listTickets(): Promise<TicketDTO[]> {
       const apiKey = config.get('linear.apiKey')
       if (!apiKey) return []
 
-      const data = await gql(apiKey, QUERY)
+      const teamKeys = parseTeamKeys(config.get('linear.teamKeys'))
+      const onlyMine = config.get('linear.onlyMine') !== '0'
+
+      const and: unknown[] = [{ state: { type: { nin: ['completed', 'canceled'] } } }]
+      if (teamKeys.length > 0) {
+        and.push({ team: { key: { in: teamKeys } } })
+      }
+      if (onlyMine) {
+        and.push({ or: [{ assignee: { isMe: { eq: true } } }, { assignee: { null: true } }] })
+      }
+
+      const data = await gql(apiKey, LIST_QUERY, { filter: { and }, first: 100 })
       const issues = data.issues as { nodes: LinearNode[] } | undefined
       const nodes = issues?.nodes ?? []
       return nodes.map((node): TicketDTO => ({

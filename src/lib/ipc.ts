@@ -24,6 +24,9 @@ import type {
   McpStatusDTO,
   DiagnosticsDTO,
   AgentCliCheck,
+  TicketSource,
+  ScopeOption,
+  TicketSourceSettings,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
 
@@ -68,15 +71,47 @@ export function listTickets(): Promise<TicketDTO[]> {
 
 export function getTicketStatus(
   tid: string,
+  src?: TicketSource,
 ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
   return hasBackend
-    ? window.slipstream.getTicketStatus(tid)
+    ? window.slipstream.getTicketStatus(tid, src)
     : Promise.resolve({ current: null, available: [] })
 }
 
-export function setTicketStatus(tid: string, stateId: string): Promise<WorkflowState> {
+export function setTicketStatus(
+  tid: string,
+  stateId: string,
+  src?: TicketSource,
+): Promise<WorkflowState> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.setTicketStatus(tid, stateId)
+  return window.slipstream.setTicketStatus(tid, stateId, src)
+}
+
+// ── Ticket source settings (Linear / Jira credentials + scoping) ───────────
+
+const EMPTY_TICKET_SETTINGS: TicketSourceSettings = {
+  configured: false,
+  scopeKeys: [],
+  onlyMine: true,
+  apiKey: '',
+  baseUrl: '',
+  email: '',
+  apiToken: '',
+}
+
+export function getTicketSettings(src: TicketSource): Promise<TicketSourceSettings> {
+  return hasBackend
+    ? window.slipstream.getTicketSettings(src)
+    : Promise.resolve({ ...EMPTY_TICKET_SETTINGS })
+}
+
+export function setTicketSettings(src: TicketSource, cfg: TicketSourceSettings): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.setTicketSettings(src, cfg)
+}
+
+export function listTicketScopes(src: TicketSource): Promise<ScopeOption[]> {
+  return hasBackend ? window.slipstream.listTicketScopes(src) : Promise.resolve([])
 }
 
 // ── Sessions ───────────────────────────────────────────────────────────────

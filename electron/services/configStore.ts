@@ -8,7 +8,12 @@ export interface IConfigStore {
 
 /** Config keys whose values are secrets and get encrypted at rest when an
  *  encryptor is available (desktop safeStorage). Everything else stays plaintext. */
-export const SECRET_KEYS = new Set(['linear.apiKey', 'github.token', 'gitlab.token'])
+export const SECRET_KEYS = new Set([
+  'linear.apiKey',
+  'github.token',
+  'gitlab.token',
+  'jira.apiToken',
+])
 
 /** Marker prefix identifying a safeStorage-encrypted, base64-encoded value, so
  *  reads can transparently decrypt new values while still returning legacy

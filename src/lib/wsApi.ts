@@ -27,6 +27,8 @@ import type {
   DiagnosticsDTO,
   TicketSource,
   AgentCliCheck,
+  ScopeOption,
+  TicketSourceSettings,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -283,15 +285,16 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     getTicketStatus(
       tid: string,
+      src?: TicketSource,
     ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
-      return request(IPC.getTicketStatus, [tid]) as Promise<{
+      return request(IPC.getTicketStatus, [tid, src]) as Promise<{
         current: WorkflowState | null
         available: WorkflowState[]
       }>
     },
 
-    setTicketStatus(tid: string, stateId: string): Promise<WorkflowState> {
-      return request(IPC.setTicketStatus, [tid, stateId]) as Promise<WorkflowState>
+    setTicketStatus(tid: string, stateId: string, src?: TicketSource): Promise<WorkflowState> {
+      return request(IPC.setTicketStatus, [tid, stateId, src]) as Promise<WorkflowState>
     },
 
     getLinearKey(): Promise<string | null> {
@@ -300,6 +303,18 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     setLinearKey(key: string): Promise<void> {
       return request(IPC.setLinearKey, [key]) as Promise<void>
+    },
+
+    getTicketSettings(src: TicketSource): Promise<TicketSourceSettings> {
+      return request(IPC.getTicketSettings, [src]) as Promise<TicketSourceSettings>
+    },
+
+    setTicketSettings(src: TicketSource, cfg: TicketSourceSettings): Promise<void> {
+      return request(IPC.setTicketSettings, [src, cfg]) as Promise<void>
+    },
+
+    listTicketScopes(src: TicketSource): Promise<ScopeOption[]> {
+      return request(IPC.listTicketScopes, [src]) as Promise<ScopeOption[]>
     },
 
     startSession(input: {
