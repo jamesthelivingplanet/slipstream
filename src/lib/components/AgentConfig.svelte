@@ -2,6 +2,7 @@
   import { repos, repoById, startAgent } from '../stores'
   import { branchFor } from '../branch'
   import AgentSelector from './AgentSelector.svelte'
+  import { floatingAnchor } from '../floating'
   import { icons } from '../icons'
   import { agentOption } from '../agents'
   import type { Session, BackendKind } from '../types'
@@ -70,7 +71,7 @@
           <span class="chev">{@html icons.chevronDown}</span>
         </button>
         {#if menuOpen}
-          <div class="sel-menu">
+          <div class="sel-menu" use:floatingAnchor>
             {#each $repos as r (r.id)}
               <button
                 type="button"

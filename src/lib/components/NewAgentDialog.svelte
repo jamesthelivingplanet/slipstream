@@ -19,6 +19,7 @@
   import { checkAgentCli } from '../ipc'
   import type { Ticket, BackendKind } from '../types'
   import type { AgentCliCheck } from '../../../electron/shared/contract'
+  import { floatingAnchor } from '../floating'
 
   let picked: Ticket | null = null
   let title = ''
@@ -176,7 +177,7 @@
               <span class="chev">{@html icons.chevronDown}</span>
             </button>
             {#if menuOpen}
-              <div class="sel-menu">
+              <div class="sel-menu" use:floatingAnchor>
                 {#each $repos as r (r.id)}
                   <button
                     type="button"
