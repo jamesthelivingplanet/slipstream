@@ -46,6 +46,8 @@ export interface Session {
   prUrl?: string
   // set when auto-reconcile skipped removing a dirty/unmerged worktree
   reconcileWarning?: string
+  // epoch ms timestamp when this session entered 'needs' status; cleared when it exits
+  needsSince?: number
   activity: { text: string; q?: boolean }
 }
 

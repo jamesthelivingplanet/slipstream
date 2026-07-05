@@ -462,6 +462,14 @@ export function setSessionStatus(id: string, status: Status) {
       if (s.id !== id) return s
       prev = s.status
       title = s.title
+      // Set needsSince when transitioning into 'needs'
+      if (prev !== 'needs' && status === 'needs') {
+        return { ...s, status, needsSince: Date.now() }
+      }
+      // Clear needsSince when transitioning out of 'needs'
+      if (prev === 'needs' && status !== 'needs') {
+        return { ...s, status, needsSince: undefined }
+      }
       return { ...s, status }
     }),
   )
