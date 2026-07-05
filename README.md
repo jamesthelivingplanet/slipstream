@@ -1,15 +1,16 @@
 # Slipstream
 
-A desktop console for running and watching **many Claude Code agents at once** — one
+A desktop console for running and watching **many coding agents at once** — one
 agent per task, each `claude --dangerously-skip-permissions` running in its own git
 worktree. Start them, watch them, and jump to whichever one needs you.
 
 It also runs as a **headless server** you reach from a browser or phone as an
 installable PWA, with push notifications when an agent changes status.
 
-> Status: Phase 1 functional. The full agent loop is wired (register a repo → create an
-> agent → start it in a fresh worktree → live terminal). See [docs/ROADMAP.md](docs/ROADMAP.md)
-> for what's done and what's next.
+> The full agent loop is wired (register a repo → create an agent → start it in a
+> fresh worktree → live terminal), the daemon survives app-close, and a one-command
+> Docker path runs it on a pod you drive from your phone. See
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design.
 
 > New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) — a single
 > fresh-machine → phone-connected walkthrough.
@@ -19,15 +20,17 @@ installable PWA, with push notifications when an agent changes status.
 Two-pane desktop app: a list of **agents** on the left, the selected agent's **terminal**
 on the right. You import git repos, create an agent (blank or from a ticket), pick a repo,
 and **Start** — Slipstream cuts a worktree, assigns a sticky dev port, and streams the live
-`claude` PTY into the terminal. Built to manage a fleet of them concurrently.
+agent PTY into the terminal. Built to manage a fleet of them concurrently.
 
-The same backend can run headlessly on any machine (Linux or macOS) and serve the UI to
-any browser over Tailscale HTTPS. Once loaded, browsers can install it as a PWA and
-receive push notifications when an agent finishes or needs your attention.
+The desktop is a **thin client** of a local daemon (spawned on first launch, reused after):
+agents live in the daemon process, so they keep running when you close the window. The same
+daemon can run headlessly on any machine (Linux or macOS) and serve the UI to any browser
+over Tailscale HTTPS. Once loaded, browsers can install it as a PWA and receive push
+notifications when an agent finishes or needs your attention.
 
 ## Stack
 
-- **Electron** (main process: PTYs, git, SQLite, IPC) · also runs headless via `ELECTRON_RUN_AS_NODE=1`
+- **Electron** (main process: PTYs, git, SQLite) · also runs headless via `ELECTRON_RUN_AS_NODE=1`
 - **Svelte 4 + Vite + Tailwind**, shadcn-style design with live theming
 - **xterm.js** terminals · **node-pty** processes · **better-sqlite3** persistence
 - **Web Push** (VAPID) for agent status notifications · **WebSocket** server for the browser client
@@ -61,8 +64,7 @@ inside the app's data directory. On desktop, they're encrypted at rest with the 
 via Electron `safeStorage` when available. The headless server (`pnpm serve`, and the
 detached daemon) runs under `ELECTRON_RUN_AS_NODE`, where safeStorage isn't reachable, so
 there secrets stay plaintext in `<dataDir>/slipstream.db`, protected only by the data
-directory's 0700 permissions — restrict host/filesystem access accordingly on a shared or
-remote machine.
+directory's 0700 permissions. Full detail in [docs/SECURITY.md](docs/SECURITY.md) §6.
 
 ## Run it on your phone / as a server
 
@@ -160,30 +162,51 @@ SKIP_CHECKS=1 pnpm deploy
 
 ```
 electron/                 main process (and headless server entry point)
-  main.ts                 window + service wiring (Electron desktop mode)
+  main.ts                 window + local-daemon spawn/reuse (Electron desktop mode)
   server.ts               headless WS server entry (ELECTRON_RUN_AS_NODE mode)
-  preload.ts              contextBridge → window.slipstream (ESM)
-  ipc.ts                  registerIpc(): ipcMain handlers
+  preload.ts              contextBridge → window.__slipstreamDaemon / __slipstreamNative (CJS)
+  ipc.ts                  IpcDeps interface shared by rpc.ts + server.ts
   shared/contract.ts      types, service interfaces, IPC channels, SlipstreamApi  (the seam)
-  services/               repoRegistry, worktreeManager, sessionManager, statusDetector, portBroker
-  db/db.ts                better-sqlite3 (schema inlined — no .sql files)
-  tickets/                ITicketProvider impls (emptyProvider; real providers TBD)
+  shared/agentCli.ts      centralized claude/opencode CLI flags + timing constants
+  shared/wire.ts          WS wire protocol (req/res/push envelopes)
+  core/                   rpc.ts (transport-free router), auth.ts (identity), services.ts
+                          (factory), daemonManager.ts (spawn/reuse local daemon), bootstrap.ts
+  services/               repoRegistry + repoResolve (self-heal/clone), worktreeManager,
+                          sessionManager, agentBackend (claude + opencode), statusDetector +
+                          statusSentinel, sessionReaper (GC/cost guard), writeCoordinator
+                          (multi-client write lock), outputBuffer + scrollbackStore (durable),
+                          sessionStore + sessionPersistence, transcripts, portBroker,
+                          pushService, runLogger, configStore, claudeTrust, cliProbe,
+                          editorLauncher, appRunner, diagnostics, gitDriver, mcpConfig/mcpHealth
+  tickets/                ITicketProvider impls: emptyProvider, linearProvider
+  db/db.ts                better-sqlite3 (schema inlined; numbered migrations)
+  mcp/                    MCP integration
 src/                      Svelte renderer (runs in browser + Electron)
+  main.ts                 bootElectron()/bootWeb() — sets window.slipstream before importing App
   App.svelte, app.css     shell + shadcn token system
-  lib/components/         AgentList, AgentConfig, TerminalView, NewAgentDialog, ThemeMenu, SettingsModal, Toasts
-  lib/                    stores, ipc (client), types, branch, icons, theme, term, toast
+  lib/components/         AgentList, AgentConfig, TerminalView, NewAgentDialog, SettingsModal
+                          (+ settings/ tab split), ThemeMenu, Toasts, TokenGate, ConfirmDialog,
+                          McpStatus, TicketStatusBar, ResponsivePanel, InstallNudge
+  lib/                    stores, ipc, wsApi, term, theme, toast, push, reconcile, responsive,
+                          ticketFilter, branch, icons, types
 scripts/
   deploy.sh               build + restart service + tailscale serve (pnpm deploy)
   setup.sh                one-time machine bootstrap (pnpm setup)
   serve-with-env.sh       sources server.env and execs the server; called by systemd/launchd
   build-server.mjs        esbuild script for the headless server bundle
-  e2e/                    Playwright drivers (manual; launch the built app, screenshot flows)
+  check-preload-cjs.mjs   post-build guard: preload output has no top-level ESM import/export
+  e2e/                    Playwright drivers (smoke-add-repo is the CI gate)
 prototype.html            original design reference (not used at runtime)
 ```
 
 ## Docs
 
 - [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) — fresh-machine → phone-connected walkthrough
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data model, the contract seam, services, IPC, conventions, decisions
-- [docs/ROADMAP.md](docs/ROADMAP.md) — status by phase, what's next, known refinements
-- [CLAUDE.md](CLAUDE.md) — contributor notes: commands, conventions, gotchas, native module troubleshooting
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data model, the contract seam, services, daemon/process model, web mode, decisions
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — dev loop: daemon rebuild cycle, tests, agent-run logs, e2e drivers
+- [docs/NATIVE-MODULES.md](docs/NATIVE-MODULES.md) — native ABI rebuild + fresh-machine troubleshooting
+- [docs/SECURITY.md](docs/SECURITY.md) — auth model, `?token=`-in-logs threat + deferred one-time-ticket fix, secrets at rest, sandbox
+- [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md) — the `ownerId` seam that keeps a future multi-user tier additive
+- [docs/POD-DEPLOY.md](docs/POD-DEPLOY.md) — one-command Docker + Tailscale pod deploy
+- [docs/VERIFYING-DESKTOP-DAEMON.md](docs/VERIFYING-DESKTOP-DAEMON.md) — manual verify recipe for the thin-client daemon
+- [CLAUDE.md](CLAUDE.md) — contributor notes: commands, conventions, and a gotcha index that links to the above

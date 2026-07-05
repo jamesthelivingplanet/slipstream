@@ -178,3 +178,27 @@ launch Electron headlessly here and drive the picker) — the evidence above
 (well-formed CJS bundle with the arg-parse and picker logic present, build +
 guard + full test suite green) is the basis for calling this a success rather
 than a runtime click-through.
+
+## 6. Secrets at rest
+
+Config-table secrets — the Linear API key, GitHub/GitLab tokens — are stored in the
+SQLite `config` table inside the app's data directory (`<dataDir>/slipstream.db`).
+VAPID keys (for Web Push) live there too, which is expected: they're server
+credentials, not user secrets.
+
+**Encrypted on the desktop.** Where a real Electron process with an OS keychain is
+available (the desktop app), `configStore.ts` encrypts each value with Electron
+`safeStorage` before writing it, prefixed with a `ss1:` marker so encrypted and
+plaintext values are distinguishable.
+
+**Plaintext on the daemon / headless server.** The detached local daemon and the
+headless `pnpm serve` server both run under `ELECTRON_RUN_AS_NODE=1`, where
+`safeStorage` is unavailable. There the same values are stored **plaintext**, with
+only the data directory's 0700 permissions protecting them — so on a shared or
+remote host, restrict filesystem access accordingly (the pod image runs as an
+unprivileged user; see [POD-DEPLOY.md](POD-DEPLOY.md)).
+
+**Legacy values keep working.** `configStore.ts` transparently reads both forms: a
+prefixed `ss1:` value is decrypted, an unprefixed value is returned as-is. Existing
+plaintext secrets are left in place rather than force-migrated, so an upgrade never
+locks you out of your own config.

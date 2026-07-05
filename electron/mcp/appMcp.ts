@@ -29,7 +29,38 @@ export interface AppMcpDeps {
   writeStatus(state: 'running' | 'needs' | 'done', message?: string): Promise<void>
 }
 
-const TOOLS = [
+/** A single text content item in a tools/call result. */
+export interface McpTextContent {
+  type: string
+  text: string
+}
+
+/** Payload returned by a tools/call: text content, optionally flagged as a tool error. */
+export interface McpToolResult {
+  content: McpTextContent[]
+  isError?: boolean
+}
+
+/** Description of an MCP tool exposed via tools/list. */
+export interface McpTool {
+  name: string
+  description: string
+  inputSchema: {
+    type: 'object'
+    properties: Record<string, unknown>
+    required: string[]
+  }
+}
+
+/** JSON-RPC 2.0 response envelope. A success carries `result`; a failure carries `error`. */
+export interface JsonRpcResponse<TResult = unknown> {
+  jsonrpc: '2.0'
+  id: unknown
+  result?: TResult
+  error?: { code: number; message: string }
+}
+
+const TOOLS: McpTool[] = [
   {
     name: 'open_merge_request',
     description: 'Open a merge/pull request on the remote host',
@@ -61,26 +92,23 @@ const TOOLS = [
   },
 ]
 
-function makeResponse(id: unknown, result: unknown): unknown {
+function makeResponse<TResult>(id: unknown, result: TResult): JsonRpcResponse<TResult> {
   return { jsonrpc: '2.0', id, result }
 }
 
-function makeError(id: unknown, code: number, message: string): unknown {
+function makeError(id: unknown, code: number, message: string): JsonRpcResponse {
   return { jsonrpc: '2.0', id, error: { code, message } }
 }
 
-function makeToolError(text: string): {
-  isError: true
-  content: Array<{ type: string; text: string }>
-} {
+function makeToolError(text: string): McpToolResult {
   return { isError: true, content: [{ type: 'text', text }] }
 }
 
-function makeToolSuccess(text: string): { content: Array<{ type: string; text: string }> } {
+function makeToolSuccess(text: string): McpToolResult {
   return { content: [{ type: 'text', text }] }
 }
 
-export async function handleRpc(msg: unknown, deps: AppMcpDeps): Promise<unknown | null> {
+export async function handleRpc(msg: unknown, deps: AppMcpDeps): Promise<JsonRpcResponse | null> {
   const m = msg as Record<string, unknown>
 
   // Notifications have no id

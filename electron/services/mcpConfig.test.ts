@@ -42,7 +42,7 @@ describe('buildOpencodeMcpConfig', () => {
       sessionId: 'sess-1',
       base: 'main',
       branch: 'feature',
-    }) as any
+    })
     expect(config.mcp.slipstream.type).toBe('local')
     expect(config.mcp.slipstream.command).toEqual(['/usr/bin/electron', '/dist/app-mcp.js'])
     expect(config.mcp.slipstream.enabled).toBe(true)

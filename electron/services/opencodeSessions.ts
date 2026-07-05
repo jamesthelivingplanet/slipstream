@@ -106,9 +106,7 @@ export function parseOpencodeSessionIdFromStdout(stdout: string): string | null 
  * Must run in the worktree directory so opencode scopes to the correct
  * project — opencode sessions are per-directory, not global.
  */
-export async function queryOpencodeSessionIdFromCli(
-  cwd: string,
-): Promise<string | null> {
+export async function queryOpencodeSessionIdFromCli(cwd: string): Promise<string | null> {
   return new Promise((resolve) => {
     const child = execFile(
       OPENCODE_BIN,
@@ -131,9 +129,11 @@ export async function queryOpencodeSessionIdFromCli(
  * Uses the CLI instead of the HTTP server, so it works even when the embedded
  * server is slow to start.
  */
-export async function captureOpencodeSessionId(
-  opts: { cwd: string; attempts?: number; intervalMs?: number },
-): Promise<string | null> {
+export async function captureOpencodeSessionId(opts: {
+  cwd: string
+  attempts?: number
+  intervalMs?: number
+}): Promise<string | null> {
   const attempts = opts.attempts ?? OPENCODE_SESSION_CAPTURE_ATTEMPTS
   const intervalMs = opts.intervalMs ?? OPENCODE_SESSION_CAPTURE_INTERVAL_MS
   for (let i = 0; i < attempts; i++) {

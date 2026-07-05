@@ -215,7 +215,6 @@ export function createRpc(
           }
         }
 
-
         const session = deps.sessions.start({
           tid,
           title,

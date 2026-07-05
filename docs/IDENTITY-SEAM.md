@@ -1,9 +1,9 @@
 # Identity Seam
 
-FLO-48. The identity seam is how Slipstream stays additive as it moves up the
-[open-core ladder](POSITIONING.md) toward a paid team self-host tier. The
-[ROADMAP D3 phase](ROADMAP.md) adds per-owner data isolation — the seam is
-the cut point. Change the seam; don't touch call sites.
+FLO-48. The identity seam is how Slipstream stays additive on the path to a paid
+team self-host tier: it isolates data per owner today (single user) without
+forcing a rewrite when real multi-user arrives. The seam is the cut point —
+change the seam, don't touch call sites.
 
 ## The model
 
@@ -58,79 +58,48 @@ passes — behavior is byte-for-byte identical to the pre-seam code. This is
 locked in by `electron/core/auth.test.ts` (identity resolution) and
 `electron/core/rpc.test.ts` (ownership guards on each handler).
 
-## Known follow-up for true multi-user
+## What true multi-user still needs
 
-`writeSession`, `resizeSession`, `killSession`, `attachSession`, `takeWrite`,
-and `detachSession` are fire-and-forget control ops addressed by an
-unguessable uuid session id. They are now owner-guarded via `ownedSession`,
-but because they're fire-and-forget they silently no-op for a missing or
-other-owner session — `undefined` for `writeSession`/`resizeSession`/
-`killSession`/`detachSession`, or a neutral, non-attaching `lockState(id)`
-for `attachSession`/`takeWrite` — rather than throwing, preserving the
-no-existence-leak invariant used elsewhere in this file. This does require
-the session to be persisted (owned) in `sessionStore`, which is always true
-after `startSession`, so there's no practical behavior change for legitimate
-callers.
+Today there is exactly one owner: `resolveIdentity(_token)` ignores its argument
+and always returns `LOCAL_IDENTITY`, and a single static `SLIPSTREAM_TOKEN`
+authenticates every device. A security-review pass (FLO-84) flagged that token
+as the first thing to change for a multi-user tier — this records what that
+change touches and what it doesn't, so it isn't re-derived later. It must also
+compose with the one-time WS ticket design in [docs/SECURITY.md](SECURITY.md) §3.
 
-Remaining genuine follow-ups: give `resolveIdentity` a real token → owner
-store (today every valid token maps to `LOCAL_IDENTITY`), and decide between
-per-owner data-dir vs row-level isolation for the eventual multi-user tier.
+Every downstream call site is already owner-scoped (see Enforcement above), so
+going multi-user is a change *at the seam* — none of the ~15 guarded handlers
+need to know or care how many distinct identities exist.
 
-## Readiness for per-device / per-user tokens
+One current-behavior caveat to carry forward: `writeSession`, `resizeSession`,
+`killSession`, `attachSession`, `takeWrite`, and `detachSession` are
+fire-and-forget control ops addressed by an unguessable uuid. They are
+owner-guarded via `ownedSession`, but because they're fire-and-forget they
+silently no-op for a missing or other-owner session (`undefined`, or a neutral
+non-attaching `lockState(id)` for `attachSession`/`takeWrite`) rather than
+throwing — preserving the no-existence-leak invariant. This requires the session
+to be persisted (owned) in `sessionStore`, which is always true after
+`startSession`, so there's no practical behavior change for legitimate callers.
 
-FLO-84. A security-review pass over auth flagged the single static token as
-the first thing to change for a multi-user tier — this section records what
-that change touches and what it doesn't, so it isn't re-derived later. See
-also [docs/SECURITY.md](SECURITY.md) for the one-time WS ticket design this
-seam also needs to accommodate.
+What a real multi-user milestone still needs:
 
-### What's already there
-
-- `resolveIdentity(token)` (`electron/core/auth.ts`) — the single choke point
-  that maps a bearer token to an `Identity`. Called exactly once per
-  connection, at WebSocket upgrade (`electron/server/server.ts`), and threaded
-  into `createRpc({ identity })` from there. No other entry path exists.
-- `ownerId` columns — nullable `ownerId TEXT DEFAULT 'local'` on both `repos`
-  and `sessions`, added as additive `ALTER TABLE` migrations, with legacy
-  `NULL` rows coalescing to `'local'` at the predicate level.
-- `ownedByCaller(row)` predicate, enumeration filtering (`listRepos`,
-  `listSessions` in `electron/core/rpc.ts` only return rows the caller owns),
-  and the single-item guards (`ownedSession`, `requireOwnedRepo`) covering
-  every read/write call site listed above.
-- The no-existence-leak invariant: a cross-owner access gets the identical
-  error a missing row would (`Session not found` / `Unknown repo`), so
-  ownership can't be probed by comparing error messages.
-
-Net effect: **every downstream call site is already owner-scoped.** Going
-multi-user is a change *at the seam* (`resolveIdentity` and whatever feeds it),
-not a change at any of the ~15 guarded call sites — those don't need to know
-or care how many distinct identities exist.
-
-### What multi-user token rotation still needs
-
-1. **A real token → owner store.** Today `resolveIdentity(_token)` ignores its
-   argument and always returns `LOCAL_IDENTITY` — there is exactly one owner.
-   Multi-user needs this to become a lookup (DB table or similar) mapping each
-   issued token to a distinct owner id.
+1. **A real token → owner store.** `resolveIdentity` becomes a lookup (DB table
+   or similar) mapping each issued token to a distinct owner id — today every
+   valid token maps to `LOCAL_IDENTITY`.
 2. **Per-device/per-user token issuance + onboarding.** A way to mint a new
-   token for a new device/user and get it onto that device — today onboarding
-   is "here's the one `SLIPSTREAM_TOKEN` value, put it in the URL or
-   localStorage" (see `scripts/deploy.sh`'s QR-code onboarding flow).
+   token for a new device/user and get it onto that device — today onboarding is
+   "here's the one `SLIPSTREAM_TOKEN` value, put it in the URL or localStorage"
+   (see `scripts/deploy.sh`'s QR-code onboarding flow).
 3. **Revocation granularity.** Today "rotate" means edit `server.env` and
    re-onboard *every* device, because there's only one token. Multi-user needs
    to revoke one token (one compromised device, one departing user) without
    disturbing any other token's validity.
-4. **Integration with the one-time WS ticket endpoint** (docs/SECURITY.md,
-   §3 — design only, not yet implemented). Tickets need to be minted per-token,
-   not per-deployment: `POST /rpc-ticket`'s `Authorization: Bearer` check
-   resolves an identity via this same seam, and the ticket's stored `identity`
-   field is what the upgrade handler uses on redemption. The ticket design
-   composes with per-user tokens for free *if* the token store from item 1
-   above is in place first — the ticket endpoint doesn't need its own identity
-   logic, just to call `resolveIdentity()` like the upgrade handler already
-   does.
-5. **The still-open per-owner-data-dir vs. row-level-isolation decision**
-   (carried over from the "Known follow-up" section above) — multi-user token
-   rotation is orthogonal to this, but both land in the same eventual
-   multi-user milestone and should be designed together rather than
-   sequentially discovering conflicts.
+4. **Integration with the one-time WS ticket endpoint** ([docs/SECURITY.md](SECURITY.md)
+   §3 — design only, not yet implemented). Tickets must be minted per-token, not
+   per-deployment: `POST /rpc-ticket`'s `Authorization: Bearer` check resolves an
+   identity via this same seam, and the ticket's stored `identity` field is what
+   the upgrade handler uses on redemption. The ticket design composes with
+   per-user tokens for free *if* the token store from item 1 is in place first.
+5. **The per-owner-data-dir vs. row-level-isolation decision.** Orthogonal to
+   token rotation, but both land in the same multi-user milestone and should be
+   designed together rather than sequentially discovering conflicts.

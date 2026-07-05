@@ -1,7 +1,11 @@
 # CLAUDE.md
 
 Hard-won, non-obvious notes for this repo — start with
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Reference docs are pull-on-demand:
+native build pain → [docs/NATIVE-MODULES.md](docs/NATIVE-MODULES.md); the dev
+loop (daemon rebuild, tests, logs, e2e) → [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md);
+the auth/secrets threat model → [docs/SECURITY.md](docs/SECURITY.md); the
+multi-user identity seam → [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md).
 
 Use **pnpm**. Run `pnpm check` (svelte-check), `pnpm test`, and `pnpm lint` (eslint +
 `prettier --check`) before committing — `pnpm lint` gates the MR, so don't skip it; use
@@ -26,129 +30,48 @@ describes the current behavior and update it in the same change.
 
 ## Gotchas (hard-won)
 
-- **CJS preload**: `preload.ts` builds to `preload.cjs` — `vite.config.ts` forces
-  `output.format: 'cjs'` + `entryFileNames: '[name].cjs'` for the preload build
-  (package.json has `"type": "module"`, so the `.cjs` extension is what forces
-  CJS loading despite that). This lets `main.ts` load it with `sandbox: true`
-  (contextIsolation stays at its safe default) — restored per FLO-84 now that the
-  preload is tiny (just the `--slipstream-daemon` arg parse + folder-picker
-  bridge); it used to be ESM + `sandbox: false` because the preload did much more.
-  Symptom if broken: `window.slipstream` is `undefined`, `Add repo`/everything
-  silently no-ops (falls back to mock-less empty state). This invariant is
-  enforced as a post-build check (`scripts/check-preload-cjs.mjs`, which asserts
-  no top-level ESM `import`/`export` made it into the output), run in the GitLab
-  CI `build` job and in `deploy.sh` phase 2 (moved out of vitest per FLO-80).
-- **Bundled main has no sibling files.** Anything `main.js` needs at runtime must be
-  inlined or bundled — e.g. the DB schema is a `SCHEMA` string in `db.ts`, not a `.sql`
-  file (which the bundler won't copy). Symptom if broken: `No handler registered for ...`
-  because `openDb` threw before `registerIpc` ran.
-- **Native modules** (`node-pty`, `better-sqlite3`) are built for **Electron's ABI**, so
-  node-run tests can't import `db.ts`/`sessionManager.ts`. Tests cover pure logic +
-  real-git integration instead.
-- **Rebuild natives for Electron, not Node.** `pnpm rebuild better-sqlite3 node-pty` — and
-  any change to the Node version pnpm runs scripts on (e.g. switching Node via `mise`/`nvm`) —
-  compiles them against the *current Node's* ABI, which Electron then refuses to load.
-  Symptom: `better_sqlite3.node … compiled against … NODE_MODULE_VERSION 127 … requires 130`
-  (127 = Node 22, 130 = Electron 33). That throw happens in `openDb()`, so `registerIpc()`
-  never runs → `No handler registered for 'repos:list'`. Always finish a native rebuild with
-  `pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty`.
-- **vitest uses `vitest.config.ts`** (not the Vite config) so tests don't run through the
-  Electron plugin (which rewrites `child_process` into a require-shim that breaks ESM).
-- **`ELECTRON_RUN_AS_NODE` + native ABI**: `pnpm serve` runs
-  `ELECTRON_RUN_AS_NODE=1 electron dist-electron/server.js`. This reuses Electron's Node
-  binary so `better-sqlite3` and `node-pty` (built for Electron's ABI) load without a
-  separate rebuild. In `ELECTRON_RUN_AS_NODE` mode the Electron `app` API is unavailable
-  — which is why `resolveDataDir()` in `electron/core/services.ts` derives the data path
-  from `os.homedir()` / env vars rather than `app.getPath('userData')`.
-- **`window.slipstream` must be set before `App`/`ipc.ts` loads**: in web mode `src/main.ts`
-  assigns `window.slipstream` and `window.__slipstreamWeb = true` and only _then_ does
-  `await import('./App.svelte')`. This is intentional — `ipc.ts` has a module-level
-  `hasBackend = !!window.slipstream`. If App is imported first (or the order changes),
-  `hasBackend` is `false` and all backend calls silently no-op.
+Each is a tripwire — the symptom is here, the full procedure is in the linked doc. Pull the
+doc only when the symptom matches what you're seeing.
+
+- **CJS preload**: `preload.ts` builds to `preload.cjs` (`vite.config.ts` forces
+  `output.format:'cjs'` + `[name].cjs`), so the `BrowserWindow` can run `sandbox: true`.
+  Symptom if broken: `window.slipstream` is `undefined` and `Add repo`/everything silently
+  no-ops. Why (sandbox rationale) is in the preload ⚠️ block of
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the build guard is
+  `scripts/check-preload-cjs.mjs` (asserts no top-level ESM in the output; run in the CI
+  `build` job and `deploy.sh` phase 2).
+- **Bundled main has no sibling files.** Anything `main.js` needs at runtime must be inlined
+  or bundled — e.g. the DB schema is a `SCHEMA` string in `db.ts`, not a `.sql` file (which
+  the bundler won't copy). Symptom if broken: `No handler registered for ...` because
+  `openDb` threw before `registerIpc` ran.
+- **Native ABI**: `better-sqlite3`/`node-pty` are built for **Electron's** ABI, not Node's;
+  a wrong-ABI load throws in `openDb()` → `No handler registered for 'repos:list'`. Rebuild +
+  fresh-machine troubleshooting: [docs/NATIVE-MODULES.md](docs/NATIVE-MODULES.md).
+- **`window.slipstream` must be set before `App`/`ipc.ts` loads.** `src/main.ts` assigns
+  `window.slipstream` (and `__slipstreamWeb`) and only _then_ does `await import('./App.svelte')`
+  — `ipc.ts` has a module-level `hasBackend = !!window.slipstream`. Import App first (or change
+  the order) and all backend calls silently no-op.
+- **`--slipstream-daemon=` arg**: `main.ts` passes daemon URL+token to the renderer via
+  `additionalArguments: ['--slipstream-daemon=<base64>']`; the preload parses `process.argv`
+  (not `ipcRenderer`) into `window.__slipstreamDaemon`. If absent, the app falls back to web
+  mode → `window.slipstream` undefined, backend calls silently no-op.
 - **`SLIPSTREAM_TOKEN` is required**: the headless server (`pnpm serve`) refuses to start if
-  the env var is unset. Without it there is no authentication on the WebSocket endpoint.
-- **Agent-run logs**: every session spawn and exit is logged to
-  `<dataDir>/logs/<sessionId>.log` (spawn: cmd + args + cwd + prompt; exit: code + signal +
-  status + last 2KB of PTY output). Process-level errors land in `<dataDir>/logs/server.log`.
-  When debugging a red "errored" bubble, read the per-session log first — it shows the exit
-  code and the tail of what the agent printed before dying. See `electron/services/runLogger.ts`.
-- **Repo paths are frozen at registration time**: `repoRegistry.ts` stores `path: absPath`
-  and never re-validates it. If a repo directory is moved or renamed (e.g. the
-  `flotilla` → `slipstream` rename), the DB row still points at the dead path and every
-  agent run against it fails silently — deep in `worktrees.create`, no clear error, just the
-  red bubble. Fix: update `repos.path` in SQLite, or re-register the repo. FLO-40 will make
-  repos resolve dynamically by remote URL instead of trusting a frozen path.
-- **`--slipstream-daemon=` additionalArguments**: `main.ts` passes the daemon URL + token to
-  the renderer via `additionalArguments: ['--slipstream-daemon=<base64>']`. The preload
-  reads `process.argv` (not `ipcRenderer`) to parse this arg and exposes it as
-  `window.__slipstreamDaemon = { url, token }`. `src/main.ts` detects `__slipstreamDaemon`
-  and calls `bootElectron()` (which runs `createWsApi`) rather than `bootWeb()`. If
-  `window.__slipstreamDaemon` is absent, the app falls back to web mode. Symptom if broken:
-  `window.slipstream` is undefined and all backend calls silently no-op.
-- **The daemon survives app-close.** `main.ts` spawns the local daemon `detached + unref()`d,
-  so quitting the desktop does **not** stop it — it keeps the PTYs alive and keeps holding the
-  port recorded in `<dataDir>/daemon.json`. On next launch `ensureLocalDaemon` finds it via
-  `/healthz` and **reuses** it. To fully reset (free the port, drop live sessions, pick up new
-  daemon/server code): kill the daemon process (it's the `ELECTRON_RUN_AS_NODE` `server.js`
-  listening on the `daemon.json` port), or launch with `SLIPSTREAM_DAEMON_EPHEMERAL=1` to tie
-  its lifetime to the window — `pnpm dev:backend` automates the rebuild+kill+respawn part of
-  this for the normal dev loop. Symptom if forgotten: relaunch reattaches to stale sessions, or
-  "port in use", or backend edits seem to have no effect. `SLIPSTREAM_DAEMON_EPHEMERAL=1` is a
-  dev-only env flag (used by the e2e drivers) — the systemd `pnpm serve` service and the
-  Docker/pod image never set it, and `main.ts` only reads it from the environment, so it can't
-  leak into production daemon startup.
-- **`pnpm dev` builds `server.js` once, up front — it does not hot-reload.** The `dev` script
-  is `node scripts/build-server.mjs && vite`; the daemon is the *built* `dist-electron/server.js`.
-  Vite hot-reloads the renderer and restarts `main`, but a restarted `main` just *reuses* the
-  already-running daemon (via `/healthz`). So edits to `server.ts` or any `electron/services/*`
-  / `electron/core/*` code the daemon runs **won't take effect** until you rebuild server.js
-  *and* kill the running daemon so a fresh one spawns. Use **`pnpm dev:backend`** to do this in
-  one step — it rebuilds `server.js`, kills the daemon on the `daemon.json` port, and respawns
-  a fresh one so your backend edits take effect (reload the app window if it's open).
-  Renderer-only work doesn't need this.
-- **Identity seam (`ownerId`)**: every RPC request carries a resolved `Identity` (today
-  always `{ id: 'local' }` via `resolveIdentity` in `electron/core/auth.ts`). `createRpc`
-  filters enumerations and guards single-item reads by `ownerId`; it's a deliberate no-op
-  for the single user (legacy rows coalesce to `'local'`). Don't add a read of a
-  `sessions`/`repos` row without scoping it by owner. See `docs/IDENTITY-SEAM.md`.
-- **Secrets at rest**: config-table secrets (Linear API key, GitHub/GitLab tokens) are
-  encrypted with Electron `safeStorage` only where a real Electron process + OS keychain is
-  available. The detached daemon and the headless `pnpm serve` server both run under
-  `ELECTRON_RUN_AS_NODE`, where safeStorage is unavailable, so there they stay **plaintext**
-  in `<dataDir>/slipstream.db`, protected only by the 0700 data dir. VAPID keys live there
-  too — that's expected (server credentials, not user secrets). `configStore.ts` handles this
-  transparently via a marker prefix (`ss1:`); legacy plaintext values keep working and are
-  left as-is.
-
-## Troubleshooting native setup
-
-pnpm 11 no longer reads the `pnpm` field in `package.json`; the build-script allowlist lives
-in `pnpm-workspace.yaml` under `allowBuilds:` (a map of `pkg: true`). On a fresh/odd machine:
-
-```sh
-pnpm rebuild esbuild electron better-sqlite3 node-pty   # run native build scripts
-# Electron binary "failed to install": its postinstall didn't extract the zip. On Node 24,
-# install.js can exit mid-extraction (leaving only dist/locales) — pin Node 22 or, failing
-# that, manually unzip the cached ~/.cache/electron/<hash>/electron-*.zip into
-# node_modules/electron/dist/ and write "electron" to node_modules/electron/path.txt
-node node_modules/electron/install.js                   # re-run; if it no-ops, unzip manually
-pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty   # match Electron ABI
-```
-
-## e2e drivers
-
-`scripts/e2e/*.mjs` launch the **built** app via Playwright in an isolated
-`--user-data-dir`, stub the native folder dialog, drive a flow, and screenshot to `/tmp`.
-They require a display (not headless). Build first (`pnpm build`), then
-`node scripts/e2e/<flow>.mjs`. Do **not** drive `Start agent` with a real repo unless you
-intend to spawn an autonomous `claude`.
-
-Every driver launches with `env: { SLIPSTREAM_DAEMON_EPHEMERAL: '1' }` so the daemon dies on
-`app.close()` — without it, each run would leave an orphan daemon holding a port. The one
-exception is `daemon-survival-flow.mjs`, which deliberately omits the flag to prove the daemon
-outlives the UI and is reused on relaunch (so it leaves a daemon running — kill it afterward).
-
-- **`smoke-add-repo.mjs`** is the CI smoke driver — no screenshots, asserts
-  `window.slipstream` is present and the repo count increases after Add repo, and exits
-  nonzero on any failed assertion. It runs unattended in the `e2e-smoke` GitLab CI job
-  under `xvfb-run`, on a nightly schedule and `when: manual` on merge requests.
+  unset — without it there is no auth on the WebSocket endpoint.
+- **Backend edits don't hot-reload.** `pnpm dev` builds `server.js` once and reuses the daemon;
+  edit `server.ts` / `electron/services/*` / `electron/core/*` and you must rebuild + restart
+  the daemon — use `pnpm dev:backend`. Full cycle + reset procedure:
+  [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+- **Red "errored" bubble?** Read `<dataDir>/logs/<sessionId>.log` first (exit code + last 2KB
+  of PTY output). Detail: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) §Debugging.
+- **Repo paths self-heal, but only so far**: `repoResolve.ts` re-validates the stored path on
+  use and self-heals a moved/renamed repo via its `origin` remote URL. If no sibling checkout
+  matches (deleted, or a fresh pod that hasn't cloned it) the run fails deep in
+  `worktrees.create` with just the red bubble — register by remote URL (`registerRepoByUrl`)
+  instead.
+- **Identity seam (`ownerId`)**: every RPC carries a resolved `Identity` (today always
+  `{ id:'local' }`); `createRpc` filters enumerations and guards reads by `ownerId`. Don't
+  add a read of a `sessions`/`repos` row without scoping it by owner. See
+  [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md).
+- **Secrets at rest**: config-table secrets are `safeStorage`-encrypted on desktop but
+  **plaintext** in the daemon/headless server (`ELECTRON_RUN_AS_NODE`, no keychain) behind the
+  0700 data dir. Detail: [docs/SECURITY.md](docs/SECURITY.md) §6.

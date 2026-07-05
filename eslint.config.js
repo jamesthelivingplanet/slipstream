@@ -84,12 +84,11 @@ export default tseslint.config(
   },
   {
     rules: {
-      // The codebase leans on `any` in a handful of IPC/DTO boundary spots
-      // (contract.ts, ipc glue) where precise typing wasn't worth the churn
-      // when this was written. Downgraded to a warning rather than off so
-      // new `any` usage is still visible in review, but existing code isn't
-      // blocked. Revisit if the warning count grows unmanageable.
-      '@typescript-eslint/no-explicit-any': 'warn',
+      // The codebase is `any`-free; treat any new usage as an error so it
+      // must be justified (or typed properly) rather than slipping in. Tests
+      // that assert on untyped JSON-RPC/DTO boundaries narrow with explicit
+      // cast types sourced from the module under test (see appMcp.test.ts).
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
         {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest'
 
 type ExitCb = (code: number | null, signal: NodeJS.Signals | null) => void
 
@@ -35,8 +35,7 @@ vi.mock('node:child_process', () => ({
 const { createAppRunner } = await import('./appRunner.js')
 
 describe('createAppRunner', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let killSpy: any
+  let killSpy: MockInstance<typeof process.kill>
 
   beforeEach(() => {
     spawnMock.mockReset()
