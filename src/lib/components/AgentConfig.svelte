@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { repos, repoById, startAgent } from '../stores'
+  import { repos, repoById, startAgent, discardDraft } from '../stores'
   import { branchFor } from '../branch'
   import AgentSelector from './AgentSelector.svelte'
   import { floatingAnchor } from '../floating'
@@ -34,6 +34,10 @@
     }
     if (!session.id) return
     startAgent(session.id, repoChoice, prompt, agentKind)
+  }
+
+  function discard() {
+    discardDraft(session)
   }
 
   function onWindowClick(e: MouseEvent) {
@@ -116,6 +120,14 @@
 
     <button class="btn btn-primary" style="width:100%;height:40px;font-size:14px" on:click={start}>
       {@html icons.play} Start agent
+    </button>
+    <button
+      class="btn btn-ghost"
+      style="width:100%;height:36px;font-size:13px"
+      type="button"
+      on:click={discard}
+    >
+      Discard draft
     </button>
   </div>
 </div>

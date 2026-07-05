@@ -23,12 +23,13 @@ vi.mock('./ipc', () => ({
   getMcpStatus: vi.fn(),
 }))
 
-import { cleanupSession, killSession, runApp, stopApp } from './ipc'
+import { cleanupSession, killSession, runApp, stopApp, listTickets } from './ipc'
 import {
   sessions,
   tickets,
   createBlankAgent,
   createAgentFromTicket,
+  discardDraft,
   setSessionPrUrl,
   cleanupAgent,
   contentLoading,
@@ -125,6 +126,67 @@ describe('createAgentFromTicket', () => {
       status: 'idle',
     })
     expect(get(tickets)).toHaveLength(0)
+  })
+})
+
+describe('discardDraft', () => {
+  beforeEach(() => {
+    sessions.set([])
+    tickets.set([])
+    selectedId.set(null)
+    vi.clearAllMocks()
+  })
+
+  it('only acts on an idle draft, leaving non-idle sessions untouched', () => {
+    const t: Ticket = { tid: 'FLO-40', src: 'linear', title: 'Not idle', repo: '', done: false }
+    const id = createAgentFromTicket(t, 'go')
+    const running = { ...get(sessions).find((s) => s.id === id)!, status: 'running' as const }
+    sessions.set([running])
+
+    discardDraft(running)
+
+    expect(get(sessions)).toHaveLength(1)
+    expect(get(sessions)[0].id).toBe(id)
+  })
+
+  it('removes the draft session and deselects it when selected', () => {
+    const t: Ticket = { tid: 'FLO-41', src: 'linear', title: 'Bye', repo: '', done: false }
+    const id = createAgentFromTicket(t, 'go')
+    select(id)
+
+    const draft = get(sessions).find((s) => s.id === id)!
+    discardDraft(draft)
+
+    expect(get(sessions).find((s) => s.id === id)).toBeUndefined()
+    expect(get(selectedId)).toBeNull()
+  })
+
+  it('restores the ticket via refreshTickets when the draft came from a real ticket', async () => {
+    const t: Ticket = { tid: 'FLO-42', src: 'linear', title: 'Restore me', repo: '', done: false }
+    tickets.set([t])
+    const id = createAgentFromTicket(t, 'go')
+    expect(get(tickets)).toHaveLength(0)
+
+    vi.mocked(listTickets).mockResolvedValue([
+      { id: 'FLO-42', tid: 'FLO-42', src: 'linear', title: 'Restore me', done: false },
+    ])
+
+    const draft = get(sessions).find((s) => s.id === id)!
+    discardDraft(draft)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(listTickets).toHaveBeenCalled()
+    expect(get(tickets).find((x) => x.tid === 'FLO-42')).toBeDefined()
+  })
+
+  it('does not remove a blank-agent draft twice or throw when it has no suggestedRepo', () => {
+    const id = createBlankAgent('Blank', 'go')
+    const draft = get(sessions).find((s) => s.id === id)!
+
+    discardDraft(draft)
+
+    expect(get(sessions).find((s) => s.id === id)).toBeUndefined()
   })
 })
 

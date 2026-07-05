@@ -367,6 +367,24 @@ export function createBlankAgent(
   return id
 }
 
+/**
+ * Escape hatch for a draft session created via createAgentFromTicket/createBlankAgent:
+ * only acts on an untouched 'idle' draft, drops it from the sidebar, deselects it if
+ * selected, and — when the draft was seeded from a real ticket — refreshes the ticket
+ * list so the backend's copy (which was never actually removed, just locally filtered
+ * out) reappears in the launchpad.
+ */
+export function discardDraft(s: Session): void {
+  if (s.status !== 'idle') return
+  const cameFromTicket = s.suggestedRepo !== undefined
+  sessions.update(($s) => $s.filter((x) => x.id !== s.id))
+  if (get(selectedId) === s.id) select(null)
+  if (cameFromTicket && hasBackend) {
+    refreshTickets()
+  }
+  pushToast('success', `Discarded draft ${s.tid}`)
+}
+
 export async function startAgent(
   id: string,
   repoId: string,
