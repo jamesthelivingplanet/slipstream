@@ -108,6 +108,7 @@ export class StatusDetector implements IStatusDetector {
   private buffer = ''
 
   private lastOutputAt: number
+  private lastMarkerAt = 0
   private exited = false
   private exitCode: number | null = null
 
@@ -128,6 +129,9 @@ export class StatusDetector implements IStatusDetector {
       this.buffer = this.buffer.slice(this.buffer.length - MAX_BUFFER)
     }
     this.lastOutputAt = this.now()
+    if (tailSignal(this.buffer.slice(-512))) {
+      this.lastMarkerAt = this.now()
+    }
   }
 
   /** Record process exit; subsequent status() calls return 'done' or 'errored'. */
@@ -160,8 +164,10 @@ export class StatusDetector implements IStatusDetector {
     const tail = this.buffer.slice(-512)
     const marker = tailSignal(tail)
 
-    // Most-recent-wins between an out-of-band MCP signal and a PTY tail marker.
-    if (this.signalState && this.signalAt >= this.lastOutputAt) return this.signalState
+    // An explicit MCP signal is a deliberate declaration; like `done` it stays in
+    // effect until a strictly-newer explicit tail marker (or process exit)
+    // supersedes it — ordinary non-marker output must not revert it.
+    if (this.signalState && this.signalAt >= this.lastMarkerAt) return this.signalState
     if (marker) return marker
 
     const elapsed = this.now() - this.lastOutputAt
