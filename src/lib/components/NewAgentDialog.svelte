@@ -12,8 +12,10 @@
     mobile,
   } from '../stores'
   import ResponsivePanel from './ResponsivePanel.svelte'
+  import AgentSelector from './AgentSelector.svelte'
   import { branchFor } from '../branch'
   import { icons } from '../icons'
+  import { agentOption } from '../agents'
   import { checkAgentCli } from '../ipc'
   import type { Ticket, BackendKind } from '../types'
   import type { AgentCliCheck } from '../../../electron/shared/contract'
@@ -108,32 +110,12 @@
 
       <div>
         <span class="lbl-f">Agent type</span>
-        <div class="agent-kind-toggle">
-          <button
-            type="button"
-            class="toggle-opt"
-            class:active={agentKind === 'claude-code'}
-            on:click={() => selectAgentKind('claude-code')}
-          >
-            Claude Code
-          </button>
-          <button
-            type="button"
-            class="toggle-opt"
-            class:active={agentKind === 'opencode'}
-            on:click={() => selectAgentKind('opencode')}
-          >
-            OpenCode
-          </button>
-          <button
-            type="button"
-            class="toggle-opt"
-            class:active={agentKind === 'pi'}
-            on:click={() => selectAgentKind('pi')}
-          >
-            Pi
-          </button>
-        </div>
+        <AgentSelector
+          label="Agent type"
+          value={agentKind}
+          on:select={(e) => selectAgentKind(e.detail)}
+        />
+        <p class="cfg-hint">{agentOption(agentKind).description}</p>
         {#if cliMissing}
           <p class="cfg-hint cli-warn">
             <b>{cliCheck?.bin}</b> was not found on PATH. Install it and make sure it's on the daemon's
