@@ -352,17 +352,44 @@ describe('tailSignal / explicit markers', () => {
 // ─── applySignal / MCP channel ────────────────────────────────────────────────
 
 describe('applySignal / MCP channel', () => {
-  it('a "needs" signal is sticky until strictly-newer PTY output arrives', () => {
+  it('a "needs" signal survives ordinary non-marker output', () => {
     const clock = makeClock(0)
     const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
     d.applySignal('needs', 0)
-    // No new output yet — signal wins even within the idle window
     expect(d.status()).toBe('needs')
+    // Agent keeps streaming a prose reply — none of it is an explicit marker.
     clock.advance(100)
-    d.push('Still no new output pushed at this signalAt though...')
-    // Output is now newer than the signal, but tail has no marker/question and
-    // is within idle window — falls through to running.
+    d.push('Sure, here is what I found in the codebase...')
+    clock.advance(100)
+    d.push(' and a few more sentences of explanation.')
+    // The deliberate MCP signal is not reverted by ordinary output.
+    expect(d.status()).toBe('needs')
+  })
+
+  it('a "needs" signal is superseded by a strictly-newer IN_PROGRESS_MARKER tail', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.applySignal('needs', 0)
+    clock.advance(100)
+    d.push('Still no marker here...')
+    expect(d.status()).toBe('needs')
+    // A strictly-newer explicit marker supersedes the stale signal.
+    clock.advance(100)
+    d.push(`Resuming work now.\n${IN_PROGRESS_MARKER}`)
     expect(d.status()).toBe('running')
+  })
+
+  it('a "running" signal survives its own non-marker output', () => {
+    const clock = makeClock(0)
+    const d = new StatusDetector({ idleMs: DEFAULT_IDLE, now: clock.now })
+    d.applySignal('running', 0)
+    clock.advance(100)
+    d.push('Working on the change, editing files...')
+    expect(d.status()).toBe('running')
+    // A newer DONE_MARKER supersedes it.
+    clock.advance(100)
+    d.push(`All done.\n${DONE_MARKER}`)
+    expect(d.status()).toBe('done')
   })
 
   it('a "done" signal is sticky even after later plain output is pushed', () => {
