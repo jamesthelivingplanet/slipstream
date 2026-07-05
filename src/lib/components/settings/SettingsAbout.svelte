@@ -15,7 +15,7 @@
     <div>
       <b>Slipstream</b>
       <p class="about-desc">
-        A desktop console for running and watching many Claude Code agents at once.
+        A multi-agent platform for running and organizing many coding agents in one app.
       </p>
     </div>
   </div>
