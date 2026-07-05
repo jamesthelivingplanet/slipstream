@@ -9,6 +9,8 @@ import { createSessionManager } from '../services/sessionManager.js'
 import { createPortBroker } from '../services/portBroker.js'
 import { createConfigStore, createSafeStorageEncryptor } from '../services/configStore.js'
 import { createLinearProvider } from '../tickets/linearProvider.js'
+import { createJiraProvider } from '../tickets/jiraProvider.js'
+import { createCompositeProvider } from '../tickets/compositeProvider.js'
 import { createSessionStore, restoreInterruptedSessions } from '../services/sessionStore.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
@@ -69,12 +71,15 @@ export function createServices(root: string): IpcDeps {
     sessions,
     sessionStore,
   })
+  const linear = createLinearProvider(configStore)
+  const jira = createJiraProvider(configStore)
   const deps: IpcDeps = {
     repos: createRepoRegistry(db, root),
     worktrees: createWorktreeManager(os.homedir()),
     sessions,
     ports: createPortBroker(),
-    tickets: createLinearProvider(configStore),
+    tickets: createCompositeProvider([linear, jira]),
+    ticketProviders: { linear, jira },
     config: configStore,
     sessionStore,
     editor: createEditorLauncher(),

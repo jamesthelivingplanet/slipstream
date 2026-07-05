@@ -14,6 +14,7 @@ import type {
   WriteLockState,
   GcPolicy,
   TicketSource,
+  TicketSourceSettings,
 } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
@@ -28,6 +29,13 @@ import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 import { checkAppMcp, lastMcpActivity } from '../services/mcpHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
 import { findOnPath, binForKind } from '../services/cliProbe.js'
+
+function parseCsv(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0)
+}
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -253,7 +261,7 @@ export function createRpc(
         // break the agent launch. Follow-up: handle stop/complete/error
         // transitions (out of scope for FLO-26).
         try {
-          await deps.tickets.startTicket(tid)
+          await deps.tickets.startTicket(tid, input.src)
         } catch {
           // ignore: ticket provider unavailable or transition not applicable
         }
@@ -328,7 +336,7 @@ export function createRpc(
           const tid = persisted?.tid
           if (tid) {
             try {
-              await deps.tickets.resetTicket(tid)
+              await deps.tickets.resetTicket(tid, persisted?.src)
             } catch {
               // ignore: ticket provider unavailable or transition not applicable
             }
@@ -455,10 +463,73 @@ export function createRpc(
         return undefined
 
       case IPC.getTicketStatus:
-        return deps.tickets.getTicketStatus(args[0] as string)
+        return deps.tickets.getTicketStatus(args[0] as string, args[1] as TicketSource | undefined)
 
       case IPC.setTicketStatus:
-        return deps.tickets.setTicketStatus(args[0] as string, args[1] as string)
+        return deps.tickets.setTicketStatus(
+          args[0] as string,
+          args[1] as string,
+          args[2] as TicketSource | undefined,
+        )
+
+      case IPC.getTicketSettings: {
+        const src = args[0] as TicketSource
+        if (src === 'linear') {
+          const apiKey = deps.config.get('linear.apiKey') ?? ''
+          return {
+            configured: !!apiKey,
+            scopeKeys: parseCsv(deps.config.get('linear.teamKeys')),
+            onlyMine: deps.config.get('linear.onlyMine') !== '0',
+            apiKey,
+            baseUrl: '',
+            email: '',
+            apiToken: '',
+          } satisfies TicketSourceSettings
+        }
+        if (src === 'jira') {
+          const baseUrl = deps.config.get('jira.baseUrl') ?? ''
+          const email = deps.config.get('jira.email') ?? ''
+          const apiToken = deps.config.get('jira.apiToken') ?? ''
+          return {
+            configured: !!baseUrl && !!email && !!apiToken,
+            scopeKeys: parseCsv(deps.config.get('jira.projectKeys')),
+            onlyMine: deps.config.get('jira.onlyMine') !== '0',
+            apiKey: '',
+            baseUrl,
+            email,
+            apiToken,
+          } satisfies TicketSourceSettings
+        }
+        throw new Error(`Unknown ticket source: ${src}`)
+      }
+
+      case IPC.setTicketSettings: {
+        const src = args[0] as TicketSource
+        const cfg = args[1] as TicketSourceSettings
+        if (src === 'linear') {
+          deps.config.set('linear.apiKey', cfg.apiKey ?? '')
+          deps.config.set('linear.teamKeys', (cfg.scopeKeys ?? []).join(','))
+          deps.config.set('linear.onlyMine', cfg.onlyMine === false ? '0' : '1')
+          return undefined
+        }
+        if (src === 'jira') {
+          deps.config.set('jira.baseUrl', cfg.baseUrl ?? '')
+          deps.config.set('jira.email', cfg.email ?? '')
+          deps.config.set('jira.apiToken', cfg.apiToken ?? '')
+          deps.config.set('jira.projectKeys', (cfg.scopeKeys ?? []).join(','))
+          deps.config.set('jira.onlyMine', cfg.onlyMine === false ? '0' : '1')
+          return undefined
+        }
+        throw new Error(`Unknown ticket source: ${src}`)
+      }
+
+      case IPC.listTicketScopes: {
+        const src = args[0] as TicketSource
+        const provider = deps.ticketProviders?.[src]
+        if (!provider) throw new Error(`Unknown ticket source: ${src}`)
+        if (!provider.listScopes) throw new Error('Scope listing not supported')
+        return provider.listScopes()
+      }
 
       case IPC.getEditorConfig:
         return {

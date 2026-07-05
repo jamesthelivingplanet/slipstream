@@ -148,7 +148,28 @@ export interface SessionDTO {
 export interface WorkflowState {
   id: string
   name: string
-  type?: string // linear: backlog|unstarted|started|completed|canceled
+  type?: string // linear: backlog|unstarted|started|completed|canceled (jira status categories map onto unstarted|started|completed)
+}
+
+/** A selectable ticket scope: a Linear team or a Jira project. */
+export interface ScopeOption {
+  id: string
+  key: string // e.g. Linear team key "FLO", Jira project key "PROJ"
+  name: string
+}
+
+/** Per-source ticket provider settings (credentials + scoping), struct
+ *  get/set like EditorConfig. Credential fields are ''-when-unset; which
+ *  ones apply depends on the source (linear: apiKey; jira: baseUrl/email/
+ *  apiToken). scopeKeys empty = all teams/projects. */
+export interface TicketSourceSettings {
+  configured: boolean // read-only: credentials present (ignored on set)
+  scopeKeys: string[] // linear team keys / jira project keys; [] = no scope filter
+  onlyMine: boolean // restrict to assigned-to-me-or-unassigned
+  apiKey: string // linear
+  baseUrl: string // jira, e.g. https://yourteam.atlassian.net
+  email: string // jira
+  apiToken: string // jira
 }
 export interface TicketDTO {
   id: string
@@ -315,26 +336,35 @@ export interface IAppRunner {
 export interface ITicketProvider {
   readonly id: string
   listTickets(): Promise<TicketDTO[]>
-  /** tid is the human identifier e.g. "FLO-17". */
+  /** Available scopes (Linear teams / Jira projects) for the settings picker.
+   *  Throws with a readable message on bad credentials — doubles as a
+   *  connection test. Optional: single-purpose providers may omit it. */
+  listScopes?(): Promise<ScopeOption[]>
+  /** tid is the human identifier e.g. "FLO-17". `src` routes to the right
+   *  sub-provider when multiple sources are active (composite); concrete
+   *  providers ignore it. */
   getTicketStatus(
     tid: string,
+    src?: TicketSource,
   ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
-  setTicketStatus(tid: string, stateId: string): Promise<WorkflowState>
+  setTicketStatus(tid: string, stateId: string, src?: TicketSource): Promise<WorkflowState>
   /**
    * Transition the ticket to this provider's "in progress" / started state
    * (e.g. Linear "In Progress"). Best-effort and idempotent: returns the new
    * state, or null when no transition applies (no provider configured, no
    * started state exists, or the ticket is already in a started state).
+   * `src` routes to the right sub-provider (composite); concrete providers ignore it.
    */
-  startTicket(tid: string): Promise<WorkflowState | null>
+  startTicket(tid: string, src?: TicketSource): Promise<WorkflowState | null>
   /**
    * Transition the ticket back to this provider's "to do" / unstarted state
    * (e.g. Linear "To Do"). Best-effort and idempotent: returns the new
    * state, or null when no transition applies (ticket is not currently in a
    * started/in-progress state, no provider configured, no unstarted state
    * exists, or the ticket is already unstarted).
+   * `src` routes to the right sub-provider (composite); concrete providers ignore it.
    */
-  resetTicket(tid: string): Promise<WorkflowState | null>
+  resetTicket(tid: string, src?: TicketSource): Promise<WorkflowState | null>
 }
 
 /* ───────── IPC: renderer-facing bridge (window.slipstream) ───────── */
@@ -352,10 +382,17 @@ export interface SlipstreamApi {
   listTickets(): Promise<TicketDTO[]>
   getTicketStatus(
     tid: string,
+    src?: TicketSource,
   ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }>
-  setTicketStatus(tid: string, stateId: string): Promise<WorkflowState>
+  setTicketStatus(tid: string, stateId: string, src?: TicketSource): Promise<WorkflowState>
   getLinearKey(): Promise<string | null>
   setLinearKey(key: string): Promise<void>
+  /** Struct get/set for a ticket source's credentials + scoping, mirroring EditorConfig. */
+  getTicketSettings(src: TicketSource): Promise<TicketSourceSettings>
+  setTicketSettings(src: TicketSource, cfg: TicketSourceSettings): Promise<void>
+  /** Live-fetches Linear teams / Jira projects for the settings scope picker.
+   *  Rejects with a readable error on bad credentials — doubles as a connection test. */
+  listTicketScopes(src: TicketSource): Promise<ScopeOption[]>
   getEditorConfig(): Promise<EditorConfig>
   setEditorConfig(cfg: EditorConfig): Promise<void>
   /** Launch the configured editor on the session's worktree. mobile=true uses the mobile command when set. Rejects with a descriptive Error on failure. */
@@ -441,6 +478,9 @@ export const IPC = {
   listTickets: 'tickets:list',
   getTicketStatus: 'tickets:status',
   setTicketStatus: 'tickets:setStatus',
+  getTicketSettings: 'tickets:getSettings',
+  setTicketSettings: 'tickets:setSettings',
+  listTicketScopes: 'tickets:listScopes',
   startSession: 'session:start',
   writeSession: 'session:write',
   resizeSession: 'session:resize',

@@ -433,7 +433,7 @@ describe('createRpc', () => {
     await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ])
-    expect(deps.tickets.startTicket).toHaveBeenCalledWith('T-1')
+    expect(deps.tickets.startTicket).toHaveBeenCalledWith('T-1', undefined)
   })
 
   it('startSession still succeeds when startTicket rejects', async () => {
@@ -501,7 +501,7 @@ describe('createRpc', () => {
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ])
     await rpc.handle(IPC.cleanupSession, ['s1'])
-    expect(deps.tickets.resetTicket).toHaveBeenCalledWith('T-1')
+    expect(deps.tickets.resetTicket).toHaveBeenCalledWith('T-1', undefined)
   })
 
   it('cleanupSession still succeeds when resetTicket rejects', async () => {

@@ -25,7 +25,7 @@
     error = null
     menuOpen = false
     contentLoading.set(true)
-    getTicketStatus(session.tid)
+    getTicketStatus(session.tid, session.src)
       .then((res) => {
         current = res.current
         available = res.available
@@ -57,7 +57,7 @@
     current = state
     menuOpen = false
     try {
-      const updated = await setTicketStatus(session.tid, state.id)
+      const updated = await setTicketStatus(session.tid, state.id, session.src)
       current = updated
     } catch (e) {
       current = prev
