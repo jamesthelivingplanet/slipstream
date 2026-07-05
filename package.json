@@ -8,7 +8,7 @@
   "engines": {
     "node": "22.x"
   },
-  "description": "Desktop console for managing many parallel Claude Code agents",
+  "description": "Multi-agent platform for organizing many parallel coding agents in one app",
   "scripts": {
     "dev": "node scripts/build-server.mjs && vite",
     "dev:backend": "node scripts/dev-backend.mjs",
