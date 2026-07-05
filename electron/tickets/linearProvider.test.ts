@@ -2,9 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createLinearProvider } from './linearProvider.js'
 import type { IConfigStore } from '../services/configStore.js'
 
-function makeConfigStore(key?: string): IConfigStore {
+function makeConfigStore(
+  key?: string,
+  extra: Record<string, string | undefined> = {},
+): IConfigStore {
   return {
-    get: vi.fn().mockReturnValue(key),
+    get: vi.fn((k: string) => (k === 'linear.apiKey' ? key : extra[k])),
     set: vi.fn(),
   }
 }
@@ -539,6 +542,91 @@ describe('createLinearProvider', () => {
       const result = await provider.resetTicket('ENG-123')
 
       expect(result).toBeNull()
+    })
+  })
+
+  describe('listTickets scoping', () => {
+    it('injects team filter into the request variables when linear.teamKeys is set', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { issues: { nodes: [] } } }),
+      } as Response)
+
+      const provider = createLinearProvider(
+        makeConfigStore('lin_api_test', { 'linear.teamKeys': 'ENG, INF ,' }),
+      )
+      await provider.listTickets()
+
+      const call = vi.mocked(fetch).mock.calls[0]
+      const body = JSON.parse(call[1]!.body as string)
+      expect(body.variables.filter.and).toContainEqual({ team: { key: { in: ['ENG', 'INF'] } } })
+    })
+
+    it('omits team filter when linear.teamKeys is unset', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { issues: { nodes: [] } } }),
+      } as Response)
+
+      const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+      await provider.listTickets()
+
+      const call = vi.mocked(fetch).mock.calls[0]
+      const body = JSON.parse(call[1]!.body as string)
+      expect(body.variables.filter.and.some((c: unknown) => (c as { team?: unknown }).team)).toBe(
+        false,
+      )
+    })
+
+    it('drops the assignee clause when linear.onlyMine is 0', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { issues: { nodes: [] } } }),
+      } as Response)
+
+      const provider = createLinearProvider(
+        makeConfigStore('lin_api_test', { 'linear.onlyMine': '0' }),
+      )
+      await provider.listTickets()
+
+      const call = vi.mocked(fetch).mock.calls[0]
+      const body = JSON.parse(call[1]!.body as string)
+      expect(body.variables.filter.and.some((c: unknown) => (c as { or?: unknown }).or)).toBe(false)
+    })
+
+    it('includes the assignee clause by default (onlyMine unset)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { issues: { nodes: [] } } }),
+      } as Response)
+
+      const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+      await provider.listTickets()
+
+      const call = vi.mocked(fetch).mock.calls[0]
+      const body = JSON.parse(call[1]!.body as string)
+      expect(body.variables.filter.and.some((c: unknown) => (c as { or?: unknown }).or)).toBe(true)
+    })
+  })
+
+  describe('listScopes', () => {
+    it('maps teams query to ScopeOption[]', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: { teams: { nodes: [{ id: 't1', key: 'ENG', name: 'Engineering' }] } },
+        }),
+      } as Response)
+
+      const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+      const result = await provider.listScopes!()
+
+      expect(result).toEqual([{ id: 't1', key: 'ENG', name: 'Engineering' }])
+    })
+
+    it('throws when no API key is set', async () => {
+      const provider = createLinearProvider(makeConfigStore(undefined))
+      await expect(provider.listScopes!()).rejects.toThrow('Linear API key not set')
     })
   })
 })

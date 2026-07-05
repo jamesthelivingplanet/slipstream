@@ -6,6 +6,7 @@ import type {
   ITicketProvider,
   ISessionStore,
   IAppRunner,
+  TicketSource,
 } from './shared/contract.js'
 import type { IConfigStore } from './services/configStore.js'
 import type { IEditorLauncher } from './services/editorLauncher.js'
@@ -24,6 +25,9 @@ export interface IpcDeps {
   sessions: ISessionManager
   ports: IPortBroker
   tickets: ITicketProvider
+  /** Per-source providers, used only for scope listing (Settings picker);
+   *  per-ticket routing goes through `tickets` (the composite). */
+  ticketProviders?: Partial<Record<TicketSource, ITicketProvider>>
   config: IConfigStore
   sessionStore: ISessionStore
   editor: IEditorLauncher
