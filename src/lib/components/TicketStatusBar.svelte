@@ -4,6 +4,7 @@
   import type { WorkflowState } from '../types'
   import { getTicketStatus, setTicketStatus, hasBackend } from '../ipc'
   import { icons } from '../icons'
+  import { floatingAnchor } from '../floating'
   import { pushToast } from '../toast'
   import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
 
@@ -107,7 +108,7 @@
           <span class="chev">{@html icons.chevronDown}</span>
         </button>
         {#if menuOpen}
-          <div class="sel-menu sel-menu-right">
+          <div class="sel-menu sel-menu-right" use:floatingAnchor>
             {#each available as state (state.id)}
               <button
                 type="button"
