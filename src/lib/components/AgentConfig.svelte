@@ -1,7 +1,9 @@
 <script lang="ts">
   import { repos, repoById, startAgent } from '../stores'
   import { branchFor } from '../branch'
+  import AgentSelector from './AgentSelector.svelte'
   import { icons } from '../icons'
+  import { agentOption } from '../agents'
   import type { Session, BackendKind } from '../types'
 
   export let session: Session
@@ -94,43 +96,8 @@
 
     <div>
       <span class="lbl-f">Agent</span>
-      <div class="agent-kind-toggle">
-        <button
-          type="button"
-          class="toggle-opt"
-          class:active={agentKind === 'claude-code'}
-          on:click={() => (agentKind = 'claude-code')}
-        >
-          {#if agentKind === 'claude-code'}<span class="check-active">{@html icons.check}</span
-            >{/if}
-          Claude Code
-        </button>
-        <button
-          type="button"
-          class="toggle-opt"
-          class:active={agentKind === 'opencode'}
-          on:click={() => (agentKind = 'opencode')}
-        >
-          {#if agentKind === 'opencode'}<span class="check-active">{@html icons.check}</span>{/if}
-          OpenCode
-        </button>
-        <button
-          type="button"
-          class="toggle-opt"
-          class:active={agentKind === 'pi'}
-          on:click={() => (agentKind = 'pi')}
-        >
-          {#if agentKind === 'pi'}<span class="check-active">{@html icons.check}</span>{/if}
-          Pi
-        </button>
-      </div>
-      <p class="cfg-hint">
-        {agentKind === 'claude-code'
-          ? 'Uses claude --dangerously-skip-permissions in a git worktree.'
-          : agentKind === 'opencode'
-            ? 'Uses opencode in a git worktree with auto-discovered AGENTS.md.'
-            : 'Uses pi --approve in a git worktree with auto-discovered AGENTS.md.'}
-      </p>
+      <AgentSelector value={agentKind} on:select={(e) => (agentKind = e.detail)} />
+      <p class="cfg-hint">{agentOption(agentKind).description}</p>
     </div>
     <div class="derive">
       <div class="drow">
