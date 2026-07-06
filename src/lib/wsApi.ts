@@ -207,6 +207,11 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
         p.reject(new Error('WebSocket closed'))
       }
       pending.clear()
+      // Drop queued frames too — their pending entries were just rejected above, so
+      // flushing them on the next reconnect would execute requests whose callers
+      // already saw an error (ghost sessions for non-idempotent channels) and whose
+      // responses would be silently discarded. Queue and pending stay in lockstep.
+      queue.length = 0
 
       // 4001 = auth error (server-sent close code for 401)
       if (evt.code === 4001 || evt.code === 1008) {
@@ -339,7 +344,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     },
 
     resizeSession(id: string, cols: number, rows: number): void {
-      // Fire-and-forget
+      // Fire-and-forget: drop the frame while the socket is down instead of queuing
+      // it — replaying a stale terminal size on reconnect is useless (the UI sends a
+      // fresh resize once it re-attaches).
+      if (!isOpen()) return
       const req: WireReq = {
         t: 'req',
         id: genId(),
@@ -472,6 +480,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     },
 
     detachSession(id: string): void {
+      // Fire-and-forget: drop the frame while the socket is down instead of queuing
+      // it — the server already discards all per-client attach state on disconnect,
+      // so replaying a detach on reconnect is pointless.
+      if (!isOpen()) return
       const req: WireReq = { t: 'req', id: genId(), channel: IPC.detachSession, args: [id] }
       send(req)
     },

@@ -359,6 +359,15 @@ describe('wsApi', () => {
       expect(req.channel).toBe(IPC.resizeSession)
       expect(req.args).toEqual(['sess-1', 80, 24])
     })
+
+    it('detachSession sends a WireReq when the socket is open', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+      api.detachSession('sess-1')
+      const req = lastSent(ws)
+      expect(req.channel).toBe(IPC.detachSession)
+      expect(req.args).toEqual(['sess-1'])
+    })
   })
 
   describe('close handling', () => {
@@ -371,6 +380,73 @@ describe('wsApi', () => {
       ws.simulateClose(1001)
 
       await expect(promise).rejects.toThrow('WebSocket closed')
+    })
+  })
+
+  describe('reconnect must not replay orphaned frames', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('rejects a request made while disconnected and never sends its frame after a later reconnect', async () => {
+      vi.useFakeTimers()
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws1 = getWs()
+      ws1.simulateOpen()
+      ws1.simulateClose(1006) // connection drops → reconnect scheduled (500ms backoff)
+
+      // Issued while down: goes into the queue (and pending map), nothing on the wire.
+      const promise = api.startSession({ tid: 't1', title: 'T', prompt: 'p', repoId: 'r1' })
+      const rejection = expect(promise).rejects.toThrow('WebSocket closed')
+
+      // First reconnect attempt fails — its onclose rejects the pending request.
+      await vi.advanceTimersByTimeAsync(500)
+      const ws2 = getWs()
+      expect(ws2).not.toBe(ws1)
+      ws2.simulateClose(1006)
+      await rejection // the caller has already seen the error
+
+      // Second reconnect attempt (1000ms backoff) succeeds.
+      await vi.advanceTimersByTimeAsync(1000)
+      const ws3 = getWs()
+      expect(ws3).not.toBe(ws2)
+      ws3.simulateOpen()
+
+      // Regression guard: the orphaned frame must NOT be flushed to the server —
+      // its caller was already rejected, so replaying it would create work (e.g. a
+      // ghost session) nobody is tracking.
+      expect(ws3.sentMessages.map((m) => JSON.parse(m).channel)).not.toContain(IPC.startSession)
+      expect(ws3.sentMessages.length).toBe(0)
+    })
+
+    it('resizeSession while disconnected sends nothing after reconnect', async () => {
+      vi.useFakeTimers()
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws1 = getWs()
+      ws1.simulateOpen()
+      ws1.simulateClose(1006)
+
+      api.resizeSession('sess-1', 80, 24) // dropped, not queued
+
+      await vi.advanceTimersByTimeAsync(500)
+      const ws2 = getWs()
+      ws2.simulateOpen()
+      expect(ws2.sentMessages.length).toBe(0)
+    })
+
+    it('detachSession while disconnected sends nothing after reconnect', async () => {
+      vi.useFakeTimers()
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws1 = getWs()
+      ws1.simulateOpen()
+      ws1.simulateClose(1006)
+
+      api.detachSession('sess-1') // dropped, not queued
+
+      await vi.advanceTimersByTimeAsync(500)
+      const ws2 = getWs()
+      ws2.simulateOpen()
+      expect(ws2.sentMessages.length).toBe(0)
     })
   })
 
