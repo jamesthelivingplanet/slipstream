@@ -127,6 +127,10 @@ export const settingsRepoId = writable<string | null>(null)
 /** True when the viewport is at or below the mobile breakpoint. Synced from App.svelte. */
 export const mobile = writable<boolean>(false)
 
+/** True when the viewport is at or below the drawer breakpoint (≤900px), meaning
+ *  the agent list sidebar should be a toggleable overlay drawer. Synced from App.svelte. */
+export const drawer = writable<boolean>(false)
+
 // FLO-56: the header refresh button doubles as the agent-content fetch indicator.
 // TicketStatusBar reports its ticket-status fetch here so the header can show loading/resolved.
 export const contentLoading = writable<boolean>(false)

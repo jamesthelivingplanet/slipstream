@@ -1085,21 +1085,14 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
-/* On narrow viewports the sidebar becomes a full-width overlay drawer. */
-@media (max-width: 700px) {
+/* On narrow viewports the sidebar becomes a full-width overlay drawer.
+   Covers mobile AND medium/tablet viewports (≤900px). */
+@media (max-width: 900px) {
   body {
     overflow: hidden;
   }
 
-  /* The app header shrinks slightly and pads safe areas. */
-  header.bar {
-    padding: 0 12px;
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(12px, env(safe-area-inset-right));
-  }
-
-  /* Stack list + term vertically; list becomes a slide-in overlay
-     when .mobile-list-open is toggled (see App.svelte). */
+  /* Stack list + term vertically; list becomes a slide-in overlay. */
   .content {
     grid-template-columns: 1fr;
     position: relative;
@@ -1121,10 +1114,20 @@ body {
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
   }
 
-  /* The terminal pane fills the whole content area on mobile. */
+  /* The terminal pane fills the whole content area. */
   .term-pane {
     min-width: 0;
     width: 100%;
+  }
+}
+
+/* Mobile-only compact UI tweaks (≤700px). */
+@media (max-width: 700px) {
+  /* The app header shrinks slightly and pads safe areas. */
+  header.bar {
+    padding: 0 12px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
   }
 
   /* Larger touch targets for primary buttons. */
@@ -1195,13 +1198,6 @@ body {
     min-width: 80px;
     max-width: 110px;
     font-size: 11px;
-  }
-}
-
-/* Tablet-ish: narrower sidebar but still side-by-side. */
-@media (max-width: 900px) and (min-width: 701px) {
-  .content {
-    grid-template-columns: 280px 1fr;
   }
 }
 
