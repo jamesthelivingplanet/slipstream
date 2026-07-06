@@ -28,6 +28,7 @@ import type {
   TicketSource,
   ScopeOption,
   TicketSourceSettings,
+  PromptTemplateDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
 
@@ -333,6 +334,27 @@ export function getMcpStatus(): Promise<McpStatusDTO> {
 export function getDiagnostics(): Promise<DiagnosticsDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.getDiagnostics()
+}
+
+// ── Prompt templates (FLO-98) ────────────────────────────────────────────
+
+export function listPromptTemplates(repoId: string): Promise<PromptTemplateDTO[]> {
+  return hasBackend ? window.slipstream.listPromptTemplates(repoId) : Promise.resolve([])
+}
+
+export function savePromptTemplate(input: {
+  id?: string
+  repoId: string
+  name: string
+  body: string
+}): Promise<PromptTemplateDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.savePromptTemplate(input)
+}
+
+export function deletePromptTemplate(id: string): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.deletePromptTemplate(id)
 }
 
 // ── Agent CLI preflight ──────────────────────────────────────────────────

@@ -315,5 +315,27 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
 
       return result.issue.state
     },
+
+    async postComment(tid: string, body: string): Promise<boolean> {
+      const apiKey = config.get('linear.apiKey')
+      if (!apiKey) return false
+
+      const node = await resolveIssue(tid)
+
+      // Linear comments accept markdown, so the plain body string is fine.
+      const data = await gql(
+        apiKey,
+        `
+        mutation($issueId:String!,$body:String!){
+          commentCreate(input:{ issueId:$issueId, body:$body }){ success }
+        }
+      `,
+        { issueId: node.id, body },
+      )
+
+      const result = data.commentCreate as { success: boolean } | undefined
+      if (!result?.success) throw new Error('Failed to post comment')
+      return true
+    },
   }
 }

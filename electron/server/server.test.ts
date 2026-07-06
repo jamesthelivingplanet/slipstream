@@ -10,6 +10,7 @@ import type {
   IPortBroker,
   ITicketProvider,
   ISessionStore,
+  IPromptTemplateStore,
 } from '../shared/contract.js'
 import { IPC } from '../shared/contract.js'
 import { WebSocket } from 'ws'
@@ -22,6 +23,15 @@ import { OutputBuffer } from '../services/outputBuffer.js'
 
 function makeRepo(): RepoDTO {
   return { id: 'r1', org: 'acme', name: 'api', base: 'main', path: '/repos/api' }
+}
+
+function makeFakePromptTemplates(): IPromptTemplateStore {
+  return {
+    list: vi.fn().mockReturnValue([]),
+    get: vi.fn().mockReturnValue(undefined),
+    upsert: vi.fn(),
+    delete: vi.fn(),
+  }
 }
 
 function makeFakeDeps(): IpcDeps {
@@ -102,6 +112,7 @@ function makeFakeDeps(): IpcDeps {
     setTicketStatus: vi.fn().mockRejectedValue(new Error('not implemented')),
     startTicket: vi.fn().mockResolvedValue(null),
     resetTicket: vi.fn().mockResolvedValue(null),
+    postComment: vi.fn().mockResolvedValue(false),
   }
 
   const config: IConfigStore = {
@@ -142,6 +153,7 @@ function makeFakeDeps(): IpcDeps {
     tickets,
     config,
     sessionStore,
+    promptTemplates: makeFakePromptTemplates(),
     editor,
     appRunner: {
       run: vi.fn().mockResolvedValue({ pid: 1234, reused: false }),
@@ -242,6 +254,7 @@ function makeSurvivalDeps(): {
     setTicketStatus: vi.fn().mockRejectedValue(new Error('not implemented')),
     startTicket: vi.fn().mockResolvedValue(null),
     resetTicket: vi.fn().mockResolvedValue(null),
+    postComment: vi.fn().mockResolvedValue(false),
   }
 
   const config: IConfigStore = {
@@ -282,6 +295,7 @@ function makeSurvivalDeps(): {
     tickets,
     config,
     sessionStore,
+    promptTemplates: makeFakePromptTemplates(),
     editor,
     appRunner: {
       run: vi.fn().mockResolvedValue({ pid: 1234, reused: false }),

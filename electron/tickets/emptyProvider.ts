@@ -20,5 +20,8 @@ export function createEmptyProvider(): ITicketProvider {
     async resetTicket(_tid: string): Promise<WorkflowState | null> {
       return null
     },
+    async postComment(_tid: string, _body: string): Promise<boolean> {
+      return false
+    },
   }
 }

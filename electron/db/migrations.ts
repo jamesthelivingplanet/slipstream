@@ -78,6 +78,16 @@ export const MIGRATIONS: Migration[] = [
   (db) => db.exec(SCHEMA),
   // 2 — FLO-83: persist the ticket source per session so it round-trips on reload
   (db) => db.exec(`ALTER TABLE sessions ADD COLUMN src TEXT`),
+  // 3 — FLO-98: per-repo reusable prompt templates
+  (db) =>
+    db.exec(`CREATE TABLE IF NOT EXISTS prompt_templates (
+  id        TEXT PRIMARY KEY,
+  repoId    TEXT NOT NULL,
+  name      TEXT NOT NULL,
+  body      TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  ownerId   TEXT DEFAULT 'local'
+)`),
 ]
 
 /** Apply any migrations newer than the DB's current user_version, atomically. */

@@ -16,9 +16,15 @@
   import { branchFor } from '../branch'
   import { icons } from '../icons'
   import { agentOption } from '../agents'
-  import { checkAgentCli } from '../ipc'
+  import {
+    checkAgentCli,
+    listPromptTemplates,
+    savePromptTemplate,
+    deletePromptTemplate,
+  } from '../ipc'
+  import { pushToast } from '../toast'
   import type { Ticket, BackendKind } from '../types'
-  import type { AgentCliCheck } from '../../../electron/shared/contract'
+  import type { AgentCliCheck, PromptTemplateDTO } from '../../../electron/shared/contract'
   import { floatingAnchor } from '../floating'
 
   let picked: Ticket | null = null
@@ -31,6 +37,61 @@
   let loadingTickets = false
   let agentKind: BackendKind = 'claude-code'
   let cliCheck: AgentCliCheck | null = null
+  let templates: PromptTemplateDTO[] = []
+  let tplFormOpen = false
+  let tplName = ''
+  let tplSaving = false
+
+  function loadTemplates(repoId: string) {
+    listPromptTemplates(repoId)
+      .then((ts) => {
+        // Guard against a stale response after the user switched repos.
+        if (repoChoice === repoId) templates = ts
+      })
+      .catch(() => {
+        templates = []
+      })
+  }
+
+  // Explicit (not reactive) so template loading happens exactly when the
+  // chosen repo changes — every repoChoice write goes through here.
+  function selectRepo(id: string | null) {
+    repoChoice = id
+    templates = []
+    tplFormOpen = false
+    tplName = ''
+    if (id) loadTemplates(id)
+  }
+
+  function applyTemplate(t: PromptTemplateDTO) {
+    prompt = t.body
+  }
+
+  async function removeTemplate(t: PromptTemplateDTO) {
+    try {
+      await deletePromptTemplate(t.id)
+      templates = templates.filter((x) => x.id !== t.id)
+      pushToast('success', `Deleted template "${t.name}"`)
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to delete template')
+    }
+  }
+
+  async function saveTemplate() {
+    if (!repoChoice || !tplName.trim() || !prompt.trim()) return
+    tplSaving = true
+    try {
+      const dto = await savePromptTemplate({ repoId: repoChoice, name: tplName, body: prompt })
+      templates = [...templates, dto]
+      tplFormOpen = false
+      tplName = ''
+      pushToast('success', `Saved template "${dto.name}"`)
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save template')
+    } finally {
+      tplSaving = false
+    }
+  }
 
   function runCliCheck(kind: BackendKind) {
     cliCheck = null
@@ -57,6 +118,9 @@
     repoChoice = null
     menuOpen = false
     draftTid = `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`
+    templates = []
+    tplFormOpen = false
+    tplName = ''
     wasOpen = true
     runCliCheck(agentKind)
     // refresh tickets when dialog opens
@@ -72,7 +136,7 @@
     title = t.title
     prompt = `Begin implementing ${t.tid}.`
     // Pre-select the ticket's suggested repo when it matches a registered repo.
-    repoChoice = t.repo || null
+    selectRepo(t.repo || null)
     menuOpen = false
   }
 
@@ -160,6 +224,65 @@
         </p>
       </div>
 
+      {#if repoChoice && (templates.length > 0 || prompt.trim())}
+        <div>
+          <span class="lbl-f">Prompt templates</span>
+          {#if templates.length > 0}
+            <div class="tpl-row">
+              {#each templates as t (t.id)}
+                <span class="tpl-chip">
+                  <button
+                    type="button"
+                    class="tpl-use"
+                    title={t.body}
+                    on:click={() => applyTemplate(t)}>{t.name}</button
+                  >
+                  <button
+                    type="button"
+                    class="tpl-del"
+                    aria-label={`Delete template ${t.name}`}
+                    on:click|stopPropagation={() => removeTemplate(t)}>×</button
+                  >
+                </span>
+              {/each}
+            </div>
+          {/if}
+          {#if prompt.trim()}
+            {#if tplFormOpen}
+              <div class="tpl-form">
+                <input
+                  type="text"
+                  placeholder="Template name"
+                  bind:value={tplName}
+                  on:keydown={(e) => e.key === 'Enter' && saveTemplate()}
+                />
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  disabled={!tplName.trim() || tplSaving}
+                  on:click={saveTemplate}>Save</button
+                >
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  on:click={() => {
+                    tplFormOpen = false
+                    tplName = ''
+                  }}>Cancel</button
+                >
+              </div>
+            {:else}
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                on:click={() => (tplFormOpen = true)}>Save as template</button
+              >
+            {/if}
+          {/if}
+          <p class="cfg-hint">Templates are saved per repository and reusable across agents.</p>
+        </div>
+      {/if}
+
       <div>
         <span class="lbl-f">Repository</span>
         {#if $repos.length > 0}
@@ -184,7 +307,7 @@
                     class="opt"
                     class:sel={repoChoice === r.id}
                     on:click|stopPropagation={() => {
-                      repoChoice = r.id
+                      selectRepo(r.id)
                       menuOpen = false
                     }}
                   >
@@ -255,5 +378,51 @@
     border: 1px solid hsl(var(--st-needs) / 0.4);
     background: hsl(var(--st-needs) / 0.1);
     color: hsl(var(--st-needs));
+  }
+
+  .tpl-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .tpl-chip {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid hsl(var(--border));
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .tpl-use {
+    padding: 3px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tpl-use:hover {
+    background: hsl(var(--accent-bg));
+  }
+  .tpl-del {
+    padding: 3px 7px;
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+    border-left: 1px solid hsl(var(--border));
+    cursor: pointer;
+  }
+  .tpl-del:hover {
+    background: hsl(var(--accent-bg));
+    color: hsl(var(--foreground));
+  }
+  .tpl-form {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tpl-form input {
+    flex: 1;
+    min-width: 0;
   }
 </style>

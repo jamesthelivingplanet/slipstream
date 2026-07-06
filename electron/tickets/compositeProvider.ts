@@ -66,5 +66,9 @@ export function createCompositeProvider(providers: ITicketProvider[]): ITicketPr
     async resetTicket(tid: string, src?: TicketSource): Promise<WorkflowState | null> {
       return resolve(tid, src).resetTicket(tid)
     },
+
+    async postComment(tid: string, body: string, src?: TicketSource): Promise<boolean> {
+      return resolve(tid, src).postComment(tid, body)
+    },
   }
 }

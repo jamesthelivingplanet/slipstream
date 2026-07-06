@@ -13,6 +13,8 @@ import type {
   IPortBroker,
   ITicketProvider,
   ISessionStore,
+  IPromptTemplateStore,
+  PromptTemplateDTO,
   SessionStatus,
   WriteLockState,
 } from '../shared/contract.js'
@@ -125,6 +127,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     setTicketStatus: vi.fn().mockRejectedValue(new Error('not implemented')),
     startTicket: vi.fn().mockResolvedValue(null),
     resetTicket: vi.fn().mockResolvedValue(null),
+    postComment: vi.fn().mockResolvedValue(false),
   }
 
   const config: IConfigStore = {
@@ -145,6 +148,22 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     },
     delete(id) {
       sessionStoreMap.delete(id)
+    },
+  }
+
+  const promptTemplateMap = new Map<string, PromptTemplateDTO>()
+  const promptTemplates: IPromptTemplateStore = {
+    list(repoId) {
+      return Array.from(promptTemplateMap.values()).filter((t) => t.repoId === repoId)
+    },
+    get(id) {
+      return promptTemplateMap.get(id)
+    },
+    upsert(t) {
+      promptTemplateMap.set(t.id, t)
+    },
+    delete(id) {
+      promptTemplateMap.delete(id)
     },
   }
 
@@ -176,6 +195,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     tickets,
     config,
     sessionStore,
+    promptTemplates,
     editor,
     appRunner,
     tailscale,
@@ -869,6 +889,102 @@ describe('createRpc', () => {
       )
       await expect(rpc.handle(IPC.removeRepo, ['r1'])).rejects.toThrow('Unknown repo: r1')
       expect(deps.repos.remove).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('prompt templates (FLO-98)', () => {
+    function makeTemplate(overrides: Partial<PromptTemplateDTO> = {}): PromptTemplateDTO {
+      return {
+        id: 'tpl-1',
+        repoId: 'r1',
+        name: 'Bug fix kickoff',
+        body: 'Fix the bug described in the ticket.',
+        createdAt: 111,
+        ownerId: 'local',
+        ...overrides,
+      }
+    }
+
+    it('listPromptTemplates requires an owned repo', async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined)
+      await expect(rpc.handle(IPC.listPromptTemplates, ['nope'])).rejects.toThrow(
+        'Unknown repo: nope',
+      )
+    })
+
+    it("listPromptTemplates throws Unknown repo for another identity's repo", async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
+      await expect(rpc.handle(IPC.listPromptTemplates, ['r1'])).rejects.toThrow('Unknown repo: r1')
+    })
+
+    it('listPromptTemplates filters out rows owned by another identity', async () => {
+      deps.promptTemplates.upsert(makeTemplate({ id: 'mine', ownerId: 'local' }))
+      deps.promptTemplates.upsert(makeTemplate({ id: 'legacy', ownerId: undefined })) // → local
+      deps.promptTemplates.upsert(makeTemplate({ id: 'hers', ownerId: 'alice' }))
+      const result = (await rpc.handle(IPC.listPromptTemplates, ['r1'])) as PromptTemplateDTO[]
+      expect(result.map((t) => t.id).sort()).toEqual(['legacy', 'mine'])
+    })
+
+    it('savePromptTemplate mints an id, stamps ownerId, and returns the DTO', async () => {
+      const result = (await rpc.handle(IPC.savePromptTemplate, [
+        { repoId: 'r1', name: 'Kickoff', body: 'Do the thing.' },
+      ])) as PromptTemplateDTO
+      expect(result.id).toBeTruthy()
+      expect(result.ownerId).toBe('local')
+      expect(result.repoId).toBe('r1')
+      expect(result.createdAt).toBeGreaterThan(0)
+      expect(deps.promptTemplates.get(result.id)).toEqual(result)
+    })
+
+    it('savePromptTemplate rejects an empty name', async () => {
+      await expect(
+        rpc.handle(IPC.savePromptTemplate, [{ repoId: 'r1', name: '   ', body: 'Do it.' }]),
+      ).rejects.toThrow(/name/i)
+    })
+
+    it('savePromptTemplate rejects an empty body', async () => {
+      await expect(
+        rpc.handle(IPC.savePromptTemplate, [{ repoId: 'r1', name: 'Kickoff', body: ' ' }]),
+      ).rejects.toThrow(/body/i)
+    })
+
+    it('savePromptTemplate preserves createdAt when updating an owned template', async () => {
+      deps.promptTemplates.upsert(makeTemplate({ id: 'tpl-1', createdAt: 111 }))
+      const result = (await rpc.handle(IPC.savePromptTemplate, [
+        { id: 'tpl-1', repoId: 'r1', name: 'Renamed', body: 'New body' },
+      ])) as PromptTemplateDTO
+      expect(result.createdAt).toBe(111)
+      expect(deps.promptTemplates.get('tpl-1')?.name).toBe('Renamed')
+    })
+
+    it("savePromptTemplate throws Template not found for another identity's template", async () => {
+      deps.promptTemplates.upsert(makeTemplate({ id: 'hers', ownerId: 'alice' }))
+      await expect(
+        rpc.handle(IPC.savePromptTemplate, [
+          { id: 'hers', repoId: 'r1', name: 'Steal', body: 'nope' },
+        ]),
+      ).rejects.toThrow('Template not found: hers')
+      expect(deps.promptTemplates.get('hers')?.name).toBe('Bug fix kickoff')
+    })
+
+    it('deletePromptTemplate throws the identical error for missing and other-owner rows', async () => {
+      deps.promptTemplates.upsert(makeTemplate({ id: 'hers', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.deletePromptTemplate, ['missing'])).rejects.toThrow(
+        'Template not found: missing',
+      )
+      await expect(rpc.handle(IPC.deletePromptTemplate, ['hers'])).rejects.toThrow(
+        'Template not found: hers',
+      )
+      // no existence leak: the row is untouched
+      expect(deps.promptTemplates.get('hers')).toBeTruthy()
+    })
+
+    it('deletePromptTemplate deletes an owned template', async () => {
+      deps.promptTemplates.upsert(makeTemplate({ id: 'tpl-1' }))
+      await rpc.handle(IPC.deletePromptTemplate, ['tpl-1'])
+      expect(deps.promptTemplates.get('tpl-1')).toBeUndefined()
     })
   })
 
