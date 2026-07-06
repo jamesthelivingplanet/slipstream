@@ -147,6 +147,10 @@ describe('worktreeManager (real git)', () => {
     const list = await wm.list(repo)
     expect(list.some((w) => w.branch === 'feat-list')).toBe(true)
     expect(list.some((w) => w.path === repo.path)).toBe(false)
+    // The primary checkout's stanza must be skipped entirely — no bogus entry
+    // for the base branch pointing at a .worktrees path that doesn't exist.
+    expect(list.some((w) => w.branch === repo.base)).toBe(false)
+    for (const w of list) expect(existsSync(w.path)).toBe(true)
     await wm.remove(repo, 'feat-list', { force: true })
   })
 
