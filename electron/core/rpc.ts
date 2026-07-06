@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import fs from 'node:fs'
 import path from 'node:path'
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
@@ -330,6 +331,16 @@ export function createRpc(
           sessionMeta.delete(id)
           deps.sessionStore.delete(id)
 
+          // Best-effort: drop the per-session MCP config so the files don't
+          // accumulate forever. A failed unlink must not break the cleanup.
+          if (deps.appMcp) {
+            try {
+              await fs.promises.unlink(path.join(deps.appMcp.configDir, `${id}.json`))
+            } catch {
+              // ignore: file already gone or not writable
+            }
+          }
+
           // FLO-35: move the linked ticket back to "To Do" when the agent run
           // is deleted, so the next agent can pick it up. Best-effort — a
           // ticket-API failure must not break the cleanup.
@@ -374,23 +385,40 @@ export function createRpc(
         }
         const resumeEnv: Record<string, string> = {}
         if (port !== undefined) resumeEnv.PORT = String(port)
-        if (persisted.agentKind === 'opencode' && deps.appMcp) {
-          resumeEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
-            buildOpencodeMcpConfig({
-              appMcpJsPath: deps.appMcp.appMcpJsPath,
-              electronPath: deps.appMcp.electronPath,
-              dataDir: deps.appMcp.dataDir,
-              sessionId: id,
-              base: repo.base,
-              branch: persisted.branch,
-            }),
-          )
+        let mcpConfigPath: string | undefined
+        if (deps.appMcp) {
+          // Rewrite the per-session MCP config — it may have been deleted
+          // since the original start (e.g. by cleanup or a data-dir wipe).
+          mcpConfigPath = path.join(deps.appMcp.configDir, `${id}.json`)
+          const config = buildAppMcpConfig({
+            appMcpJsPath: deps.appMcp.appMcpJsPath,
+            electronPath: deps.appMcp.electronPath,
+            dataDir: deps.appMcp.dataDir,
+            sessionId: id,
+            base: repo.base,
+            branch: persisted.branch,
+          })
+          await writeAppMcpConfig(mcpConfigPath, config)
+
+          if (persisted.agentKind === 'opencode') {
+            resumeEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
+              buildOpencodeMcpConfig({
+                appMcpJsPath: deps.appMcp.appMcpJsPath,
+                electronPath: deps.appMcp.electronPath,
+                dataDir: deps.appMcp.dataDir,
+                sessionId: id,
+                base: repo.base,
+                branch: persisted.branch,
+              }),
+            )
+          }
         }
         const dto = deps.sessions.resume({
           session: persisted,
           cwd,
           env: Object.keys(resumeEnv).length > 0 ? resumeEnv : undefined,
           opencodePort,
+          mcpConfigPath,
         })
         sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })
@@ -419,23 +447,40 @@ export function createRpc(
         }
         const remoteEnv: Record<string, string> = {}
         if (port !== undefined) remoteEnv.PORT = String(port)
-        if (persisted.agentKind === 'opencode' && deps.appMcp) {
-          remoteEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
-            buildOpencodeMcpConfig({
-              appMcpJsPath: deps.appMcp.appMcpJsPath,
-              electronPath: deps.appMcp.electronPath,
-              dataDir: deps.appMcp.dataDir,
-              sessionId: id,
-              base: repo.base,
-              branch: persisted.branch,
-            }),
-          )
+        let mcpConfigPath: string | undefined
+        if (deps.appMcp) {
+          // Rewrite the per-session MCP config — it may have been deleted
+          // since the original start (e.g. by cleanup or a data-dir wipe).
+          mcpConfigPath = path.join(deps.appMcp.configDir, `${id}.json`)
+          const config = buildAppMcpConfig({
+            appMcpJsPath: deps.appMcp.appMcpJsPath,
+            electronPath: deps.appMcp.electronPath,
+            dataDir: deps.appMcp.dataDir,
+            sessionId: id,
+            base: repo.base,
+            branch: persisted.branch,
+          })
+          await writeAppMcpConfig(mcpConfigPath, config)
+
+          if (persisted.agentKind === 'opencode') {
+            remoteEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
+              buildOpencodeMcpConfig({
+                appMcpJsPath: deps.appMcp.appMcpJsPath,
+                electronPath: deps.appMcp.electronPath,
+                dataDir: deps.appMcp.dataDir,
+                sessionId: id,
+                base: repo.base,
+                branch: persisted.branch,
+              }),
+            )
+          }
         }
         const dto = deps.sessions.attachRemoteControl({
           session: persisted,
           cwd,
           env: Object.keys(remoteEnv).length > 0 ? remoteEnv : undefined,
           opencodePort,
+          mcpConfigPath,
         })
         sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })

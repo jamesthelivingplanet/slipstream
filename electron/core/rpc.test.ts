@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { createRpc } from './rpc.js'
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
@@ -548,6 +551,74 @@ describe('createRpc', () => {
     ])
     const result = await rpc.handle(IPC.cleanupSession, ['s1'])
     expect(result).toEqual({ removed: true })
+  })
+
+  describe('app MCP config lifecycle', () => {
+    let configDir: string
+
+    beforeEach(() => {
+      configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-mcp-'))
+      deps.appMcp = {
+        configDir,
+        appMcpJsPath: '/app/app-mcp.js',
+        electronPath: '/usr/bin/electron',
+        dataDir: '/data',
+      }
+    })
+
+    afterEach(() => {
+      fs.rmSync(configDir, { recursive: true, force: true })
+    })
+
+    it('resumeSession rewrites the config file and passes mcpConfigPath to sessions.resume', async () => {
+      deps.sessionStore.upsert(makeSession())
+      ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
+
+      await rpc.handle(IPC.resumeSession, ['s1'])
+
+      const expected = path.join(configDir, 's1.json')
+      expect(deps.sessions.resume).toHaveBeenCalledWith(
+        expect.objectContaining({ mcpConfigPath: expected }),
+      )
+      expect(fs.existsSync(expected)).toBe(true)
+    })
+
+    it('attachRemoteControl rewrites the config file and passes mcpConfigPath', async () => {
+      deps.sessionStore.upsert(makeSession())
+
+      await rpc.handle(IPC.attachRemoteControl, ['s1'])
+
+      const expected = path.join(configDir, 's1.json')
+      expect(deps.sessions.attachRemoteControl).toHaveBeenCalledWith(
+        expect.objectContaining({ mcpConfigPath: expected }),
+      )
+      expect(fs.existsSync(expected)).toBe(true)
+    })
+
+    it('cleanupSession deletes the per-session config file when removal succeeds', async () => {
+      await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', sessionId: 's1' },
+      ])
+      const configPath = path.join(configDir, 's1.json')
+      expect(fs.existsSync(configPath)).toBe(true)
+
+      await rpc.handle(IPC.cleanupSession, ['s1'])
+      expect(fs.existsSync(configPath)).toBe(false)
+    })
+
+    it('cleanupSession keeps the config file when removal fails', async () => {
+      await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', sessionId: 's1' },
+      ])
+      const configPath = path.join(configDir, 's1.json')
+      ;(deps.worktrees.remove as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        removed: false,
+        reason: 'dirty',
+      })
+
+      await rpc.handle(IPC.cleanupSession, ['s1'])
+      expect(fs.existsSync(configPath)).toBe(true)
+    })
   })
 
   describe('editor config', () => {
