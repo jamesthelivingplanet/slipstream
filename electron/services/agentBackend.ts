@@ -126,18 +126,19 @@ function runPoll(
   handle.setPollTimer(setInterval(() => void tick(), intervalMs))
 }
 
+function withClaudePromptArg(args: string[], prompt: string | null | undefined): string[] {
+  return prompt ? [...args, prompt] : args
+}
+
 export const claudeCodeBackend: AgentBackend = {
   kind: 'claude-code',
   statusSource: 'pty',
   buildStartArgs({ sessionId, system, user, mcpConfigPath }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
-    const args = [
-      CLAUDE_FLAGS.skipPermissions,
-      ...systemArgs,
-      CLAUDE_FLAGS.sessionId,
-      sessionId,
+    const args = withClaudePromptArg(
+      [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId],
       userPrompt,
-    ]
+    )
     if (mcpConfigPath) {
       args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
     }
@@ -218,12 +219,16 @@ export const opencodeBackend: AgentBackend = {
   },
 }
 
+function withPiPromptArg(args: string[], prompt: string | null | undefined): string[] {
+  return prompt ? [...args, prompt] : args
+}
+
 export const piBackend: AgentBackend = {
   kind: 'pi',
   statusSource: 'poll',
   buildStartArgs({ system, user }) {
     const { systemArgs, userPrompt } = deliverPrompt('pi', { system, user })
-    return { cmd: PI_BIN, args: [PI_APPROVE_FLAG, ...systemArgs, userPrompt] }
+    return { cmd: PI_BIN, args: withPiPromptArg([PI_APPROVE_FLAG, ...systemArgs], userPrompt) }
   },
   buildResumeArgs() {
     return { cmd: PI_BIN, args: [PI_APPROVE_FLAG, PI_CONTINUE_FLAG] }

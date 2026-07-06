@@ -74,6 +74,18 @@ describe('claudeCodeBackend.buildStartArgs', () => {
     })
     expect(args).not.toContain('--append-system-prompt')
   })
+
+  it('with empty user prompt, args do NOT include the prompt (no trailing empty string)', () => {
+    const { args } = claudeCodeBackend.buildStartArgs({
+      sessionId: 'sid4',
+      system: '',
+      user: '',
+    })
+    expect(args).not.toContain('')
+    expect(args[args.length - 1]).not.toBe('')
+    // Should end with sessionId
+    expect(args[args.length - 1]).toBe('sid4')
+  })
 })
 
 describe('claudeCodeBackend.buildResumeArgs', () => {
@@ -232,6 +244,14 @@ describe('piBackend.buildStartArgs', () => {
     const idx = args.indexOf('--append-system-prompt')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(args[idx + 1]).toBe('pi sys')
+  })
+
+  it('with empty user prompt, args do NOT include the prompt (no trailing empty string)', () => {
+    const { args } = piBackend.buildStartArgs({ sessionId: 'p4', system: '', user: '' })
+    expect(args).not.toContain('')
+    expect(args[args.length - 1]).not.toBe('')
+    // Should end with --approve (or system args if present)
+    expect(args[args.length - 1]).toBe('--approve')
   })
 })
 
