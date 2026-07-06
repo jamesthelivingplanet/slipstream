@@ -46,10 +46,15 @@ import {
   runAppForSession,
   stopAppForSession,
   dtoToSession,
+  reviewComments,
+  addReviewComment,
+  removeReviewComment,
+  clearReviewComments,
 } from './stores.js'
 import { toasts } from './toast.js'
 import type { Ticket, Session } from './types.js'
 import type { SessionDTO } from '../../electron/shared/contract.js'
+import type { ReviewComment } from './review.js'
 
 describe('isStartableTicket', () => {
   it('keeps a backlog ticket (type backlog, done false)', () => {
@@ -460,5 +465,59 @@ describe('runApp / stopApp store integration', () => {
 
     expect(stopApp).toHaveBeenCalledWith({ repoId: 'repo1', branch: 'A-branch' })
     expect(get(runningApps).has(appRunKey(session) as string)).toBe(false)
+  })
+})
+
+describe('reviewComments store', () => {
+  function makeComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
+    return {
+      id: 'c1',
+      file: 'src/foo.ts',
+      side: 'new',
+      line: 10,
+      lineText: 'const x = 1',
+      text: 'nit',
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    reviewComments.set({})
+  })
+
+  it('addReviewComment appends a comment under the session key', () => {
+    addReviewComment('s1', makeComment())
+    expect(get(reviewComments)['s1']).toEqual([makeComment()])
+  })
+
+  it('addReviewComment keeps separate sessions independent', () => {
+    addReviewComment('s1', makeComment({ id: 'c1' }))
+    addReviewComment('s2', makeComment({ id: 'c2' }))
+    expect(get(reviewComments)['s1']).toHaveLength(1)
+    expect(get(reviewComments)['s2']).toHaveLength(1)
+    expect(get(reviewComments)['s1']?.[0].id).toBe('c1')
+    expect(get(reviewComments)['s2']?.[0].id).toBe('c2')
+  })
+
+  it('removeReviewComment drops only the matching comment id for that session', () => {
+    addReviewComment('s1', makeComment({ id: 'c1' }))
+    addReviewComment('s1', makeComment({ id: 'c2' }))
+    removeReviewComment('s1', 'c1')
+    const remaining = get(reviewComments)['s1'] ?? []
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].id).toBe('c2')
+  })
+
+  it('removeReviewComment on an unknown session id is a no-op', () => {
+    removeReviewComment('missing', 'c1')
+    expect(get(reviewComments)['missing']).toBeUndefined()
+  })
+
+  it('clearReviewComments removes all comments for that session only', () => {
+    addReviewComment('s1', makeComment({ id: 'c1' }))
+    addReviewComment('s2', makeComment({ id: 'c2' }))
+    clearReviewComments('s1')
+    expect(get(reviewComments)['s1']).toBeUndefined()
+    expect(get(reviewComments)['s2']).toHaveLength(1)
   })
 })

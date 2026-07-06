@@ -247,3 +247,98 @@ describe('worktreeManager pull-before-create (real git + remote)', () => {
     await rwm.remove(rrepo, 'feat-fresh', { force: true })
   })
 })
+
+describe('worktreeManager.diff (real git)', () => {
+  let droot: string
+  let drepo: RepoDTO
+  let dwm: ReturnType<typeof createWorktreeManager>
+
+  beforeAll(() => {
+    droot = mkdtempSync(join(tmpdir(), 'slipstream-wt-diff-'))
+    const repoPath = join(droot, 'source')
+    execFileSync('git', ['init', '-b', 'main', repoPath], { encoding: 'utf8' })
+    git(repoPath, 'config', 'user.email', 'test@slipstream.dev')
+    git(repoPath, 'config', 'user.name', 'Slipstream Test')
+    writeFileSync(join(repoPath, 'README.md'), 'line one\nline two\nline three\n')
+    writeFileSync(join(repoPath, 'to-delete.txt'), 'will be removed\n')
+    git(repoPath, 'add', '-A')
+    git(repoPath, 'commit', '-m', 'init')
+
+    drepo = { id: 'acme-diff', org: 'acme', name: 'diff', base: 'main', path: repoPath }
+    dwm = createWorktreeManager(droot)
+  })
+
+  afterAll(() => {
+    rmSync(droot, { recursive: true, force: true })
+  })
+
+  it('reports modified/added/deleted/untracked statuses with correct hunk line numbers', async () => {
+    const info = await dwm.create(drepo, 'feat-diffreview')
+    const wtPath = info.path
+
+    // committed add
+    writeFileSync(join(wtPath, 'added.txt'), 'new file line 1\nnew file line 2\n')
+    git(wtPath, 'add', 'added.txt')
+    git(wtPath, 'commit', '-m', 'add added.txt')
+
+    // uncommitted modification of a tracked file
+    writeFileSync(join(wtPath, 'README.md'), 'line one\nline TWO changed\nline three\n')
+
+    // uncommitted deletion of a tracked file
+    rmSync(join(wtPath, 'to-delete.txt'))
+
+    // untracked file
+    writeFileSync(join(wtPath, 'scratch.txt'), 'untracked contents\n')
+
+    const dto = await dwm.diff(drepo, 'feat-diffreview')
+
+    expect(dto.error).toBeUndefined()
+    expect(dto.branch).toBe('feat-diffreview')
+    expect(dto.base).toBe('main')
+    expect(dto.mergeBase).toMatch(/^[0-9a-f]{40}$/)
+    expect(dto.truncated).toBe(false)
+
+    const byPath = Object.fromEntries(dto.files.map((f) => [f.path, f]))
+
+    expect(byPath['added.txt'].status).toBe('added')
+    expect(byPath['added.txt'].additions).toBe(2)
+    expect(byPath['added.txt'].deletions).toBe(0)
+
+    expect(byPath['README.md'].status).toBe('modified')
+    const readmeLines = byPath['README.md'].hunks[0].lines
+    const del = readmeLines.find((l) => l.kind === 'del')
+    const add = readmeLines.find((l) => l.kind === 'add')
+    expect(del).toMatchObject({ text: 'line two', oldLine: 2, newLine: null })
+    expect(add).toMatchObject({ text: 'line TWO changed', oldLine: null, newLine: 2 })
+    const lastContext = readmeLines[readmeLines.length - 1]
+    expect(lastContext).toMatchObject({
+      kind: 'context',
+      text: 'line three',
+      oldLine: 3,
+      newLine: 3,
+    })
+
+    expect(byPath['to-delete.txt'].status).toBe('deleted')
+    expect(byPath['to-delete.txt'].deletions).toBe(1)
+    expect(byPath['to-delete.txt'].additions).toBe(0)
+
+    expect(byPath['scratch.txt'].status).toBe('untracked')
+    expect(byPath['scratch.txt'].hunks[0]?.lines[0]).toMatchObject({
+      kind: 'add',
+      text: 'untracked contents',
+      newLine: 1,
+    })
+
+    await dwm.remove(drepo, 'feat-diffreview', { force: true })
+  })
+
+  it('returns an error DTO (not a throw) for a nonexistent worktree', async () => {
+    const dto = await dwm.diff(drepo, 'does-not-exist-branch')
+    expect(dto.error).toBeTruthy()
+    expect(dto.files).toEqual([])
+    expect(dto.truncated).toBe(false)
+    expect(dto.mergeBase).toBe('')
+    expect(dto.branch).toBe('does-not-exist-branch')
+    expect(dto.base).toBe('main')
+  })
+})

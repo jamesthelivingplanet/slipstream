@@ -26,6 +26,7 @@ import {
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
 import { isStartableTicket } from './ticketFilter.js'
+import type { ReviewComment } from './review.js'
 export { sessionsToReconcile } from './reconcile'
 export { isStartableTicket } from './ticketFilter.js'
 
@@ -602,11 +603,20 @@ export function appRunKey(s: Session): string | null {
   return s.repo && s.branch ? `${s.repo} ${s.branch}` : null
 }
 
-function setAppRunning(key: string, running: boolean) {
+/** Tailnet URLs of running apps (from `tailscale serve`), keyed like runningApps. */
+export const appUrls = writable<Record<string, string>>({})
+
+function setAppRunning(key: string, running: boolean, url?: string) {
   runningApps.update(($r) => {
     const next = new Set($r)
     if (running) next.add(key)
     else next.delete(key)
+    return next
+  })
+  appUrls.update(($u) => {
+    const next = { ...$u }
+    if (running && url) next[key] = url
+    else delete next[key]
     return next
   })
 }
@@ -619,9 +629,11 @@ export async function runAppForSession(s: Session): Promise<void> {
   try {
     const res = await runApp({ repoId: s.repo, branch: s.branch })
     if (res.started) {
-      if (key) setAppRunning(key, true)
+      if (key) setAppRunning(key, true, res.url)
       if (res.reused) {
-        pushToast('success', 'App already running')
+        pushToast('success', res.url ? `App already running at ${res.url}` : 'App already running')
+      } else if (res.url) {
+        pushToast('success', `Launched app at ${res.url}`)
       } else {
         pushToast('success', res.port ? `Launched app on port ${res.port}` : 'Launched app')
       }
@@ -665,8 +677,42 @@ export async function refreshAppStatus(s: Session): Promise<void> {
   if (!key) return
   try {
     const res = await appStatus({ repoId: s.repo, branch: s.branch })
-    setAppRunning(key, res.running)
+    setAppRunning(key, res.running, res.url)
   } catch {
     // leave existing state on failure
   }
+}
+
+/** Draft review comments accumulated in the Diff view, keyed by session id, so
+ *  they survive tab toggles and the `{#key $selected.id}` remount. In-memory
+ *  only (lost on reload). Svelte 4 reactivity needs reassignment, so every
+ *  action below replaces the record/array instances rather than mutating. */
+export const reviewComments = writable<Record<string, ReviewComment[]>>({})
+
+/** Append a review comment for the given session. */
+export function addReviewComment(sessionId: string, c: ReviewComment): void {
+  reviewComments.update(($r) => ({
+    ...$r,
+    [sessionId]: [...($r[sessionId] ?? []), c],
+  }))
+}
+
+/** Remove a single review comment (by id) for the given session. No-op if the
+ *  session has no draft comments (avoids creating a stray empty array entry). */
+export function removeReviewComment(sessionId: string, commentId: string): void {
+  reviewComments.update(($r) => {
+    const existing = $r[sessionId]
+    if (!existing) return $r
+    return { ...$r, [sessionId]: existing.filter((c) => c.id !== commentId) }
+  })
+}
+
+/** Discard all draft review comments for the given session (e.g. after a
+ *  successful submit, or via the Discard-all confirm). */
+export function clearReviewComments(sessionId: string): void {
+  reviewComments.update(($r) => {
+    const next = { ...$r }
+    delete next[sessionId]
+    return next
+  })
 }

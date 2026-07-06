@@ -16,6 +16,7 @@ import type {
   SessionStatus,
   WorkflowState,
   WorktreeInfo,
+  WorktreeDiffDTO,
   EditorConfig,
   NotifyPrefs,
   PushSubscriptionDTO,
@@ -378,6 +379,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.worktreeStatus, [repoId, branch]) as Promise<WorktreeInfo>
     },
 
+    worktreeDiff(repoId: string, branch: string): Promise<WorktreeDiffDTO> {
+      return request(IPC.worktreeDiff, [repoId, branch]) as Promise<WorktreeDiffDTO>
+    },
+
     getEditorConfig(): Promise<EditorConfig> {
       return request(IPC.getEditorConfig, []) as Promise<EditorConfig>
     },
@@ -415,6 +420,7 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       port?: number
       pid?: number
       reused?: boolean
+      url?: string
     }> {
       return request(IPC.runApp, [input]) as Promise<{
         started: boolean
@@ -422,13 +428,17 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
         port?: number
         pid?: number
         reused?: boolean
+        url?: string
       }>
     },
     stopApp(input: { repoId: string; branch: string }): Promise<{ stopped: boolean }> {
       return request(IPC.stopApp, [input]) as Promise<{ stopped: boolean }>
     },
-    appStatus(input: { repoId: string; branch: string }): Promise<{ running: boolean }> {
-      return request(IPC.appStatus, [input]) as Promise<{ running: boolean }>
+    appStatus(input: {
+      repoId: string
+      branch: string
+    }): Promise<{ running: boolean; url?: string }> {
+      return request(IPC.appStatus, [input]) as Promise<{ running: boolean; url?: string }>
     },
     getVapidPublicKey(): Promise<string> {
       return request(IPC.getVapidPublicKey, []) as Promise<string>

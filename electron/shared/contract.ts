@@ -127,6 +127,43 @@ export interface WorktreeInfo {
   deleted: number
 }
 
+export interface DiffLineDTO {
+  kind: 'context' | 'add' | 'del'
+  text: string // content without the leading +/-/space marker
+  oldLine: number | null // null for 'add'
+  newLine: number | null // null for 'del'
+  noNewline?: boolean // "\ No newline at end of file" followed this line
+}
+
+export interface DiffHunkDTO {
+  header: string // full "@@ -a,b +c,d @@ ctx" line
+  oldStart: number
+  newStart: number
+  lines: DiffLineDTO[]
+}
+
+export interface DiffFileDTO {
+  path: string // new path (old path when status='deleted')
+  oldPath?: string // set when status='renamed'
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
+  binary: boolean
+  truncated: boolean // hunks dropped past the per-file cap
+  additions: number
+  deletions: number
+  hunks: DiffHunkDTO[]
+}
+
+/** Full worktree diff vs the merge-base with the repo's base branch,
+ *  including uncommitted and untracked changes (the agent's working state). */
+export interface WorktreeDiffDTO {
+  branch: string
+  base: string // repo.base
+  mergeBase: string // sha; '' when it couldn't be computed
+  files: DiffFileDTO[]
+  truncated: boolean // total size cap hit
+  error?: string // human message when the diff failed entirely
+}
+
 export interface SessionDTO {
   id: string // uuid
   tid: string // ticket id, e.g. "PROJ-128"
@@ -233,6 +270,10 @@ export interface IWorktreeManager {
     opts?: { force?: boolean },
   ): Promise<{ removed: boolean; reason?: string }>
   status(repo: RepoDTO, branch: string): Promise<WorktreeInfo>
+  /** Structured diff of the worktree vs merge-base(repo.base, HEAD) — includes
+   *  uncommitted and untracked changes. Returns an `error` DTO rather than
+   *  throwing when the worktree/merge-base is unavailable. */
+  diff(repo: RepoDTO, branch: string): Promise<WorktreeDiffDTO>
   list(repo: RepoDTO): Promise<WorktreeInfo[]>
 }
 
@@ -333,6 +374,20 @@ export interface IAppRunner {
   isRunning(key: string): boolean
 }
 
+export interface ITailscaleExposer {
+  /**
+   * Publish `http://127.0.0.1:<port>` on the tailnet via `tailscale serve`,
+   * tracked under `key` (repo+branch, same key as IAppRunner). Resolves to the
+   * tailnet URL, or null when tailscaled isn't running on this machine (the
+   * common desktop/no-tailscale case — not an error). Idempotent per key.
+   */
+  expose(key: string, port: number): Promise<string | null>
+  /** Tear down the serve mount for `key`. Best-effort; no-op if not exposed. */
+  unexpose(key: string): Promise<void>
+  /** The URL previously returned by expose() for `key`, if still tracked. */
+  urlFor(key: string): string | null
+}
+
 export interface ITicketProvider {
   readonly id: string
   listTickets(): Promise<TicketDTO[]>
@@ -419,6 +474,7 @@ export interface SlipstreamApi {
   resumeSession(id: string): Promise<SessionDTO>
   attachRemoteControl(id: string): Promise<SessionDTO>
   worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo>
+  worktreeDiff(repoId: string, branch: string): Promise<WorktreeDiffDTO>
 
   /** Returns an unsubscribe fn. */
   onSessionData(cb: (id: string, data: string, seq: number) => void): () => void
@@ -426,12 +482,17 @@ export interface SlipstreamApi {
   getSessionBuffer(id: string): Promise<{ data: string; seq: number }>
   getRepoSettings(id: string): Promise<RepoSettings>
   setRepoSettings(id: string, settings: RepoSettings): Promise<void>
-  runApp(input: {
-    repoId: string
-    branch: string
-  }): Promise<{ started: boolean; reason?: string; port?: number; pid?: number; reused?: boolean }>
+  runApp(input: { repoId: string; branch: string }): Promise<{
+    started: boolean
+    reason?: string
+    port?: number
+    pid?: number
+    reused?: boolean
+    /** Tailnet URL when the daemon exposed the app via `tailscale serve`. */
+    url?: string
+  }>
   stopApp(input: { repoId: string; branch: string }): Promise<{ stopped: boolean }>
-  appStatus(input: { repoId: string; branch: string }): Promise<{ running: boolean }>
+  appStatus(input: { repoId: string; branch: string }): Promise<{ running: boolean; url?: string }>
   getVapidPublicKey(): Promise<string>
   savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void>
   deletePushSubscription(endpoint: string): Promise<void>
@@ -493,6 +554,7 @@ export const IPC = {
   sessionStatus: 'session:status', // main → renderer
   getSessionBuffer: 'session:buffer',
   worktreeStatus: 'worktree:status',
+  worktreeDiff: 'worktree:diff',
   getLinearKey: 'config:getLinearKey',
   setLinearKey: 'config:setLinearKey',
   getEditorConfig: 'config:getEditorConfig',

@@ -455,6 +455,13 @@ export function createRpc(
         return deps.worktrees.status(repo, branch)
       }
 
+      case IPC.worktreeDiff: {
+        const repoId = args[0] as string
+        const branch = args[1] as string
+        const repo = await requireOwnedRepo(repoId)
+        return deps.worktrees.diff(repo, branch)
+      }
+
       case IPC.getLinearKey:
         return deps.config.get('linear.apiKey') ?? null
 
@@ -588,7 +595,18 @@ export function createRpc(
           settings.startCmd,
           port !== undefined ? { PORT: String(port) } : undefined,
         )
-        return { started: true, port, pid, reused }
+        // When this machine is on a tailnet (i.e. Slipstream itself is being
+        // reached over Tailscale), mirror the app there too. Best-effort: a
+        // failed/unavailable expose must not fail the run.
+        let url: string | undefined
+        if (port !== undefined && deps.tailscale) {
+          try {
+            url = (await deps.tailscale.expose(key, port)) ?? undefined
+          } catch {
+            url = undefined
+          }
+        }
+        return { started: true, port, pid, reused, url }
       }
 
       case IPC.stopApp: {
@@ -596,6 +614,11 @@ export function createRpc(
         await requireOwnedRepo(repoId)
         const key = `${repoId} ${branch}`
         const stopped = await deps.appRunner.stop(key)
+        try {
+          await deps.tailscale?.unexpose(key)
+        } catch {
+          // best effort — the serve mount is cheap to leave behind
+        }
         return { stopped }
       }
 
@@ -603,7 +626,8 @@ export function createRpc(
         const { repoId, branch } = args[0] as { repoId: string; branch: string }
         await requireOwnedRepo(repoId)
         const key = `${repoId} ${branch}`
-        return { running: deps.appRunner.isRunning(key) }
+        const running = deps.appRunner.isRunning(key)
+        return { running, url: running ? (deps.tailscale?.urlFor(key) ?? undefined) : undefined }
       }
 
       case IPC.getVapidPublicKey:

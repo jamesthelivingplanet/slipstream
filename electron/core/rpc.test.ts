@@ -6,6 +6,7 @@ import type {
   RepoDTO,
   SessionDTO,
   WorktreeInfo,
+  WorktreeDiffDTO,
   IRepoRegistry,
   IWorktreeManager,
   ISessionManager,
@@ -54,6 +55,16 @@ function makeWorktreeInfo(): WorktreeInfo {
   }
 }
 
+function makeWorktreeDiff(): WorktreeDiffDTO {
+  return {
+    branch: 'T-1-fix-bug',
+    base: 'main',
+    mergeBase: 'abc123',
+    files: [],
+    truncated: false,
+  }
+}
+
 type Listener = (...args: unknown[]) => void
 
 function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) => void } {
@@ -99,6 +110,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     create: vi.fn().mockResolvedValue(makeWorktreeInfo()),
     remove: vi.fn().mockResolvedValue({ removed: true }),
     status: vi.fn().mockResolvedValue(makeWorktreeInfo()),
+    diff: vi.fn().mockResolvedValue(makeWorktreeDiff()),
     list: vi.fn().mockResolvedValue([makeWorktreeInfo()]),
   }
 
@@ -143,6 +155,12 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     isRunning: vi.fn().mockReturnValue(false),
   }
 
+  const tailscale = {
+    expose: vi.fn().mockResolvedValue(null),
+    unexpose: vi.fn().mockResolvedValue(undefined),
+    urlFor: vi.fn().mockReturnValue(null),
+  }
+
   const push: IPushService = {
     getVapidPublicKey: vi.fn().mockResolvedValue('test-vapid-key'),
     savePushSubscription: vi.fn().mockResolvedValue(undefined),
@@ -160,6 +178,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     sessionStore,
     editor,
     appRunner,
+    tailscale,
     push,
     _emit(event: string, ...args: unknown[]) {
       for (const l of listeners[event] ?? []) l(...args)
@@ -420,6 +439,22 @@ describe('createRpc', () => {
     )
   })
 
+  it('routes worktreeDiff to worktrees.diff with resolved repo and branch', async () => {
+    const result = await rpc.handle(IPC.worktreeDiff, ['r1', 't-1-fix-bug'])
+    expect(deps.repos.get).toHaveBeenCalledWith('r1')
+    expect(deps.worktrees.diff).toHaveBeenCalledWith(makeRepo(), 't-1-fix-bug')
+    expect(result).toEqual(makeWorktreeDiff())
+  })
+
+  it('worktreeDiff throws for unknown repo', async () => {
+    ;(deps.repos as unknown as { get: ReturnType<typeof vi.fn> }).get.mockResolvedValueOnce(
+      undefined,
+    )
+    await expect(rpc.handle(IPC.worktreeDiff, ['unknown', 'branch'])).rejects.toThrow(
+      'Unknown repo: unknown',
+    )
+  })
+
   it('startSession passes systemPrompt containing the ticket id to sessions.start', async () => {
     await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
@@ -594,6 +629,53 @@ describe('createRpc', () => {
     expect(result).toEqual({ started: true, port: 3001, pid: 1234, reused: false })
   })
 
+  it('runApp exposes the port over tailscale and returns the tailnet URL', async () => {
+    ;(deps.repos.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      installCmd: '',
+      startCmd: 'pnpm dev',
+    })
+    ;(deps.tailscale!.expose as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      'https://devbox.tail1234.ts.net:3001',
+    )
+    const result = await rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'main' }])
+    expect(deps.tailscale!.expose).toHaveBeenCalledWith('r1 main', 3001)
+    expect(result).toEqual({
+      started: true,
+      port: 3001,
+      pid: 1234,
+      reused: false,
+      url: 'https://devbox.tail1234.ts.net:3001',
+    })
+  })
+
+  it('runApp still succeeds when tailscale expose rejects', async () => {
+    ;(deps.repos.getSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      installCmd: '',
+      startCmd: 'pnpm dev',
+    })
+    ;(deps.tailscale!.expose as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'))
+    const result = (await rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: 'main' }])) as {
+      started: boolean
+      url?: string
+    }
+    expect(result.started).toBe(true)
+    expect(result.url).toBeUndefined()
+  })
+
+  it('stopApp tears down the tailscale mount for the key', async () => {
+    await rpc.handle(IPC.stopApp, [{ repoId: 'r1', branch: 'main' }])
+    expect(deps.tailscale!.unexpose).toHaveBeenCalledWith('r1 main')
+  })
+
+  it('appStatus reports the tailnet URL for a running app', async () => {
+    ;(deps.appRunner.isRunning as ReturnType<typeof vi.fn>).mockReturnValueOnce(true)
+    ;(deps.tailscale!.urlFor as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      'https://devbox.tail1234.ts.net:3001',
+    )
+    const result = await rpc.handle(IPC.appStatus, [{ repoId: 'r1', branch: 'main' }])
+    expect(result).toEqual({ running: true, url: 'https://devbox.tail1234.ts.net:3001' })
+  })
+
   describe('owner filter (identity seam)', () => {
     it('startSession stamps the caller identity as ownerId', async () => {
       await rpc.handle(IPC.startSession, [
@@ -676,6 +758,13 @@ describe('createRpc', () => {
         makeRepo({ id: 'r1', ownerId: 'alice' }),
       )
       await expect(rpc.handle(IPC.worktreeStatus, ['r1', 'b'])).rejects.toThrow('Unknown repo: r1')
+    })
+
+    it("worktreeDiff throws Unknown repo for another identity's repo", async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
+      await expect(rpc.handle(IPC.worktreeDiff, ['r1', 'b'])).rejects.toThrow('Unknown repo: r1')
     })
 
     it("openInEditor throws Unknown repo for another identity's repo", async () => {

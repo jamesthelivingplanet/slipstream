@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick, onDestroy } from 'svelte'
   import {
     repos,
     registerRepo,
@@ -56,50 +57,54 @@
     if (e.key === 'Enter') addByUrl()
   }
 
-  // Per-repo settings expansion
-  let expandedRepoId: string | null = null
-  let installCmd = ''
-  let startCmd = ''
-  let settingsPending = false
+  // Per-repo install/start commands — always visible, one entry per repo.
+  let cmds: Record<string, { installCmd: string; startCmd: string }> = {}
+  let pending: Record<string, boolean> = {}
 
   async function loadSettings(repoId: string) {
     try {
       const s = await getRepoSettings(repoId)
-      installCmd = s.installCmd
-      startCmd = s.startCmd
+      cmds = { ...cmds, [repoId]: { installCmd: s.installCmd, startCmd: s.startCmd } }
     } catch {
-      installCmd = ''
-      startCmd = ''
+      cmds = { ...cmds, [repoId]: { installCmd: '', startCmd: '' } }
     }
   }
 
-  function toggleExpand(repoId: string) {
-    if (expandedRepoId === repoId) {
-      expandedRepoId = null
-    } else {
-      expandedRepoId = repoId
-      loadSettings(repoId)
+  // Hydrate commands for any repo we haven't loaded yet (also covers newly
+  // added repos). Seed synchronously so inputs never bind to undefined.
+  // Plain subscription (not a reactive statement) because this updates `cmds`.
+  const unsubRepos = repos.subscribe((rs) => {
+    for (const r of rs) {
+      if (!(r.id in cmds)) {
+        cmds = { ...cmds, [r.id]: { installCmd: '', startCmd: '' } }
+        loadSettings(r.id)
+      }
     }
-  }
+  })
+  onDestroy(unsubRepos)
 
   async function saveRepoSettings(repoId: string) {
-    settingsPending = true
+    const c = cmds[repoId]
+    if (!c) return
+    pending = { ...pending, [repoId]: true }
     try {
-      await setRepoSettings(repoId, { installCmd: installCmd.trim(), startCmd: startCmd.trim() })
+      await setRepoSettings(repoId, {
+        installCmd: c.installCmd.trim(),
+        startCmd: c.startCmd.trim(),
+      })
       pushToast('success', 'Saved settings')
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Failed to save settings')
     } finally {
-      settingsPending = false
+      pending = { ...pending, [repoId]: false }
     }
   }
 
-  // React to focus requests from openRepoSettings()
+  // React to focus requests from openRepoSettings(): the fields are always
+  // visible now, so just focus that repo's start-command input.
   $: if ($settingsOpen && $settingsRepoId) {
-    if (expandedRepoId !== $settingsRepoId) {
-      expandedRepoId = $settingsRepoId
-      loadSettings($settingsRepoId)
-    }
+    const id = $settingsRepoId
+    tick().then(() => document.getElementById(`start-cmd-${id}`)?.focus())
   }
 </script>
 
@@ -172,15 +177,6 @@
         <span class="muted repo-id mono">{r.id}</span>
         <button
           type="button"
-          class="btn btn-ghost btn-icon btn-sm"
-          title="Repository settings"
-          class:active={expandedRepoId === r.id}
-          on:click={() => toggleExpand(r.id)}
-        >
-          {@html icons.settings}
-        </button>
-        <button
-          type="button"
           class="btn btn-ghost btn-icon btn-sm btn-danger"
           title="Remove repository"
           on:click={() => removeRepoById(r.id)}
@@ -188,7 +184,7 @@
           {@html icons.trash}
         </button>
       </div>
-      {#if expandedRepoId === r.id}
+      {#if cmds[r.id]}
         <div class="repo-settings-panel">
           <div class="repo-settings-field">
             <label class="lbl-f" for="install-cmd-{r.id}">Install command</label>
@@ -197,8 +193,8 @@
               type="text"
               class="path-input"
               placeholder="pnpm install"
-              bind:value={installCmd}
-              disabled={settingsPending}
+              bind:value={cmds[r.id].installCmd}
+              disabled={pending[r.id]}
             />
           </div>
           <div class="repo-settings-field">
@@ -208,14 +204,14 @@
               type="text"
               class="path-input"
               placeholder="pnpm dev"
-              bind:value={startCmd}
-              disabled={settingsPending}
+              bind:value={cmds[r.id].startCmd}
+              disabled={pending[r.id]}
             />
           </div>
           <button
             class="btn btn-outline btn-sm"
             on:click={() => saveRepoSettings(r.id)}
-            disabled={settingsPending}
+            disabled={pending[r.id]}
           >
             Save
           </button>

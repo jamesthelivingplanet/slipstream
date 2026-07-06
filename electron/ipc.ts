@@ -6,6 +6,7 @@ import type {
   ITicketProvider,
   ISessionStore,
   IAppRunner,
+  ITailscaleExposer,
   TicketSource,
 } from './shared/contract.js'
 import type { IConfigStore } from './services/configStore.js'
@@ -32,6 +33,8 @@ export interface IpcDeps {
   sessionStore: ISessionStore
   editor: IEditorLauncher
   appRunner: IAppRunner
+  /** Optional: when present, launched apps are also published on the tailnet. */
+  tailscale?: ITailscaleExposer
   push: IPushService
   /** Optional process-level logger for startup/uncaught errors. */
   logger?: RunLogger
