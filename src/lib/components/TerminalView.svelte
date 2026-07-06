@@ -38,7 +38,10 @@
   import { mode } from '../theme'
   import { icons } from '../icons'
   import { MOBILE_MEDIA_QUERY } from '../responsive'
-  import type { Session } from '../types'
+  import type { Session, WorkflowState } from '../types'
+  import { getTicketStatus, setTicketStatus } from '../ipc'
+  import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
+  import { floatingAnchor } from '../floating'
   import DiffView from './DiffView.svelte'
 
   export let session: Session
@@ -60,6 +63,13 @@
   let liveId: string | null | undefined = null
   let simStarted = false
   let showDiff = false
+  let current: WorkflowState | null = null
+  let available: WorkflowState[] = []
+  let statusLoading = false
+  let statusError: string | null = null
+  let menuOpen = false
+  let lastTid = ''
+  let lastNonce = 0
 
   $: r = repoById(session.repo)
   $: pendingCommentCount = ($reviewComments[session.id ?? ''] ?? []).length
@@ -124,6 +134,7 @@
   }
 
   onDestroy(() => {
+    contentLoading.set(false)
     cleanupListeners()
     cleanupSimulation()
     simStarted = false
@@ -358,7 +369,63 @@
     showDiff = false
     refocusTerm()
   }
+
+  $: isBlank = session.tid.startsWith('TASK-')
+  $: shouldShow = !isBlank && hasBackend
+
+  function fetchStatus() {
+    statusLoading = true
+    statusError = null
+    menuOpen = false
+    contentLoading.set(true)
+    getTicketStatus(session.tid, session.src)
+      .then((res) => {
+        current = res.current
+        available = res.available
+        contentResolvedAt.set(Date.now())
+      })
+      .catch((e) => {
+        statusError = e instanceof Error ? e.message : 'Failed to load status'
+      })
+      .finally(() => {
+        statusLoading = false
+        contentLoading.set(false)
+      })
+  }
+
+  $: if (shouldShow && session.tid !== lastTid) {
+    lastTid = session.tid
+    fetchStatus()
+  }
+
+  $: if (shouldShow && $contentRefreshNonce !== lastNonce) {
+    lastNonce = $contentRefreshNonce
+    fetchStatus()
+  }
+
+  async function selectState(state: WorkflowState) {
+    const prev = current
+    current = state
+    menuOpen = false
+    try {
+      const updated = await setTicketStatus(session.tid, state.id, session.src)
+      current = updated
+    } catch (e) {
+      current = prev
+      pushToast('error', e instanceof Error ? e.message : 'Failed to update status')
+    }
+  }
+
+  function onWindowClick(e: MouseEvent) {
+    if (menuOpen && !(e.target as HTMLElement).closest('#ticketStatusSel')) menuOpen = false
+  }
+
+  function onTriggerClick() {
+    if (!statusError && available.length > 0) menuOpen = !menuOpen
+  }
 </script>
+
+<svelte:window on:click={onWindowClick} />
 
 <div class="term-head">
   <button class="btn btn-ghost btn-icon btn-sm" title="Deselect" on:click={() => select(null)}>
@@ -382,6 +449,55 @@
     </div>
   </div>
   <div class="spacer"></div>
+  {#if shouldShow}
+    <div class="sel-head" id="ticketStatusSel">
+      {#if statusLoading && !current && available.length === 0}
+        <button class="btn btn-outline btn-sm status-trigger" type="button" disabled>
+          <span class="muted">Loading…</span>
+          <span class="chev">{@html icons.chevronDown}</span>
+        </button>
+      {:else if statusError}
+        <button
+          class="btn btn-outline btn-sm status-trigger"
+          type="button"
+          disabled
+          title={statusError}
+        >
+          <span class="muted">Status unavailable</span>
+          <span class="chev">{@html icons.chevronDown}</span>
+        </button>
+      {:else if available.length === 0}
+        <button class="btn btn-outline btn-sm status-trigger" type="button" disabled>
+          <span class="muted">{current?.name ?? 'No statuses'}</span>
+          <span class="chev">{@html icons.chevronDown}</span>
+        </button>
+      {:else}
+        <button
+          class="btn btn-outline btn-sm status-trigger"
+          type="button"
+          on:click|stopPropagation={onTriggerClick}
+        >
+          <span>{current?.name ?? 'Set status'}</span>
+          <span class="chev">{@html icons.chevronDown}</span>
+        </button>
+        {#if menuOpen}
+          <div class="sel-menu" use:floatingAnchor>
+            {#each available as state (state.id)}
+              <button
+                type="button"
+                class="opt"
+                class:sel={current?.id === state.id}
+                on:click={() => selectState(state)}
+              >
+                <span>{state.name}</span>
+                <span class="check">{@html icons.check}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      {/if}
+    </div>
+  {/if}
   <button
     class="btn btn-outline btn-sm"
     class:btn-active={showDiff}
@@ -501,5 +617,56 @@
     line-height: 1;
     background: hsl(var(--primary));
     color: hsl(var(--primary-foreground));
+  }
+
+  .status-trigger {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    min-width: 100px;
+    gap: 4px;
+  }
+  .status-trigger .chev {
+    color: hsl(var(--muted-foreground));
+    display: flex;
+  }
+  .sel-head {
+    position: relative;
+  }
+  .sel-menu {
+    position: absolute;
+    top: 38px;
+    left: 0;
+    z-index: 60;
+    padding: 5px;
+    background: hsl(var(--popover));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    max-height: 260px;
+    overflow-y: auto;
+    animation: pop 0.14s ease;
+    min-width: 160px;
+  }
+  .opt {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: calc(var(--radius) - 3px);
+    cursor: pointer;
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    width: 100%;
+  }
+  .opt:hover {
+    background: hsl(var(--accent-bg));
+  }
+  .opt .check {
+    margin-left: auto;
+    color: hsl(var(--primary));
+    opacity: 0;
+  }
+  .opt.sel .check {
+    opacity: 1;
   }
 </style>

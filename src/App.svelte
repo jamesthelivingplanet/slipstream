@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import TicketStatusBar from './lib/components/TicketStatusBar.svelte'
   import {
     selected,
     dialogOpen,
@@ -160,15 +159,12 @@
     <section class="term-pane">
       {#if !$selected}
         <MissionControl />
+      {:else if $selected.status === 'idle'}
+        <AgentConfig session={$selected} />
       {:else}
-        <TicketStatusBar session={$selected} />
-        {#if $selected.status === 'idle'}
-          <AgentConfig session={$selected} />
-        {:else}
-          {#key $selected.id}
-            <TerminalView session={$selected} />
-          {/key}
-        {/if}
+        {#key $selected.id}
+          <TerminalView session={$selected} />
+        {/key}
       {/if}
     </section>
   </div>
