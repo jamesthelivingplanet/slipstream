@@ -53,7 +53,7 @@
       ? 'Session has not started yet.'
       : !canWrite
         ? 'Another client controls this session — take over to submit.'
-        : session.status !== 'running' && session.status !== 'needs'
+        : session.status !== 'running' && session.status !== 'needs' && session.status !== 'done'
           ? 'The agent is not running.'
           : ''
   $: submitDisabled = disabledReason !== '' || submitting
