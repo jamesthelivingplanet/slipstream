@@ -115,13 +115,37 @@ export function createPushService(deps: {
     return _send
   }
 
+  /** Drop all per-session tracking state so the long-lived daemon's maps don't
+   *  grow unboundedly with every session ever seen. */
+  function forgetSession(sessionId: string) {
+    lastStatus.delete(sessionId)
+    lastSent.delete(`${sessionId}:needs`)
+    lastSent.delete(`${sessionId}:done`)
+    lastSent.delete(`${sessionId}:running`)
+  }
+
+  sessions.on('exit', (sessionId: string) => {
+    forgetSession(sessionId)
+  })
+
   sessions.on('status', (sessionId: string, next: SessionStatus) => {
     const prev = lastStatus.get(sessionId)
     lastStatus.set(sessionId, next)
 
     const kind = transitionKind(prev, next)
-    if (!kind) return
+    if (kind) notifyTransition(sessionId, next, kind)
 
+    // Reaped sessions suppress their 'exit' event (sessionManager.reap sets
+    // disposed before killing the PTY), so clean up here instead — after the
+    // transition handling above so dedupe still works during the transition.
+    if (next === 'reaped') forgetSession(sessionId)
+  })
+
+  function notifyTransition(
+    sessionId: string,
+    next: SessionStatus,
+    kind: 'needs' | 'done' | 'running',
+  ) {
     const dedupKey = `${sessionId}:${kind}`
     const lastTime = lastSent.get(dedupKey)
     const nowMs = now()
@@ -173,7 +197,7 @@ export function createPushService(deps: {
     })().catch(() => {
       // best-effort push; swallow errors
     })
-  })
+  }
 
   return {
     async getVapidPublicKey() {
