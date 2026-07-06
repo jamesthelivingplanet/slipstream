@@ -21,6 +21,7 @@ import type {
   SessionEvents,
   StartSessionInput,
 } from '../shared/contract.js'
+import { buildAgentEnv } from './agentEnv.js'
 import { StatusDetector } from './statusDetector.js'
 import { OutputBuffer } from './outputBuffer.js'
 import { ScrollbackStore } from './scrollbackStore.js'
@@ -46,7 +47,9 @@ function spawnAgent(
     cols: 80,
     rows: 30,
     cwd,
-    env: { ...process.env, ...(env ?? {}) } as Record<string, string>,
+    // Scrubbed: agents run arbitrary repo code and must not inherit the
+    // daemon's internal env (SLIPSTREAM_TOKEN above all) — see agentEnv.ts.
+    env: buildAgentEnv(process.env, env),
   })
 }
 
