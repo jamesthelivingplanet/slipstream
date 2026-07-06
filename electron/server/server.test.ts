@@ -1,5 +1,8 @@
-import { describe, it, expect, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest'
 import http from 'node:http'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createServer } from './server.js'
 import type { IpcDeps } from '../ipc.js'
 import type {
@@ -594,5 +597,104 @@ describe('createServer', () => {
 
     expect(statusCode).toBe(404)
     expect(contentType).not.toContain('text/html')
+  })
+
+  // ── Static serving: percent-decoding + distDir containment ─────────────────
+  //
+  // createServer resolves its static root relative to its own module location:
+  // <electron>/server/.. -> <electron>/dist. That directory doesn't exist in a
+  // source checkout (builds emit to the repo-root dist/), so these tests plant
+  // fixture files there and remove exactly what they created afterwards.
+  describe('static file percent-decoding', () => {
+    const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist')
+    const created: string[] = []
+    let createdDistDir = false
+    let createdAssetsDir = false
+
+    function plant(relPath: string, content: string) {
+      const fp = path.join(distDir, relPath)
+      if (fs.existsSync(fp)) return
+      fs.writeFileSync(fp, content)
+      created.push(fp)
+    }
+
+    beforeAll(() => {
+      createdDistDir = !fs.existsSync(distDir)
+      createdAssetsDir = !fs.existsSync(path.join(distDir, 'assets'))
+      fs.mkdirSync(path.join(distDir, 'assets'), { recursive: true })
+      plant('index.html', '<html>spa-index</html>')
+      plant('test fixture.js', 'console.log("spaced")')
+      plant(path.join('assets', 'test fixture.js'), 'console.log("hashed")')
+    })
+
+    afterAll(() => {
+      for (const fp of created) fs.rmSync(fp, { force: true })
+      if (createdAssetsDir)
+        fs.rmSync(path.join(distDir, 'assets'), { recursive: true, force: true })
+      if (createdDistDir) fs.rmSync(distDir, { recursive: true, force: true })
+    })
+
+    function httpGet(
+      port: number,
+      rawPath: string,
+    ): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
+      return new Promise((resolve, reject) => {
+        http
+          .get(`http://127.0.0.1:${port}${rawPath}`, (res) => {
+            let body = ''
+            res.on('data', (c: Buffer) => (body += c.toString()))
+            res.on('end', () =>
+              resolve({ status: res.statusCode ?? 0, headers: res.headers, body }),
+            )
+          })
+          .on('error', reject)
+      })
+    }
+
+    async function startServer(): Promise<number> {
+      server = createServer(makeFakeDeps(), { token: 'secret', port: 0 })
+      return new Promise<number>((res) => server!.once('listening', () => res(getPort(server!))))
+    }
+
+    it('serves a file whose request path is percent-encoded', async () => {
+      const port = await startServer()
+      const res = await httpGet(port, '/test%20fixture.js')
+      expect(res.status).toBe(200)
+      expect(res.body).toBe('console.log("spaced")')
+      expect(res.headers['content-type']).toBe('application/javascript')
+      expect(res.headers['cache-control']).toBe('no-cache')
+    })
+
+    it('marks an /assets/ file requested via an encoded path as immutable', async () => {
+      const port = await startServer()
+      const res = await httpGet(port, '/assets/test%20fixture.js')
+      expect(res.status).toBe(200)
+      expect(res.headers['cache-control']).toBe('public, max-age=31536000, immutable')
+    })
+
+    it('uses the DECODED pathname for the SPA-fallback extension check', async () => {
+      const port = await startServer()
+      // Raw '/missing%2Ejs' has no literal dot, so an undecoded extname check
+      // would SPA-fallback to HTML; decoded it is '/missing.js' -> hard 404.
+      const res = await httpGet(port, '/missing%2Ejs')
+      expect(res.status).toBe(404)
+      expect(res.body).not.toContain('spa-index')
+    })
+
+    it('responds 400 to malformed percent-encoding', async () => {
+      const port = await startServer()
+      const res = await httpGet(port, '/%zz')
+      expect(res.status).toBe(400)
+    })
+
+    it('responds 404 to encoded path traversal outside distDir', async () => {
+      const port = await startServer()
+      // %2f keeps the dot segments inside a single URL path segment so neither
+      // the client nor the server URL parser normalizes them away; only the
+      // server-side decode reveals the ../../ — which must be contained.
+      const res = await httpGet(port, '/..%2f..%2fpackage.json')
+      expect(res.status).toBe(404)
+      expect(res.body).not.toContain('"scripts"')
+    })
   })
 })

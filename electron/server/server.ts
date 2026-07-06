@@ -54,8 +54,24 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
       return
     }
 
-    // Serve static files from dist/
-    let filePath = path.join(distDir, url.pathname)
+    // Serve static files from dist/. The URL pathname is still percent-encoded;
+    // decode it so assets with encoded characters resolve, then guard that the
+    // resolved path cannot escape distDir (e.g. via encoded ../ segments).
+    let pathname: string
+    try {
+      pathname = decodeURIComponent(url.pathname)
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'text/plain' })
+      res.end('Bad request')
+      return
+    }
+
+    let filePath = path.resolve(path.join(distDir, pathname))
+    if (filePath !== distDir && !filePath.startsWith(distDir + path.sep)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('Not found')
+      return
+    }
 
     function serveFile(fp: string): void {
       fs.readFile(fp, (err, data) => {
@@ -64,7 +80,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
           // A missing .js/.css means the browser has a stale index.html
           // referencing chunks from a previous build — serving HTML here
           // causes a MIME mismatch that silently kills the app.
-          if (path.extname(url.pathname)) {
+          if (path.extname(pathname)) {
             res.writeHead(404, { 'Content-Type': 'text/plain' })
             res.end('Not found')
             return
@@ -99,7 +115,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
         // Cache policy:
         //  - index.html and other non-asset files: no-cache (always revalidate)
         //  - /assets/* (content-hashed filenames): immutable, cache for 1 year
-        const isHashedAsset = url.pathname.startsWith('/assets/')
+        const isHashedAsset = pathname.startsWith('/assets/')
         const cacheControl = isHashedAsset ? 'public, max-age=31536000, immutable' : 'no-cache'
         res.writeHead(200, {
           'Content-Type': mime[ext] ?? 'application/octet-stream',
