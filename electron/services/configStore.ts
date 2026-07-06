@@ -46,7 +46,11 @@ export function createConfigStore(
     get(key: string): string | undefined {
       const raw = getStmt.get(key)?.value
       if (raw === undefined) return undefined
-      if (encryptor && raw.startsWith(ENC_PREFIX)) {
+      if (raw.startsWith(ENC_PREFIX)) {
+        // Encrypted at rest. Without an encryptor (headless daemon) the value
+        // is unreadable — treat it as absent rather than leaking ciphertext to
+        // callers, matching the decrypt-failure behavior below.
+        if (!encryptor) return undefined
         try {
           return encryptor.decrypt(raw)
         } catch {
