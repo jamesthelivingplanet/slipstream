@@ -126,7 +126,7 @@ export function createRepoRegistry(db: Database.Database, root: string): IRepoRe
       if (existsSync(dest)) rmSync(dest, { recursive: true, force: true })
 
       mkdirSync(join(root, '.repositories'), { recursive: true })
-      cloneRepo(trimmed, dest)
+      await cloneRepo(trimmed, dest)
 
       const repo = buildRepoDTO(dest, getRemoteUrl(dest), ownerId)
       upsertRepo(db, repo)
@@ -150,7 +150,7 @@ export function createRepoRegistry(db: Database.Database, root: string): IRepoRe
         if (repo.remoteUrl && repo.path === managedPath(repo.id)) {
           if (existsSync(repo.path)) rmSync(repo.path, { recursive: true, force: true })
           mkdirSync(join(root, '.repositories'), { recursive: true })
-          cloneRepo(repo.remoteUrl, repo.path)
+          await cloneRepo(repo.remoteUrl, repo.path)
           upsertRepo(db, repo)
           return repo
         }
