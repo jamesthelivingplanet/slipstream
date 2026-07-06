@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import type {
   DiffFileDTO,
   IWorktreeManager,
