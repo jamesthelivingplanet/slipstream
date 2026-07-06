@@ -15,8 +15,10 @@
     restartAppForSession,
     refreshAppStatus,
     runningApps,
+    appUrls,
     appRunKey,
     cleanError,
+    reviewComments,
   } from '../stores'
   import {
     hasBackend,
@@ -37,6 +39,7 @@
   import { icons } from '../icons'
   import { MOBILE_MEDIA_QUERY } from '../responsive'
   import type { Session } from '../types'
+  import DiffView from './DiffView.svelte'
 
   export let session: Session
 
@@ -56,8 +59,10 @@
   let viewers = 1
   let liveId: string | null | undefined = null
   let simStarted = false
+  let showDiff = false
 
   $: r = repoById(session.repo)
+  $: pendingCommentCount = ($reviewComments[session.id ?? ''] ?? []).length
   $: dot =
     session.status === 'idle'
       ? 'hsl(var(--muted-foreground))'
@@ -65,6 +70,7 @@
 
   $: runKey = appRunKey(session)
   $: appRunning = runKey ? $runningApps.has(runKey) : false
+  $: appUrl = runKey ? $appUrls[runKey] : undefined
 
   function openLink(_event: MouseEvent, uri: string) {
     window.open(uri, '_blank', 'noopener,noreferrer')
@@ -332,6 +338,26 @@
       pushToast('error', cleanError(e))
     }
   }
+
+  // Re-focus the (never-unmounted) terminal after the Diff view is hidden again.
+  function refocusTerm() {
+    setTimeout(() => {
+      try {
+        fit.fit()
+      } catch {}
+      term.focus()
+    }, 40)
+  }
+
+  function toggleDiff() {
+    showDiff = !showDiff
+    if (!showDiff) refocusTerm()
+  }
+
+  function handleDiffSubmitted() {
+    showDiff = false
+    refocusTerm()
+  }
 </script>
 
 <div class="term-head">
@@ -356,7 +382,29 @@
     </div>
   </div>
   <div class="spacer"></div>
+  <button
+    class="btn btn-outline btn-sm"
+    class:btn-active={showDiff}
+    title="Review the worktree diff and comment on lines"
+    disabled={!session.repo || !session.branch}
+    on:click={toggleDiff}
+  >
+    {@html icons.fileDiff} <span class="btn-label">Diff</span>
+    {#if pendingCommentCount > 0}
+      <span class="diff-count">{pendingCommentCount}</span>
+    {/if}
+  </button>
   {#if appRunning}
+    {#if appUrl}
+      <a
+        class="btn btn-outline btn-sm"
+        title="Open the running app over Tailscale"
+        href={appUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        >{@html icons.externalLink} <span class="btn-label">Open app</span></a
+      >
+    {/if}
     <button
       class="btn btn-outline btn-sm"
       title="Stop the running app"
@@ -400,7 +448,13 @@
   </button>
 </div>
 
-<div class="term-wrap"><div class="term-mount" bind:this={mountEl}></div></div>
+<div class="term-wrap" class:hidden={showDiff}>
+  <div class="term-mount" bind:this={mountEl}></div>
+</div>
+
+{#if showDiff}
+  <DiffView {session} {canWrite} onSubmitted={handleDiffSubmitted} />
+{/if}
 
 {#if liveMode && !canWrite}
   <div class="alert">
@@ -419,3 +473,33 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* The terminal wrapper is only ever CSS-hidden (never unmounted) so xterm,
+     the PTY attach, and the write-lock subscription survive toggling to the
+     Diff view and back. */
+  .hidden {
+    display: none;
+  }
+
+  .btn-active {
+    background: hsl(var(--primary) / 0.12);
+    border-color: hsl(var(--primary) / 0.5);
+    color: hsl(var(--primary));
+  }
+
+  .diff-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+</style>

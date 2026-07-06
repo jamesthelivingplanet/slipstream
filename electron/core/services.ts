@@ -14,6 +14,7 @@ import { createCompositeProvider } from '../tickets/compositeProvider.js'
 import { createSessionStore, restoreInterruptedSessions } from '../services/sessionStore.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
+import { createTailscaleExposer } from '../services/tailscale.js'
 import { createPushService, createDbPushStore } from '../services/pushService.js'
 import { createRunLogger } from '../services/runLogger.js'
 import { createWriteCoordinator } from '../services/writeCoordinator.js'
@@ -84,6 +85,7 @@ export function createServices(root: string): IpcDeps {
     sessionStore,
     editor: createEditorLauncher(),
     appRunner: createAppRunner(),
+    tailscale: createTailscaleExposer(),
     push,
     logger: runLogger,
     writeCoordinator: createWriteCoordinator(),

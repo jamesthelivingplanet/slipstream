@@ -15,6 +15,7 @@ import type {
   SessionStatus,
   WorkflowState,
   WorktreeInfo,
+  WorktreeDiffDTO,
   EditorConfig,
   NotifyPrefs,
   PushSubscriptionDTO,
@@ -190,6 +191,12 @@ export function worktreeStatus(repoId: string, branch: string): Promise<Worktree
     : Promise.resolve({ branch, path: '', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 })
 }
 
+export function worktreeDiff(repoId: string, branch: string): Promise<WorktreeDiffDTO> {
+  return hasBackend
+    ? window.slipstream.worktreeDiff(repoId, branch)
+    : Promise.resolve({ branch: '', base: '', mergeBase: '', files: [], truncated: false })
+}
+
 // ── Editor ─────────────────────────────────────────────────────────────────
 
 export function getEditorConfig(): Promise<EditorConfig> {
@@ -221,10 +228,14 @@ export function setRepoSettings(id: string, settings: RepoSettings): Promise<voi
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.setRepoSettings(id, settings)
 }
-export function runApp(input: {
-  repoId: string
-  branch: string
-}): Promise<{ started: boolean; reason?: string; port?: number; pid?: number; reused?: boolean }> {
+export function runApp(input: { repoId: string; branch: string }): Promise<{
+  started: boolean
+  reason?: string
+  port?: number
+  pid?: number
+  reused?: boolean
+  url?: string
+}> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.runApp(input)
 }
@@ -237,7 +248,7 @@ export function stopApp(input: { repoId: string; branch: string }): Promise<{ st
 export function appStatus(input: {
   repoId: string
   branch: string
-}): Promise<{ running: boolean }> {
+}): Promise<{ running: boolean; url?: string }> {
   if (!hasBackend) return Promise.resolve({ running: false })
   return window.slipstream.appStatus(input)
 }

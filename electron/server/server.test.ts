@@ -83,6 +83,13 @@ function makeFakeDeps(): IpcDeps {
       added: 0,
       deleted: 0,
     }),
+    diff: vi.fn().mockResolvedValue({
+      branch: 'b',
+      base: 'main',
+      mergeBase: '',
+      files: [],
+      truncated: false,
+    }),
     list: vi.fn().mockResolvedValue([]),
   }
 
@@ -215,6 +222,13 @@ function makeSurvivalDeps(): {
       behind: 0,
       added: 0,
       deleted: 0,
+    }),
+    diff: vi.fn().mockResolvedValue({
+      branch: 'b',
+      base: 'main',
+      mergeBase: '',
+      files: [],
+      truncated: false,
     }),
     list: vi.fn().mockResolvedValue([]),
   }

@@ -1,7 +1,14 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { IWorktreeManager, RepoDTO, WorktreeInfo } from '../shared/contract.js'
+import type {
+  DiffFileDTO,
+  IWorktreeManager,
+  RepoDTO,
+  WorktreeDiffDTO,
+  WorktreeInfo,
+} from '../shared/contract.js'
+import { parseUnifiedDiff } from './diffParser.js'
 
 // ── Pure parse helpers (exported for unit tests) ─────────────────────────────
 
@@ -87,15 +94,24 @@ export function isMissingWorktreeError(err: unknown): boolean {
 
 // ── Implementation ────────────────────────────────────────────────────────────
 
-function git(args: string[], opts?: { cwd?: string }): string {
+function git(
+  args: string[],
+  opts?: { cwd?: string; maxBuffer?: number; allowExit1?: boolean },
+): string {
   try {
     return execFileSync('git', args, {
       encoding: 'utf8',
       cwd: opts?.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: opts?.maxBuffer,
     })
   } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; message?: string }
+    const e = err as { status?: number; stdout?: string; stderr?: string; message?: string }
+    // `git diff --no-index` exits 1 (not an error) when the compared paths
+    // differ — the caller opts in to treat that as success and read stdout.
+    if (opts?.allowExit1 && e.status === 1 && typeof e.stdout === 'string') {
+      return e.stdout
+    }
     throw new Error(
       `git ${args.slice(0, 3).join(' ')} failed: ${e.stderr ?? e.message ?? String(err)}`,
       {
@@ -103,6 +119,30 @@ function git(args: string[], opts?: { cwd?: string }): string {
       },
     )
   }
+}
+
+/**
+ * Diff a single untracked file against /dev/null so it renders through the
+ * same unified-diff parser as tracked changes. `--no-index` exits 1 (not 0)
+ * whenever the two sides differ, which is the expected/only case here.
+ */
+function gitNoIndexDiff(wt: string, file: string): string {
+  return git(
+    [
+      '-C',
+      wt,
+      '-c',
+      'core.quotepath=false',
+      'diff',
+      '--no-color',
+      '--no-ext-diff',
+      '--no-index',
+      '--',
+      '/dev/null',
+      file,
+    ],
+    { allowExit1: true },
+  )
 }
 
 /**
@@ -317,6 +357,130 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       }
 
       return { branch, path: wt, dirty, ahead, behind, added, deleted }
+    },
+
+    async diff(repo: RepoDTO, branch: string): Promise<WorktreeDiffDTO> {
+      const wt = this.pathFor(repo, branch)
+
+      let mergeBase = ''
+      try {
+        mergeBase = git(['-C', wt, 'merge-base', repo.base, 'HEAD']).trim()
+      } catch (err) {
+        const error = isMissingWorktreeError(err)
+          ? `Worktree for "${branch}" is missing.`
+          : `Could not find a merge-base with "${repo.base}": ${err instanceof Error ? err.message : String(err)}`
+        return { branch, base: repo.base, mergeBase: '', files: [], truncated: false, error }
+      }
+
+      let raw: string
+      try {
+        raw = git(
+          [
+            '-C',
+            wt,
+            '-c',
+            'core.quotepath=false',
+            'diff',
+            '--no-color',
+            '--no-ext-diff',
+            '--find-renames',
+            '--unified=3',
+            mergeBase,
+          ],
+          { maxBuffer: 32 * 1024 * 1024 },
+        )
+      } catch (err) {
+        return {
+          branch,
+          base: repo.base,
+          mergeBase,
+          files: [],
+          truncated: false,
+          error: `Could not compute diff: ${err instanceof Error ? err.message : String(err)}`,
+        }
+      }
+
+      // Cap the raw tracked-diff size, truncating on a clean file boundary so
+      // the parser never sees a half-emitted file.
+      const RAW_CAP = 2 * 1024 * 1024
+      let sizeTruncated = false
+      if (raw.length > RAW_CAP) {
+        const boundary = raw.lastIndexOf('\ndiff --git ', RAW_CAP)
+        raw = boundary > 0 ? raw.slice(0, boundary) : raw.slice(0, RAW_CAP)
+        sizeTruncated = true
+      }
+
+      // Untracked files don't show up in `git diff` — synthesize a diff for
+      // each (against /dev/null) and fold it into the same raw text so the
+      // one parser call produces the whole file list.
+      let untrackedPaths: string[] = []
+      try {
+        untrackedPaths = git(['-C', wt, 'ls-files', '--others', '--exclude-standard'])
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .slice(0, 50)
+      } catch {
+        // no untracked listing available — proceed with the tracked diff only
+      }
+
+      let untrackedRaw = ''
+      const fallbackUntracked: DiffFileDTO[] = []
+      for (const file of untrackedPaths) {
+        let size: number
+        try {
+          size = statSync(join(wt, file)).size
+        } catch {
+          fallbackUntracked.push({
+            path: file,
+            status: 'untracked',
+            binary: false,
+            truncated: false,
+            additions: 0,
+            deletions: 0,
+            hunks: [],
+          })
+          continue
+        }
+        if (size > 200 * 1024) continue // skip large untracked files entirely
+
+        try {
+          const out = gitNoIndexDiff(wt, file)
+          untrackedRaw += (untrackedRaw.length > 0 ? '\n' : '') + out.replace(/\n$/, '')
+        } catch {
+          fallbackUntracked.push({
+            path: file,
+            status: 'untracked',
+            binary: false,
+            truncated: false,
+            additions: 0,
+            deletions: 0,
+            hunks: [],
+          })
+        }
+      }
+
+      const combinedRaw =
+        untrackedRaw.length > 0
+          ? `${raw}${raw.length > 0 && !raw.endsWith('\n') ? '\n' : ''}${untrackedRaw}`
+          : raw
+
+      const { files: parsedFiles, truncated: perFileTruncated } = parseUnifiedDiff(combinedRaw)
+
+      // git shows an untracked file's synthesized /dev/null diff as "added";
+      // relabel those to 'untracked' to match reality.
+      const files = parsedFiles.map((f) =>
+        untrackedPaths.includes(f.path) ? { ...f, status: 'untracked' as const } : f,
+      )
+      files.push(...fallbackUntracked)
+
+      return {
+        branch,
+        base: repo.base,
+        mergeBase,
+        files,
+        truncated: sizeTruncated || perFileTruncated,
+      }
     },
 
     async list(repo: RepoDTO): Promise<WorktreeInfo[]> {
