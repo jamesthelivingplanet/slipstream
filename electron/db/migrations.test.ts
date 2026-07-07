@@ -55,6 +55,12 @@ describe('runMigrations', () => {
     expect(f.sessionCols.has('src')).toBe(true)
   })
 
+  it('creates the session_outcomes table (migration 4)', () => {
+    const f = makeFakeDb({ userVersion: 0 })
+    runMigrations(f.db)
+    expect(f.execLog.some((s) => s.includes('CREATE TABLE session_outcomes'))).toBe(true)
+  })
+
   it('migrates a legacy old-scheme DB (user_version 0, all pre-existing columns) without duplicate-column errors', () => {
     const f = makeFakeDb({
       userVersion: 0,

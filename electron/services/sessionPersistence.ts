@@ -1,4 +1,10 @@
-import type { ISessionManager, ISessionStore, SessionStatus } from '../shared/contract.js'
+import type {
+  IOutcomeStore,
+  ISessionManager,
+  ISessionStore,
+  SessionOutcomeDTO,
+  SessionStatus,
+} from '../shared/contract.js'
 
 export interface SessionPersistence {
   /** Remove the daemon-level session event listeners. */
@@ -24,8 +30,9 @@ export interface SessionPersistence {
 export function createSessionPersistence(deps: {
   sessions: Pick<ISessionManager, 'on' | 'off'>
   store: ISessionStore
+  outcomes: IOutcomeStore
 }): SessionPersistence {
-  const { sessions, store } = deps
+  const { sessions, store, outcomes } = deps
 
   function onStatus(sessionId: string, status: SessionStatus): void {
     const persisted = store.get(sessionId)
@@ -41,13 +48,21 @@ export function createSessionPersistence(deps: {
     }
   }
 
+  // Keyed by sessionId; last write wins (no staleness check needed — a
+  // report_outcome call is a single terminal event per run, not a stream).
+  function onOutcome(sessionId: string, outcome: SessionOutcomeDTO): void {
+    outcomes.upsert(outcome)
+  }
+
   sessions.on('status', onStatus)
   sessions.on('pr', onPr)
+  sessions.on('outcome', onOutcome)
 
   return {
     dispose(): void {
       sessions.off('status', onStatus)
       sessions.off('pr', onPr)
+      sessions.off('outcome', onOutcome)
     },
   }
 }

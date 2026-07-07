@@ -1,5 +1,11 @@
 import Database from 'better-sqlite3'
-import type { RepoDTO, SessionDTO, RepoSettings, PromptTemplateDTO } from '../shared/contract.js'
+import type {
+  RepoDTO,
+  SessionDTO,
+  RepoSettings,
+  PromptTemplateDTO,
+  SessionOutcomeDTO,
+} from '../shared/contract.js'
 import { runMigrations } from './migrations.js'
 
 /** Open (or create) a SQLite database at `file` and apply the schema. */
@@ -82,7 +88,46 @@ export function getSession(db: Database.Database, id: string): SessionDTO | unde
 }
 
 export function deleteSession(db: Database.Database, id: string): void {
+  db.prepare('DELETE FROM session_outcomes WHERE sessionId = ?').run(id)
   db.prepare('DELETE FROM sessions WHERE id = ?').run(id)
+}
+
+export function upsertSessionOutcome(db: Database.Database, o: SessionOutcomeDTO): void {
+  db.prepare(
+    `
+    INSERT INTO session_outcomes (sessionId, result, summary, details, reportedAt)
+    VALUES (@sessionId, @result, @summary, @details, @reportedAt)
+    ON CONFLICT(sessionId) DO UPDATE SET
+      result     = excluded.result,
+      summary    = excluded.summary,
+      details    = excluded.details,
+      reportedAt = excluded.reportedAt
+  `,
+  ).run({ ...o, details: o.details ?? null })
+}
+
+export function getSessionOutcome(
+  db: Database.Database,
+  sessionId: string,
+): SessionOutcomeDTO | undefined {
+  const row = db
+    .prepare(
+      'SELECT sessionId, result, summary, details, reportedAt FROM session_outcomes WHERE sessionId = ?',
+    )
+    .get(sessionId) as (SessionOutcomeDTO & { details: string | null }) | undefined
+  if (!row) return undefined
+  return { ...row, details: row.details ?? undefined }
+}
+
+export function allSessionOutcomes(db: Database.Database): SessionOutcomeDTO[] {
+  const rows = db
+    .prepare('SELECT sessionId, result, summary, details, reportedAt FROM session_outcomes')
+    .all() as (SessionOutcomeDTO & { details: string | null })[]
+  return rows.map((row) => ({ ...row, details: row.details ?? undefined }))
+}
+
+export function deleteSessionOutcome(db: Database.Database, sessionId: string): void {
+  db.prepare('DELETE FROM session_outcomes WHERE sessionId = ?').run(sessionId)
 }
 
 export function deleteRepo(db: Database.Database, id: string): void {

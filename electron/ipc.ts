@@ -6,6 +6,7 @@ import type {
   ITicketProvider,
   ISessionStore,
   IPromptTemplateStore,
+  IOutcomeStore,
   IAppRunner,
   ITailscaleExposer,
   TicketSource,
@@ -34,6 +35,9 @@ export interface IpcDeps {
   sessionStore: ISessionStore
   /** Per-repo reusable prompt templates (FLO-98). */
   promptTemplates: IPromptTemplateStore
+  /** Structured final session outcomes (FLO-97), reported via the app MCP's
+   *  report_outcome tool and persisted independent of the output ring buffer. */
+  outcomeStore: IOutcomeStore
   editor: IEditorLauncher
   appRunner: IAppRunner
   /** Optional: when present, launched apps are also published on the tailnet. */

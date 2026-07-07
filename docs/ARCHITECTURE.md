@@ -51,6 +51,8 @@ Electron main  ──spawns──▶  daemon (ELECTRON_RUN_AS_NODE=1, server.js)
 - **PromptTemplateDTO** — `{ id (uuid), repoId, name, body, createdAt, ownerId? }` (FLO-98
   reusable per-repo kickoff prompts).
 - **SessionStatus** — `idle | running | needs | done | errored`.
+- **SessionOutcomeDTO** — `{ sessionId, result (success|partial|failure), summary, details?, reportedAt }`
+  (FLO-97): the agent's own structured final summary of a run, durable in SQLite.
 
 ## Main-process services
 
@@ -190,6 +192,24 @@ timer — it never reaps a PTY. PTYs are ended solely by:
 A late-reconnecting client recovers missed output by calling `IPC.getSessionBuffer`, which
 returns the session's `OutputBuffer` snapshot (`electron/services/outputBuffer.ts`) — a
 bounded ring-buffer of the last 256 KB of PTY output.
+
+### Structured session outcomes (FLO-97)
+
+The 256 KB output ring-buffer is scrollback, not a record — it truncates, and it's not
+queryable. FLO-97 gives agents a way to leave a durable, structured final summary: the app
+MCP's `report_outcome` tool (`electron/mcp/appMcp.ts`) writes an `outcome.json` sentinel next
+to `status.json`/`pr.json` in `<dataDir>/sessions/<id>/`. `sessionManager.ts`'s existing
+fs.watch on that directory picks it up, parses it with `outcomeSentinel.ts` (mirrors
+`statusSentinel.ts`), and emits a typed `outcome` event; `sessionPersistence.ts` (FLO-69)
+subscribes at the daemon level and upserts it into the `session_outcomes` table
+(`electron/db/migrations.ts` migration 3) via `outcomeStore.ts` — so it survives with zero
+clients attached, same as status/PR persistence. `IPC.getSessionOutcome` and
+`IPC.listSessionHistory` (`electron/core/rpc.ts`) read it back, with a disk-fallback that
+re-parses `outcome.json` directly when the store misses (covers the daemon-restart race where
+an agent finishes before the watcher reattaches) and backfills the store on a successful read.
+`listSessionHistory` joins every owned `SessionDTO` with its outcome and transcript usage
+(FLO-94) into a `SessionHistoryEntry[]`, most recent first — this is what powers the History
+view (browse by repo, compare prompts/outcomes).
 
 ## Key decisions
 

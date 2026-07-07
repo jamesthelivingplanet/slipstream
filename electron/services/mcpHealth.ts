@@ -216,7 +216,7 @@ export async function lastMcpActivity(dataDir: string): Promise<number | undefin
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
-      for (const file of ['status.json', 'pr.json']) {
+      for (const file of ['status.json', 'pr.json', 'outcome.json']) {
         try {
           const stat = await fs.promises.stat(path.join(sessionsDir, entry.name, file))
           if (max === undefined || stat.mtimeMs > max) max = stat.mtimeMs

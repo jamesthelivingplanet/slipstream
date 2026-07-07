@@ -14,6 +14,8 @@ import type {
   ITicketProvider,
   ISessionStore,
   IPromptTemplateStore,
+  IOutcomeStore,
+  SessionOutcomeDTO,
 } from '../shared/contract.js'
 import { IPC } from '../shared/contract.js'
 import { WebSocket } from 'ws'
@@ -34,6 +36,20 @@ function makeFakePromptTemplates(): IPromptTemplateStore {
     get: vi.fn().mockReturnValue(undefined),
     upsert: vi.fn(),
     delete: vi.fn(),
+  }
+}
+
+function makeOutcomeStore(): IOutcomeStore {
+  const map = new Map<string, SessionOutcomeDTO>()
+  return {
+    get: (id) => map.get(id),
+    upsert: (o) => {
+      map.set(o.sessionId, o)
+    },
+    list: () => Array.from(map.values()),
+    delete: (id) => {
+      map.delete(id)
+    },
   }
 }
 
@@ -157,6 +173,7 @@ function makeFakeDeps(): IpcDeps {
     config,
     sessionStore,
     promptTemplates: makeFakePromptTemplates(),
+    outcomeStore: makeOutcomeStore(),
     editor,
     appRunner: {
       run: vi.fn().mockResolvedValue({ pid: 1234, reused: false }),
@@ -299,6 +316,7 @@ function makeSurvivalDeps(): {
     config,
     sessionStore,
     promptTemplates: makeFakePromptTemplates(),
+    outcomeStore: makeOutcomeStore(),
     editor,
     appRunner: {
       run: vi.fn().mockResolvedValue({ pid: 1234, reused: false }),

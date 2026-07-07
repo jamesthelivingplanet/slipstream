@@ -3,8 +3,12 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { execFile as _execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { GitHost } from '../shared/contract.js'
+import type { GitHost, OutcomeResult } from '../shared/contract.js'
 import { parseRemote, createGitDriver } from '../services/gitDriver.js'
+
+const VALID_OUTCOME_RESULTS: OutcomeResult[] = ['success', 'partial', 'failure']
+const MAX_SUMMARY_LEN = 4000
+const MAX_DETAILS_LEN = 32000
 
 const execFile = promisify(_execFile)
 
@@ -27,6 +31,7 @@ export interface AppMcpDeps {
   getRemoteUrl(cwd: string): Promise<string>
   writeSentinel(url: string): Promise<void>
   writeStatus(state: 'running' | 'needs' | 'done', message?: string): Promise<void>
+  writeOutcome(result: OutcomeResult, summary: string, details?: string): Promise<void>
 }
 
 /** A single text content item in a tools/call result. */
@@ -88,6 +93,34 @@ const TOOLS: McpTool[] = [
         message: { type: 'string', description: 'Optional short human-readable note' },
       },
       required: ['state'],
+    },
+  },
+  {
+    name: 'report_outcome',
+    description:
+      'Record the structured final outcome of this session so it is preserved in ' +
+      "Slipstream's run history. Call this once when you finish working (just before " +
+      'your final report_status): state whether the run succeeded, and summarize what ' +
+      'you did/concluded. This is the durable record of the session — the terminal ' +
+      'buffer is not.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        result: {
+          type: 'string',
+          enum: ['success', 'partial', 'failure'],
+          description: 'Whether the run succeeded, partially succeeded, or failed',
+        },
+        summary: {
+          type: 'string',
+          description: 'One-paragraph summary of what was done and concluded',
+        },
+        details: {
+          type: 'string',
+          description: 'Optional longer notes: key decisions, follow-ups, caveats (markdown ok)',
+        },
+      },
+      required: ['result', 'summary'],
     },
   },
 ]
@@ -187,6 +220,23 @@ export async function handleRpc(msg: unknown, deps: AppMcpDeps): Promise<JsonRpc
           return makeResponse(id, makeToolSuccess(`Status reported: ${state}`))
         }
 
+        if (toolName === 'report_outcome') {
+          const result = args['result'] as string
+          const summary = args['summary'] as string | undefined
+          const details = args['details'] as string | undefined
+          if (!VALID_OUTCOME_RESULTS.includes(result as OutcomeResult)) {
+            return makeResponse(id, makeToolError(`Invalid result: ${result}`))
+          }
+          if (typeof summary !== 'string' || summary.length === 0) {
+            return makeResponse(id, makeToolError('summary is required and must be non-empty'))
+          }
+          const truncatedSummary = summary.slice(0, MAX_SUMMARY_LEN)
+          const truncatedDetails =
+            typeof details === 'string' ? details.slice(0, MAX_DETAILS_LEN) : undefined
+          await deps.writeOutcome(result as OutcomeResult, truncatedSummary, truncatedDetails)
+          return makeResponse(id, makeToolSuccess(`Outcome reported: ${result}`))
+        }
+
         return makeError(id, -32601, `Unknown tool: ${toolName}`)
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
@@ -257,6 +307,20 @@ export async function main(): Promise<void> {
       await fs.promises.writeFile(
         path.join(sentinelDir, 'status.json'),
         JSON.stringify({ state, message, ts: Date.now() }),
+      )
+    },
+    async writeOutcome(result: OutcomeResult, summary: string, details?: string): Promise<void> {
+      if (!sessionId) return
+      const sentinelDir = path.join(dataDir, 'sessions', sessionId)
+      await fs.promises.mkdir(sentinelDir, { recursive: true })
+      await fs.promises.writeFile(
+        path.join(sentinelDir, 'outcome.json'),
+        JSON.stringify({
+          result,
+          summary,
+          ...(details !== undefined ? { details } : {}),
+          ts: Date.now(),
+        }),
       )
     },
   }

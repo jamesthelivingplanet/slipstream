@@ -1,7 +1,13 @@
 import { describe, it, expect, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { createSessionPersistence } from './sessionPersistence.js'
-import type { ISessionManager, ISessionStore, SessionDTO } from '../shared/contract.js'
+import type {
+  IOutcomeStore,
+  ISessionManager,
+  ISessionStore,
+  SessionDTO,
+  SessionOutcomeDTO,
+} from '../shared/contract.js'
 
 function makeSession(overrides: Partial<SessionDTO> = {}): SessionDTO {
   return {
@@ -41,14 +47,28 @@ function makeFakes() {
       map.delete(id)
     },
   }
-  return { emitter, sessions, store, map, upsert }
+
+  const outcomeMap = new Map<string, SessionOutcomeDTO>()
+  const outcomeUpsert = vi.fn((o: SessionOutcomeDTO) => {
+    outcomeMap.set(o.sessionId, o)
+  })
+  const outcomes: IOutcomeStore = {
+    get: (id) => outcomeMap.get(id),
+    upsert: outcomeUpsert,
+    list: () => Array.from(outcomeMap.values()),
+    delete: (id) => {
+      outcomeMap.delete(id)
+    },
+  }
+
+  return { emitter, sessions, store, map, upsert, outcomes, outcomeMap, outcomeUpsert }
 }
 
 describe('createSessionPersistence', () => {
   it('persists a status change when no client is attached', () => {
-    const { emitter, sessions, store, map, upsert } = makeFakes()
+    const { emitter, sessions, store, map, upsert, outcomes } = makeFakes()
     map.set('s1', makeSession({ status: 'running' }))
-    createSessionPersistence({ sessions, store })
+    createSessionPersistence({ sessions, store, outcomes })
 
     emitter.emit('status', 's1', 'done')
 
@@ -57,9 +77,9 @@ describe('createSessionPersistence', () => {
   })
 
   it('persists a pr.json sentinel URL with no client attached', () => {
-    const { emitter, sessions, store, map, upsert } = makeFakes()
+    const { emitter, sessions, store, map, upsert, outcomes } = makeFakes()
     map.set('s1', makeSession())
-    createSessionPersistence({ sessions, store })
+    createSessionPersistence({ sessions, store, outcomes })
 
     emitter.emit('pr', 's1', 'https://example.com/pr/1')
 
@@ -68,9 +88,9 @@ describe('createSessionPersistence', () => {
   })
 
   it('persists the reaped status (no reaper regression)', () => {
-    const { emitter, sessions, store, map } = makeFakes()
+    const { emitter, sessions, store, map, outcomes } = makeFakes()
     map.set('s1', makeSession({ status: 'running' }))
-    createSessionPersistence({ sessions, store })
+    createSessionPersistence({ sessions, store, outcomes })
 
     emitter.emit('status', 's1', 'reaped')
 
@@ -78,8 +98,8 @@ describe('createSessionPersistence', () => {
   })
 
   it('ignores status events for sessions not yet in the store', () => {
-    const { emitter, sessions, store, upsert } = makeFakes()
-    createSessionPersistence({ sessions, store })
+    const { emitter, sessions, store, upsert, outcomes } = makeFakes()
+    createSessionPersistence({ sessions, store, outcomes })
 
     emitter.emit('status', 's1', 'running')
 
@@ -87,9 +107,9 @@ describe('createSessionPersistence', () => {
   })
 
   it('skips redundant writes when the status is unchanged', () => {
-    const { emitter, sessions, store, map, upsert } = makeFakes()
+    const { emitter, sessions, store, map, upsert, outcomes } = makeFakes()
     map.set('s1', makeSession({ status: 'running' }))
-    createSessionPersistence({ sessions, store })
+    createSessionPersistence({ sessions, store, outcomes })
 
     emitter.emit('status', 's1', 'running')
 
@@ -97,9 +117,9 @@ describe('createSessionPersistence', () => {
   })
 
   it('writes exactly once for a status transition even with repeated identical emits', () => {
-    const { emitter, sessions, store, map, upsert } = makeFakes()
+    const { emitter, sessions, store, map, upsert, outcomes } = makeFakes()
     map.set('s1', makeSession({ status: 'running' }))
-    createSessionPersistence({ sessions, store })
+    createSessionPersistence({ sessions, store, outcomes })
 
     emitter.emit('status', 's1', 'done')
     emitter.emit('status', 's1', 'done')
@@ -108,9 +128,9 @@ describe('createSessionPersistence', () => {
   })
 
   it('skips redundant pr writes when the url is unchanged', () => {
-    const { emitter, sessions, store, map, upsert } = makeFakes()
+    const { emitter, sessions, store, map, upsert, outcomes } = makeFakes()
     map.set('s1', makeSession({ prUrl: 'https://example.com/pr/1' }))
-    createSessionPersistence({ sessions, store })
+    createSessionPersistence({ sessions, store, outcomes })
 
     emitter.emit('pr', 's1', 'https://example.com/pr/1')
 
@@ -118,9 +138,9 @@ describe('createSessionPersistence', () => {
   })
 
   it('persists exactly once even when multiple clients also listen for the same status', () => {
-    const { emitter, sessions, store, map, upsert } = makeFakes()
+    const { emitter, sessions, store, map, upsert, outcomes } = makeFakes()
     map.set('s1', makeSession({ status: 'running' }))
-    createSessionPersistence({ sessions, store })
+    createSessionPersistence({ sessions, store, outcomes })
 
     // Simulate two connected clients whose per-RPC listeners push to transport.
     const clientA = vi.fn()
@@ -137,13 +157,65 @@ describe('createSessionPersistence', () => {
   })
 
   it('stops persisting after dispose()', () => {
-    const { emitter, sessions, store, map, upsert } = makeFakes()
+    const { emitter, sessions, store, map, upsert, outcomes } = makeFakes()
     map.set('s1', makeSession({ status: 'running' }))
-    const persistence = createSessionPersistence({ sessions, store })
+    const persistence = createSessionPersistence({ sessions, store, outcomes })
 
     persistence.dispose()
     emitter.emit('status', 's1', 'done')
 
     expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('persists a structured outcome when no client is attached', () => {
+    const { emitter, sessions, store, outcomes, outcomeUpsert } = makeFakes()
+    createSessionPersistence({ sessions, store, outcomes })
+
+    const outcome: SessionOutcomeDTO = {
+      sessionId: 's1',
+      result: 'success',
+      summary: 'Fixed the bug',
+      reportedAt: 1000,
+    }
+    emitter.emit('outcome', 's1', outcome)
+
+    expect(outcomes.get('s1')).toEqual(outcome)
+    expect(outcomeUpsert).toHaveBeenCalledTimes(1)
+  })
+
+  it('upserts an outcome unconditionally — last write wins', () => {
+    const { emitter, sessions, store, outcomes, outcomeUpsert } = makeFakes()
+    createSessionPersistence({ sessions, store, outcomes })
+
+    emitter.emit('outcome', 's1', {
+      sessionId: 's1',
+      result: 'partial',
+      summary: 'First attempt',
+      reportedAt: 1000,
+    } satisfies SessionOutcomeDTO)
+    emitter.emit('outcome', 's1', {
+      sessionId: 's1',
+      result: 'success',
+      summary: 'Second attempt',
+      reportedAt: 2000,
+    } satisfies SessionOutcomeDTO)
+
+    expect(outcomeUpsert).toHaveBeenCalledTimes(2)
+    expect(outcomes.get('s1')?.summary).toBe('Second attempt')
+  })
+
+  it('stops persisting outcomes after dispose()', () => {
+    const { emitter, sessions, store, outcomes, outcomeUpsert } = makeFakes()
+    const persistence = createSessionPersistence({ sessions, store, outcomes })
+
+    persistence.dispose()
+    emitter.emit('outcome', 's1', {
+      sessionId: 's1',
+      result: 'success',
+      summary: 'Done',
+      reportedAt: 1000,
+    } satisfies SessionOutcomeDTO)
+
+    expect(outcomeUpsert).not.toHaveBeenCalled()
   })
 })

@@ -270,6 +270,34 @@ export interface SessionUsage {
   model?: string // last-seen model alias, e.g. "claude-sonnet-5"
 }
 
+export type OutcomeResult = 'success' | 'partial' | 'failure'
+
+/** Structured final summary for a session, reported by the agent via the app
+ *  MCP's report_outcome tool (FLO-97). Durable in SQLite — the 256 KB output
+ *  ring buffer is NOT the record. */
+export interface SessionOutcomeDTO {
+  sessionId: string
+  result: OutcomeResult
+  summary: string // short human-readable statement of what happened
+  details?: string // optional longer notes (markdown)
+  reportedAt: number // epoch ms
+}
+
+/** One row of the session-history view (FLO-97): a persisted session joined
+ *  with its structured outcome and transcript usage. */
+export interface SessionHistoryEntry {
+  session: SessionDTO
+  outcome: SessionOutcomeDTO | null
+  usage: SessionUsage | null // null when no transcript/turns yet
+}
+
+export interface IOutcomeStore {
+  get(sessionId: string): SessionOutcomeDTO | undefined
+  upsert(o: SessionOutcomeDTO): void
+  list(): SessionOutcomeDTO[]
+  delete(sessionId: string): void
+}
+
 /** One bucket of a by-repo / by-day usage summary (FLO-94). */
 export interface UsageBucket {
   key: string // repoId (byRepo) or 'YYYY-MM-DD' (byDay)
@@ -333,6 +361,7 @@ export interface SessionEvents {
   status: (sessionId: string, status: SessionStatus) => void
   exit: (sessionId: string, code: number) => void
   pr: (sessionId: string, prUrl: string) => void
+  outcome: (sessionId: string, outcome: SessionOutcomeDTO) => void
 }
 
 export interface StartSessionInput {
@@ -614,6 +643,13 @@ export interface SlipstreamApi {
     body: string
   }): Promise<PromptTemplateDTO>
   deletePromptTemplate(id: string): Promise<void>
+  /** Structured final summary reported by the agent via the app MCP's
+   *  report_outcome tool, or null if none reported yet (FLO-97). */
+  getSessionOutcome(sessionId: string): Promise<SessionOutcomeDTO | null>
+  /** Owner-scoped history of all persisted sessions joined with outcomes +
+   *  usage, most recent first; powers the History view (browse by repo,
+   *  compare prompts/outcomes) (FLO-97). */
+  listSessionHistory(): Promise<SessionHistoryEntry[]>
 }
 
 export const IPC = {
@@ -672,6 +708,8 @@ export const IPC = {
   listPromptTemplates: 'templates:list',
   savePromptTemplate: 'templates:save',
   deletePromptTemplate: 'templates:delete',
+  getSessionOutcome: 'session:outcome',
+  listSessionHistory: 'history:list',
 } as const
 
 declare global {
