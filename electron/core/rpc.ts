@@ -30,6 +30,7 @@ import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 import { checkAppMcp, lastMcpActivity } from '../services/mcpHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
 import { findOnPath, binForKind } from '../services/cliProbe.js'
+import { readTranscriptUsage, buildUsageSummary } from '../services/usage.js'
 
 function parseCsv(raw: string | undefined): string[] {
   return (raw ?? '')
@@ -752,6 +753,19 @@ export function createRpc(
         const bin = binForKind(kind)
         const found = findOnPath(bin)
         return { kind, bin, found: found !== null, path: found ?? undefined }
+      }
+
+      case IPC.sessionUsage: {
+        const id = args[0] as string
+        // Owner-scoped: a missing OR other-owner session surfaces the same
+        // "not found" so usage can't leak across owners.
+        if (!ownedSession(id)) throw new Error(`Session not found: ${id}`)
+        return readTranscriptUsage(id)
+      }
+
+      case IPC.usageSummary: {
+        const list = deps.sessionStore.list().filter(ownedByCaller)
+        return buildUsageSummary(list)
       }
 
       case IPC.pickRepo:

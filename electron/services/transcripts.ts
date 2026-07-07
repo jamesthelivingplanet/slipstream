@@ -9,19 +9,32 @@ export function claudeProjectsDir(): string {
 }
 
 /**
- * True if a Claude Code transcript (<id>.jsonl) exists for this session id under
- * any project dir. Session ids are globally unique UUIDs, so we scan project
- * subdirs rather than reproduce Claude's cwd-path encoding.
+ * Resolve the path of a Claude Code transcript (<id>.jsonl) for this session
+ * id under any project dir, or null when none exists. Session ids are
+ * globally unique UUIDs, so we scan project subdirs rather than reproduce
+ * Claude's cwd-path encoding. Also used by the usage parser (FLO-94).
  */
-export function hasTranscript(id: string, projectsDir: string = claudeProjectsDir()): boolean {
+export function transcriptPathFor(
+  id: string,
+  projectsDir: string = claudeProjectsDir(),
+): string | null {
   let subs: string[]
   try {
     subs = fs.readdirSync(projectsDir)
   } catch {
-    return false
+    return null
   }
   for (const sub of subs) {
-    if (fs.existsSync(path.join(projectsDir, sub, `${id}.jsonl`))) return true
+    const candidate = path.join(projectsDir, sub, `${id}.jsonl`)
+    if (fs.existsSync(candidate)) return candidate
   }
-  return false
+  return null
+}
+
+/**
+ * True if a Claude Code transcript (<id>.jsonl) exists for this session id under
+ * any project dir.
+ */
+export function hasTranscript(id: string, projectsDir: string = claudeProjectsDir()): boolean {
+  return transcriptPathFor(id, projectsDir) !== null
 }
