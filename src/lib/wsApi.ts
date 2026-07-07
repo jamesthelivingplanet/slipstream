@@ -30,6 +30,8 @@ import type {
   AgentCliCheck,
   ScopeOption,
   TicketSourceSettings,
+  SessionUsage,
+  UsageSummary,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -515,6 +517,14 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     checkAgentCli(kind): Promise<AgentCliCheck> {
       return request(IPC.checkAgentCli, [kind]) as Promise<AgentCliCheck>
+    },
+
+    getSessionUsage(sessionId: string): Promise<SessionUsage> {
+      return request(IPC.sessionUsage, [sessionId]) as Promise<SessionUsage>
+    },
+
+    getUsageSummary(): Promise<UsageSummary> {
+      return request(IPC.usageSummary, []) as Promise<UsageSummary>
     },
   }
 }

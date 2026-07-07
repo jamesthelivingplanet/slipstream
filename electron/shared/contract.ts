@@ -238,6 +238,48 @@ export interface LiveSessionInfo {
   lastActivityAt: number // ms epoch of last PTY output (spawn time if none yet)
 }
 
+/** Per-turn token usage parsed from a Claude Code transcript JSONL. The four
+ *  fields mirror the Anthropic usage object's token counts (cache creation +
+ *  cache read counted separately so cache savings are visible). */
+export interface UsageTokens {
+  input: number
+  output: number
+  cacheCreation: number
+  cacheRead: number
+}
+
+/** Aggregate usage for a single session, derived from its transcript JSONL
+ *  (FLO-94). `costUsd` is an ESTIMATE computed from a model-family pricing
+ *  table (see electron/services/usage.ts) — the token counts are the
+ *  authoritative metric; dollars are a convenient, approximate rollup. */
+export interface SessionUsage {
+  sessionId: string
+  exists: boolean // false when no transcript file is present yet (session may be pre-first-turn)
+  tokens: UsageTokens
+  costUsd: number // estimate; 0 until the first assistant turn lands
+  turns: number // number of assistant turns counted
+  model?: string // last-seen model alias, e.g. "claude-sonnet-5"
+}
+
+/** One bucket of a by-repo / by-day usage summary (FLO-94). */
+export interface UsageBucket {
+  key: string // repoId (byRepo) or 'YYYY-MM-DD' (byDay)
+  tokens: UsageTokens
+  costUsd: number
+  sessions: number // distinct sessions contributing to this bucket
+}
+
+/** Total + by-repo + by-day usage rollup across tracked sessions (FLO-94).
+ *  Gives mission control a real cost signal instead of relying on the idle
+ *  reaper as a proxy. `sessions` carries per-session detail for row chips. */
+export interface UsageSummary {
+  total: UsageTokens
+  costUsd: number
+  byRepo: UsageBucket[] // most expensive first
+  byDay: UsageBucket[] // most recent first
+  sessions: SessionUsage[] // per-session detail, most expensive first
+}
+
 /* ───────── main-process service interfaces ───────── */
 
 export interface IRepoRegistry {
@@ -528,6 +570,15 @@ export interface SlipstreamApi {
    *  on the daemon/server machine? Lets the UI warn before Start rather than
    *  failing only at spawn time with a red bubble. */
   checkAgentCli(kind: BackendKind): Promise<AgentCliCheck>
+
+  /** Aggregate token/cost usage for a session, parsed from its Claude Code
+   *  transcript JSONL. `exists` is false until the transcript file appears.
+   *  Cost is an estimate (see SessionUsage). */
+  getSessionUsage(sessionId: string): Promise<SessionUsage>
+  /** Total + by-repo + by-day usage rollup across the caller's tracked
+   *  sessions, parsed from their transcripts. The real cost signal for
+   *  mission control (FLO-94). */
+  getUsageSummary(): Promise<UsageSummary>
 }
 
 export const IPC = {
@@ -581,6 +632,8 @@ export const IPC = {
   getMcpStatus: 'mcp:status',
   getDiagnostics: 'diag:get',
   checkAgentCli: 'agent:checkCli',
+  sessionUsage: 'session:usage',
+  usageSummary: 'usage:summary',
 } as const
 
 declare global {
