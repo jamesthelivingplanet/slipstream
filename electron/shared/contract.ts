@@ -317,6 +317,27 @@ export interface UsageSummary {
   sessions: SessionUsage[] // per-session detail, most expensive first
 }
 
+export type PrMergeState = 'open' | 'merged' | 'closed' | 'unknown'
+export type PrCiState = 'none' | 'pending' | 'running' | 'passed' | 'failed' | 'unknown'
+export type PrReviewState = 'none' | 'approved' | 'changes_requested' | 'unknown'
+
+/** Post-handoff PR/MR state for a session (FLO-96). Lets mission control
+ *  answer "is CI green / is it approved / did it merge" independently of
+ *  the agent's exit status. `error` carries a human message when the check
+ *  couldn't run (no token, network, PR URL unparseable) — the UI shows the
+ *  states it has rather than failing. */
+export interface PrStatusDTO {
+  sessionId: string
+  url: string
+  host: GitHost
+  state: PrMergeState
+  ci: PrCiState
+  review: PrReviewState
+  approvals: number // count of distinct approving reviewers (0 when unknown)
+  checkedAt: number // epoch ms of this check
+  error?: string
+}
+
 /* ───────── main-process service interfaces ───────── */
 
 export interface IRepoRegistry {
@@ -650,6 +671,11 @@ export interface SlipstreamApi {
    *  usage, most recent first; powers the History view (browse by repo,
    *  compare prompts/outcomes) (FLO-97). */
   listSessionHistory(): Promise<SessionHistoryEntry[]>
+
+  /** Post-handoff PR/MR merge/CI/review state for a session (FLO-96). null
+   *  when the session has no prUrl yet. Never rejects for a provider-side
+   *  failure — see PrStatusDTO.error. */
+  getPrStatus(sessionId: string): Promise<PrStatusDTO | null>
 }
 
 export const IPC = {
@@ -710,6 +736,7 @@ export const IPC = {
   deletePromptTemplate: 'templates:delete',
   getSessionOutcome: 'session:outcome',
   listSessionHistory: 'history:list',
+  sessionPrStatus: 'session:prStatus',
 } as const
 
 declare global {

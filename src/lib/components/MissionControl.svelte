@@ -15,11 +15,15 @@
     dialogOpen,
     registerRepo,
   } from '../stores'
-  import { getSessionBuffer, hasBackend, getUsageSummary } from '../ipc'
+  import { getSessionBuffer, hasBackend, getUsageSummary, getPrStatus } from '../ipc'
   import { extractAsk, formatWait } from '../missionControl'
   import { formatCost, formatTokens, dayKeyFromMs } from '../../../electron/shared/usageFormat.js'
   import type { Session, Ticket } from '../types'
-  import type { UsageSummary, SessionUsage } from '../../../electron/shared/contract.js'
+  import type {
+    UsageSummary,
+    SessionUsage,
+    PrStatusDTO,
+  } from '../../../electron/shared/contract.js'
   import Streamlines from './Streamlines.svelte'
 
   // Ticks every 30s so "waiting Xm" labels stay fresh without a full re-render trigger.
@@ -73,6 +77,80 @@
 
   $: refreshAsks($sessions)
 
+  // FLO-96: post-handoff PR/MR status (merge/CI/review), keyed by session id.
+  // Backend caches per prUrl with a TTL, so polling every session with a
+  // prUrl on an interval is cheap. A session freshly gaining a prUrl (the
+  // agent just opened its MR) is picked up immediately by refreshNewPrs
+  // rather than waiting for the next tick.
+  let prStatuses: Record<string, PrStatusDTO> = {}
+  let prTimer: ReturnType<typeof setInterval> | undefined
+  const prTracked = new Set<string>()
+  let prNewInFlight = false
+
+  async function fetchPr(id: string): Promise<void> {
+    try {
+      const dto = await getPrStatus(id)
+      if (dto) prStatuses = { ...prStatuses, [id]: dto }
+    } catch {
+      // leave prior state — PR status is advisory, never blocks the UI
+    }
+  }
+
+  async function refreshAllPrStatuses(): Promise<void> {
+    if (!hasBackend) return
+    const targets = $sessions.filter((s) => s.id && s.prUrl)
+    await Promise.all(targets.map((s) => fetchPr(s.id as string)))
+  }
+
+  function refreshNewPrs(list: Session[]) {
+    if (!hasBackend || prNewInFlight) return
+    const targets = list.filter((s) => s.id && s.prUrl && !prTracked.has(s.id as string))
+    if (targets.length === 0) return
+    prNewInFlight = true
+    Promise.all(
+      targets.map((s) => {
+        prTracked.add(s.id as string)
+        return fetchPr(s.id as string)
+      }),
+    ).finally(() => {
+      prNewInFlight = false
+    })
+  }
+
+  $: refreshNewPrs($sessions)
+
+  /** A done session whose PR is known but hasn't merged yet needs to read
+   *  differently from one that actually landed. */
+  function prNotMerged(s: Session): boolean {
+    if (!s.id) return false
+    const dto = prStatuses[s.id]
+    return !!dto && dto.state !== 'unknown' && dto.state !== 'merged'
+  }
+
+  interface PrChip {
+    text: string
+    cls: 'done' | 'error' | 'needs' | 'muted'
+  }
+
+  /** Compact chip list for a session's PR: merge state, CI, review — in that
+   *  order, omitting states that aren't worth a chip (none/unknown CI,
+   *  none/unknown review). An error collapses to a single "PR ?" chip. */
+  function prChips(dto: PrStatusDTO | undefined): PrChip[] {
+    if (!dto) return []
+    if (dto.error) return [{ text: 'PR ?', cls: 'muted' }]
+    const chips: PrChip[] = []
+    if (dto.state === 'merged') chips.push({ text: 'merged', cls: 'done' })
+    else if (dto.state === 'open') chips.push({ text: 'open', cls: 'muted' })
+    else if (dto.state === 'closed') chips.push({ text: 'closed', cls: 'error' })
+    if (dto.ci === 'passed') chips.push({ text: 'CI ✓', cls: 'done' })
+    else if (dto.ci === 'failed') chips.push({ text: 'CI ✗', cls: 'error' })
+    else if (dto.ci === 'pending' || dto.ci === 'running')
+      chips.push({ text: 'CI …', cls: 'needs' })
+    if (dto.review === 'approved') chips.push({ text: 'approved', cls: 'done' })
+    else if (dto.review === 'changes_requested') chips.push({ text: 'changes', cls: 'error' })
+    return chips
+  }
+
   $: needsSessions = $sessions.filter((s) => s.status === 'needs' || s.status === 'errored')
   $: runningSessions = $sessions.filter((s) => s.status === 'running' || s.status === 'detached')
   $: doneSessions = $sessions.filter((s) => s.status === 'done')
@@ -86,10 +164,14 @@
     refreshUsage()
     // 90s keeps running spend fresh without re-scanning transcripts too often.
     usageTimer = setInterval(refreshUsage, 90_000)
+    refreshAllPrStatuses()
+    // 60s alongside the usage timer; the backend TTL-caches per prUrl so this stays cheap.
+    prTimer = setInterval(refreshAllPrStatuses, 60_000)
   })
   onDestroy(() => {
     clearInterval(tickTimer)
     clearInterval(usageTimer)
+    clearInterval(prTimer)
   })
 
   function choose(id: string | null | undefined) {
@@ -209,6 +291,15 @@
                     >{costFor(s)?.cost}</span
                   >
                 {/if}
+                {#if s.id && s.prUrl && prStatuses[s.id]}
+                  <span class="pr-chips">
+                    {#each prChips(prStatuses[s.id]) as c (c.text)}
+                      <span class="pr-chip pr-{c.cls}" title={prStatuses[s.id]?.error}
+                        >{c.text}</span
+                      >
+                    {/each}
+                  </span>
+                {/if}
               </button>
             {/each}
           </div>
@@ -236,7 +327,11 @@
           <div class="rows">
             {#each doneSessions as s (s.id ?? s.tid)}
               <button type="button" class="row" on:click={() => choose(s.id)}>
-                <span class="dot"></span>
+                <span
+                  class="dot"
+                  class:not-merged={prNotMerged(s)}
+                  title={prNotMerged(s) ? 'agent finished — PR not merged yet' : undefined}
+                ></span>
                 <span class="r-id mono">{s.tid}</span>
                 <span class="r-title">{s.title}</span>
                 {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
@@ -246,6 +341,15 @@
                     title={`${costFor(s)?.tokens} tokens · estimated from transcript usage`}
                     >{costFor(s)?.cost}</span
                   >
+                {/if}
+                {#if s.id && s.prUrl && prStatuses[s.id]}
+                  <span class="pr-chips">
+                    {#each prChips(prStatuses[s.id]) as c (c.text)}
+                      <span class="pr-chip pr-{c.cls}" title={prStatuses[s.id]?.error}
+                        >{c.text}</span
+                      >
+                    {/each}
+                  </span>
                 {/if}
               </button>
             {/each}
@@ -539,6 +643,35 @@
     white-space: nowrap;
   }
 
+  /* PR/CI status chips (FLO-96) */
+  .pr-chips {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+  }
+  .pr-chip {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10.5px;
+    font-weight: 550;
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: hsl(var(--muted) / 0.6);
+    color: hsl(var(--muted-foreground));
+  }
+  .pr-chip.pr-done {
+    color: hsl(var(--st-done));
+    background: hsl(var(--st-done) / 0.12);
+  }
+  .pr-chip.pr-error {
+    color: hsl(var(--st-error));
+    background: hsl(var(--st-error) / 0.12);
+  }
+  .pr-chip.pr-needs {
+    color: hsl(var(--st-needs));
+    background: hsl(var(--st-needs) / 0.12);
+  }
+
   /* launchpad */
   .tiks {
     display: flex;
@@ -593,6 +726,11 @@
   .landed .dot {
     background: hsl(var(--st-done));
     animation: none;
+  }
+  /* A done session whose PR hasn't merged yet must read differently from one
+     that actually landed (FLO-96). */
+  .landed .dot.not-merged {
+    background: hsl(var(--st-needs));
   }
 
   @keyframes mc-breathe {

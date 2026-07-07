@@ -570,6 +570,54 @@ describe('createRpc', () => {
     })
   })
 
+  describe('sessionPrStatus (FLO-96)', () => {
+    it('returns null when the session has no prUrl', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', prUrl: undefined }))
+      deps.prStatus = { get: vi.fn() }
+      const result = await rpc.handle(IPC.sessionPrStatus, ['s1'])
+      expect(result).toBeNull()
+      expect(deps.prStatus.get).not.toHaveBeenCalled()
+    })
+
+    it('returns null when no prStatus service is configured', async () => {
+      deps.sessionStore.upsert(
+        makeSession({ id: 's1', prUrl: 'https://github.com/acme/api/pull/1' }),
+      )
+      const result = await rpc.handle(IPC.sessionPrStatus, ['s1'])
+      expect(result).toBeNull()
+    })
+
+    it('delegates to prStatus.get for an owned session with a prUrl', async () => {
+      const dto = {
+        sessionId: 's1',
+        url: 'https://github.com/acme/api/pull/1',
+        host: 'github' as const,
+        state: 'open' as const,
+        ci: 'passed' as const,
+        review: 'approved' as const,
+        approvals: 1,
+        checkedAt: 123,
+      }
+      deps.sessionStore.upsert(makeSession({ id: 's1', prUrl: dto.url }))
+      deps.prStatus = { get: vi.fn().mockResolvedValue(dto) }
+      const result = await rpc.handle(IPC.sessionPrStatus, ['s1'])
+      expect(deps.prStatus.get).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 's1', prUrl: dto.url }),
+      )
+      expect(result).toEqual(dto)
+    })
+
+    it('rejects for a session the caller does not own', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice', prUrl: 'x' }))
+      deps.prStatus = { get: vi.fn() }
+      await expect(rpc.handle(IPC.sessionPrStatus, ['hers'])).rejects.toThrow(/Session not found/)
+    })
+
+    it('rejects for a missing session', async () => {
+      await expect(rpc.handle(IPC.sessionPrStatus, ['nope'])).rejects.toThrow(/Session not found/)
+    })
+  })
+
   it('forwards session data events to emit (3-arg form with seq)', () => {
     deps._emit('data', 's1', 'some output', 42)
     expect(emitted).toEqual([[IPC.sessionData, 's1', 'some output', 42]])

@@ -34,6 +34,7 @@ import type {
   PromptTemplateDTO,
   SessionOutcomeDTO,
   SessionHistoryEntry,
+  PrStatusDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
 
@@ -414,4 +415,12 @@ export function getSessionOutcome(sessionId: string): Promise<SessionOutcomeDTO 
  *  most recent first; powers the History view. */
 export function listSessionHistory(): Promise<SessionHistoryEntry[]> {
   return hasBackend ? window.slipstream.listSessionHistory() : Promise.resolve([])
+}
+
+// ── PR / CI status (FLO-96) ───────────────────────────────────────────────
+
+/** Post-handoff PR/MR merge/CI/review state for a session. null when there's
+ *  no backend or the session has no prUrl yet. */
+export function getPrStatus(sessionId: string): Promise<PrStatusDTO | null> {
+  return hasBackend ? window.slipstream.getPrStatus(sessionId) : Promise.resolve(null)
 }
