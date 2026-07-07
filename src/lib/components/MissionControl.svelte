@@ -15,14 +15,34 @@
     dialogOpen,
     registerRepo,
   } from '../stores'
-  import { getSessionBuffer, hasBackend } from '../ipc'
+  import { getSessionBuffer, hasBackend, getUsageSummary } from '../ipc'
   import { extractAsk, formatWait } from '../missionControl'
+  import { formatCost, formatTokens, dayKeyFromMs } from '../../../electron/shared/usageFormat.js'
   import type { Session, Ticket } from '../types'
+  import type { UsageSummary, SessionUsage } from '../../../electron/shared/contract.js'
   import Streamlines from './Streamlines.svelte'
 
   // Ticks every 30s so "waiting Xm" labels stay fresh without a full re-render trigger.
   let now = Date.now()
   let tickTimer: ReturnType<typeof setInterval> | undefined
+
+  // FLO-94: real token/cost usage parsed from transcripts. Refreshed on mount +
+  // periodically so running costs climb as agents work; gives mission control a
+  // real cost signal instead of the idle reaper as a proxy.
+  let usage: UsageSummary | null = null
+  let usageTimer: ReturnType<typeof setInterval> | undefined
+  $: usageById = new Map<string, SessionUsage>((usage?.sessions ?? []).map((s) => [s.sessionId, s]))
+  $: todayCost = usage?.byDay.find((b) => b.key === dayKeyFromMs(Date.now()))?.costUsd ?? 0
+  $: hasUsage = (usage?.costUsd ?? 0) > 0
+
+  async function refreshUsage(): Promise<void> {
+    if (!hasBackend) return
+    try {
+      usage = await getUsageSummary()
+    } catch {
+      // leave existing usage on failure — cost is advisory, never blocks the UI
+    }
+  }
 
   // Cache of the last-extracted "ask" per backend session id. Re-fetched only
   // when a session newly enters 'needs' (not on every store tick).
@@ -63,14 +83,27 @@
 
   onMount(() => {
     tickTimer = setInterval(() => (now = Date.now()), 30_000)
+    refreshUsage()
+    // 90s keeps running spend fresh without re-scanning transcripts too often.
+    usageTimer = setInterval(refreshUsage, 90_000)
   })
   onDestroy(() => {
     clearInterval(tickTimer)
+    clearInterval(usageTimer)
   })
 
   function choose(id: string | null | undefined) {
     if (!id) return
     select(id)
+  }
+
+  /** Cost chip text for a session row, or null when there's no usage yet. */
+  function costFor(s: Session): { cost: string; tokens: string } | null {
+    if (!s.id) return null
+    const u = usageById.get(s.id)
+    if (!u || !u.exists || u.turns === 0) return null
+    const tokens = u.tokens.input + u.tokens.output + u.tokens.cacheCreation + u.tokens.cacheRead
+    return { cost: formatCost(u.costUsd), tokens: formatTokens(tokens) }
   }
 
   /** Mirrors NewAgentDialog's ticket → prompt convention so launching from here
@@ -90,6 +123,13 @@
       <span class="muted head-sum"
         >{runningCount} running · {needsSessions.length} waiting on you</span
       >
+      {#if hasUsage}
+        <span class="head-spend" title="Estimated from transcript usage">
+          <span class="spend-today">today {formatCost(todayCost)}</span>
+          <span class="muted">·</span>
+          <span class="spend-total">{formatCost(usage?.costUsd ?? 0)} all time</span>
+        </span>
+      {/if}
     </div>
 
     {#if showOnboarding}
@@ -162,6 +202,13 @@
                     <span class="del">−{s.del}</span>
                   </span>
                 {/if}
+                {#if costFor(s)}
+                  <span
+                    class="r-cost mono"
+                    title={`${costFor(s)?.tokens} tokens · estimated from transcript usage`}
+                    >{costFor(s)?.cost}</span
+                  >
+                {/if}
               </button>
             {/each}
           </div>
@@ -193,6 +240,13 @@
                 <span class="r-id mono">{s.tid}</span>
                 <span class="r-title">{s.title}</span>
                 {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
+                {#if costFor(s)}
+                  <span
+                    class="r-cost mono"
+                    title={`${costFor(s)?.tokens} tokens · estimated from transcript usage`}
+                    >{costFor(s)?.cost}</span
+                  >
+                {/if}
               </button>
             {/each}
           </div>
@@ -232,6 +286,20 @@
   }
   .head-sum {
     font-size: 12.5px;
+  }
+
+  .head-spend {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: hsl(var(--muted-foreground));
+  }
+  .head-spend .spend-today {
+    color: hsl(var(--foreground));
   }
 
   .first-run {
@@ -452,6 +520,15 @@
   }
   .r-diff .del {
     color: hsl(var(--st-error));
+  }
+  .r-cost {
+    font-size: 11px;
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    color: hsl(var(--muted-foreground));
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: hsl(var(--muted) / 0.6);
   }
   .r-activity {
     font-size: 11.5px;

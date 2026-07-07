@@ -38,7 +38,7 @@ export function composeReviewPrompt(comments: ReviewComment[], base: string): st
       n++
       const suffix = c.side === 'old' ? ' (removed line)' : ''
       lines.push('')
-      lines.push(`${n}. ${c.file}:${c.line}${suffix}`)
+      lines.push(`${n}. @${c.file}:${c.line}${suffix}`)
       lines.push(`   > ${c.lineText}`)
       for (const textLine of c.text.split('\n')) {
         lines.push(`   ${textLine}`)

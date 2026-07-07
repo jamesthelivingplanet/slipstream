@@ -123,18 +123,18 @@ describe('resolveRepoPath', () => {
 })
 
 describe('cloneRepo', () => {
-  it('clones a local repo into dest and makes it a work tree with the correct remote', () => {
+  it('clones a local repo into dest and makes it a work tree with the correct remote', async () => {
     const src = join(root, 'clone-src')
     initRepo(src, 'https://github.com/acme/cloned.git')
     const dest = join(root, 'clone-dest')
-    cloneRepo(src, dest)
+    await cloneRepo(src, dest)
     expect(isWorkTree(dest)).toBe(true)
     expect(getRemoteUrl(dest)).toBe(src)
   })
 
-  it('throws a clear Error when given a bogus path', () => {
+  it('rejects with a clear Error when given a bogus path', async () => {
     const bad = join(root, 'does-not-exist-at-all')
     const dest = join(root, 'clone-bad-dest')
-    expect(() => cloneRepo(bad, dest)).toThrow(/Failed to clone/)
+    await expect(cloneRepo(bad, dest)).rejects.toThrow(/Failed to clone/)
   })
 })

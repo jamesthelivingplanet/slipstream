@@ -10,6 +10,20 @@ export function isMobileWidth(width: number): boolean {
   return width <= MOBILE_BREAKPOINT
 }
 
+/** Viewport width (px) at or below which the agent sidebar becomes a
+ *  toggleable drawer overlay instead of a fixed sidebar. Covers both
+ *  mobile and medium/tablet viewports.
+ *  Must stay in sync with the `@media (max-width: …)` breakpoints in app.css. */
+export const DRAWER_BREAKPOINT = 900
+
+/** Media query string for drawer mode (agent list is a toggleable overlay). */
+export const DRAWER_MEDIA_QUERY = `(max-width: ${DRAWER_BREAKPOINT}px)`
+
+/** True when a viewport of the given width should use drawer layout. */
+export function isDrawerWidth(width: number): boolean {
+  return width <= DRAWER_BREAKPOINT
+}
+
 /** Vertical drag distance (px) at or beyond which a drawer drag dismisses it. */
 export const DRAWER_DISMISS_PX = 72
 

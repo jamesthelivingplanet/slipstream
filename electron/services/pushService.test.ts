@@ -337,4 +337,51 @@ describe('createPushService', () => {
     expect(JSON.parse(payload).tid).toBe('FLO-42')
     expect(JSON.parse(payload).body).toBe('Do work')
   })
+
+  it('clears per-session tracking on exit so a restarted session notifies again', async () => {
+    const sub = makeSub()
+    store.upsert(sub, { needs: true, done: false, running: false }, 0)
+    makeService()
+    sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+    sessions._emit('exit', 's1', 0)
+    // Same status, same instant: without cleanup this is swallowed both by
+    // lastStatus (needs -> needs = no transition) and lastSent (3s dedupe).
+    sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('clears per-session tracking on a reaped status (exit event is suppressed)', async () => {
+    const sub = makeSub()
+    store.upsert(sub, { needs: true, done: false, running: false }, 0)
+    makeService()
+    sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+    sessions._emit('status', 's1', 'reaped' satisfies SessionStatus)
+    sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not send a push for a reaped status itself', async () => {
+    const sub = makeSub()
+    store.upsert(sub, { needs: true, done: true, running: true }, 0)
+    makeService()
+    sessions._emit('status', 's1', 'reaped' satisfies SessionStatus)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('keeps deduping other sessions after one session exits', async () => {
+    const sub = makeSub()
+    store.upsert(sub, { needs: true, done: false, running: false }, 0)
+    makeService()
+    sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+    sessions._emit('status', 's2', 'needs' satisfies SessionStatus)
+    sessions._emit('exit', 's1', 0)
+    // s2 was untouched by s1's cleanup: still deduped within the window.
+    sessions._emit('status', 's2', 'idle' satisfies SessionStatus)
+    sessions._emit('status', 's2', 'needs' satisfies SessionStatus)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(send).toHaveBeenCalledTimes(2)
+  })
 })

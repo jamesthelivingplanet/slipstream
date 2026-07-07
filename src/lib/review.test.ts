@@ -23,7 +23,7 @@ describe('composeReviewPrompt', () => {
 
   it('formats a single comment with numbering, file:line, quoted line, and text', () => {
     const prompt = composeReviewPrompt([makeComment()], 'main')
-    expect(prompt).toContain('1. src/foo.ts:10')
+    expect(prompt).toContain('1. @src/foo.ts:10')
     expect(prompt).toContain('   > const x = 1')
     expect(prompt).toContain('   Use a const enum here.')
   })
@@ -33,7 +33,7 @@ describe('composeReviewPrompt', () => {
       [makeComment({ side: 'old', line: 5, lineText: 'const y = 2' })],
       'main',
     )
-    expect(prompt).toContain('1. src/foo.ts:5 (removed line)')
+    expect(prompt).toContain('1. @src/foo.ts:5 (removed line)')
   })
 
   it('does not append the suffix for new-side comments', () => {
@@ -58,9 +58,9 @@ describe('composeReviewPrompt', () => {
       makeComment({ id: 'c', file: 'b.ts', line: 2 }),
     ]
     const prompt = composeReviewPrompt(comments, 'main')
-    const bIdx = prompt.indexOf('b.ts:1')
-    const b2Idx = prompt.indexOf('b.ts:2')
-    const aIdx = prompt.indexOf('a.ts:1')
+    const bIdx = prompt.indexOf('@b.ts:1')
+    const b2Idx = prompt.indexOf('@b.ts:2')
+    const aIdx = prompt.indexOf('@a.ts:1')
     expect(bIdx).toBeGreaterThan(-1)
     // Both b.ts entries stay grouped together (ordered by line within the file)...
     expect(b2Idx).toBeGreaterThan(bIdx)
@@ -74,8 +74,8 @@ describe('composeReviewPrompt', () => {
       makeComment({ id: 'b', file: 'x.ts', line: 5 }),
     ]
     const prompt = composeReviewPrompt(comments, 'main')
-    const idx5 = prompt.indexOf('x.ts:5')
-    const idx20 = prompt.indexOf('x.ts:20')
+    const idx5 = prompt.indexOf('@x.ts:5')
+    const idx20 = prompt.indexOf('@x.ts:20')
     expect(idx5).toBeGreaterThan(-1)
     expect(idx20).toBeGreaterThan(idx5)
   })
@@ -86,8 +86,8 @@ describe('composeReviewPrompt', () => {
       makeComment({ id: 'b', file: 'b.ts', line: 1 }),
     ]
     const prompt = composeReviewPrompt(comments, 'main')
-    expect(prompt).toContain('1. a.ts:1')
-    expect(prompt).toContain('2. b.ts:1')
+    expect(prompt).toContain('1. @a.ts:1')
+    expect(prompt).toContain('2. @b.ts:1')
   })
 
   it('returns just the header for an empty comment list', () => {

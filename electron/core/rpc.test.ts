@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { createRpc } from './rpc.js'
 import type { IpcDeps } from '../ipc.js'
 import { IPC } from '../shared/contract.js'
@@ -326,6 +329,103 @@ describe('createRpc', () => {
     await expect(rpc.handle('unknown:channel', [])).rejects.toThrow(/Unknown channel/)
   })
 
+  describe('usage (token/cost from transcripts)', () => {
+    // The usage handlers read transcripts from claudeProjectsDir(), which honors
+    // CLAUDE_CONFIG_DIR. Point it at a temp dir and write fixture transcripts.
+    let configDir: string
+    let prevConfigDir: string | undefined
+
+    function writeTurn(
+      id: string,
+      opts: { model?: string; input?: number; output?: number } = {},
+    ): void {
+      const sub = path.join(configDir, 'projects', 'proj-a')
+      fs.mkdirSync(sub, { recursive: true })
+      const model = opts.model ?? 'claude-sonnet-5'
+      const line = JSON.stringify({
+        type: 'assistant',
+        message: {
+          model,
+          usage: {
+            input_tokens: opts.input ?? 0,
+            output_tokens: opts.output ?? 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      })
+      const file = path.join(sub, `${id}.jsonl`)
+      fs.appendFileSync(file, (fs.existsSync(file) ? '\n' : '') + line)
+    }
+
+    beforeEach(() => {
+      configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-rpc-usage-'))
+      prevConfigDir = process.env.CLAUDE_CONFIG_DIR
+      process.env.CLAUDE_CONFIG_DIR = configDir
+    })
+
+    afterEach(() => {
+      if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = prevConfigDir
+      fs.rmSync(configDir, { recursive: true, force: true })
+    })
+
+    it('sessionUsage parses the session transcript (owner-scoped)', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', repoId: 'r1' }))
+      writeTurn('s1', { model: 'claude-sonnet-5', input: 1_000_000, output: 1_000_000 })
+      const result = (await rpc.handle(IPC.sessionUsage, ['s1'])) as {
+        exists: boolean
+        costUsd: number
+        turns: number
+        model?: string
+      }
+      expect(result.exists).toBe(true)
+      expect(result.turns).toBe(1)
+      expect(result.model).toBe('claude-sonnet-5')
+      expect(result.costUsd).toBeCloseTo(18, 4) // sonnet: $3/M in + $15/M out
+    })
+
+    it('sessionUsage reports exists:false when no transcript exists yet', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'pre-turn', repoId: 'r1' }))
+      const result = (await rpc.handle(IPC.sessionUsage, ['pre-turn'])) as {
+        exists: boolean
+        costUsd: number
+      }
+      expect(result.exists).toBe(false)
+      expect(result.costUsd).toBe(0)
+    })
+
+    it('sessionUsage rejects for a session the caller does not own', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.sessionUsage, ['hers'])).rejects.toThrow(/Session not found/)
+    })
+
+    it('usageSummary rolls up across the caller sessions by repo and day', async () => {
+      deps.sessionStore.upsert(
+        makeSession({ id: 's1', repoId: 'r1', createdAt: Date.UTC(2026, 6, 1) }),
+      )
+      deps.sessionStore.upsert(
+        makeSession({ id: 's2', repoId: 'r2', createdAt: Date.UTC(2026, 6, 2) }),
+      )
+      // foreign-owner session must be excluded from the summary
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
+      writeTurn('s1', { model: 'sonnet', input: 1_000_000, output: 1_000_000 }) // $18
+      writeTurn('s2', { model: 'opus', input: 1_000_000, output: 1_000_000 }) // $90
+      writeTurn('hers', { model: 'sonnet', input: 1_000_000, output: 1_000_000 })
+
+      const result = (await rpc.handle(IPC.usageSummary, [])) as {
+        costUsd: number
+        byRepo: { key: string; costUsd: number }[]
+        byDay: { key: string; costUsd: number }[]
+        sessions: { sessionId: string }[]
+      }
+      expect(result.costUsd).toBeCloseTo(108, 4)
+      expect(result.byRepo.map((b) => b.key)).toEqual(['r2', 'r1'])
+      expect(result.byDay.map((b) => b.key)).toEqual(['2026-07-02', '2026-07-01'])
+      expect(result.sessions).toHaveLength(2)
+    })
+  })
+
   it('forwards session data events to emit (3-arg form with seq)', () => {
     deps._emit('data', 's1', 'some output', 42)
     expect(emitted).toEqual([[IPC.sessionData, 's1', 'some output', 42]])
@@ -568,6 +668,74 @@ describe('createRpc', () => {
     ])
     const result = await rpc.handle(IPC.cleanupSession, ['s1'])
     expect(result).toEqual({ removed: true })
+  })
+
+  describe('app MCP config lifecycle', () => {
+    let configDir: string
+
+    beforeEach(() => {
+      configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-mcp-'))
+      deps.appMcp = {
+        configDir,
+        appMcpJsPath: '/app/app-mcp.js',
+        electronPath: '/usr/bin/electron',
+        dataDir: '/data',
+      }
+    })
+
+    afterEach(() => {
+      fs.rmSync(configDir, { recursive: true, force: true })
+    })
+
+    it('resumeSession rewrites the config file and passes mcpConfigPath to sessions.resume', async () => {
+      deps.sessionStore.upsert(makeSession())
+      ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
+
+      await rpc.handle(IPC.resumeSession, ['s1'])
+
+      const expected = path.join(configDir, 's1.json')
+      expect(deps.sessions.resume).toHaveBeenCalledWith(
+        expect.objectContaining({ mcpConfigPath: expected }),
+      )
+      expect(fs.existsSync(expected)).toBe(true)
+    })
+
+    it('attachRemoteControl rewrites the config file and passes mcpConfigPath', async () => {
+      deps.sessionStore.upsert(makeSession())
+
+      await rpc.handle(IPC.attachRemoteControl, ['s1'])
+
+      const expected = path.join(configDir, 's1.json')
+      expect(deps.sessions.attachRemoteControl).toHaveBeenCalledWith(
+        expect.objectContaining({ mcpConfigPath: expected }),
+      )
+      expect(fs.existsSync(expected)).toBe(true)
+    })
+
+    it('cleanupSession deletes the per-session config file when removal succeeds', async () => {
+      await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', sessionId: 's1' },
+      ])
+      const configPath = path.join(configDir, 's1.json')
+      expect(fs.existsSync(configPath)).toBe(true)
+
+      await rpc.handle(IPC.cleanupSession, ['s1'])
+      expect(fs.existsSync(configPath)).toBe(false)
+    })
+
+    it('cleanupSession keeps the config file when removal fails', async () => {
+      await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', sessionId: 's1' },
+      ])
+      const configPath = path.join(configDir, 's1.json')
+      ;(deps.worktrees.remove as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        removed: false,
+        reason: 'dirty',
+      })
+
+      await rpc.handle(IPC.cleanupSession, ['s1'])
+      expect(fs.existsSync(configPath)).toBe(true)
+    })
   })
 
   describe('editor config', () => {

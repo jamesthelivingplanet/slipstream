@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import type {
   DiffFileDTO,
   IWorktreeManager,
@@ -94,22 +95,34 @@ export function isMissingWorktreeError(err: unknown): boolean {
 
 // ── Implementation ────────────────────────────────────────────────────────────
 
-function git(
+const execFileAsync = promisify(execFile)
+
+// Async so a slow git call (e.g. a network fetch) never blocks the daemon's
+// event loop — a sync exec here would freeze every live agent PTY stream.
+async function git(
   args: string[],
   opts?: { cwd?: string; maxBuffer?: number; allowExit1?: boolean },
-): string {
+): Promise<string> {
   try {
-    return execFileSync('git', args, {
+    const { stdout } = await execFileAsync('git', args, {
       encoding: 'utf8',
       cwd: opts?.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
       maxBuffer: opts?.maxBuffer,
     })
+    return stdout
   } catch (err: unknown) {
-    const e = err as { status?: number; stdout?: string; stderr?: string; message?: string }
+    const e = err as {
+      code?: number | string
+      status?: number
+      stdout?: string
+      stderr?: string
+      message?: string
+    }
     // `git diff --no-index` exits 1 (not an error) when the compared paths
     // differ — the caller opts in to treat that as success and read stdout.
-    if (opts?.allowExit1 && e.status === 1 && typeof e.stdout === 'string') {
+    // Async execFile reports the exit status as `code`; sync used `status`.
+    const exitCode = typeof e.code === 'number' ? e.code : e.status
+    if (opts?.allowExit1 && exitCode === 1 && typeof e.stdout === 'string') {
       return e.stdout
     }
     throw new Error(
@@ -126,7 +139,7 @@ function git(
  * same unified-diff parser as tracked changes. `--no-index` exits 1 (not 0)
  * whenever the two sides differ, which is the expected/only case here.
  */
-function gitNoIndexDiff(wt: string, file: string): string {
+async function gitNoIndexDiff(wt: string, file: string): Promise<string> {
   return git(
     [
       '-C',
@@ -157,16 +170,16 @@ function gitNoIndexDiff(wt: string, file: string): string {
  *   3. No origin at all (local-only repo) / offline — cut from the local <base>,
  *      exactly as before.
  */
-function pullBaseStartPoint(repoPath: string, base: string): string {
+async function pullBaseStartPoint(repoPath: string, base: string): Promise<string> {
   try {
-    git(['-C', repoPath, 'fetch', 'origin', `${base}:${base}`])
+    await git(['-C', repoPath, 'fetch', 'origin', `${base}:${base}`])
     return base
   } catch {
     // base is checked out, non-fast-forward, or no origin — try a plain fetch.
   }
   try {
-    git(['-C', repoPath, 'fetch', 'origin', base])
-    git(['-C', repoPath, 'show-ref', '--verify', '--quiet', `refs/remotes/origin/${base}`])
+    await git(['-C', repoPath, 'fetch', 'origin', base])
+    await git(['-C', repoPath, 'show-ref', '--verify', '--quiet', `refs/remotes/origin/${base}`])
     return `origin/${base}`
   } catch {
     // local-only repo / offline — fall back to the local base as before.
@@ -181,22 +194,15 @@ function pullBaseStartPoint(repoPath: string, base: string): string {
  * then ask `git cherry` whether base already has that patch (`-` prefix means it
  * does). Best-effort — returns false if any git step fails.
  */
-function isSquashMerged(repoPath: string, base: string, branch: string): boolean {
+async function isSquashMerged(repoPath: string, base: string, branch: string): Promise<boolean> {
   try {
-    const mergeBase = git(['-C', repoPath, 'merge-base', base, branch]).trim()
+    const mergeBase = (await git(['-C', repoPath, 'merge-base', base, branch])).trim()
     if (!mergeBase) return false
-    const tree = git(['-C', repoPath, 'rev-parse', `${branch}^{tree}`]).trim()
-    const dangling = git([
-      '-C',
-      repoPath,
-      'commit-tree',
-      tree,
-      '-p',
-      mergeBase,
-      '-m',
-      'squash-merge-check',
-    ]).trim()
-    const cherry = git(['-C', repoPath, 'cherry', base, dangling])
+    const tree = (await git(['-C', repoPath, 'rev-parse', `${branch}^{tree}`])).trim()
+    const dangling = (
+      await git(['-C', repoPath, 'commit-tree', tree, '-p', mergeBase, '-m', 'squash-merge-check'])
+    ).trim()
+    const cherry = await git(['-C', repoPath, 'cherry', base, dangling])
     return cherry.split('\n').some((line) => line.startsWith('-'))
   } catch {
     return false
@@ -216,7 +222,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       // Idempotent: a failed previous attempt may have left a registered
       // worktree and/or the branch ref behind — reuse whatever's there.
       const existing = parsePorcelainWorktreeList(
-        git(['-C', repo.path, 'worktree', 'list', '--porcelain']),
+        await git(['-C', repo.path, 'worktree', 'list', '--porcelain']),
       )
       if (existing.some((e) => e.path === wt)) {
         return this.status(repo, branch)
@@ -226,17 +232,17 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       // ref is absent, so flip a boolean in the catch.
       let branchExists = true
       try {
-        git(['-C', repo.path, 'show-ref', '--verify', '--quiet', 'refs/heads/' + branch])
+        await git(['-C', repo.path, 'show-ref', '--verify', '--quiet', 'refs/heads/' + branch])
       } catch {
         branchExists = false
       }
 
       if (branchExists) {
         // Check out the existing branch into a new worktree (no -b).
-        git(['-C', repo.path, 'worktree', 'add', wt, branch])
+        await git(['-C', repo.path, 'worktree', 'add', wt, branch])
       } else {
-        const startPoint = pullBaseStartPoint(repo.path, repo.base)
-        git(['-C', repo.path, 'worktree', 'add', wt, '-b', branch, startPoint])
+        const startPoint = await pullBaseStartPoint(repo.path, repo.base)
+        await git(['-C', repo.path, 'worktree', 'add', wt, '-b', branch, startPoint])
       }
 
       return this.status(repo, branch)
@@ -255,7 +261,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
         if (present) {
           let porcelain = ''
           try {
-            porcelain = git(['-C', wt, 'status', '--porcelain'])
+            porcelain = await git(['-C', wt, 'status', '--porcelain'])
           } catch {
             // if we can't even run git here, let worktree remove decide
           }
@@ -267,17 +273,21 @@ export function createWorktreeManager(root: string): IWorktreeManager {
         // Unmerged-commit guard: the branch ref still exists even when the
         // worktree directory is gone, so always honour it. Refresh base first so
         // a squash merge that landed on the remote base is visible locally.
-        const baseRef = pullBaseStartPoint(repo.path, repo.base)
+        const baseRef = await pullBaseStartPoint(repo.path, repo.base)
         let countOut = ''
         try {
-          countOut = git(['-C', repo.path, 'rev-list', '--count', `${baseRef}..${branch}`])
+          countOut = await git(['-C', repo.path, 'rev-list', '--count', `${baseRef}..${branch}`])
         } catch {
           // swallow — be permissive if we can't determine
         }
         const unmerged = parseInt(countOut.trim(), 10)
         // A squash merge leaves the branch's original commits unmatched by SHA but
         // its cumulative patch already in base — treat that as merged (FLO-91).
-        if (!isNaN(unmerged) && unmerged > 0 && !isSquashMerged(repo.path, baseRef, branch)) {
+        if (
+          !isNaN(unmerged) &&
+          unmerged > 0 &&
+          !(await isSquashMerged(repo.path, baseRef, branch))
+        ) {
           return {
             removed: false,
             reason: `Branch has ${unmerged} commit(s) not merged into ${repo.base}.`,
@@ -290,7 +300,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
         if (opts?.force) removeArgs.push('--force')
         removeArgs.push(wt)
         try {
-          git(removeArgs)
+          await git(removeArgs)
         } catch (err) {
           // A worktree that vanished underneath us (moved/deleted dir, stale admin
           // entry) is a detached agent — treat it as already gone and fall through
@@ -301,14 +311,14 @@ export function createWorktreeManager(root: string): IWorktreeManager {
 
       // Prune stale admin entries (also clears the record for a vanished worktree).
       try {
-        git(['-C', repo.path, 'worktree', 'prune'])
+        await git(['-C', repo.path, 'worktree', 'prune'])
       } catch {
         // prune failure does not fail the removal
       }
 
       // Delete the branch
       try {
-        git(['-C', repo.path, 'branch', '-D', branch])
+        await git(['-C', repo.path, 'branch', '-D', branch])
       } catch {
         // deleting an already-gone branch doesn't fail removal
       }
@@ -322,7 +332,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       // dirty
       let dirty = false
       try {
-        const porcelain = git(['-C', wt, 'status', '--porcelain'])
+        const porcelain = await git(['-C', wt, 'status', '--porcelain'])
         dirty = parsePorcelainDirty(porcelain)
       } catch {
         /* default false */
@@ -332,7 +342,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       let ahead = 0
       let behind = 0
       try {
-        const rl = git([
+        const rl = await git([
           '-C',
           repo.path,
           'rev-list',
@@ -349,8 +359,8 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       let added = 0
       let deleted = 0
       try {
-        const mergeBase = git(['-C', wt, 'merge-base', repo.base, 'HEAD']).trim()
-        const stat = git(['-C', wt, 'diff', '--shortstat', mergeBase])
+        const mergeBase = (await git(['-C', wt, 'merge-base', repo.base, 'HEAD'])).trim()
+        const stat = await git(['-C', wt, 'diff', '--shortstat', mergeBase])
         ;({ added, deleted } = parseShortstat(stat))
       } catch {
         /* defaults */
@@ -364,7 +374,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
 
       let mergeBase = ''
       try {
-        mergeBase = git(['-C', wt, 'merge-base', repo.base, 'HEAD']).trim()
+        mergeBase = (await git(['-C', wt, 'merge-base', repo.base, 'HEAD'])).trim()
       } catch (err) {
         const error = isMissingWorktreeError(err)
           ? `Worktree for "${branch}" is missing.`
@@ -374,7 +384,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
 
       let raw: string
       try {
-        raw = git(
+        raw = await git(
           [
             '-C',
             wt,
@@ -415,7 +425,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       // one parser call produces the whole file list.
       let untrackedPaths: string[] = []
       try {
-        untrackedPaths = git(['-C', wt, 'ls-files', '--others', '--exclude-standard'])
+        untrackedPaths = (await git(['-C', wt, 'ls-files', '--others', '--exclude-standard']))
           .split('\n')
           .map((l) => l.trim())
           .filter(Boolean)
@@ -445,7 +455,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
         if (size > 200 * 1024) continue // skip large untracked files entirely
 
         try {
-          const out = gitNoIndexDiff(wt, file)
+          const out = await gitNoIndexDiff(wt, file)
           untrackedRaw += (untrackedRaw.length > 0 ? '\n' : '') + out.replace(/\n$/, '')
         } catch {
           fallbackUntracked.push({
@@ -484,14 +494,13 @@ export function createWorktreeManager(root: string): IWorktreeManager {
     },
 
     async list(repo: RepoDTO): Promise<WorktreeInfo[]> {
-      const raw = git(['-C', repo.path, 'worktree', 'list', '--porcelain'])
+      const raw = await git(['-C', repo.path, 'worktree', 'list', '--porcelain'])
       const entries = parsePorcelainWorktreeList(raw)
 
       const results: WorktreeInfo[] = []
-      for (const { branch } of entries) {
-        // Skip the main checkout (which lives at repo.path itself)
-        const wt = this.pathFor(repo, branch)
-        if (wt === repo.path) continue
+      for (const { path: stanzaPath, branch } of entries) {
+        // Skip the main checkout — its stanza's path is the repo itself.
+        if (stanzaPath === repo.path) continue
 
         try {
           results.push(await this.status(repo, branch))
@@ -499,7 +508,7 @@ export function createWorktreeManager(root: string): IWorktreeManager {
           // include a minimal entry rather than dropping the worktree
           results.push({
             branch,
-            path: wt,
+            path: this.pathFor(repo, branch),
             dirty: false,
             ahead: 0,
             behind: 0,

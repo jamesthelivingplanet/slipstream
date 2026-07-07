@@ -28,6 +28,9 @@ import type {
   TicketSource,
   ScopeOption,
   TicketSourceSettings,
+  SessionUsage,
+  UsageSummary,
+  UsageTokens,
   PromptTemplateDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
@@ -366,4 +369,34 @@ export function checkAgentCli(kind: BackendKind): Promise<AgentCliCheck> {
   return hasBackend
     ? window.slipstream.checkAgentCli(kind)
     : Promise.resolve({ kind, bin: '', found: true })
+}
+
+// ── Usage (token/cost) ─────────────────────────────────────────────────────
+
+const ZERO_TOKENS: UsageTokens = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }
+
+/** Per-session token/cost usage parsed from the session's transcript JSONL. */
+export function getSessionUsage(sessionId: string): Promise<SessionUsage> {
+  return hasBackend
+    ? window.slipstream.getSessionUsage(sessionId)
+    : Promise.resolve({
+        sessionId,
+        exists: false,
+        tokens: { ...ZERO_TOKENS },
+        costUsd: 0,
+        turns: 0,
+      })
+}
+
+/** Total + by-repo + by-day usage rollup for mission control. */
+export function getUsageSummary(): Promise<UsageSummary> {
+  return hasBackend
+    ? window.slipstream.getUsageSummary()
+    : Promise.resolve({
+        total: { ...ZERO_TOKENS },
+        costUsd: 0,
+        byRepo: [],
+        byDay: [],
+        sessions: [],
+      })
 }

@@ -1,7 +1,10 @@
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { promisify } from 'node:util'
 import type { RepoDTO } from '../shared/contract.js'
+
+const execFileAsync = promisify(execFile)
 
 /** Get the origin remote URL for a checkout, or null when unset / not a git repo / path gone. */
 export function getRemoteUrl(absPath: string): string | null {
@@ -17,13 +20,11 @@ export function getRemoteUrl(absPath: string): string | null {
 
 /** Clone `remoteUrl` into `dest`. Throws a clear error (with git's stderr) on
  *  failure — bad URL, auth, or network. The caller ensures `dest` does not
- *  already exist. */
-export function cloneRepo(remoteUrl: string, dest: string): void {
+ *  already exist. Async: a clone can take minutes over a slow link, and a
+ *  synchronous spawn would freeze every live agent PTY for the duration. */
+export async function cloneRepo(remoteUrl: string, dest: string): Promise<void> {
   try {
-    execFileSync('git', ['clone', remoteUrl, dest], {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    await execFileAsync('git', ['clone', remoteUrl, dest], { encoding: 'utf8' })
   } catch (err: unknown) {
     const e = err as { stderr?: string; message?: string }
     throw new Error(

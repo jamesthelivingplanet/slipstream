@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import TicketStatusBar from './lib/components/TicketStatusBar.svelte'
   import {
     selected,
     dialogOpen,
@@ -11,6 +10,7 @@
     subscribeSessionStatus,
     subscribeSessionPr,
     mobile,
+    drawer,
     contentLoading,
     contentResolvedAt,
     contentRefreshNonce,
@@ -27,7 +27,7 @@
   import InstallNudge from './lib/components/InstallNudge.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
   import McpStatus from './lib/components/McpStatus.svelte'
-  import { MOBILE_MEDIA_QUERY } from './lib/responsive'
+  import { MOBILE_MEDIA_QUERY, DRAWER_MEDIA_QUERY } from './lib/responsive'
 
   // Mobile drawer state — the sidebar is an overlay on narrow viewports.
   let listOpen = false
@@ -53,6 +53,15 @@
 
   function checkMobile() {
     mobile.set(window.matchMedia(MOBILE_MEDIA_QUERY).matches)
+  }
+
+  function checkDrawer() {
+    drawer.set(window.matchMedia(DRAWER_MEDIA_QUERY).matches)
+  }
+
+  function checkViewport() {
+    checkMobile()
+    checkDrawer()
   }
 
   onMount(() => {
@@ -86,25 +95,25 @@
       })
     }
 
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    window.addEventListener('orientationchange', checkMobile)
+    checkViewport()
+    window.addEventListener('resize', checkViewport)
+    window.addEventListener('orientationchange', checkViewport)
     return () => {
       offStatus()
       offPr()
-      window.removeEventListener('resize', checkMobile)
-      window.removeEventListener('orientationchange', checkMobile)
+      window.removeEventListener('resize', checkViewport)
+      window.removeEventListener('orientationchange', checkViewport)
     }
   })
 
-  // When an agent is selected on mobile, close the drawer.
-  $: if ($selected && $mobile) listOpen = false
+  // When an agent is selected on mobile/medium, close the drawer.
+  $: if ($selected && $drawer) listOpen = false
 </script>
 
 <div class="app">
   <header class="bar">
-    {#if $mobile}
-      <!-- Hamburger: toggles the agent list drawer on mobile -->
+    {#if $drawer}
+      <!-- Hamburger: toggles the agent list drawer on mobile/medium -->
       <button
         class="btn btn-ghost btn-icon btn-sm"
         title="Agent list"
@@ -144,31 +153,28 @@
     </button>
   </header>
 
-  <!-- Mobile overlay backdrop: tap outside drawer to close -->
-  {#if $mobile && listOpen}
+  <!-- Drawer overlay backdrop: tap outside drawer to close (mobile + medium) -->
+  {#if $drawer && listOpen}
     <div class="drawer-backdrop" on:click={() => (listOpen = false)} role="presentation"></div>
   {/if}
 
   <div class="content">
     <AgentList
-      mobileOpen={!$mobile || listOpen}
+      mobileOpen={!$drawer || listOpen}
       onSelect={() => {
-        if ($mobile) listOpen = false
+        if ($drawer) listOpen = false
       }}
     />
 
     <section class="term-pane">
       {#if !$selected}
         <MissionControl />
+      {:else if $selected.status === 'idle'}
+        <AgentConfig session={$selected} />
       {:else}
-        <TicketStatusBar session={$selected} />
-        {#if $selected.status === 'idle'}
-          <AgentConfig session={$selected} />
-        {:else}
-          {#key $selected.id}
-            <TerminalView session={$selected} />
-          {/key}
-        {/if}
+        {#key $selected.id}
+          <TerminalView session={$selected} />
+        {/key}
       {/if}
     </section>
   </div>
