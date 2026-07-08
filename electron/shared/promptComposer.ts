@@ -47,13 +47,13 @@ Note: CLAUDE.md already covers repo conventions \u2014 follow it but do not dupl
 
 ## Signaling your state to the app
 
-The app learns your state ONLY through the slipstream MCP. You MUST call the \`report_status\` tool of the **slipstream** MCP every time your working state changes, there is no other channel:
+The app learns your state ONLY through the slipstream MCP \`report_status\` tool — there is no other channel. Your working state is a lifecycle, and every transition MUST be reported the instant it happens:
 
-- Call \`report_status\` with \`state: "running"\` when you begin or resume actively working on the ticket.
-- Call \`report_status\` with \`state: "needs"\` the moment you are blocked waiting on the user to answer a question, make a decision, or provide input, and cannot make progress without it.
-- Call \`report_status\` with \`state: "done"\` when the ticket is fully complete (acceptance criteria met / PR opened) and nothing is left to do.
+1. **running** — call this FIRST, before anything else (before investigating, before replying), whenever you begin working AND every time you resume after being idle or blocked. This includes: starting the ticket, and — most importantly — the instant the user sends a new message while you were in "needs". Do not investigate, do not reply, do not think out loud first: report "running", then act.
+2. **needs** — call this the moment you stop and are waiting on the user (a question, a decision, missing input) and cannot proceed without their reply. Call it right before you stop, not after.
+3. **done** — call this as your final action, after (and only after) the PR is open and acceptance criteria are verified met. Nothing else follows it.
 
-This is mandatory. If you skip it, the app shows a stale or wrong status. If you resume work after reporting "needs", immediately call \`report_status\` with "running" again.
+The transition agents most often drop is #1's resume case: user was asked something, replies, and work resumes silently with no "running" call. Treat "the user just sent a message and I was previously blocked" as an explicit trigger to call \`report_status("running")\` before doing anything else. If you skip any of these calls, the app shows a stale or wrong status to the user.
 
 Ticket:
 ${tid}: ${title}

@@ -76,7 +76,7 @@ const TOOLS: McpTool[] = [
   {
     name: 'report_status',
     description:
-      'Report your current working state to the Slipstream app so it shows the correct status. Call with state "needs" when you are blocked waiting on the user, "done" when the ticket is fully complete, or "running" when actively working. This is the reliable status channel — prefer it over relying on printed terminal markers.',
+      'Report your current working state to the Slipstream app so it shows the correct status. This is the reliable status channel — prefer it over relying on printed terminal markers. Call with state "running" the instant you start or resume work (including immediately after the user replies to a "needs" — that resume call is mandatory and easy to forget), "needs" the moment you stop to wait on the user for a question/decision/input, and "done" as your final action once the ticket is fully complete and the PR is open.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -106,6 +106,31 @@ function makeToolError(text: string): McpToolResult {
 
 function makeToolSuccess(text: string): McpToolResult {
   return { content: [{ type: 'text', text }] }
+}
+
+/**
+ * Builds the report_status success text, always naming the state that was just
+ * recorded (existing tests assert on this) plus a reminder of the next expected
+ * transition. The agent reads tool results, so this closes the loop on the
+ * transition that gets dropped most: resuming with "running" after "needs".
+ */
+function reportStatusReminder(state: 'running' | 'needs' | 'done'): string {
+  switch (state) {
+    case 'needs':
+      return (
+        'Status reported: needs. The app is now showing you as waiting on the user. ' +
+        'When the user responds and you resume work, call report_status with "running" ' +
+        'as your very first action — before investigating or replying.'
+      )
+    case 'running':
+      return (
+        'Status reported: running. Remember to call report_status again the moment ' +
+        'your state next changes: "needs" if you stop to wait on the user, or "done" ' +
+        'as your final action once the ticket is complete and the PR is open.'
+      )
+    case 'done':
+      return 'Status reported: done.'
+  }
 }
 
 export async function handleRpc(msg: unknown, deps: AppMcpDeps): Promise<JsonRpcResponse | null> {
@@ -184,7 +209,7 @@ export async function handleRpc(msg: unknown, deps: AppMcpDeps): Promise<JsonRpc
             return makeResponse(id, makeToolError(`Invalid state: ${state}`))
           }
           await deps.writeStatus(state, message)
-          return makeResponse(id, makeToolSuccess(`Status reported: ${state}`))
+          return makeResponse(id, makeToolSuccess(reportStatusReminder(state)))
         }
 
         return makeError(id, -32601, `Unknown tool: ${toolName}`)

@@ -119,4 +119,36 @@ describe('handleRpc', () => {
     expect(res.result?.isError).toBeFalsy()
     expect(res.result?.content[0].text).toContain('done')
   })
+
+  it('tools/call report_status "needs" reminds the agent to report "running" on resume', async () => {
+    const deps = makeDeps()
+    const msg = {
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'tools/call',
+      params: { name: 'report_status', arguments: { state: 'needs' } },
+    }
+    const res = (await handleRpc(msg, deps)) as JsonRpcResponse<McpToolResult>
+    expect(res.result?.content[0].text).toContain('running')
+  })
+
+  it('tools/call report_status "running" reminds the agent of the next expected transition', async () => {
+    const deps = makeDeps()
+    const msg = {
+      jsonrpc: '2.0',
+      id: 11,
+      method: 'tools/call',
+      params: { name: 'report_status', arguments: { state: 'running' } },
+    }
+    const res = (await handleRpc(msg, deps)) as JsonRpcResponse<McpToolResult>
+    expect(res.result?.content[0].text).toContain('needs')
+    expect(res.result?.content[0].text).toContain('done')
+  })
+
+  it('report_status tool description mentions the resume-to-running transition', async () => {
+    const msg = { jsonrpc: '2.0', id: 12, method: 'tools/list', params: {} }
+    const res = (await handleRpc(msg, makeDeps())) as JsonRpcResponse<{ tools: McpTool[] }>
+    const tool = (res.result?.tools ?? []).find((t) => t.name === 'report_status')
+    expect(tool?.description.toLowerCase()).toContain('resume')
+  })
 })

@@ -70,6 +70,22 @@ describe('buildSystemPrompt', () => {
     const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
     expect(result).toContain('tests')
   })
+
+  it('makes the resume-from-needs transition to "running" explicit', () => {
+    const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
+    expect(result.toLowerCase()).toContain('resume')
+    expect(result).toContain('report_status("running")')
+  })
+
+  it('instructs reporting "running" before investigating or replying', () => {
+    const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
+    expect(result).toContain('before doing anything else')
+  })
+
+  it('instructs "done" is the final action', () => {
+    const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
+    expect(result).toContain('as your final action')
+  })
 })
 
 describe('deliverPrompt', () => {
