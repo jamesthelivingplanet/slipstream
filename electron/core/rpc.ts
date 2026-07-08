@@ -868,6 +868,16 @@ export function createRpc(
         return entries
       }
 
+      case IPC.sessionPrStatus: {
+        const id = args[0] as string
+        // Owner-scoped: a missing OR other-owner session surfaces the same
+        // "not found" so PR status can't leak across owners.
+        const s = ownedSession(id)
+        if (!s) throw new Error(`Session not found: ${id}`)
+        if (!deps.prStatus || !s.prUrl) return null
+        return deps.prStatus.get(s)
+      }
+
       case IPC.pickRepo:
         throw new Error('pickRepo is not supported without a desktop window')
 

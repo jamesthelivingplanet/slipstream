@@ -33,12 +33,14 @@
     detachSession,
     takeWrite,
     onSessionWriteLock,
+    getPrStatus,
   } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
   import { MOBILE_MEDIA_QUERY } from '../responsive'
   import type { Session, WorkflowState } from '../types'
+  import type { PrStatusDTO } from '../../../electron/shared/contract.js'
   import { getTicketStatus, setTicketStatus } from '../ipc'
   import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
   import { floatingAnchor } from '../floating'
@@ -125,6 +127,51 @@
   $: if (hasBackend && session.id && session.id !== statusCheckedFor) {
     statusCheckedFor = session.id
     refreshAppStatus(session)
+  }
+
+  // FLO-96: post-handoff PR/MR status. One fetch when the session has both an
+  // id and a prUrl (on mount, or as soon as prUrl appears) — no polling here,
+  // mission control already keeps this warm in the backend TTL cache.
+  let prStatus: PrStatusDTO | null = null
+  let prCheckedFor: string | null = null
+  function refreshPrStatus(id: string | undefined, prUrl: string | undefined) {
+    if (!liveMode || !hasBackend || !id || !prUrl) return
+    const key = `${id}:${prUrl}`
+    if (key === prCheckedFor) return
+    prCheckedFor = key
+    // Clear the previous session's badges immediately, and only accept the
+    // resolution if this is still the fetch for the current key — a slow
+    // fetch for a previous session must not overwrite the new one's state.
+    prStatus = null
+    getPrStatus(id)
+      .then((dto) => {
+        if (prCheckedFor === key) prStatus = dto
+      })
+      .catch(() => {
+        if (prCheckedFor === key) prStatus = null
+      })
+  }
+  $: refreshPrStatus(session.id, session.prUrl)
+
+  interface PrBadge {
+    text: string
+    cls: 'done' | 'error' | 'needs' | 'muted'
+  }
+
+  function prBadges(dto: PrStatusDTO | null): PrBadge[] {
+    if (!dto) return []
+    if (dto.error) return [{ text: 'PR ?', cls: 'muted' }]
+    const badges: PrBadge[] = []
+    if (dto.state === 'merged') badges.push({ text: 'merged', cls: 'done' })
+    else if (dto.state === 'open') badges.push({ text: 'open', cls: 'muted' })
+    else if (dto.state === 'closed') badges.push({ text: 'closed', cls: 'error' })
+    if (dto.ci === 'passed') badges.push({ text: 'CI ✓', cls: 'done' })
+    else if (dto.ci === 'failed') badges.push({ text: 'CI ✗', cls: 'error' })
+    else if (dto.ci === 'pending' || dto.ci === 'running')
+      badges.push({ text: 'CI …', cls: 'needs' })
+    if (dto.review === 'approved') badges.push({ text: 'approved', cls: 'done' })
+    else if (dto.review === 'changes_requested') badges.push({ text: 'changes', cls: 'error' })
+    return badges
   }
 
   $: if (liveMode && session.id && session.id !== liveId) startLive()
@@ -445,6 +492,9 @@
         <a class="badge mono" href={session.prUrl} target="_blank" rel="noopener noreferrer">
           {@html icons.externalLink} View PR
         </a>
+        {#each prBadges(prStatus) as b (b.text)}
+          <span class="badge mono pr-badge-{b.cls}" title={prStatus?.error}>{b.text}</span>
+        {/each}
       {/if}
     </div>
   </div>
@@ -602,6 +652,20 @@
     background: hsl(var(--primary) / 0.12);
     border-color: hsl(var(--primary) / 0.5);
     color: hsl(var(--primary));
+  }
+
+  /* PR/CI status badges (FLO-96) */
+  .pr-badge-done {
+    color: hsl(var(--st-done));
+    border-color: hsl(var(--st-done) / 0.4);
+  }
+  .pr-badge-error {
+    color: hsl(var(--st-error));
+    border-color: hsl(var(--st-error) / 0.4);
+  }
+  .pr-badge-needs {
+    color: hsl(var(--st-needs));
+    border-color: hsl(var(--st-needs) / 0.4);
   }
 
   .diff-count {
