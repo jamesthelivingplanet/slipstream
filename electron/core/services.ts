@@ -12,6 +12,8 @@ import { createLinearProvider } from '../tickets/linearProvider.js'
 import { createJiraProvider } from '../tickets/jiraProvider.js'
 import { createCompositeProvider } from '../tickets/compositeProvider.js'
 import { createSessionStore, restoreInterruptedSessions } from '../services/sessionStore.js'
+import { createPromptTemplateStore } from '../services/promptTemplates.js'
+import { createTicketWriteback } from '../services/ticketWriteback.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createTailscaleExposer } from '../services/tailscale.js'
@@ -62,6 +64,15 @@ export function createServices(root: string): IpcDeps {
   restoreInterruptedSessions(sessionStore)
   const runLogger = createRunLogger(root)
   const sessions = createSessionManager(runLogger, root)
+  const linear = createLinearProvider(configStore)
+  const jira = createJiraProvider(configStore)
+  const tickets = createCompositeProvider([linear, jira])
+  // FLO-98: post the PR link back to the ticket on the session's `pr` event.
+  // ORDERING: must be registered BEFORE createSessionPersistence — both listen
+  // to 'pr', and the write-back's `persisted.prUrl === url` restart-dedupe must
+  // read the value from *before* persistence records the new URL (EventEmitter
+  // invokes listeners in registration order).
+  createTicketWriteback({ sessions, store: sessionStore, tickets, logger: runLogger })
   // FLO-69: persist session status/PR changes at the daemon level (once per
   // process), not per connected client. This is what lets an agent that
   // finishes with no UI attached still write its final state to SQLite.
@@ -72,17 +83,16 @@ export function createServices(root: string): IpcDeps {
     sessions,
     sessionStore,
   })
-  const linear = createLinearProvider(configStore)
-  const jira = createJiraProvider(configStore)
   const deps: IpcDeps = {
     repos: createRepoRegistry(db, root),
     worktrees: createWorktreeManager(os.homedir()),
     sessions,
     ports: createPortBroker(),
-    tickets: createCompositeProvider([linear, jira]),
+    tickets,
     ticketProviders: { linear, jira },
     config: configStore,
     sessionStore,
+    promptTemplates: createPromptTemplateStore(db),
     editor: createEditorLauncher(),
     appRunner: createAppRunner(),
     tailscale: createTailscaleExposer(),

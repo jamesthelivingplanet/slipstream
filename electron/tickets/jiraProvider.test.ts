@@ -374,4 +374,69 @@ describe('createJiraProvider', () => {
     const provider = createJiraProvider(makeConfigStore())
     await expect(provider.listTickets()).rejects.toThrow('Jira API error: 401 Unauthorized')
   })
+
+  describe('postComment', () => {
+    it('returns false without fetching when unconfigured', async () => {
+      const provider = createJiraProvider(
+        makeConfigStore({
+          'jira.baseUrl': undefined,
+          'jira.email': undefined,
+          'jira.apiToken': undefined,
+        }),
+      )
+      const result = await provider.postComment('PROJ-1', 'MR: https://x/mr/1')
+      expect(result).toBe(false)
+      expect(fetch).not.toHaveBeenCalled()
+    })
+
+    it('POSTs an ADF comment with URLs carrying link marks', async () => {
+      vi.mocked(fetch).mockResolvedValue(jsonResponse({ id: '1000' }, 201))
+
+      const provider = createJiraProvider(makeConfigStore())
+      const result = await provider.postComment(
+        'PROJ-1',
+        'MR opened: https://gitlab.com/acme/api/-/merge_requests/7 for review',
+      )
+
+      expect(result).toBe(true)
+      const call = vi.mocked(fetch).mock.calls[0]
+      expect(call[0]).toBe('https://acme.atlassian.net/rest/api/3/issue/PROJ-1/comment')
+      expect(call[1]!.method).toBe('POST')
+      const body = JSON.parse(call[1]!.body as string)
+      expect(body.body.type).toBe('doc')
+      expect(body.body.version).toBe(1)
+      expect(body.body.content).toEqual([
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'MR opened: ' },
+            {
+              type: 'text',
+              text: 'https://gitlab.com/acme/api/-/merge_requests/7',
+              marks: [
+                {
+                  type: 'link',
+                  attrs: { href: 'https://gitlab.com/acme/api/-/merge_requests/7' },
+                },
+              ],
+            },
+            { type: 'text', text: ' for review' },
+          ],
+        },
+      ])
+    })
+
+    it('throws on an API failure (non-ok response)', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden',
+      } as Response)
+
+      const provider = createJiraProvider(makeConfigStore())
+      await expect(provider.postComment('PROJ-1', 'hello')).rejects.toThrow(
+        'Jira API error: 403 Forbidden',
+      )
+    })
+  })
 })

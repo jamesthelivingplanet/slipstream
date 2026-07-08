@@ -219,6 +219,15 @@ export interface TicketDTO {
   status?: WorkflowState
 }
 
+export interface PromptTemplateDTO {
+  id: string // uuid
+  repoId: string
+  name: string
+  body: string // the reusable prompt text
+  createdAt: number
+  ownerId?: string // owner identity; 'local' for the single-user tier
+}
+
 export interface EditorConfig {
   command: string // desktop editor command, e.g. "code" or "zed"
   mobileCommand: string // optional mobile editor command; "" when unset
@@ -357,6 +366,14 @@ export interface ISessionStore {
   delete(id: string): void
 }
 
+/** Per-repo reusable prompt templates (FLO-98). Synchronous, DB-backed. */
+export interface IPromptTemplateStore {
+  list(repoId: string): PromptTemplateDTO[]
+  get(id: string): PromptTemplateDTO | undefined
+  upsert(t: PromptTemplateDTO): void
+  delete(id: string): void
+}
+
 /** Owns node-pty processes. Extends Node's EventEmitter (typed via SessionEvents). */
 export interface ISessionManager {
   start(input: StartSessionInput): SessionDTO
@@ -462,6 +479,14 @@ export interface ITicketProvider {
    * `src` routes to the right sub-provider (composite); concrete providers ignore it.
    */
   resetTicket(tid: string, src?: TicketSource): Promise<WorkflowState | null>
+  /**
+   * Post a comment on the ticket — richer write-back than status transitions
+   * (e.g. the PR link once a session opens a merge request). Returns true when
+   * a comment was posted, false when this provider is unconfigured or doesn't
+   * support comments. Throws on an actual API failure. `src` routes to the
+   * right sub-provider (composite); concrete providers ignore it.
+   */
+  postComment(tid: string, body: string, src?: TicketSource): Promise<boolean>
 }
 
 /* ───────── IPC: renderer-facing bridge (window.slipstream) ───────── */
@@ -579,6 +604,16 @@ export interface SlipstreamApi {
    *  sessions, parsed from their transcripts. The real cost signal for
    *  mission control (FLO-94). */
   getUsageSummary(): Promise<UsageSummary>
+
+  /** Reusable per-repo prompt templates for the New Agent dialog (FLO-98). */
+  listPromptTemplates(repoId: string): Promise<PromptTemplateDTO[]>
+  savePromptTemplate(input: {
+    id?: string
+    repoId: string
+    name: string
+    body: string
+  }): Promise<PromptTemplateDTO>
+  deletePromptTemplate(id: string): Promise<void>
 }
 
 export const IPC = {
@@ -634,6 +669,9 @@ export const IPC = {
   checkAgentCli: 'agent:checkCli',
   sessionUsage: 'session:usage',
   usageSummary: 'usage:summary',
+  listPromptTemplates: 'templates:list',
+  savePromptTemplate: 'templates:save',
+  deletePromptTemplate: 'templates:delete',
 } as const
 
 declare global {

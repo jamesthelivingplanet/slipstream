@@ -609,6 +609,82 @@ describe('createLinearProvider', () => {
     })
   })
 
+  describe('postComment', () => {
+    it('returns false without fetching when no API key is set', async () => {
+      const provider = createLinearProvider(makeConfigStore(undefined))
+      const result = await provider.postComment('ENG-123', 'MR: https://x/mr/1')
+      expect(result).toBe(false)
+      expect(fetch).not.toHaveBeenCalled()
+    })
+
+    it('resolves the issue then creates a comment via commentCreate', async () => {
+      // fetch #1: resolveIssue
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            issues: {
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-1', name: 'In Progress', type: 'started' },
+                },
+              ],
+            },
+          },
+        }),
+      } as Response)
+      // fetch #2: commentCreate
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { commentCreate: { success: true } } }),
+      } as Response)
+
+      const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+      const result = await provider.postComment('ENG-123', 'MR opened: https://x/mr/1')
+
+      expect(result).toBe(true)
+      const mutationCall = vi.mocked(fetch).mock.calls[1]
+      const body = JSON.parse(mutationCall[1]!.body as string)
+      expect(body.query).toContain('commentCreate')
+      expect(body.variables).toEqual({
+        issueId: 'issue-uuid-1',
+        body: 'MR opened: https://x/mr/1',
+      })
+    })
+
+    it('throws when commentCreate reports success: false', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            issues: {
+              nodes: [
+                {
+                  id: 'issue-uuid-1',
+                  identifier: 'ENG-123',
+                  team: { id: 'team-1', key: 'ENG' },
+                  state: { id: 'state-1', name: 'In Progress', type: 'started' },
+                },
+              ],
+            },
+          },
+        }),
+      } as Response)
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { commentCreate: { success: false } } }),
+      } as Response)
+
+      const provider = createLinearProvider(makeConfigStore('lin_api_test'))
+      await expect(provider.postComment('ENG-123', 'hello')).rejects.toThrow(
+        'Failed to post comment',
+      )
+    })
+  })
+
   describe('listScopes', () => {
     it('maps teams query to ScopeOption[]', async () => {
       vi.mocked(fetch).mockResolvedValue({

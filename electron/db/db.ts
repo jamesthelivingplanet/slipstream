@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import type { RepoDTO, SessionDTO, RepoSettings } from '../shared/contract.js'
+import type { RepoDTO, SessionDTO, RepoSettings, PromptTemplateDTO } from '../shared/contract.js'
 import { runMigrations } from './migrations.js'
 
 /** Open (or create) a SQLite database at `file` and apply the schema. */
@@ -107,6 +107,44 @@ export function setRepoSettings(db: Database.Database, repoId: string, s: RepoSe
       startCmd   = excluded.startCmd
   `,
   ).run(repoId, s.installCmd, s.startCmd)
+}
+
+// ── Prompt templates (FLO-98) ────────────────────────────────────────────────
+
+export function allPromptTemplates(db: Database.Database, repoId: string): PromptTemplateDTO[] {
+  return db
+    .prepare(
+      'SELECT id, repoId, name, body, createdAt, ownerId FROM prompt_templates WHERE repoId = ? ORDER BY createdAt',
+    )
+    .all(repoId) as PromptTemplateDTO[]
+}
+
+export function getPromptTemplate(
+  db: Database.Database,
+  id: string,
+): PromptTemplateDTO | undefined {
+  return db
+    .prepare('SELECT id, repoId, name, body, createdAt, ownerId FROM prompt_templates WHERE id = ?')
+    .get(id) as PromptTemplateDTO | undefined
+}
+
+export function upsertPromptTemplate(db: Database.Database, t: PromptTemplateDTO): void {
+  db.prepare(
+    `
+    INSERT INTO prompt_templates (id, repoId, name, body, createdAt, ownerId)
+    VALUES (@id, @repoId, @name, @body, @createdAt, @ownerId)
+    ON CONFLICT(id) DO UPDATE SET
+      repoId    = excluded.repoId,
+      name      = excluded.name,
+      body      = excluded.body,
+      createdAt = excluded.createdAt,
+      ownerId   = excluded.ownerId
+  `,
+  ).run({ ...t, ownerId: t.ownerId ?? 'local' })
+}
+
+export function deletePromptTemplate(db: Database.Database, id: string): void {
+  db.prepare('DELETE FROM prompt_templates WHERE id = ?').run(id)
 }
 
 export interface PushSubscriptionRow {

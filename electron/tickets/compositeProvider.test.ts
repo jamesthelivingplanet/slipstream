@@ -10,6 +10,7 @@ function makeProvider(id: string, overrides: Partial<ITicketProvider> = {}): ITi
     setTicketStatus: vi.fn().mockResolvedValue({ id: 's', name: 'State' } as WorkflowState),
     startTicket: vi.fn().mockResolvedValue(null),
     resetTicket: vi.fn().mockResolvedValue(null),
+    postComment: vi.fn().mockResolvedValue(true),
     ...overrides,
   }
 }
@@ -80,6 +81,20 @@ describe('createCompositeProvider', () => {
 
       await composite.resetTicket('ENG-1', 'linear')
       expect(linear.resetTicket).toHaveBeenCalledWith('ENG-1')
+    })
+
+    it('routes postComment to the matching provider by src', async () => {
+      const linear = makeProvider('linear')
+      const jira = makeProvider('jira')
+      const composite = createCompositeProvider([linear, jira])
+
+      const posted = await composite.postComment('PROJ-1', 'MR opened: https://x/mr/1', 'jira')
+      expect(posted).toBe(true)
+      expect(jira.postComment).toHaveBeenCalledWith('PROJ-1', 'MR opened: https://x/mr/1')
+      expect(linear.postComment).not.toHaveBeenCalled()
+
+      await composite.postComment('ENG-1', 'hello', 'linear')
+      expect(linear.postComment).toHaveBeenCalledWith('ENG-1', 'hello')
     })
 
     it('throws for an unknown src', async () => {

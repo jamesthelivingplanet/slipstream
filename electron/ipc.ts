@@ -5,6 +5,7 @@ import type {
   IPortBroker,
   ITicketProvider,
   ISessionStore,
+  IPromptTemplateStore,
   IAppRunner,
   ITailscaleExposer,
   TicketSource,
@@ -31,6 +32,8 @@ export interface IpcDeps {
   ticketProviders?: Partial<Record<TicketSource, ITicketProvider>>
   config: IConfigStore
   sessionStore: ISessionStore
+  /** Per-repo reusable prompt templates (FLO-98). */
+  promptTemplates: IPromptTemplateStore
   editor: IEditorLauncher
   appRunner: IAppRunner
   /** Optional: when present, launched apps are also published on the tailnet. */
