@@ -314,5 +314,39 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
       const newStatus = await getIssueStatus(c.baseUrl, c.email, c.apiToken, tid)
       return toWorkflowState(newStatus)
     },
+
+    async postComment(tid: string, body: string): Promise<boolean> {
+      const c = creds()
+      if (!c) return false
+
+      // Jira v3 comments take an ADF document: one paragraph whose text nodes
+      // carry a link mark for any http(s) URL in the body.
+      const content = body
+        .split(/(https?:\/\/\S+)/)
+        .filter((part) => part.length > 0)
+        .map((part) =>
+          /^https?:\/\//.test(part)
+            ? {
+                type: 'text',
+                text: part,
+                marks: [{ type: 'link', attrs: { href: part } }],
+              }
+            : { type: 'text', text: part },
+        )
+
+      await request(
+        c.baseUrl,
+        c.email,
+        c.apiToken,
+        `/rest/api/3/issue/${encodeURIComponent(tid)}/comment`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content }] },
+          }),
+        },
+      )
+      return true
+    },
   }
 }

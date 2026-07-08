@@ -25,7 +25,9 @@ one choke point, no other entry path.
 `repos` and `sessions` both carry a nullable `ownerId TEXT DEFAULT 'local'`
 column, added as additive `ALTER TABLE` migrations in `openDb` (`electron/db/db.ts`).
 Legacy rows with `NULL` coalesce to `'local'` at the predicate level — no
-backfill migration needed.
+backfill migration needed. `prompt_templates` (FLO-98) also carries
+`ownerId TEXT DEFAULT 'local'` — its table is created by a numbered migration
+in `electron/db/migrations.ts`, not the frozen baseline schema.
 
 ## Enforcement in `electron/core/rpc.ts`
 
@@ -48,8 +50,14 @@ backfill migration needed.
   for missing or other-owner rows): `worktreeStatus`, `openInEditor`, `runApp`,
   `getRepoSettings`, `setRepoSettings`, `removeRepo`, and `startSession`'s repo
   resolution.
+- **Prompt-template guards** (FLO-98): `listPromptTemplates` requires the owned
+  repo (`requireOwnedRepo`) then filters rows through `ownedByCaller`;
+  `savePromptTemplate` stamps `ownerId: identity.id` on new rows and guards
+  updates (an `input.id` pointing at a missing *or* other-owner row throws
+  `Template not found`); `deletePromptTemplate` guards via the same
+  identical-error no-leak rule.
 - **No existence leak**: cross-owner access surfaces an identical error to a missing
-  row (`Session not found` / `Unknown repo`).
+  row (`Session not found` / `Unknown repo` / `Template not found`).
 
 ## Single-user invariant
 
@@ -103,3 +111,10 @@ What a real multi-user milestone still needs:
 5. **The per-owner-data-dir vs. row-level-isolation decision.** Orthogonal to
    token rotation, but both land in the same multi-user milestone and should be
    designed together rather than sequentially discovering conflicts.
+6. **Per-owner integration config.** The `config` table (Linear/Jira
+   credentials, git tokens, editor command, GC policy) is deployment-global
+   today — every owner would currently share one set of ticket-provider
+   credentials, and the FLO-98 ticket write-back posts comments with those
+   shared credentials. A multi-user tier needs config keys namespaced per owner
+   (or a per-owner config table) before distinct users can connect their own
+   trackers.

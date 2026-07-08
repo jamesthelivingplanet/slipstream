@@ -48,6 +48,8 @@ Electron main  ──spawns──▶  daemon (ELECTRON_RUN_AS_NODE=1, server.js)
 - **WorktreeInfo** — `{ branch, path, dirty, ahead, behind, added, deleted }`.
 - **SessionDTO** — `{ id (uuid), tid, title, prompt, repoId, branch, status, port?, createdAt }`.
 - **TicketDTO** — `{ id, tid, src, title, repoHint? }`.
+- **PromptTemplateDTO** — `{ id (uuid), repoId, name, body, createdAt, ownerId? }` (FLO-98
+  reusable per-repo kickoff prompts).
 - **SessionStatus** — `idle | running | needs | done | errored`.
 
 ## Main-process services
@@ -60,6 +62,7 @@ Electron main  ──spawns──▶  daemon (ELECTRON_RUN_AS_NODE=1, server.js)
 | `statusDetector` | Classifies a session from PTY output + lifecycle: recent output → `running`; idle + question-like tail → `needs`; exit 0 → `done`, non-zero → `errored`. Coarse heuristics, unit-tested. |
 | `portBroker` | `floo claim <service>` in the worktree cwd → sticky port; injected as env. Swallowed if `floo` is absent. |
 | ticket provider | `ITicketProvider.listTickets()`. Currently `createEmptyProvider()` (returns `[]`); real Jira/Linear slot in behind the same interface. |
+| `promptTemplates` | `IPromptTemplateStore` — per-repo reusable kickoff prompt templates (FLO-98), synchronous CRUD over the `prompt_templates` table; owner-scoped in `rpc.ts`. |
 
 ## Renderer
 

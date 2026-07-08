@@ -32,6 +32,7 @@ import type {
   TicketSourceSettings,
   SessionUsage,
   UsageSummary,
+  PromptTemplateDTO,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -525,6 +526,23 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     getUsageSummary(): Promise<UsageSummary> {
       return request(IPC.usageSummary, []) as Promise<UsageSummary>
+    },
+
+    listPromptTemplates(repoId: string): Promise<PromptTemplateDTO[]> {
+      return request(IPC.listPromptTemplates, [repoId]) as Promise<PromptTemplateDTO[]>
+    },
+
+    savePromptTemplate(input: {
+      id?: string
+      repoId: string
+      name: string
+      body: string
+    }): Promise<PromptTemplateDTO> {
+      return request(IPC.savePromptTemplate, [input]) as Promise<PromptTemplateDTO>
+    },
+
+    deletePromptTemplate(id: string): Promise<void> {
+      return request(IPC.deletePromptTemplate, [id]) as Promise<void>
     },
   }
 }

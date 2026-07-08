@@ -16,6 +16,7 @@ import type {
   GcPolicy,
   TicketSource,
   TicketSourceSettings,
+  PromptTemplateDTO,
 } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
@@ -766,6 +767,50 @@ export function createRpc(
       case IPC.usageSummary: {
         const list = deps.sessionStore.list().filter(ownedByCaller)
         return buildUsageSummary(list)
+      }
+
+      case IPC.listPromptTemplates: {
+        const repoId = args[0] as string
+        await requireOwnedRepo(repoId)
+        return deps.promptTemplates.list(repoId).filter(ownedByCaller)
+      }
+
+      case IPC.savePromptTemplate: {
+        const input = args[0] as { id?: string; repoId: string; name: string; body: string }
+        await requireOwnedRepo(input.repoId)
+        if (!input.name?.trim()) throw new Error('Template name must not be empty')
+        if (!input.body?.trim()) throw new Error('Template body must not be empty')
+        let id = input.id
+        let createdAt = Date.now()
+        if (id !== undefined) {
+          // Updating an existing template: missing and other-owner rows throw
+          // the identical error — no existence leak across owners.
+          const existing = deps.promptTemplates.get(id)
+          if (!existing || !ownedByCaller(existing)) throw new Error(`Template not found: ${id}`)
+          createdAt = existing.createdAt
+        } else {
+          id = randomUUID()
+        }
+        const dto: PromptTemplateDTO = {
+          id,
+          repoId: input.repoId,
+          name: input.name.trim(),
+          body: input.body,
+          createdAt,
+          ownerId: identity.id,
+        }
+        deps.promptTemplates.upsert(dto)
+        return dto
+      }
+
+      case IPC.deletePromptTemplate: {
+        const id = args[0] as string
+        // Missing and other-owner rows throw the identical error — no
+        // existence leak across owners.
+        const existing = deps.promptTemplates.get(id)
+        if (!existing || !ownedByCaller(existing)) throw new Error(`Template not found: ${id}`)
+        deps.promptTemplates.delete(id)
+        return undefined
       }
 
       case IPC.pickRepo:
