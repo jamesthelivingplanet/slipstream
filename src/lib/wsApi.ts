@@ -33,6 +33,8 @@ import type {
   SessionUsage,
   UsageSummary,
   PromptTemplateDTO,
+  SessionOutcomeDTO,
+  SessionHistoryEntry,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -543,6 +545,14 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     deletePromptTemplate(id: string): Promise<void> {
       return request(IPC.deletePromptTemplate, [id]) as Promise<void>
+    },
+
+    getSessionOutcome(sessionId: string): Promise<SessionOutcomeDTO | null> {
+      return request(IPC.getSessionOutcome, [sessionId]) as Promise<SessionOutcomeDTO | null>
+    },
+
+    listSessionHistory(): Promise<SessionHistoryEntry[]> {
+      return request(IPC.listSessionHistory, []) as Promise<SessionHistoryEntry[]>
     },
   }
 }

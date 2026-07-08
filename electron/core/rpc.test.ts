@@ -8,6 +8,7 @@ import { IPC } from '../shared/contract.js'
 import type {
   RepoDTO,
   SessionDTO,
+  SessionOutcomeDTO,
   WorktreeInfo,
   WorktreeDiffDTO,
   IRepoRegistry,
@@ -18,6 +19,7 @@ import type {
   ISessionStore,
   IPromptTemplateStore,
   PromptTemplateDTO,
+  IOutcomeStore,
   SessionStatus,
   WriteLockState,
 } from '../shared/contract.js'
@@ -190,6 +192,22 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     getPushPrefs: vi.fn().mockResolvedValue(null),
   }
 
+  const outcomeMap = new Map<string, SessionOutcomeDTO>()
+  const outcomeStore: IOutcomeStore = {
+    get(id) {
+      return outcomeMap.get(id)
+    },
+    upsert(o) {
+      outcomeMap.set(o.sessionId, o)
+    },
+    list() {
+      return Array.from(outcomeMap.values())
+    },
+    delete(id) {
+      outcomeMap.delete(id)
+    },
+  }
+
   return {
     repos,
     worktrees,
@@ -199,6 +217,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     config,
     sessionStore,
     promptTemplates,
+    outcomeStore,
     editor,
     appRunner,
     tailscale,
@@ -423,6 +442,131 @@ describe('createRpc', () => {
       expect(result.byRepo.map((b) => b.key)).toEqual(['r2', 'r1'])
       expect(result.byDay.map((b) => b.key)).toEqual(['2026-07-02', '2026-07-01'])
       expect(result.sessions).toHaveLength(2)
+    })
+  })
+
+  describe('session outcome + history (FLO-97)', () => {
+    function makeOutcome(overrides: Partial<SessionOutcomeDTO> = {}): SessionOutcomeDTO {
+      return {
+        sessionId: 's1',
+        result: 'success',
+        summary: 'Fixed the bug',
+        reportedAt: 1000,
+        ...overrides,
+      }
+    }
+
+    it('getSessionOutcome returns the stored outcome', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      deps.outcomeStore.upsert(makeOutcome())
+
+      const result = await rpc.handle(IPC.getSessionOutcome, ['s1'])
+      expect(result).toEqual(makeOutcome())
+    })
+
+    it('getSessionOutcome returns null when none reported yet', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      const result = await rpc.handle(IPC.getSessionOutcome, ['s1'])
+      expect(result).toBeNull()
+    })
+
+    it('getSessionOutcome rejects for a session the caller does not own', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.getSessionOutcome, ['hers'])).rejects.toThrow(/Session not found/)
+    })
+
+    describe('disk fallback (daemon-restart race)', () => {
+      let dataDir: string
+
+      beforeEach(() => {
+        dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-outcome-'))
+        deps.appMcp = {
+          configDir: dataDir,
+          appMcpJsPath: '/app/app-mcp.js',
+          electronPath: '/usr/bin/electron',
+          dataDir,
+        }
+      })
+
+      afterEach(() => {
+        fs.rmSync(dataDir, { recursive: true, force: true })
+      })
+
+      function writeSentinel(sessionId: string, body: Record<string, unknown>): void {
+        const dir = path.join(dataDir, 'sessions', sessionId)
+        fs.mkdirSync(dir, { recursive: true })
+        fs.writeFileSync(path.join(dir, 'outcome.json'), JSON.stringify(body))
+      }
+
+      it('falls back to reading outcome.json off disk when the store misses', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1' }))
+        writeSentinel('s1', { result: 'partial', summary: 'From disk', ts: 555 })
+
+        const result = await rpc.handle(IPC.getSessionOutcome, ['s1'])
+        expect(result).toEqual({
+          sessionId: 's1',
+          result: 'partial',
+          summary: 'From disk',
+          reportedAt: 555,
+        })
+      })
+
+      it('backfills the store after a successful disk fallback read', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1' }))
+        writeSentinel('s1', { result: 'success', summary: 'Backfilled', ts: 555 })
+
+        await rpc.handle(IPC.getSessionOutcome, ['s1'])
+        expect(deps.outcomeStore.get('s1')?.summary).toBe('Backfilled')
+      })
+
+      it('returns null when neither the store nor disk has a valid outcome', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1' }))
+        const result = await rpc.handle(IPC.getSessionOutcome, ['s1'])
+        expect(result).toBeNull()
+      })
+
+      it('returns null when the on-disk sentinel is malformed', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1' }))
+        writeSentinel('s1', { result: 'bogus', summary: 'x', ts: 1 })
+        const result = await rpc.handle(IPC.getSessionOutcome, ['s1'])
+        expect(result).toBeNull()
+      })
+    })
+
+    it('listSessionHistory joins sessions with outcomes and usage, most recent first', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', repoId: 'r1', createdAt: 1000 }))
+      deps.sessionStore.upsert(makeSession({ id: 's2', repoId: 'r1', createdAt: 2000 }))
+      deps.outcomeStore.upsert(makeOutcome({ sessionId: 's1' }))
+
+      const result = (await rpc.handle(IPC.listSessionHistory, [])) as Array<{
+        session: SessionDTO
+        outcome: SessionOutcomeDTO | null
+        usage: unknown
+      }>
+
+      expect(result).toHaveLength(2)
+      expect(result[0].session.id).toBe('s2') // most recent first
+      expect(result[0].outcome).toBeNull()
+      expect(result[1].session.id).toBe('s1')
+      expect(result[1].outcome).toEqual(makeOutcome({ sessionId: 's1' }))
+    })
+
+    it('listSessionHistory excludes sessions owned by another identity', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
+
+      const result = (await rpc.handle(IPC.listSessionHistory, [])) as Array<{
+        session: SessionDTO
+      }>
+      expect(result.map((e) => e.session.id)).toEqual(['s1'])
+    })
+
+    it('listSessionHistory reports usage:null when no transcript/turns exist', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      const result = (await rpc.handle(IPC.listSessionHistory, [])) as Array<{
+        usage: unknown
+      }>
+      expect(result[0].usage).toBeNull()
     })
   })
 

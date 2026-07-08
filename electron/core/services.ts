@@ -14,6 +14,7 @@ import { createCompositeProvider } from '../tickets/compositeProvider.js'
 import { createSessionStore, restoreInterruptedSessions } from '../services/sessionStore.js'
 import { createPromptTemplateStore } from '../services/promptTemplates.js'
 import { createTicketWriteback } from '../services/ticketWriteback.js'
+import { createOutcomeStore } from '../services/outcomeStore.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createTailscaleExposer } from '../services/tailscale.js'
@@ -60,6 +61,7 @@ export function createServices(root: string): IpcDeps {
   const db = openDb(path.join(root, 'slipstream.db'))
   const configStore = createConfigStore(db, { encryptor: createSafeStorageEncryptor() })
   const sessionStore = createSessionStore(db)
+  const outcomeStore = createOutcomeStore(db)
   // FLO-46: mark orphaned in-flight sessions as interrupted on boot
   restoreInterruptedSessions(sessionStore)
   const runLogger = createRunLogger(root)
@@ -76,7 +78,9 @@ export function createServices(root: string): IpcDeps {
   // FLO-69: persist session status/PR changes at the daemon level (once per
   // process), not per connected client. This is what lets an agent that
   // finishes with no UI attached still write its final state to SQLite.
-  createSessionPersistence({ sessions, store: sessionStore })
+  // FLO-97: also persists structured session outcomes reported via the app
+  // MCP's report_outcome tool.
+  createSessionPersistence({ sessions, store: sessionStore, outcomes: outcomeStore })
   const push = createPushService({
     config: configStore,
     store: createDbPushStore(db),
@@ -93,6 +97,7 @@ export function createServices(root: string): IpcDeps {
     config: configStore,
     sessionStore,
     promptTemplates: createPromptTemplateStore(db),
+    outcomeStore,
     editor: createEditorLauncher(),
     appRunner: createAppRunner(),
     tailscale: createTailscaleExposer(),

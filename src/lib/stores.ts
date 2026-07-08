@@ -123,6 +123,8 @@ export const query = writable<string>('')
 export const dialogOpen = writable<boolean>(false)
 export const settingsOpen = writable<boolean>(false)
 export const settingsRepoId = writable<string | null>(null)
+// FLO-97: the Run history view, toggled from the header.
+export const historyOpen = writable<boolean>(false)
 
 /** True when the viewport is at or below the mobile breakpoint. Synced from App.svelte. */
 export const mobile = writable<boolean>(false)
@@ -203,6 +205,7 @@ function patch(id: string, fn: (s: Session) => Session) {
 
 export function select(tid: string | null) {
   selectedId.set(tid)
+  if (tid) historyOpen.set(false)
 }
 
 /** Seed stores from the real backend. No-op when hasBackend is false. */

@@ -32,6 +32,8 @@ import type {
   UsageSummary,
   UsageTokens,
   PromptTemplateDTO,
+  SessionOutcomeDTO,
+  SessionHistoryEntry,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
 
@@ -399,4 +401,17 @@ export function getUsageSummary(): Promise<UsageSummary> {
         byDay: [],
         sessions: [],
       })
+}
+
+// ── Session outcomes / history (FLO-97) ─────────────────────────────────────
+
+/** Structured final summary reported by the agent, or null if none reported yet. */
+export function getSessionOutcome(sessionId: string): Promise<SessionOutcomeDTO | null> {
+  return hasBackend ? window.slipstream.getSessionOutcome(sessionId) : Promise.resolve(null)
+}
+
+/** Owner-scoped history of all persisted sessions joined with outcomes + usage,
+ *  most recent first; powers the History view. */
+export function listSessionHistory(): Promise<SessionHistoryEntry[]> {
+  return hasBackend ? window.slipstream.listSessionHistory() : Promise.resolve([])
 }

@@ -35,6 +35,7 @@ import {
 } from './agentBackend.js'
 import type { RunLogger } from './runLogger.js'
 import { parseStatusSentinel, STATUS_SENTINEL_FILE } from './statusSentinel.js'
+import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from './outcomeSentinel.js'
 
 function spawnAgent(
   cmd: string,
@@ -225,9 +226,15 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
         .then(() => {
           const emittedPrUrl = new Set<string>()
           let lastStatusTs = 0
+          let lastOutcomeTs = 0
           try {
             const watcher = fs.watch(sentinelDir, { persistent: false }, (_event, filename) => {
-              if (filename !== 'pr.json' && filename !== STATUS_SENTINEL_FILE) return
+              if (
+                filename !== 'pr.json' &&
+                filename !== STATUS_SENTINEL_FILE &&
+                filename !== OUTCOME_SENTINEL_FILE
+              )
+                return
 
               if (filename === 'pr.json') {
                 const filePath = path.join(sentinelDir, 'pr.json')
@@ -237,6 +244,27 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
                   if (parsed.url && !emittedPrUrl.has(parsed.url)) {
                     emittedPrUrl.add(parsed.url)
                     emit('pr', id, parsed.url)
+                  }
+                } catch {
+                  // Ignore read/parse errors (file may be partially written)
+                }
+                return
+              }
+
+              if (filename === OUTCOME_SENTINEL_FILE) {
+                const filePath = path.join(sentinelDir, OUTCOME_SENTINEL_FILE)
+                try {
+                  const content = fs.readFileSync(filePath, 'utf8')
+                  const parsed = parseOutcomeSentinel(content)
+                  if (parsed && parsed.ts > lastOutcomeTs) {
+                    lastOutcomeTs = parsed.ts
+                    emit('outcome', id, {
+                      sessionId: id,
+                      result: parsed.result,
+                      summary: parsed.summary,
+                      details: parsed.details,
+                      reportedAt: parsed.ts,
+                    })
                   }
                 } catch {
                   // Ignore read/parse errors (file may be partially written)

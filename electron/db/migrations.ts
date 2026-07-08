@@ -88,6 +88,18 @@ export const MIGRATIONS: Migration[] = [
   createdAt INTEGER NOT NULL,
   ownerId   TEXT DEFAULT 'local'
 )`),
+  // 4 — FLO-97: structured final session outcomes, reported via the app MCP's
+  // report_outcome tool and durable independent of the output ring buffer.
+  (db) =>
+    db.exec(`
+CREATE TABLE session_outcomes (
+  sessionId  TEXT PRIMARY KEY,
+  result     TEXT NOT NULL,
+  summary    TEXT NOT NULL,
+  details    TEXT,
+  reportedAt INTEGER NOT NULL
+)
+`),
 ]
 
 /** Apply any migrations newer than the DB's current user_version, atomically. */
