@@ -123,12 +123,35 @@
         {@html icons.terminal}
       </button>
     {/if}
-    <div class="logo">
+    <div
+      class="logo"
+      role="button"
+      tabindex="0"
+      title="Mission control"
+      aria-label="Go to mission control"
+      on:click={() => select(null)}
+      on:keydown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          select(null)
+        }
+      }}
+    >
       <img src="/icons/icon.svg" alt="Slipstream" class="glyph" />
       <b>Slipstream</b>
       {#if !$mobile}<span class="badge mono">dangerous mode</span>{/if}
       <McpStatus />
     </div>
+    {#if $selected}
+      <button
+        class="btn btn-ghost btn-icon btn-sm"
+        title="Mission control"
+        on:click={() => select(null)}
+        aria-label="Back to mission control"
+      >
+        {@html icons.home}
+      </button>
+    {/if}
     <div class="spacer"></div>
     <ThemeMenu />
     <button class="btn btn-outline btn-icon btn-sm" title="Refresh" on:click={onRefresh}>

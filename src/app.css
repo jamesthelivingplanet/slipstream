@@ -155,6 +155,7 @@ header.bar {
   display: flex;
   align-items: center;
   gap: 9px;
+  cursor: pointer;
 }
 .logo .glyph {
   width: 26px;
