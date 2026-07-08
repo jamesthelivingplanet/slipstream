@@ -54,4 +54,7 @@ export interface IpcDeps {
     electronPath: string
     dataDir: string
   }
+  /** Optional: post-handoff PR/MR status (FLO-96). Optional (like `tailscale`)
+   *  so tests can omit it; when absent, sessionPrStatus returns null. */
+  prStatus?: import('./services/prStatus.js').IPrStatusService
 }

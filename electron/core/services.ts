@@ -23,6 +23,7 @@ import { createRunLogger } from '../services/runLogger.js'
 import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import { createSessionReaper } from '../services/sessionReaper.js'
 import { createSessionPersistence } from '../services/sessionPersistence.js'
+import { createPrStatusService } from '../services/prStatus.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -104,6 +105,7 @@ export function createServices(root: string): IpcDeps {
     push,
     logger: runLogger,
     writeCoordinator: createWriteCoordinator(),
+    prStatus: createPrStatusService({ config: configStore }),
     appMcp: {
       configDir: path.join(root, 'mcp'),
       appMcpJsPath: fileURLToPath(new URL('./app-mcp.js', import.meta.url)),

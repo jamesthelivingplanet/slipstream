@@ -35,6 +35,7 @@ import type {
   PromptTemplateDTO,
   SessionOutcomeDTO,
   SessionHistoryEntry,
+  PrStatusDTO,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -553,6 +554,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     listSessionHistory(): Promise<SessionHistoryEntry[]> {
       return request(IPC.listSessionHistory, []) as Promise<SessionHistoryEntry[]>
+    },
+
+    getPrStatus(sessionId: string): Promise<PrStatusDTO | null> {
+      return request(IPC.sessionPrStatus, [sessionId]) as Promise<PrStatusDTO | null>
     },
   }
 }
