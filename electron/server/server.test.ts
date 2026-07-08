@@ -93,6 +93,7 @@ function makeFakeDeps(): IpcDeps {
 
   const worktrees: IWorktreeManager = {
     pathFor: vi.fn().mockReturnValue('/wt/branch'),
+    isMerged: vi.fn().mockResolvedValue({ merged: false, ahead: -1 }),
     create: vi.fn().mockResolvedValue({
       branch: 'b',
       path: '/wt/b',
@@ -236,6 +237,7 @@ function makeSurvivalDeps(): {
 
   const worktrees: IWorktreeManager = {
     pathFor: vi.fn().mockReturnValue('/wt/branch'),
+    isMerged: vi.fn().mockResolvedValue({ merged: false, ahead: -1 }),
     create: vi.fn().mockResolvedValue({
       branch: 'b',
       path: '/wt/b',

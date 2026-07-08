@@ -392,6 +392,21 @@ export function createRpc(
         return result
       }
 
+      case IPC.sessionMerged: {
+        const id = args[0] as string
+        const persisted = ownedSession(id)
+        if (!persisted) return { merged: false }
+        const repo = await deps.repos.get(persisted.repoId)
+        if (!repo) return { merged: false }
+        const probe = await deps.worktrees.isMerged(repo, persisted.branch)
+        if (probe.merged) return { merged: true, via: probe.via }
+        // Rebase/fast-forward merges leave no merge commit and put the branch's
+        // original SHAs on base (ahead === 0) — indistinguishable from a fresh
+        // branch by git alone, so require the session's recorded PR as evidence.
+        if (probe.ahead === 0 && persisted.prUrl) return { merged: true, via: 'pr' }
+        return { merged: false }
+      }
+
       case IPC.listSessions:
         return deps.sessionStore.list().filter(ownedByCaller)
 

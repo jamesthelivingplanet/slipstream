@@ -8,6 +8,7 @@
  */
 import type {
   BackendKind,
+  BranchMergedDTO,
   RepoDTO,
   RepoSettings,
   SessionDTO,
@@ -157,6 +158,10 @@ export function cleanupSession(
   return hasBackend
     ? window.slipstream.cleanupSession(id, opts)
     : Promise.resolve({ removed: false, reason: 'no backend' })
+}
+
+export function sessionMerged(id: string): Promise<BranchMergedDTO> {
+  return hasBackend ? window.slipstream.sessionMerged(id) : Promise.resolve({ merged: false })
 }
 
 // ── Push event subscriptions ───────────────────────────────────────────────

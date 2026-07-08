@@ -359,6 +359,15 @@ export interface IRepoRegistry {
   setSettings(id: string, settings: RepoSettings): Promise<void>
 }
 
+/** Result of a merged-into-base probe for a session's branch
+ *  (IWorktreeManager.isMerged, surfaced via IPC.sessionMerged). */
+export interface BranchMergedDTO {
+  merged: boolean
+  /** What proved it: a merge commit naming the branch, a squash-equivalent
+   *  patch on base, or a recorded PR whose branch has no commits left off base. */
+  via?: 'merge-commit' | 'squash' | 'pr'
+}
+
 export interface IWorktreeManager {
   /** `.worktrees/<org>-<name>/<branch>` (pure, synchronous, unit-tested). */
   pathFor(repo: RepoDTO, branch: string): string
@@ -369,6 +378,16 @@ export interface IWorktreeManager {
     branch: string,
     opts?: { force?: boolean },
   ): Promise<{ removed: boolean; reason?: string }>
+  /** Merged-into-base probe (refreshes base from origin first; offline-safe).
+   *  `merged` is only true on positive evidence: a merge commit naming the
+   *  branch since the fork point, or a squash-equivalent patch on base — a
+   *  fresh branch with no commits is NOT merged. `ahead` is the branch's
+   *  commit count not on base (-1 when undeterminable) so callers can combine
+   *  `ahead === 0` with their own evidence (e.g. a recorded PR). */
+  isMerged(
+    repo: RepoDTO,
+    branch: string,
+  ): Promise<{ merged: boolean; via?: 'merge-commit' | 'squash'; ahead: number }>
   status(repo: RepoDTO, branch: string): Promise<WorktreeInfo>
   /** Structured diff of the worktree vs merge-base(repo.base, HEAD) — includes
    *  uncommitted and untracked changes. Returns an `error` DTO rather than
@@ -590,6 +609,10 @@ export interface SlipstreamApi {
     id: string,
     opts?: { force?: boolean },
   ): Promise<{ removed: boolean; reason?: string }>
+  /** Is this session's branch merged into its repo's base? Combines the git
+   *  probe (merge commit / squash patch) with the session's recorded PR as
+   *  evidence for rebase/fast-forward merges. */
+  sessionMerged(id: string): Promise<BranchMergedDTO>
   listSessions(): Promise<SessionDTO[]>
   resumeSession(id: string): Promise<SessionDTO>
   attachRemoteControl(id: string): Promise<SessionDTO>
@@ -698,6 +721,7 @@ export const IPC = {
   resizeSession: 'session:resize',
   killSession: 'session:kill',
   cleanupSession: 'session:cleanup',
+  sessionMerged: 'session:merged',
   listSessions: 'session:list',
   resumeSession: 'session:resume',
   attachRemoteControl: 'session:attachRemoteControl',

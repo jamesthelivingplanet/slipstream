@@ -14,6 +14,7 @@ vi.mock('./ipc', () => ({
   startSession: vi.fn(),
   killSession: vi.fn(),
   cleanupSession: vi.fn(),
+  sessionMerged: vi.fn(),
   worktreeStatus: vi.fn(),
   runApp: vi.fn(),
   stopApp: vi.fn(),
@@ -23,7 +24,7 @@ vi.mock('./ipc', () => ({
   getMcpStatus: vi.fn(),
 }))
 
-import { cleanupSession, killSession, runApp, stopApp, listTickets } from './ipc'
+import { cleanupSession, killSession, runApp, stopApp, listTickets, sessionMerged } from './ipc'
 import {
   sessions,
   tickets,
@@ -39,6 +40,7 @@ import {
   selectedId,
   setSessionStatus,
   removeSession,
+  refreshAndReconcile,
   selected,
   confirmState,
   runningApps,
@@ -519,5 +521,73 @@ describe('reviewComments store', () => {
     clearReviewComments('s1')
     expect(get(reviewComments)['s1']).toBeUndefined()
     expect(get(reviewComments)['s2']).toHaveLength(1)
+  })
+})
+
+describe('refreshAndReconcile merged-branch cleanup', () => {
+  function makeSession(overrides: Partial<Session> = {}): Session {
+    return {
+      id: 'u1',
+      tid: 'A',
+      src: 'linear',
+      status: 'done',
+      title: 'Some task',
+      repo: 'repo1',
+      branch: 'A-branch',
+      add: 0,
+      del: 0,
+      ago: '',
+      activity: { text: '' },
+      ...overrides,
+    } as Session
+  }
+
+  beforeEach(() => {
+    sessions.set([makeSession()])
+    toasts.set([])
+    vi.clearAllMocks()
+    vi.mocked(listTickets).mockResolvedValue([])
+    vi.mocked(killSession).mockResolvedValue(undefined)
+  })
+
+  it('cleans up a session whose branch is merged into base', async () => {
+    vi.mocked(sessionMerged).mockResolvedValue({ merged: true, via: 'merge-commit' })
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: true })
+
+    await refreshAndReconcile()
+
+    expect(sessionMerged).toHaveBeenCalledWith('u1')
+    expect(cleanupSession).toHaveBeenCalledWith('u1', { force: false })
+    expect(get(sessions).find((s) => s.id === 'u1')).toBeUndefined()
+  })
+
+  it('leaves an unmerged session alone', async () => {
+    vi.mocked(sessionMerged).mockResolvedValue({ merged: false })
+
+    await refreshAndReconcile()
+
+    expect(cleanupSession).not.toHaveBeenCalled()
+    expect(get(sessions).find((s) => s.id === 'u1')).toBeDefined()
+  })
+
+  it('a merged-probe failure does not break the refresh or clean anything', async () => {
+    vi.mocked(sessionMerged).mockRejectedValue(new Error('offline'))
+
+    await refreshAndReconcile()
+
+    expect(cleanupSession).not.toHaveBeenCalled()
+    expect(get(sessions)).toHaveLength(1)
+  })
+
+  it('never force-removes: a merged session with a dirty worktree is kept with a warning', async () => {
+    vi.mocked(sessionMerged).mockResolvedValue({ merged: true, via: 'squash' })
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: false, reason: '2 files changed' })
+
+    await refreshAndReconcile()
+
+    expect(cleanupSession).toHaveBeenCalledTimes(1)
+    expect(cleanupSession).toHaveBeenCalledWith('u1', { force: false })
+    expect(get(sessions).find((s) => s.id === 'u1')).toBeDefined()
+    expect(get(toasts).find((t) => t.type === 'warning')).toBeDefined()
   })
 })

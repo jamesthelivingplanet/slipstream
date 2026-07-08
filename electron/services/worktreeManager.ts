@@ -248,6 +248,69 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       return this.status(repo, branch)
     },
 
+    async isMerged(
+      repo: RepoDTO,
+      branch: string,
+    ): Promise<{ merged: boolean; via?: 'merge-commit' | 'squash'; ahead: number }> {
+      // No branch ref → nothing to probe (and `ahead` must not read as 0,
+      // which callers may combine with PR evidence).
+      try {
+        await git(['-C', repo.path, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
+      } catch {
+        return { merged: false, ahead: -1 }
+      }
+
+      // Refresh base so a merge that landed on the remote is visible locally.
+      const baseRef = await pullBaseStartPoint(repo.path, repo.base)
+
+      let ahead = -1
+      try {
+        const out = await git(['-C', repo.path, 'rev-list', '--count', `${baseRef}..${branch}`])
+        const n = parseInt(out.trim(), 10)
+        if (!isNaN(n)) ahead = n
+      } catch {
+        // permissive: leave ahead = -1
+      }
+
+      // 1) A merge commit on base since the fork point whose subject names the
+      //    branch. Covers GitLab ("Merge branch '<branch>' into 'master'") and
+      //    GitHub ("Merge pull request #N from <org>/<branch>") for both plain
+      //    and squash merges. Fixed-string, and bounded to merges after the
+      //    fork point so an old branch-name collision can't false-positive.
+      try {
+        const mergeBase = (await git(['-C', repo.path, 'merge-base', baseRef, branch])).trim()
+        if (mergeBase) {
+          const hit = await git([
+            '-C',
+            repo.path,
+            'log',
+            '--merges',
+            '--fixed-strings',
+            '--grep',
+            `'${branch}'`,
+            '--grep',
+            `/${branch}`,
+            '--format=%H',
+            '-1',
+            `${mergeBase}..${baseRef}`,
+          ])
+          if (hit.trim().length > 0) return { merged: true, via: 'merge-commit', ahead }
+        }
+      } catch {
+        // fall through to the other signals
+      }
+
+      // 2) Squash merge without a telltale merge commit: the branch's cumulative
+      //    patch is already on base even though its SHAs aren't (FLO-91 check).
+      if (ahead !== 0 && (await isSquashMerged(repo.path, baseRef, branch))) {
+        return { merged: true, via: 'squash', ahead }
+      }
+
+      // ahead === 0 alone is NOT merged evidence — a freshly cut branch also has
+      // zero commits off base. Callers may combine it with a recorded PR.
+      return { merged: false, ahead }
+    },
+
     async remove(
       repo: RepoDTO,
       branch: string,

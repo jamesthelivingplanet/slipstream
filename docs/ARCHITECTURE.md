@@ -59,7 +59,7 @@ Electron main  ──spawns──▶  daemon (ELECTRON_RUN_AS_NODE=1, server.js)
 | Service | Responsibility |
 |---------|----------------|
 | `repoRegistry` | Register/list/get/remove repos in SQLite. `register` **validates** the folder is a git work tree with commits (else throws); idempotent. |
-| `worktreeManager` | `pathFor`/`create`/`status`/`list`/`remove`. **Guarded remove** refuses dirty or unmerged worktrees unless forced. Diff stats + ahead/behind via git. |
+| `worktreeManager` | `pathFor`/`create`/`status`/`list`/`remove`/`isMerged`. **Guarded remove** refuses dirty or unmerged worktrees unless forced (squash-merged counts as merged, FLO-91). `isMerged` probes whether a branch landed on base — merge commit naming the branch (GitLab/GitHub style) or squash-equivalent patch; `ahead === 0` alone is never merged evidence (a fresh branch looks the same), so `rpc.ts`'s `sessionMerged` combines it with the session's recorded PR. Drives the refresh-button auto-cleanup in `stores.refreshAndReconcile` (the ticket-is-Done trigger rarely fires: providers filter done tickets out of `listTickets`). Diff stats + ahead/behind via git. |
 | `sessionManager` | Spawns `claude --dangerously-skip-permissions "<prompt>"` via **node-pty** in the worktree cwd; emits `data`/`status`/`exit`; `write`/`resize`/`kill`. |
 | `statusDetector` | Classifies a session from PTY output + lifecycle: recent output → `running`; idle + question-like tail → `needs`; exit 0 → `done`, non-zero → `errored`. Coarse heuristics, unit-tested. The MCP `report_status` signal (`applySignal`) overrides the heuristics; see §Session status pipeline. |
 | `portBroker` | `floo claim <service>` in the worktree cwd → sticky port; injected as env. Swallowed if `floo` is absent. |

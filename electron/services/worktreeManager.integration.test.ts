@@ -122,6 +122,70 @@ describe('worktreeManager (real git)', () => {
     expect(res.removed).toBe(true)
   })
 
+  it('isMerged: fresh branch with no commits is NOT merged (ahead 0)', async () => {
+    await wm.create(repo, 'feat-m-fresh')
+    const res = await wm.isMerged(repo, 'feat-m-fresh')
+    expect(res.merged).toBe(false)
+    expect(res.ahead).toBe(0)
+    await wm.remove(repo, 'feat-m-fresh', { force: true })
+  })
+
+  it('isMerged: branch with open (unmerged) commits is NOT merged', async () => {
+    const info = await wm.create(repo, 'feat-m-open')
+    writeFileSync(join(info.path, 'open.txt'), 'wip\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'open work')
+
+    const res = await wm.isMerged(repo, 'feat-m-open')
+    expect(res.merged).toBe(false)
+    expect(res.ahead).toBe(1)
+    await wm.remove(repo, 'feat-m-open', { force: true })
+  })
+
+  it('isMerged: detects a GitLab-style merge commit naming the branch', async () => {
+    const info = await wm.create(repo, 'feat-m-merge')
+    writeFileSync(join(info.path, 'merged.txt'), 'work\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'merged work')
+
+    git(
+      repo.path,
+      'merge',
+      '--no-ff',
+      '-m',
+      "Merge branch 'feat-m-merge' into 'main'",
+      'feat-m-merge',
+    )
+
+    const res = await wm.isMerged(repo, 'feat-m-merge')
+    expect(res.merged).toBe(true)
+    expect(res.via).toBe('merge-commit')
+    await wm.remove(repo, 'feat-m-merge', { force: true })
+  })
+
+  it('isMerged: detects a squash merge whose commit does not name the branch', async () => {
+    const info = await wm.create(repo, 'feat-m-squash')
+    writeFileSync(join(info.path, 'sq-a.txt'), 'a\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'squash part one')
+    writeFileSync(join(info.path, 'sq-b.txt'), 'b\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'squash part two')
+
+    git(repo.path, 'merge', '--squash', 'feat-m-squash')
+    git(repo.path, 'commit', '-m', 'T-42: landed the thing') // no branch name anywhere
+
+    const res = await wm.isMerged(repo, 'feat-m-squash')
+    expect(res.merged).toBe(true)
+    expect(res.via).toBe('squash')
+    await wm.remove(repo, 'feat-m-squash', { force: true })
+  })
+
+  it('isMerged: missing branch ref reports ahead -1, not merged', async () => {
+    const res = await wm.isMerged(repo, 'no-such-branch')
+    expect(res).toEqual({ merged: false, ahead: -1 })
+  })
+
   it('removes worktree, prunes stale entries, and deletes the branch', async () => {
     await wm.create(repo, 'feat-teardown')
     const wtPath = join(root, '.worktrees', 'acme-demo', 'feat-teardown')

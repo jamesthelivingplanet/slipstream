@@ -14,6 +14,7 @@ import {
   startSession,
   killSession,
   cleanupSession,
+  sessionMerged,
   worktreeStatus,
   runApp,
   stopApp,
@@ -583,7 +584,13 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
   }
 }
 
-/** Pull latest tickets, refresh the sidebar list, and tear down agents whose ticket is now Done. */
+/** Pull latest tickets, refresh the sidebar list, and tear down agents whose
+ *  work has landed. Two triggers, OR'd:
+ *  - the linked ticket is now Done (only fires if the provider returns done
+ *    tickets — most filter them out of the list, so this rarely triggers), or
+ *  - the session's branch is merged into base per `sessionMerged` (merge
+ *    commit naming the branch, squash-equivalent patch, or recorded PR with
+ *    zero commits left off base). This is the reliable, git-truth trigger. */
 export async function refreshAndReconcile(): Promise<void> {
   if (!hasBackend) return
   let dtos
@@ -594,7 +601,21 @@ export async function refreshAndReconcile(): Promise<void> {
     return
   }
   tickets.set(dtoToTickets(dtos).filter(isStartableTicket))
+
+  const toClean = new Map<string, Session>()
   for (const s of sessionsToReconcile(get(sessions), dtos)) {
+    if (s.id) toClean.set(s.id, s)
+  }
+  for (const s of get(sessions)) {
+    if (!s.id || toClean.has(s.id)) continue
+    try {
+      const probe = await sessionMerged(s.id)
+      if (probe.merged) toClean.set(s.id, s)
+    } catch {
+      // per-session probe failure (offline, repo gone) must not break refresh
+    }
+  }
+  for (const s of toClean.values()) {
     await cleanupAgent(s, { auto: true })
   }
   await refreshDiffStats().catch(() => {})

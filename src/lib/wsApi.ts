@@ -9,6 +9,7 @@
 
 import type {
   SlipstreamApi,
+  BranchMergedDTO,
   RepoDTO,
   RepoSettings,
   SessionDTO,
@@ -375,6 +376,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
         removed: boolean
         reason?: string
       }>
+    },
+
+    sessionMerged(id: string): Promise<BranchMergedDTO> {
+      return request(IPC.sessionMerged, [id]) as Promise<BranchMergedDTO>
     },
 
     listSessions(): Promise<SessionDTO[]> {

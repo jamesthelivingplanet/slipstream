@@ -116,6 +116,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     pathFor: vi.fn().mockReturnValue('/wt/t-1-fix-bug'),
     create: vi.fn().mockResolvedValue(makeWorktreeInfo()),
     remove: vi.fn().mockResolvedValue({ removed: true }),
+    isMerged: vi.fn().mockResolvedValue({ merged: false, ahead: -1 }),
     status: vi.fn().mockResolvedValue(makeWorktreeInfo()),
     diff: vi.fn().mockResolvedValue(makeWorktreeDiff()),
     list: vi.fn().mockResolvedValue([makeWorktreeInfo()]),
@@ -716,6 +717,52 @@ describe('createRpc', () => {
     expect(deps.worktrees.remove).toHaveBeenCalled()
     expect(result).toEqual({ removed: true })
     expect(deps.sessionStore.list()).toHaveLength(0)
+  })
+
+  it('sessionMerged returns merged:false for an unknown session', async () => {
+    const result = await rpc.handle(IPC.sessionMerged, ['nope'])
+    expect(result).toEqual({ merged: false })
+  })
+
+  it('sessionMerged surfaces the git probe verdict', async () => {
+    deps.sessionStore.upsert(makeSession())
+    ;(
+      deps.worktrees as unknown as { isMerged: ReturnType<typeof vi.fn> }
+    ).isMerged.mockResolvedValueOnce({ merged: true, via: 'merge-commit', ahead: 2 })
+    const result = await rpc.handle(IPC.sessionMerged, ['s1'])
+    expect(deps.worktrees.isMerged).toHaveBeenCalledWith(makeRepo(), 't-1-fix-bug')
+    expect(result).toEqual({ merged: true, via: 'merge-commit' })
+  })
+
+  it('sessionMerged treats ahead 0 + recorded PR as merged (rebase/FF merge)', async () => {
+    deps.sessionStore.upsert(
+      makeSession({ prUrl: 'https://gitlab.com/acme/api/-/merge_requests/7' }),
+    )
+    ;(
+      deps.worktrees as unknown as { isMerged: ReturnType<typeof vi.fn> }
+    ).isMerged.mockResolvedValueOnce({ merged: false, ahead: 0 })
+    const result = await rpc.handle(IPC.sessionMerged, ['s1'])
+    expect(result).toEqual({ merged: true, via: 'pr' })
+  })
+
+  it('sessionMerged does NOT treat a fresh branch without a PR as merged', async () => {
+    deps.sessionStore.upsert(makeSession())
+    ;(
+      deps.worktrees as unknown as { isMerged: ReturnType<typeof vi.fn> }
+    ).isMerged.mockResolvedValueOnce({ merged: false, ahead: 0 })
+    const result = await rpc.handle(IPC.sessionMerged, ['s1'])
+    expect(result).toEqual({ merged: false })
+  })
+
+  it('sessionMerged ignores PR evidence when the branch ref is missing (ahead -1)', async () => {
+    deps.sessionStore.upsert(
+      makeSession({ prUrl: 'https://gitlab.com/acme/api/-/merge_requests/7' }),
+    )
+    ;(
+      deps.worktrees as unknown as { isMerged: ReturnType<typeof vi.fn> }
+    ).isMerged.mockResolvedValueOnce({ merged: false, ahead: -1 })
+    const result = await rpc.handle(IPC.sessionMerged, ['s1'])
+    expect(result).toEqual({ merged: false })
   })
 
   it('attachRemoteControl calls sessions.attachRemoteControl and upserts status running', async () => {
