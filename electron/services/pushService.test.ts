@@ -259,31 +259,60 @@ describe('createPushService', () => {
     expect(JSON.parse(payload).status).toBe('running')
   })
 
-  it('deduplicates sends within 3 seconds', async () => {
+  it('sends only one notification per kind while the status flaps', async () => {
     const sub = makeSub()
     store.upsert(sub, { needs: true, done: false, running: false }, 0)
     makeService()
     // First transition to needs
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
-    // Back to idle (clears the "current" but keeps lastSent)
+    // Back to idle (clears the "current" but keeps the notified flag)
     sessions._emit('status', 's1', 'idle' satisfies SessionStatus)
-    // Second transition to needs within 3s window (nowMs unchanged)
+    // Second transition to needs — same episode, suppressed
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
     await new Promise((r) => setTimeout(r, 10))
     expect(send).toHaveBeenCalledOnce()
   })
 
-  it('does NOT deduplicate sends after 3 seconds', async () => {
+  it('does NOT re-notify on heuristic flapping, no matter how much time passes', async () => {
     const sub = makeSub()
     store.upsert(sub, { needs: true, done: false, running: false }, 0)
     let t = 10000
     makeService({ now: () => t })
+    // Idle-TUI flap: needs -> running -> needs -> ... every few seconds.
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
-    sessions._emit('status', 's1', 'idle' satisfies SessionStatus)
-    t += 4000
+    for (let i = 0; i < 20; i++) {
+      t += 5000
+      sessions._emit('status', 's1', 'running' satisfies SessionStatus)
+      t += 5000
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+    }
+    await new Promise((r) => setTimeout(r, 10))
+    expect(send).toHaveBeenCalledOnce()
+  })
+
+  it('re-arms notifications after the user types into the session', async () => {
+    const sub = makeSub()
+    store.upsert(sub, { needs: true, done: false, running: false }, 0)
+    makeService()
+    sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+    // User answers the agent's question — new episode.
+    sessions._emit('input', 's1')
+    sessions._emit('status', 's1', 'running' satisfies SessionStatus)
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
     await new Promise((r) => setTimeout(r, 10))
     expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('input on one session does not re-arm another', async () => {
+    const sub = makeSub()
+    store.upsert(sub, { needs: true, done: false, running: false }, 0)
+    makeService()
+    sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+    sessions._emit('input', 's2')
+    sessions._emit('status', 's1', 'idle' satisfies SessionStatus)
+    sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(send).toHaveBeenCalledOnce()
   })
 
   it('prunes subscription on 410 response', async () => {
@@ -345,7 +374,7 @@ describe('createPushService', () => {
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
     sessions._emit('exit', 's1', 0)
     // Same status, same instant: without cleanup this is swallowed both by
-    // lastStatus (needs -> needs = no transition) and lastSent (3s dedupe).
+    // lastStatus (needs -> needs = no transition) and the notified-kinds set.
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
     await new Promise((r) => setTimeout(r, 10))
     expect(send).toHaveBeenCalledTimes(2)
@@ -378,7 +407,7 @@ describe('createPushService', () => {
     sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
     sessions._emit('status', 's2', 'needs' satisfies SessionStatus)
     sessions._emit('exit', 's1', 0)
-    // s2 was untouched by s1's cleanup: still deduped within the window.
+    // s2 was untouched by s1's cleanup: its needs notification stays spent.
     sessions._emit('status', 's2', 'idle' satisfies SessionStatus)
     sessions._emit('status', 's2', 'needs' satisfies SessionStatus)
     await new Promise((r) => setTimeout(r, 10))

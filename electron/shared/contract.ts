@@ -362,6 +362,9 @@ export interface SessionEvents {
   exit: (sessionId: string, code: number) => void
   pr: (sessionId: string, prUrl: string) => void
   outcome: (sessionId: string, outcome: SessionOutcomeDTO) => void
+  /** User keystrokes were written to the session's PTY (write() is only
+   *  reachable via the writeSession RPC, i.e. a human typing in a terminal). */
+  input: (sessionId: string) => void
 }
 
 export interface StartSessionInput {

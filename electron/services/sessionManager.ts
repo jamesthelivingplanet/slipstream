@@ -438,6 +438,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     const rec = sessions.get(sessionId)
     if (!rec) return
     rec.pty.write(data)
+    emit('input', sessionId)
   }
 
   function resize(sessionId: string, cols: number, rows: number): void {

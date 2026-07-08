@@ -66,8 +66,12 @@ export function createPushService(deps: {
   const now = deps.now ?? (() => Date.now())
 
   const lastStatus = new Map<string, SessionStatus>()
-  const lastSent = new Map<string, number>()
-  const DEDUP_MS = 3000
+  // Kinds already notified during the session's current "episode". The status
+  // detector's heuristics flap on idle TUIs (screen repaint → running, quiet
+  // prompt → needs, repeat), so a time-window dedupe re-notifies forever. Each
+  // kind fires at most once per episode; an episode ends when the user actually
+  // types into the session ('input' event), which re-arms all kinds.
+  const notified = new Map<string, Set<'needs' | 'done' | 'running'>>()
 
   let _send: PushSender | null = deps.send ?? null
   let _webpush: typeof import('web-push') | null = null
@@ -119,13 +123,17 @@ export function createPushService(deps: {
    *  grow unboundedly with every session ever seen. */
   function forgetSession(sessionId: string) {
     lastStatus.delete(sessionId)
-    lastSent.delete(`${sessionId}:needs`)
-    lastSent.delete(`${sessionId}:done`)
-    lastSent.delete(`${sessionId}:running`)
+    notified.delete(sessionId)
   }
 
   sessions.on('exit', (sessionId: string) => {
     forgetSession(sessionId)
+  })
+
+  // User typed into the session — they're engaged, so the next genuine
+  // transition of any kind deserves a fresh notification.
+  sessions.on('input', (sessionId: string) => {
+    notified.delete(sessionId)
   })
 
   sessions.on('status', (sessionId: string, next: SessionStatus) => {
@@ -146,11 +154,10 @@ export function createPushService(deps: {
     next: SessionStatus,
     kind: 'needs' | 'done' | 'running',
   ) {
-    const dedupKey = `${sessionId}:${kind}`
-    const lastTime = lastSent.get(dedupKey)
-    const nowMs = now()
-    if (lastTime !== undefined && nowMs - lastTime < DEDUP_MS) return
-    lastSent.set(dedupKey, nowMs)
+    const seen = notified.get(sessionId) ?? new Set<'needs' | 'done' | 'running'>()
+    if (seen.has(kind)) return
+    seen.add(kind)
+    notified.set(sessionId, seen)
 
     const session = sessionStore.get(sessionId)
     const tid = session?.tid ?? sessionId
