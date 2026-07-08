@@ -61,10 +61,48 @@ Electron main  ──spawns──▶  daemon (ELECTRON_RUN_AS_NODE=1, server.js)
 | `repoRegistry` | Register/list/get/remove repos in SQLite. `register` **validates** the folder is a git work tree with commits (else throws); idempotent. |
 | `worktreeManager` | `pathFor`/`create`/`status`/`list`/`remove`. **Guarded remove** refuses dirty or unmerged worktrees unless forced. Diff stats + ahead/behind via git. |
 | `sessionManager` | Spawns `claude --dangerously-skip-permissions "<prompt>"` via **node-pty** in the worktree cwd; emits `data`/`status`/`exit`; `write`/`resize`/`kill`. |
-| `statusDetector` | Classifies a session from PTY output + lifecycle: recent output → `running`; idle + question-like tail → `needs`; exit 0 → `done`, non-zero → `errored`. Coarse heuristics, unit-tested. |
+| `statusDetector` | Classifies a session from PTY output + lifecycle: recent output → `running`; idle + question-like tail → `needs`; exit 0 → `done`, non-zero → `errored`. Coarse heuristics, unit-tested. The MCP `report_status` signal (`applySignal`) overrides the heuristics; see §Session status pipeline. |
 | `portBroker` | `floo claim <service>` in the worktree cwd → sticky port; injected as env. Swallowed if `floo` is absent. |
 | ticket provider | `ITicketProvider.listTickets()`. Currently `createEmptyProvider()` (returns `[]`); real Jira/Linear slot in behind the same interface. |
 | `promptTemplates` | `IPromptTemplateStore` — per-repo reusable kickoff prompt templates (FLO-98), synchronous CRUD over the `prompt_templates` table; owner-scoped in `rpc.ts`. |
+
+## Session status pipeline
+
+A session's `status` has **three producers**, merged in `sessionManager.ts`:
+
+1. **PTY heuristics** (`statusDetector.ts`, backends with `statusSource: 'pty'`) — every
+   data chunk is pushed into the detector and `status()` re-derived.
+2. **The MCP sentinel** (the reliable channel) — the app MCP's `report_status` tool writes
+   `status.json` to `<dataDir>/sessions/<id>/`; an `fs.watch` feeds it to
+   `detector.applySignal()` (PTY backends) or emits it directly (poll backends). An applied
+   signal wins over heuristics until a strictly-newer explicit tail marker or process exit;
+   MCP `done` is sticky.
+3. **Poll-driven backends** (opencode/pi, `statusSource !== 'pty'`) — `beginStatusTracking`
+   sets status from the backend's own API/session file; the detector is bypassed because
+   full-screen TUI redraws make PTY scraping unreliable.
+
+Two properties every **consumer** of the `status` event must respect:
+
+- **It fires on every PTY chunk, not on change.** Consumers detect transitions themselves
+  (see `transitionKind` in `pushService.ts`).
+- **Heuristic status flaps as normal operation.** An idle TUI repaints itself periodically;
+  each repaint resets the detector's idle clock → `running`, then ≥4s of quiet with a
+  prompt-glyph tail → `needs`, and around it goes every few seconds. So anything *reacting*
+  to a transition (push notifications, GC `autoStopOnDone`, write-backs) must dedupe **per
+  episode**, not per time-window — a window shorter than the flap period re-fires forever
+  (that was the repeated-notification bug). The episode boundary is the `input` session
+  event, emitted only from `sessionManager.write()`, which is reachable only via the
+  `writeSession` RPC — i.e. a human actually typed into the terminal. `pushService.ts` is
+  the reference implementation: a per-session set of already-notified kinds, cleared on
+  `input`/`exit`/`reaped`.
+
+The **agent-side contract** spans three places that must change together: the system prompt
+(`promptComposer.ts` §"Signaling your state") tells the agent when to call `report_status`;
+the tool description and per-state result text in `appMcp.ts` reinforce the next expected
+transition (agents read tool results — the resume-from-`needs`→`running` call is the one
+they drop most); `statusDetector.ts`/`statusSentinel.ts` consume it. Tests assert on prompt
+and result substrings (`promptComposer.test.ts`, `appMcp.test.ts`), so wording changes
+ripple there.
 
 ## Renderer
 

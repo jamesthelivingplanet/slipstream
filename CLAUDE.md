@@ -10,7 +10,9 @@ multi-user identity seam → [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md).
 Use **pnpm**. Run `pnpm check` (svelte-check), `pnpm test`, and `pnpm lint` (eslint +
 `prettier --check`) before committing — `pnpm lint` gates the MR, so don't skip it; use
 `pnpm lint:fix` to auto-fix formatting. `pnpm deploy` builds, then restarts the systemd
-`slipstream.service` and hits a healthz check.
+`slipstream.service` and hits a healthz check. Master takes frequent MR merges: `git pull
+--rebase origin master` right before pushing, and expect the conflict (if any) in
+`contract.ts` — every feature extends it, so additive changes collide there.
 
 If a change touches `scripts/setup.sh`, `scripts/deploy.sh`, `package.json` (scripts/engines),
 or how the app is bootstrapped/deployed, check whether `.claude/skills/setup/SKILL.md` still
@@ -75,3 +77,15 @@ doc only when the symptom matches what you're seeing.
 - **Secrets at rest**: config-table secrets are `safeStorage`-encrypted on desktop but
   **plaintext** in the daemon/headless server (`ELECTRON_RUN_AS_NODE`, no keychain) behind the
   0700 data dir. Detail: [docs/SECURITY.md](docs/SECURITY.md) §6.
+- **Session status flaps by design — never time-window dedupe a status consumer.** The
+  `status` event fires on every PTY chunk (not on change), and on an idle TUI the heuristic
+  status ping-pongs `needs`↔`running` every few seconds (repaints reset the idle clock).
+  Symptom: whatever reacts to a transition (notifications, GC, write-backs) fires over and
+  over. React **once per episode**, re-armed by the `input` event (real user keystrokes) —
+  `pushService.ts` is the reference. Pipeline + producer rules:
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §Session status pipeline.
+- **The agent status contract lives in three files** that must change together:
+  `promptComposer.ts` (system prompt), `appMcp.ts` (`report_status` description + result
+  text), `statusDetector.ts`/`statusSentinel.ts` (consumption). Tests assert on the prompt
+  and result wording, so string tweaks ripple into `promptComposer.test.ts`/`appMcp.test.ts`.
+  Detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §Session status pipeline.
