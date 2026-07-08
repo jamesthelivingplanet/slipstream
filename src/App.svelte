@@ -14,11 +14,13 @@
     contentLoading,
     contentResolvedAt,
     contentRefreshNonce,
+    historyOpen,
   } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
   import AgentConfig from './lib/components/AgentConfig.svelte'
   import MissionControl from './lib/components/MissionControl.svelte'
+  import HistoryView from './lib/components/HistoryView.svelte'
   import TerminalView from './lib/components/TerminalView.svelte'
   import NewAgentDialog from './lib/components/NewAgentDialog.svelte'
   import SettingsModal from './lib/components/SettingsModal.svelte'
@@ -165,6 +167,16 @@
     </button>
     <button
       class="btn btn-outline btn-icon btn-sm"
+      title="History"
+      on:click={() => {
+        select(null)
+        historyOpen.set(true)
+      }}
+    >
+      {@html icons.history}
+    </button>
+    <button
+      class="btn btn-outline btn-icon btn-sm"
       title="Settings"
       on:click={() => settingsOpen.set(true)}
     >
@@ -190,7 +202,9 @@
     />
 
     <section class="term-pane">
-      {#if !$selected}
+      {#if $historyOpen}
+        <HistoryView />
+      {:else if !$selected}
         <MissionControl />
       {:else if $selected.status === 'idle'}
         <AgentConfig session={$selected} />

@@ -15,6 +15,7 @@ function makeDeps(overrides: Partial<AppMcpDeps> = {}): AppMcpDeps {
     getRemoteUrl: vi.fn().mockResolvedValue('git@github.com:org/repo.git'),
     writeSentinel: vi.fn().mockResolvedValue(undefined),
     writeStatus: vi.fn().mockResolvedValue(undefined),
+    writeOutcome: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -33,13 +34,14 @@ describe('handleRpc', () => {
     expect(res).toBeNull()
   })
 
-  it('tools/list returns 2 tools', async () => {
+  it('tools/list returns 3 tools', async () => {
     const msg = { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }
     const res = (await handleRpc(msg, makeDeps())) as JsonRpcResponse<{ tools: McpTool[] }>
-    expect(res.result?.tools).toHaveLength(2)
+    expect(res.result?.tools).toHaveLength(3)
     const names = (res.result?.tools ?? []).map((t) => t.name)
     expect(names).toContain('open_merge_request')
     expect(names).toContain('report_status')
+    expect(names).toContain('report_outcome')
   })
 
   it('unknown method returns error -32601', async () => {
@@ -150,5 +152,78 @@ describe('handleRpc', () => {
     const res = (await handleRpc(msg, makeDeps())) as JsonRpcResponse<{ tools: McpTool[] }>
     const tool = (res.result?.tools ?? []).find((t) => t.name === 'report_status')
     expect(tool?.description.toLowerCase()).toContain('resume')
+  })
+
+  it('tools/call report_outcome calls writeOutcome and returns success text containing the result', async () => {
+    const deps = makeDeps()
+    const msg = {
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'tools/call',
+      params: {
+        name: 'report_outcome',
+        arguments: { result: 'success', summary: 'Fixed the login bug', details: 'notes' },
+      },
+    }
+    const res = (await handleRpc(msg, deps)) as JsonRpcResponse<McpToolResult>
+    expect(deps.writeOutcome).toHaveBeenCalledWith('success', 'Fixed the login bug', 'notes')
+    expect(res.result?.isError).toBeFalsy()
+    expect(res.result?.content[0].text).toContain('success')
+  })
+
+  it('tools/call report_outcome works without details (optional)', async () => {
+    const deps = makeDeps()
+    const msg = {
+      jsonrpc: '2.0',
+      id: 11,
+      method: 'tools/call',
+      params: {
+        name: 'report_outcome',
+        arguments: { result: 'partial', summary: 'Some progress' },
+      },
+    }
+    const res = (await handleRpc(msg, deps)) as JsonRpcResponse<McpToolResult>
+    expect(deps.writeOutcome).toHaveBeenCalledWith('partial', 'Some progress', undefined)
+    expect(res.result?.isError).toBeFalsy()
+  })
+
+  it('tools/call report_outcome with invalid result returns a tool error and does not call writeOutcome', async () => {
+    const deps = makeDeps()
+    const msg = {
+      jsonrpc: '2.0',
+      id: 12,
+      method: 'tools/call',
+      params: { name: 'report_outcome', arguments: { result: 'bogus', summary: 'x' } },
+    }
+    const res = (await handleRpc(msg, deps)) as JsonRpcResponse<McpToolResult>
+    expect(deps.writeOutcome).not.toHaveBeenCalled()
+    expect(res.result?.isError).toBe(true)
+  })
+
+  it('tools/call report_outcome with missing summary returns a tool error and does not call writeOutcome', async () => {
+    const deps = makeDeps()
+    const msg = {
+      jsonrpc: '2.0',
+      id: 13,
+      method: 'tools/call',
+      params: { name: 'report_outcome', arguments: { result: 'success' } },
+    }
+    const res = (await handleRpc(msg, deps)) as JsonRpcResponse<McpToolResult>
+    expect(deps.writeOutcome).not.toHaveBeenCalled()
+    expect(res.result?.isError).toBe(true)
+  })
+
+  it('tools/call report_outcome truncates an over-long summary', async () => {
+    const deps = makeDeps()
+    const longSummary = 'x'.repeat(5000)
+    const msg = {
+      jsonrpc: '2.0',
+      id: 14,
+      method: 'tools/call',
+      params: { name: 'report_outcome', arguments: { result: 'success', summary: longSummary } },
+    }
+    await handleRpc(msg, deps)
+    const call = (deps.writeOutcome as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(call[1]).toHaveLength(4000)
   })
 })

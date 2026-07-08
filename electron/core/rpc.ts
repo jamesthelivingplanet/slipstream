@@ -7,6 +7,8 @@ import type {
   BackendKind,
   RepoDTO,
   SessionDTO,
+  SessionHistoryEntry,
+  SessionOutcomeDTO,
   Identity,
   EditorConfig,
   RepoSettings,
@@ -32,6 +34,7 @@ import { checkAppMcp, lastMcpActivity } from '../services/mcpHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
 import { findOnPath, binForKind } from '../services/cliProbe.js'
 import { readTranscriptUsage, buildUsageSummary } from '../services/usage.js'
+import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
 
 function parseCsv(raw: string | undefined): string[] {
   return (raw ?? '')
@@ -84,6 +87,37 @@ export function createRpc(
     const repo = await deps.repos.get(repoId)
     if (!repo || !ownedByCaller(repo)) throw new Error(`Unknown repo: ${repoId}`)
     return repo
+  }
+
+  // Resolve a session's structured outcome: prefer the durable store, but
+  // fall back to reading the outcome.json sentinel straight off disk. A
+  // daemon restart can race the sessionManager's fs.watch — the watcher only
+  // starts once a session is live again — so a session that finished and
+  // wrote its sentinel while the daemon was down (or between restart and
+  // resume) would otherwise appear to have no outcome even though the agent
+  // reported one. On a successful disk read, backfill the store so future
+  // reads don't need the fallback.
+  async function resolveOutcome(sessionId: string): Promise<SessionOutcomeDTO | null> {
+    const stored = deps.outcomeStore.get(sessionId)
+    if (stored) return stored
+    if (!deps.appMcp) return null
+    try {
+      const filePath = path.join(deps.appMcp.dataDir, 'sessions', sessionId, OUTCOME_SENTINEL_FILE)
+      const content = await fs.promises.readFile(filePath, 'utf8')
+      const parsed = parseOutcomeSentinel(content)
+      if (!parsed) return null
+      const outcome: SessionOutcomeDTO = {
+        sessionId,
+        result: parsed.result,
+        summary: parsed.summary,
+        details: parsed.details,
+        reportedAt: parsed.ts,
+      }
+      deps.outcomeStore.upsert(outcome)
+      return outcome
+    } catch {
+      return null
+    }
   }
 
   // Tracks which repo+branch each session owns so cleanup can remove the worktree.
@@ -811,6 +845,27 @@ export function createRpc(
         if (!existing || !ownedByCaller(existing)) throw new Error(`Template not found: ${id}`)
         deps.promptTemplates.delete(id)
         return undefined
+      }
+
+      case IPC.getSessionOutcome: {
+        const id = args[0] as string
+        // Owner-scoped: a missing OR other-owner session surfaces the same
+        // "not found" so an outcome can't leak across owners.
+        if (!ownedSession(id)) throw new Error(`Session not found: ${id}`)
+        return resolveOutcome(id)
+      }
+
+      case IPC.listSessionHistory: {
+        const sessions = deps.sessionStore.list().filter(ownedByCaller)
+        sessions.sort((a, b) => b.createdAt - a.createdAt)
+        const entries: SessionHistoryEntry[] = []
+        for (const session of sessions) {
+          const outcome = await resolveOutcome(session.id)
+          const rawUsage = readTranscriptUsage(session.id)
+          const usage = !rawUsage.exists || rawUsage.turns === 0 ? null : rawUsage
+          entries.push({ session, outcome, usage })
+        }
+        return entries
       }
 
       case IPC.pickRepo:
