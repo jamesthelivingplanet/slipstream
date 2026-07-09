@@ -22,6 +22,8 @@ import { createPushService, createDbPushStore } from '../services/pushService.js
 import { createRunLogger } from '../services/runLogger.js'
 import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import { createSessionReaper } from '../services/sessionReaper.js'
+import { createSessionScheduler } from '../services/sessionScheduler.js'
+import { launchSession } from '../services/sessionLauncher.js'
 import { createSessionPersistence } from '../services/sessionPersistence.js'
 import { createPrStatusService } from '../services/prStatus.js'
 import type { IpcDeps } from '../ipc.js'
@@ -122,6 +124,20 @@ export function createServices(root: string): IpcDeps {
     logger: runLogger,
   })
   reaper.start()
+
+  // FLO-95: caps concurrently live agents, queueing excess startSession calls
+  // and draining them as slots free up. The reaper (above) is the other end
+  // of this lifecycle — reaping a session is what frees a slot for the next
+  // queued start.
+  const scheduler = createSessionScheduler({
+    sessions,
+    store: sessionStore,
+    config: configStore,
+    launch: (req) => launchSession(deps, req),
+    logger: runLogger,
+  })
+  deps.scheduler = scheduler
+  scheduler.start()
 
   return deps
 }

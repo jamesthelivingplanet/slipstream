@@ -12,12 +12,15 @@
     repos,
     select,
     createAgentFromTicket,
+    startAgentsFromTickets,
     dialogOpen,
     registerRepo,
+    repoById,
   } from '../stores'
   import { getSessionBuffer, hasBackend, getUsageSummary, getPrStatus } from '../ipc'
   import { extractAsk, formatWait } from '../missionControl'
   import { formatCost, formatTokens, dayKeyFromMs } from '../../../electron/shared/usageFormat.js'
+  import { pushToast } from '../toast'
   import type { Session, Ticket } from '../types'
   import type {
     UsageSummary,
@@ -152,7 +155,9 @@
   }
 
   $: needsSessions = $sessions.filter((s) => s.status === 'needs' || s.status === 'errored')
-  $: runningSessions = $sessions.filter((s) => s.status === 'running' || s.status === 'detached')
+  $: runningSessions = $sessions.filter(
+    (s) => s.status === 'running' || s.status === 'detached' || s.status === 'queued',
+  )
   $: doneSessions = $sessions.filter((s) => s.status === 'done')
   $: runningCount = $sessions.filter((s) => s.status === 'running').length
 
@@ -193,6 +198,24 @@
   function launch(t: Ticket) {
     const prompt = `Begin implementing ${t.tid}.`
     createAgentFromTicket(t, prompt, 'claude-code')
+  }
+
+  // FLO-95: batch-launch every ticket whose repo hint resolves to a registered
+  // repo. Starts beyond the scheduler's concurrency cap queue and drain on
+  // their own, so this is safe to fire for an arbitrary number of tickets.
+  $: launchableTickets = $tickets.filter((t) => repoById(t.repo))
+  let launchingAll = false
+  async function launchAll() {
+    if (launchingAll) return
+    launchingAll = true
+    try {
+      const n = await startAgentsFromTickets(launchableTickets)
+      if (n > 0) {
+        pushToast('success', `Launched ${n} agents — excess starts queue`)
+      }
+    } finally {
+      launchingAll = false
+    }
   }
 </script>
 
@@ -272,11 +295,11 @@
           <div class="rows">
             {#each runningSessions as s (s.id ?? s.tid)}
               <button type="button" class="row" on:click={() => choose(s.id)}>
-                <span class="dot"></span>
+                <span class="dot" class:queued={s.status === 'queued'}></span>
                 <span class="r-id mono">{s.tid}</span>
                 <span class="r-title">{s.title}</span>
                 {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
-                {#if s.status === 'detached'}
+                {#if s.status === 'detached' || s.status === 'queued'}
                   <span class="r-activity muted">{s.activity.text}</span>
                 {:else}
                   <span class="r-diff mono">
@@ -308,7 +331,19 @@
 
       {#if $tickets.length > 0}
         <section>
-          <div class="eyebrow">Ready to launch <span class="cnt">{$tickets.length}</span></div>
+          <div class="eyebrow">
+            Ready to launch <span class="cnt">{$tickets.length}</span>
+            {#if launchableTickets.length >= 2}
+              <button
+                type="button"
+                class="btn btn-outline btn-sm launch-all"
+                disabled={launchingAll}
+                on:click={launchAll}
+              >
+                {launchingAll ? 'Launching…' : 'Launch all →'}
+              </button>
+            {/if}
+          </div>
           <div class="tiks">
             {#each $tickets as t (t.tid)}
               <button type="button" class="tik" on:click={() => launch(t)}>
@@ -455,6 +490,11 @@
     height: 1px;
     background: hsl(var(--border));
   }
+  .eyebrow .launch-all {
+    text-transform: none;
+    letter-spacing: normal;
+    font-weight: 550;
+  }
 
   /* needs-you cards */
   .cards {
@@ -588,6 +628,10 @@
     flex: 0 0 auto;
     background: hsl(var(--st-run));
     animation: mc-breathe 1.6s ease-in-out infinite;
+  }
+  .row .dot.queued {
+    background: hsl(var(--muted-foreground));
+    animation: none;
   }
   .r-id {
     font-size: 11px;

@@ -231,7 +231,24 @@ A late-reconnecting client recovers missed output by calling `IPC.getSessionBuff
 returns the session's `OutputBuffer` snapshot (`electron/services/outputBuffer.ts`) — a
 bounded ring-buffer of the last 256 KB of PTY output.
 
-### Structured session outcomes (FLO-97)
+### Session-start scheduling (FLO-95)
+
+The reaper's counterpart on the *start* side of the lifecycle is the **session scheduler**
+(`electron/services/sessionScheduler.ts`): `IPC.startSession` no longer spawns
+unconditionally. The launch procedure itself (worktree create → port claim → per-session MCP
+config → PTY spawn → persistence → ticket transition) lives in
+`electron/services/sessionLauncher.ts`; `rpc.ts` composes a `LaunchRequest` (system prompt
+built once, at submit time) and hands it to the daemon-singleton scheduler
+(`deps.scheduler`, wired in `core/services.ts`). Under the configurable
+`SchedulerPolicy.maxConcurrent` cap (0 = unlimited, the default; Settings → Behavior →
+"Concurrency", config key `scheduler.policy`) the launch runs immediately; over the cap the
+session is persisted as `status: 'queued'` and enqueued FIFO. Queued rows survive daemon
+restarts (restored oldest-first on boot) and are drained as slots free up — the only
+slot-freeing triggers are the terminal `exit` event and a `reaped` status (so the GC policy
+literally feeds the queue; flapping heuristic statuses are deliberately ignored, see the
+pipeline rules above). `resumeSession`/`attachRemoteControl` return a queued row without
+spawning — viewers can't jump the queue — and kill/cleanup of a queued session cancels its
+entry instead of touching a PTY.
 
 The 256 KB output ring-buffer is scrollback, not a record — it truncates, and it's not
 queryable. FLO-97 gives agents a way to leave a durable, structured final summary: the app

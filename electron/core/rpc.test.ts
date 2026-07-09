@@ -28,6 +28,7 @@ import type { IEditorLauncher } from '../services/editorLauncher.js'
 import type { IPushService } from '../services/pushService.js'
 import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import type { IWriteCoordinator } from '../services/writeCoordinator.js'
+import type { ISessionScheduler } from '../services/sessionScheduler.js'
 
 // ── Fake deps ─────────────────────────────────────────────────────────────────
 
@@ -866,9 +867,14 @@ describe('createRpc', () => {
 
   it('startSession uses the resolved (healed) repo path for worktree creation', async () => {
     const healed = makeRepo({ path: '/new-location/api' })
+    // resolvePath is idempotent/self-healing and is now called twice on the
+    // direct-launch path (once in rpc.ts for the owner check, once inside
+    // sessionLauncher.ts to get the RepoDTO for worktree creation) — both
+    // calls resolve the same healed path in production, so mock it for every
+    // call rather than just the first.
     ;(
       deps.repos as unknown as { resolvePath: ReturnType<typeof vi.fn> }
-    ).resolvePath.mockResolvedValueOnce(healed)
+    ).resolvePath.mockResolvedValue(healed)
     await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ])
@@ -1481,6 +1487,119 @@ describe('createRpc', () => {
       rpcA.dispose()
 
       expect(coord.canWrite('s1', 'client-b')).toBe(true)
+    })
+  })
+
+  describe('scheduler (FLO-95)', () => {
+    function makeFakeScheduler(): ISessionScheduler & {
+      submit: ReturnType<typeof vi.fn>
+      cancel: ReturnType<typeof vi.fn>
+      drain: ReturnType<typeof vi.fn>
+    } {
+      return {
+        submit: vi.fn().mockImplementation(async () => makeSession()),
+        cancel: vi.fn().mockReturnValue(false),
+        drain: vi.fn().mockResolvedValue(undefined),
+        start: vi.fn(),
+        stop: vi.fn(),
+        queuedIds: vi.fn().mockReturnValue([]),
+      }
+    }
+
+    it('startSession routes through scheduler.submit when a scheduler is present', async () => {
+      const scheduler = makeFakeScheduler()
+      scheduler.submit.mockResolvedValueOnce(makeSession({ id: 's1', status: 'queued' }))
+      deps.scheduler = scheduler
+
+      const result = (await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+      ])) as SessionDTO
+
+      expect(scheduler.submit).toHaveBeenCalledWith(
+        expect.objectContaining({ tid: 'T-1', title: 'Fix bug', repoId: 'r1', ownerId: 'local' }),
+      )
+      expect(deps.sessions.start).not.toHaveBeenCalled()
+      expect(result.status).toBe('queued')
+    })
+
+    it('startSession does not call scheduler.submit when no scheduler is configured (direct launch)', async () => {
+      await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+      ])
+      expect(deps.sessions.start).toHaveBeenCalled()
+    })
+
+    it('killSession cancels a queued session via the scheduler and marks it interrupted', async () => {
+      const scheduler = makeFakeScheduler()
+      scheduler.cancel.mockReturnValue(true)
+      deps.scheduler = scheduler
+      deps.sessionStore.upsert(makeSession({ id: 's1', status: 'queued' }))
+
+      await rpc.handle(IPC.killSession, ['s1'])
+
+      expect(scheduler.cancel).toHaveBeenCalledWith('s1')
+      expect(deps.sessions.kill).not.toHaveBeenCalled()
+      expect(deps.sessionStore.get('s1')?.status).toBe('interrupted')
+    })
+
+    it('killSession falls through to sessions.kill when the scheduler does not have it queued', async () => {
+      const scheduler = makeFakeScheduler()
+      scheduler.cancel.mockReturnValue(false)
+      deps.scheduler = scheduler
+      deps.sessionStore.upsert(makeSession({ id: 's1', status: 'running' }))
+
+      await rpc.handle(IPC.killSession, ['s1'])
+
+      expect(scheduler.cancel).toHaveBeenCalledWith('s1')
+      expect(deps.sessions.kill).toHaveBeenCalledWith('s1')
+    })
+
+    it('resumeSession on a queued row returns it as-is without calling sessions.resume', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', status: 'queued' }))
+      ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
+
+      const result = (await rpc.handle(IPC.resumeSession, ['s1'])) as SessionDTO
+
+      expect(result.status).toBe('queued')
+      expect(deps.sessions.resume).not.toHaveBeenCalled()
+      expect(deps.worktrees.pathFor).not.toHaveBeenCalled()
+    })
+
+    it('attachRemoteControl on a queued row returns it as-is without calling sessions.attachRemoteControl', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', status: 'queued' }))
+
+      const result = (await rpc.handle(IPC.attachRemoteControl, ['s1'])) as SessionDTO
+
+      expect(result.status).toBe('queued')
+      expect(deps.sessions.attachRemoteControl).not.toHaveBeenCalled()
+    })
+
+    it('setSchedulerPolicy persists the normalized policy via config.set', async () => {
+      await rpc.handle(IPC.setSchedulerPolicy, [{ maxConcurrent: 3 }])
+      expect(deps.config.set).toHaveBeenCalledWith(
+        'scheduler.policy',
+        JSON.stringify({ maxConcurrent: 3 }),
+      )
+    })
+
+    it('getSchedulerPolicy reads the policy back through config.get', async () => {
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+        JSON.stringify({ maxConcurrent: 3 }),
+      )
+      const result = await rpc.handle(IPC.getSchedulerPolicy, [])
+      expect(result).toEqual({ maxConcurrent: 3 })
+    })
+
+    it('setSchedulerPolicy triggers scheduler.drain (raising the cap frees slots)', async () => {
+      const scheduler = makeFakeScheduler()
+      deps.scheduler = scheduler
+      await rpc.handle(IPC.setSchedulerPolicy, [{ maxConcurrent: 5 }])
+      expect(scheduler.drain).toHaveBeenCalledOnce()
+    })
+
+    it('getSchedulerPolicy returns the default when unset', async () => {
+      const result = await rpc.handle(IPC.getSchedulerPolicy, [])
+      expect(result).toEqual({ maxConcurrent: 0 })
     })
   })
 })

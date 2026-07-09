@@ -1,5 +1,13 @@
 export type Status =
-  'idle' | 'running' | 'needs' | 'done' | 'errored' | 'detached' | 'interrupted' | 'reaped'
+  | 'idle'
+  | 'running'
+  | 'needs'
+  | 'done'
+  | 'errored'
+  | 'detached'
+  | 'interrupted'
+  | 'reaped'
+  | 'queued'
 export type Source = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi'
 export type Filter = 'all' | 'needs' | 'running' | 'done'
@@ -55,6 +63,7 @@ export const STATUS_LABEL: Record<Status, string> = {
   idle: 'Not started',
   needs: 'Needs you',
   running: 'Running',
+  queued: 'Queued',
   done: 'Done',
   errored: 'Errored',
   detached: 'Detached',
