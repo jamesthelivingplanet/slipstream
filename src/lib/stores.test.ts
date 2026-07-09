@@ -24,12 +24,23 @@ vi.mock('./ipc', () => ({
   getMcpStatus: vi.fn(),
 }))
 
-import { cleanupSession, killSession, runApp, stopApp, listTickets, sessionMerged } from './ipc'
+import {
+  cleanupSession,
+  killSession,
+  runApp,
+  stopApp,
+  listTickets,
+  sessionMerged,
+  startSession,
+} from './ipc'
 import {
   sessions,
   tickets,
+  repos,
+  dialogOpen,
   createBlankAgent,
   createAgentFromTicket,
+  startAgentsFromTickets,
   discardDraft,
   setSessionPrUrl,
   cleanupAgent,
@@ -133,6 +144,19 @@ describe('createAgentFromTicket', () => {
       status: 'idle',
     })
     expect(get(tickets)).toHaveLength(0)
+  })
+
+  it('FLO-95: with { select: false } does not touch selection or close the dialog', () => {
+    const t: Ticket = { tid: 'FLO-95', src: 'linear', title: 'Batch', repo: '', done: false }
+    tickets.set([t])
+    selectedId.set('some-other-id')
+    dialogOpen.set(true)
+
+    const id = createAgentFromTicket(t, 'go', 'claude-code', { select: false })
+
+    expect(get(sessions).find((s) => s.id === id)).toBeDefined()
+    expect(get(selectedId)).toBe('some-other-id')
+    expect(get(dialogOpen)).toBe(true)
   })
 })
 
@@ -418,6 +442,93 @@ describe('dtoToSession (FLO-83 src round-trip)', () => {
       createdAt: 0,
     }
     expect(dtoToSession(dto).src).toBe('jira')
+  })
+
+  it('FLO-95: keeps a queued DTO as queued with the queued activity text', () => {
+    const dto: SessionDTO = {
+      id: 's3',
+      tid: 'T-3',
+      title: 't',
+      prompt: 'p',
+      repoId: 'r',
+      branch: 'b',
+      status: 'queued',
+      createdAt: 0,
+      src: 'linear',
+    }
+    const s = dtoToSession(dto)
+    expect(s.status).toBe('queued')
+    expect(s.activity.text).toBe('Queued — will start when an agent slot frees.')
+  })
+})
+
+describe('startAgentsFromTickets (FLO-95 batch launch)', () => {
+  beforeEach(() => {
+    sessions.set([])
+    tickets.set([])
+    repos.set([{ id: 'repo1', org: 'acme', name: 'widgets', base: 'main' }])
+    selectedId.set(null)
+    dialogOpen.set(false)
+    vi.clearAllMocks()
+  })
+
+  it('only starts tickets whose repo hint resolves to a registered repo', async () => {
+    const withRepo: Ticket = {
+      tid: 'FLO-1',
+      src: 'linear',
+      title: 'Has repo',
+      repo: 'repo1',
+      done: false,
+    }
+    const withoutRepo: Ticket = {
+      tid: 'FLO-2',
+      src: 'linear',
+      title: 'No repo',
+      repo: 'unknown-repo',
+      done: false,
+    }
+    vi.mocked(startSession).mockResolvedValue({
+      id: 'started-1',
+      tid: 'FLO-1',
+      title: 'Has repo',
+      prompt: 'Begin implementing FLO-1.',
+      repoId: 'repo1',
+      branch: 'FLO-1-branch',
+      status: 'running',
+      createdAt: 0,
+      src: 'linear',
+    })
+
+    const n = await startAgentsFromTickets([withRepo, withoutRepo])
+
+    expect(n).toBe(1)
+    expect(startSession).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(startSession).mock.calls[0][0]).toMatchObject({
+      tid: 'FLO-1',
+      repoId: 'repo1',
+    })
+  })
+
+  it('does not steal selection or close the dialog while batch-launching', async () => {
+    const t: Ticket = { tid: 'FLO-3', src: 'linear', title: 'Batch', repo: 'repo1', done: false }
+    selectedId.set('preserved')
+    dialogOpen.set(true)
+    vi.mocked(startSession).mockResolvedValue({
+      id: 'started-3',
+      tid: 'FLO-3',
+      title: 'Batch',
+      prompt: 'Begin implementing FLO-3.',
+      repoId: 'repo1',
+      branch: 'FLO-3-branch',
+      status: 'running',
+      createdAt: 0,
+      src: 'linear',
+    })
+
+    await startAgentsFromTickets([t])
+
+    expect(get(selectedId)).toBe('preserved')
+    expect(get(dialogOpen)).toBe(true)
   })
 })
 

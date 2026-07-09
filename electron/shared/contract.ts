@@ -13,7 +13,7 @@
  */
 
 export type SessionStatus =
-  'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted' | 'reaped'
+  'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted' | 'reaped' | 'queued'
 export type TicketSource = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi'
 export type GitHost = 'github' | 'gitlab'
@@ -45,6 +45,13 @@ export const DEFAULT_GC_POLICY: GcPolicy = {
   idleMs: 0,
   maxAgeMs: 0,
 }
+/** Session-start scheduler policy (FLO-95). Caps concurrently live agents;
+ *  excess startSession calls queue and drain as slots free up (the GC policy
+ *  is the other end of this lifecycle: reaping frees a slot). */
+export interface SchedulerPolicy {
+  maxConcurrent: number // 0 = unlimited: every start fires immediately (pre-FLO-95 behavior)
+}
+export const DEFAULT_SCHEDULER_POLICY: SchedulerPolicy = { maxConcurrent: 0 }
 /** Result of an out-of-band self-test handshake against the app's own MCP
  *  server (electron/mcp/appMcp.ts). Never spawned inside an agent session —
  *  see McpHealthParams / checkAppMcp — so it adds no agent context. */
@@ -592,7 +599,10 @@ export interface SlipstreamApi {
   /** Launch the configured editor on the session's worktree. mobile=true uses the mobile command when set. Rejects with a descriptive Error on failure. */
   openInEditor(input: { repoId: string; branch: string; mobile?: boolean }): Promise<void>
 
-  /** Creates the worktree, claims a port, spawns claude. Returns the session. */
+  /** Creates the worktree, claims a port, spawns claude. Returns the session.
+   *  When the scheduler's concurrency cap (SchedulerPolicy.maxConcurrent) is
+   *  reached, may instead return a 'queued' session that launches later as
+   *  slots free up (FLO-95). */
   startSession(input: {
     tid: string
     title: string
@@ -656,6 +666,9 @@ export interface SlipstreamApi {
 
   getGcPolicy(): Promise<GcPolicy>
   setGcPolicy(policy: GcPolicy): Promise<void>
+
+  getSchedulerPolicy(): Promise<SchedulerPolicy>
+  setSchedulerPolicy(policy: SchedulerPolicy): Promise<void>
 
   /** Out-of-band self-test of the app's own MCP server: spawns it directly
    *  and runs the initialize/tools-list handshake outside of any agent
@@ -753,6 +766,8 @@ export const IPC = {
   sessionWriteLock: 'session:writeLock', // main → renderer push
   getGcPolicy: 'gc:getPolicy',
   setGcPolicy: 'gc:setPolicy',
+  getSchedulerPolicy: 'scheduler:getPolicy',
+  setSchedulerPolicy: 'scheduler:setPolicy',
   getMcpStatus: 'mcp:status',
   getDiagnostics: 'diag:get',
   checkAgentCli: 'agent:checkCli',

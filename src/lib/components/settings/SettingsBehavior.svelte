@@ -1,9 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { hasBackend, getEditorConfig, setEditorConfig, getGcPolicy, setGcPolicy } from '../../ipc'
+  import {
+    hasBackend,
+    getEditorConfig,
+    setEditorConfig,
+    getGcPolicy,
+    setGcPolicy,
+    getSchedulerPolicy,
+    setSchedulerPolicy,
+  } from '../../ipc'
   import { pushToast } from '../../toast'
-  import type { GcPolicy } from '../../../../electron/shared/contract.js'
-  import { DEFAULT_GC_POLICY } from '../../../../electron/shared/contract.js'
+  import type { GcPolicy, SchedulerPolicy } from '../../../../electron/shared/contract.js'
+  import {
+    DEFAULT_GC_POLICY,
+    DEFAULT_SCHEDULER_POLICY,
+  } from '../../../../electron/shared/contract.js'
 
   let editorCommand = ''
   let mobileEditorCommand = ''
@@ -70,9 +81,39 @@
     }
   }
 
+  let schedPolicy: SchedulerPolicy = { ...DEFAULT_SCHEDULER_POLICY }
+  let schedPending = false
+
+  async function loadSchedulerPolicy() {
+    if (!hasBackend) return
+    try {
+      schedPolicy = await getSchedulerPolicy()
+    } catch {
+      /* ignore */
+    }
+  }
+  async function saveSchedulerPolicy() {
+    if (!hasBackend) return
+    schedPending = true
+    try {
+      const next: SchedulerPolicy = {
+        ...schedPolicy,
+        maxConcurrent: Math.max(0, Math.round(schedPolicy.maxConcurrent)),
+      }
+      await setSchedulerPolicy(next)
+      schedPolicy = next
+      pushToast('success', 'Concurrency settings saved')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save settings')
+    } finally {
+      schedPending = false
+    }
+  }
+
   onMount(() => {
     loadEditorConfig()
     loadGcPolicy()
+    loadSchedulerPolicy()
   })
 </script>
 
@@ -173,6 +214,34 @@
     style="margin-top:8px"
     on:click={saveGcPolicy}
     disabled={gcPending || !hasBackend}>Save</button
+  >
+  {#if !hasBackend}
+    <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+  {/if}
+</div>
+
+<div>
+  <span class="lbl-f">Concurrency</span>
+  <p class="integration-hint">
+    Cap how many agent sessions run at once. Starts beyond the cap are queued and launch
+    automatically as running agents finish or are reaped.
+  </p>
+  <div class="repo-settings-field">
+    <label class="lbl-f" for="sched-max">Max concurrent agents (0 = unlimited)</label>
+    <input
+      id="sched-max"
+      type="number"
+      min="0"
+      class="path-input"
+      bind:value={schedPolicy.maxConcurrent}
+      disabled={schedPending || !hasBackend}
+    />
+  </div>
+  <button
+    class="btn btn-outline btn-sm"
+    style="margin-top:8px"
+    on:click={saveSchedulerPolicy}
+    disabled={schedPending || !hasBackend}>Save</button
   >
   {#if !hasBackend}
     <p class="integration-hint muted">Backend not available in browser-only mode.</p>

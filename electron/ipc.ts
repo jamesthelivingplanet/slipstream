@@ -57,4 +57,6 @@ export interface IpcDeps {
   /** Optional: post-handoff PR/MR status (FLO-96). Optional (like `tailscale`)
    *  so tests can omit it; when absent, sessionPrStatus returns null. */
   prStatus?: import('./services/prStatus.js').IPrStatusService
+  /** Session-start scheduler (FLO-95). Optional so tests without one fall back to immediate launch. */
+  scheduler?: import('./services/sessionScheduler.js').ISessionScheduler
 }

@@ -25,6 +25,7 @@ import type {
   GitHost,
   WriteLockState,
   GcPolicy,
+  SchedulerPolicy,
   McpStatusDTO,
   DiagnosticsDTO,
   TicketSource,
@@ -514,6 +515,14 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     setGcPolicy(policy: GcPolicy): Promise<void> {
       return request(IPC.setGcPolicy, [policy]) as Promise<void>
+    },
+
+    getSchedulerPolicy(): Promise<SchedulerPolicy> {
+      return request(IPC.getSchedulerPolicy, []) as Promise<SchedulerPolicy>
+    },
+
+    setSchedulerPolicy(policy: SchedulerPolicy): Promise<void> {
+      return request(IPC.setSchedulerPolicy, [policy]) as Promise<void>
     },
 
     getMcpStatus(): Promise<McpStatusDTO> {
