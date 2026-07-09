@@ -16,13 +16,13 @@ import type {
   PushSubscriptionDTO,
   WriteLockState,
   GcPolicy,
+  SchedulerPolicy,
   TicketSource,
   TicketSourceSettings,
   PromptTemplateDTO,
 } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
-import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
 import { LOCAL_IDENTITY } from './auth.js'
 import {
   buildAppMcpConfig,
@@ -30,6 +30,9 @@ import {
   writeAppMcpConfig,
 } from '../services/mcpConfig.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
+import { launchSession } from '../services/sessionLauncher.js'
+import type { LaunchRequest } from '../services/sessionLauncher.js'
+import { readSchedulerPolicy, writeSchedulerPolicy } from '../services/sessionScheduler.js'
 import { checkAppMcp, lastMcpActivity } from '../services/mcpHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
 import { findOnPath, binForKind } from '../services/cliProbe.js'
@@ -209,101 +212,32 @@ export function createRpc(
         if (!ownedByCaller(repo)) throw new Error(`Unknown repo: ${repoId}`)
 
         const branch = branchFor(tid, title)
-        await deps.worktrees.create(repo, branch)
-        const cwd = deps.worktrees.pathFor(repo, branch)
-
-        let port: number | undefined
-        try {
-          port = await deps.ports.claim(cwd, 'web')
-        } catch {
-          port = undefined
-        }
-
         const systemPrompt = buildSystemPrompt({ tid, title, description })
 
-        let opencodePort: number | undefined
-        if (agentKind === 'opencode') {
-          try {
-            opencodePort = await deps.ports.claim(cwd, 'opencode')
-          } catch {
-            opencodePort = undefined
-          }
-        }
-
-        const sessionId = input.sessionId ?? randomUUID()
-        let mcpConfigPath: string | undefined
-        const startEnv: Record<string, string> = {}
-        if (port !== undefined) startEnv.PORT = String(port)
-        if (deps.appMcp) {
-          mcpConfigPath = path.join(deps.appMcp.configDir, `${sessionId}.json`)
-          const config = buildAppMcpConfig({
-            appMcpJsPath: deps.appMcp.appMcpJsPath,
-            electronPath: deps.appMcp.electronPath,
-            dataDir: deps.appMcp.dataDir,
-            sessionId,
-            base: repo.base,
-            branch,
-          })
-          await writeAppMcpConfig(mcpConfigPath, config)
-
-          if (agentKind === 'opencode') {
-            startEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
-              buildOpencodeMcpConfig({
-                appMcpJsPath: deps.appMcp.appMcpJsPath,
-                electronPath: deps.appMcp.electronPath,
-                dataDir: deps.appMcp.dataDir,
-                sessionId,
-                base: repo.base,
-                branch,
-              }),
-            )
-          }
-        }
-
-        const session = deps.sessions.start({
+        // FLO-95: the actual worktree/port/PTY launch procedure lives in
+        // sessionLauncher.ts so it can run immediately (below the concurrency
+        // cap) or later from the scheduler's queue drain. The system prompt is
+        // built once here (not in the launcher) and carried on the request so
+        // a queued start launches with exactly what was requested.
+        const req: LaunchRequest = {
+          sessionId: input.sessionId ?? randomUUID(),
           tid,
           title,
           prompt,
-          repo,
+          repoId,
           branch,
-          cwd,
-          env: Object.keys(startEnv).length > 0 ? startEnv : undefined,
           systemPrompt,
           agentKind,
-          opencodePort,
-          sessionId,
-          mcpConfigPath,
           src: input.src,
-        })
+          ownerId: identity.id,
+        }
+
+        const session = deps.scheduler
+          ? await deps.scheduler.submit(req)
+          : await launchSession(deps, req)
 
         sessionMeta.set(session.id, { repo, branch })
-        deps.sessionStore.upsert({
-          ...session,
-          port,
-          agentKind: agentKind ?? 'claude-code',
-          ownerId: identity.id,
-        })
-
-        if (agentKind === 'opencode') {
-          void captureOpencodeSessionId({ cwd }).then((sid) => {
-            if (!sid) return
-            deps.sessions.setOpencodeSid(session.id, sid)
-            const cur = deps.sessionStore.get(session.id)
-            if (cur) deps.sessionStore.upsert({ ...cur, opencodeSid: sid })
-          })
-        }
-
-        // FLO-26: move the linked ticket to the provider's "In Progress" state
-        // when the agent starts. Best-effort — a ticket-API failure must not
-        // break the agent launch. Follow-up: handle stop/complete/error
-        // transitions (out of scope for FLO-26).
-        try {
-          await deps.tickets.startTicket(tid, input.src)
-        } catch {
-          // ignore: ticket provider unavailable or transition not applicable
-        }
-
-        return { ...session, port }
+        return session
       }
 
       case IPC.writeSession: {
@@ -346,6 +280,14 @@ export function createRpc(
       case IPC.killSession: {
         const id = args[0] as string
         if (!ownedSession(id)) return undefined
+        // A queued (not-yet-spawned) session has no PTY to kill — cancel it
+        // out of the scheduler's queue instead, and record it the same way a
+        // kill of a live session would (interrupted: resumable/cleanable).
+        if (deps.scheduler?.cancel(id)) {
+          const persisted = deps.sessionStore.get(id)
+          if (persisted) deps.sessionStore.upsert({ ...persisted, status: 'interrupted' })
+          return undefined
+        }
         deps.sessions.kill(id)
         return undefined
       }
@@ -353,6 +295,10 @@ export function createRpc(
       case IPC.cleanupSession: {
         const id = args[0] as string
         const opts = args[1] as { force?: boolean } | undefined
+        // Cancel first: a queued entry must not be able to launch after its
+        // store row is deleted below. (The drain's stale-row guard is the
+        // backstop if this races anyway.)
+        deps.scheduler?.cancel(id)
         const persisted = ownedSession(id)
         let meta = sessionMeta.get(id)
         if (!meta) {
@@ -418,6 +364,9 @@ export function createRpc(
         }
         const persisted = owned
         if (!persisted) throw new Error(`Session not found: ${id}`)
+        // A queued session hasn't been spawned yet — the scheduler owns when
+        // it launches (spawning it here would let a viewer jump the queue).
+        if (persisted.status === 'queued') return persisted
         const repo = await deps.repos.resolvePath(persisted.repoId)
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
         let port: number | undefined
@@ -480,6 +429,9 @@ export function createRpc(
         const id = args[0] as string
         const persisted = ownedSession(id)
         if (!persisted) throw new Error(`Session not found: ${id}`)
+        // A queued session hasn't been spawned yet — the scheduler owns when
+        // it launches (spawning it here would let a viewer jump the queue).
+        if (persisted.status === 'queued') return persisted
         const repo = await deps.repos.resolvePath(persisted.repoId)
         const cwd = deps.worktrees.pathFor(repo, persisted.branch)
         let port: number | undefined
@@ -759,6 +711,14 @@ export function createRpc(
 
       case IPC.setGcPolicy:
         writeGcPolicy(deps.config, args[0] as GcPolicy)
+        return undefined
+
+      case IPC.getSchedulerPolicy:
+        return readSchedulerPolicy(deps.config)
+
+      case IPC.setSchedulerPolicy:
+        writeSchedulerPolicy(deps.config, args[0] as SchedulerPolicy)
+        void deps.scheduler?.drain() // raising the cap frees slots immediately
         return undefined
 
       case IPC.getMcpStatus: {

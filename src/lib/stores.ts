@@ -79,7 +79,9 @@ export function dtoToSession(dto: SessionDTO): Session {
           ? 'Interrupted by restart — open to resume.'
           : uiStatus === 'reaped'
             ? 'Reaped by the cost guard.'
-            : 'Detached — open to resume.',
+            : uiStatus === 'queued'
+              ? 'Queued — will start when an agent slot frees.'
+              : 'Detached — open to resume.',
     },
   }
 }
@@ -318,7 +320,9 @@ export function createAgentFromTicket(
   ticket: Ticket,
   prompt: string,
   agentKind: BackendKind = 'claude-code',
+  opts?: { select?: boolean },
 ): string {
+  const doSelect = opts?.select ?? true
   const id = crypto.randomUUID()
   tickets.update(($t) => $t.filter((t) => t.tid !== ticket.tid))
   sessions.update(($s) => [
@@ -341,8 +345,10 @@ export function createAgentFromTicket(
     },
     ...$s,
   ])
-  dialogOpen.set(false)
-  select(id)
+  if (doSelect) {
+    dialogOpen.set(false)
+    select(id)
+  }
   return id
 }
 
@@ -432,7 +438,14 @@ export async function startAgent(
         agentKind: dto.agentKind,
         repo: repoId,
         status: dto.status,
+        activity:
+          dto.status === 'queued'
+            ? { text: 'Queued — will start when an agent slot frees.' }
+            : s.activity,
       }))
+      if (dto.status === 'queued') {
+        pushToast('success', `Queued ${s.tid} — starts when a slot frees`)
+      }
     } catch (err) {
       patch(id, (s) => ({
         ...s,
@@ -454,6 +467,22 @@ export async function startAgent(
       activity: { text: 'Creating worktree & starting claude…' },
     }))
   }
+}
+
+/** FLO-95 batch flow: launch agents for every ticket whose repo hint matches a
+ *  registered repo, without stealing selection/closing dialogs per ticket. The
+ *  backend scheduler queues starts beyond the concurrency cap and drains them. */
+export async function startAgentsFromTickets(ts: Ticket[]): Promise<number> {
+  let started = 0
+  for (const t of ts) {
+    const repo = repoById(t.repo)
+    if (!repo) continue
+    const prompt = `Begin implementing ${t.tid}.`
+    const id = createAgentFromTicket(t, prompt, 'claude-code', { select: false })
+    await startAgent(id, repo.id, prompt, 'claude-code')
+    started++
+  }
+  return started
 }
 
 /**

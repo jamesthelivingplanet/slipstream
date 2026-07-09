@@ -23,6 +23,7 @@ import type {
   GitHost,
   WriteLockState,
   GcPolicy,
+  SchedulerPolicy,
   McpStatusDTO,
   DiagnosticsDTO,
   AgentCliCheck,
@@ -37,7 +38,7 @@ import type {
   SessionHistoryEntry,
   PrStatusDTO,
 } from '../../electron/shared/contract.js'
-import { DEFAULT_GC_POLICY } from '../../electron/shared/contract.js'
+import { DEFAULT_GC_POLICY, DEFAULT_SCHEDULER_POLICY } from '../../electron/shared/contract.js'
 
 export const hasBackend = typeof window !== 'undefined' && !!window.slipstream
 
@@ -331,6 +332,19 @@ export function getGcPolicy(): Promise<GcPolicy> {
 export function setGcPolicy(policy: GcPolicy): Promise<void> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.setGcPolicy(policy)
+}
+
+// ── Scheduler concurrency policy ────────────────────────────────────────────
+
+export function getSchedulerPolicy(): Promise<SchedulerPolicy> {
+  return hasBackend
+    ? window.slipstream.getSchedulerPolicy()
+    : Promise.resolve({ ...DEFAULT_SCHEDULER_POLICY })
+}
+
+export function setSchedulerPolicy(policy: SchedulerPolicy): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.setSchedulerPolicy(policy)
 }
 
 // ── MCP status ───────────────────────────────────────────────────────────

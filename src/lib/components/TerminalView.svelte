@@ -76,7 +76,7 @@
   $: r = repoById(session.repo)
   $: pendingCommentCount = ($reviewComments[session.id ?? ''] ?? []).length
   $: dot =
-    session.status === 'idle'
+    session.status === 'idle' || session.status === 'queued'
       ? 'hsl(var(--muted-foreground))'
       : `hsl(var(--st-${session.status === 'needs' ? 'needs' : session.status === 'running' ? 'run' : session.status === 'done' ? 'done' : 'error'}))`
 
@@ -199,7 +199,10 @@
     if (liveId !== null && liveId !== session.id) cleanupListeners()
     liveId = session.id
 
-    if (session.id && !resumedIds.has(session.id)) {
+    // FLO-95: a queued session hasn't started yet — resuming it would be a
+    // no-op backend-side (the scheduler guards against jumping the queue),
+    // and its PTY data/status arrive automatically once a slot frees.
+    if (session.id && session.status !== 'queued' && !resumedIds.has(session.id)) {
       resumedIds.add(session.id)
       try {
         await resumeSession(session.id)
