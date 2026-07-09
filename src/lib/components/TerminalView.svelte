@@ -33,6 +33,7 @@
     detachSession,
     takeWrite,
     onSessionWriteLock,
+    onSessionExit,
     getPrStatus,
   } from '../ipc'
   import { pushToast } from '../toast'
@@ -59,9 +60,13 @@
   // Unsubscribe fns for backend push listeners
   let offData: (() => void) | null = null
   let offWriteLock: (() => void) | null = null
+  let offExit: (() => void) | null = null
   let onDataSub: IDisposable | null = null
   let canWrite = true
   let viewers = 1
+  let exited = false
+  let exitCode: number | null = null
+  let restarting = false
   let liveId: string | null | undefined = null
   let simStarted = false
   let showDiff = false
@@ -198,6 +203,8 @@
   async function startLive() {
     if (liveId !== null && liveId !== session.id) cleanupListeners()
     liveId = session.id
+    exited = false
+    exitCode = null
 
     // FLO-95: a queued session hasn't started yet — resuming it would be a
     // no-op backend-side (the scheduler guards against jumping the queue),
@@ -242,6 +249,11 @@
       canWrite = state.canWrite
       viewers = state.viewers
     })
+    offExit = onSessionExit((sid, code) => {
+      if (sid !== session.id) return
+      exited = true
+      exitCode = code
+    })
     if (session.id) {
       const lock = await attachSession(session.id)
       canWrite = lock.canWrite
@@ -274,6 +286,10 @@
     if (offWriteLock) {
       offWriteLock()
       offWriteLock = null
+    }
+    if (offExit) {
+      offExit()
+      offExit = null
     }
     if (offResize) {
       offResize()
@@ -387,6 +403,24 @@
 
   async function handleCleanup() {
     await cleanupAgent(session, { auto: false })
+  }
+
+  async function handleRestart() {
+    if (!hasBackend || !session.id || restarting) return
+    restarting = true
+    try {
+      resumedIds.add(session.id)
+      await resumeSession(session.id)
+      exited = false
+      exitCode = null
+      cleanupListeners()
+      await startLive()
+      pushToast('success', 'Agent restarted.')
+    } catch (e) {
+      pushToast('error', cleanError(e))
+    } finally {
+      restarting = false
+    }
   }
 
   async function handleOpenEditor() {
@@ -640,6 +674,24 @@
     <div class="keys">
       <span class="kbd">1</span><span class="kbd">2</span><span class="kbd">↵</span>
     </div>
+  </div>
+{/if}
+
+{#if liveMode && exited}
+  <div class="alert">
+    <span class="ic">{@html icons.refresh}</span>
+    <div class="tx">
+      <b>Agent closed out</b>
+      <span>
+        {exitCode === 0
+          ? 'The agent process exited.'
+          : `The agent process exited with code ${exitCode}.`}
+        Restart it to keep working in the same worktree.
+      </span>
+    </div>
+    <button class="btn btn-sm" disabled={restarting} on:click={handleRestart}>
+      {restarting ? 'Restarting…' : 'Restart'}
+    </button>
   </div>
 {/if}
 
