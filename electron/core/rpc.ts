@@ -164,9 +164,14 @@ export function createRpc(
     emit(IPC.sessionPr, id, url)
   }
 
+  function onExit(id: string, code: number): void {
+    emit(IPC.sessionExit, id, code)
+  }
+
   deps.sessions.on('data', onData)
   deps.sessions.on('status', onStatus)
   deps.sessions.on('pr', onPr)
+  deps.sessions.on('exit', onExit)
 
   function onLockChange(sessionId: string): void {
     if (!coord!.isViewer(sessionId, clientId)) return
@@ -870,6 +875,7 @@ export function createRpc(
     deps.sessions.off('data', onData)
     deps.sessions.off('status', onStatus)
     deps.sessions.off('pr', onPr)
+    deps.sessions.off('exit', onExit)
     if (coord) {
       coord.dropClient(clientId)
       coord.off('change', onLockChange)

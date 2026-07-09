@@ -632,6 +632,9 @@ export interface SlipstreamApi {
   /** Returns an unsubscribe fn. */
   onSessionData(cb: (id: string, data: string, seq: number) => void): () => void
   onSessionStatus(cb: (id: string, status: SessionStatus) => void): () => void
+  /** Fires when a session's agent process exits on its own (not on kill/reap/
+   *  remote-control takeover) — lets the view offer a restart (FLO-101). */
+  onSessionExit(cb: (id: string, code: number) => void): () => void
   getSessionBuffer(id: string): Promise<{ data: string; seq: number }>
   getRepoSettings(id: string): Promise<RepoSettings>
   setRepoSettings(id: string, settings: RepoSettings): Promise<void>
@@ -740,6 +743,7 @@ export const IPC = {
   attachRemoteControl: 'session:attachRemoteControl',
   sessionData: 'session:data', // main → renderer
   sessionStatus: 'session:status', // main → renderer
+  sessionExit: 'session:exit', // main → renderer push
   getSessionBuffer: 'session:buffer',
   worktreeStatus: 'worktree:status',
   worktreeDiff: 'worktree:diff',
