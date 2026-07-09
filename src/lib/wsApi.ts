@@ -71,6 +71,7 @@ type PendingReq = {
 
 type DataCb = (id: string, data: string, seq: number) => void
 type StatusCb = (id: string, status: SessionStatus) => void
+type ExitCb = (id: string, code: number) => void
 
 export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   const WS = opts.WebSocketCtor ?? WebSocket
@@ -92,6 +93,7 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   // Push listeners
   const dataListeners = new Set<DataCb>()
   const statusListeners = new Set<StatusCb>()
+  const exitListeners = new Set<ExitCb>()
   type PrCb = (id: string, prUrl: string) => void
   const prListeners = new Set<PrCb>()
   type WriteLockCb = (state: WriteLockState) => void
@@ -195,6 +197,9 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
         } else if (msg.channel === IPC.sessionStatus) {
           const [id, status] = msg.args as [string, SessionStatus]
           for (const cb of statusListeners) cb(id, status)
+        } else if (msg.channel === IPC.sessionExit) {
+          const [id, code] = msg.args as [string, number]
+          for (const cb of exitListeners) cb(id, code)
         } else if (msg.channel === IPC.sessionPr) {
           const [id, prUrl] = msg.args as [string, string]
           for (const cb of prListeners) cb(id, prUrl)
@@ -426,6 +431,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     onSessionStatus(cb: StatusCb): () => void {
       statusListeners.add(cb)
       return () => statusListeners.delete(cb)
+    },
+    onSessionExit(cb: ExitCb): () => void {
+      exitListeners.add(cb)
+      return () => exitListeners.delete(cb)
     },
     getRepoSettings(id: string): Promise<RepoSettings> {
       return request(IPC.getRepoSettings, [id]) as Promise<RepoSettings>

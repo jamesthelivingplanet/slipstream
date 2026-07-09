@@ -652,9 +652,20 @@ describe('createRpc', () => {
     expect(emitted).toEqual([[IPC.sessionStatus, 's1', 'done']])
   })
 
+  it('forwards session exit events to emit (FLO-101)', () => {
+    deps._emit('exit', 's1', 0)
+    expect(emitted).toEqual([[IPC.sessionExit, 's1', 0]])
+  })
+
   it('dispose() removes event listeners', () => {
     rpc.dispose()
     deps._emit('data', 's1', 'after dispose')
+    expect(emitted).toHaveLength(0)
+  })
+
+  it('dispose() removes the exit listener (FLO-101)', () => {
+    rpc.dispose()
+    deps._emit('exit', 's1', 1)
     expect(emitted).toHaveLength(0)
   })
 
@@ -667,6 +678,7 @@ describe('createRpc', () => {
     rpc.dispose()
     expect(offSpy).toHaveBeenCalledWith('data', expect.any(Function))
     expect(offSpy).toHaveBeenCalledWith('status', expect.any(Function))
+    expect(offSpy).toHaveBeenCalledWith('exit', expect.any(Function))
   })
 
   it('startSession persists session to sessionStore', async () => {

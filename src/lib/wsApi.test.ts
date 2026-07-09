@@ -193,6 +193,31 @@ describe('wsApi', () => {
       expect(received).toEqual([['sess-2', 'done']])
     })
 
+    it('delivers session:exit to onSessionExit callbacks', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      const received: [string, number][] = []
+      api.onSessionExit((id, code) => received.push([id, code]))
+
+      ws.simulateMessage({ t: 'push', channel: IPC.sessionExit, args: ['sess-4', 0] })
+      expect(received).toEqual([['sess-4', 0]])
+    })
+
+    it('unsubscribe stops session:exit delivery', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      const received: [string, number][] = []
+      const unsub = api.onSessionExit((id, code) => received.push([id, code]))
+
+      ws.simulateMessage({ t: 'push', channel: IPC.sessionExit, args: ['sess-4', 0] })
+      unsub()
+      ws.simulateMessage({ t: 'push', channel: IPC.sessionExit, args: ['sess-4', 1] })
+
+      expect(received).toEqual([['sess-4', 0]])
+    })
+
     it('delivers session:pr to onSessionPr callbacks', () => {
       const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
       const ws = openWs()

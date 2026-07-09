@@ -183,6 +183,13 @@ export function onSessionStatus(cb: (id: string, status: SessionStatus) => void)
   return window.slipstream.onSessionStatus(cb)
 }
 
+/** Subscribe to a session's agent process exiting on its own (not on kill/reap).
+ *  Returns an unsubscribe fn. */
+export function onSessionExit(cb: (id: string, code: number) => void): () => void {
+  if (!hasBackend) return () => {}
+  return window.slipstream.onSessionExit(cb)
+}
+
 export function listSessions(): Promise<SessionDTO[]> {
   return hasBackend ? window.slipstream.listSessions() : Promise.resolve([])
 }
