@@ -277,6 +277,121 @@ describe('piBackend resume / remote-control', () => {
   })
 })
 
+describe('claudeCodeBackend.buildHandoffArgs', () => {
+  it('hasTranscript:false → uses --session-id + id + prompt is present', () => {
+    const { cmd, args } = claudeCodeBackend.buildHandoffArgs({
+      sessionId: 'hoid1',
+      system: '',
+      user: 'takeover prompt',
+      hasTranscript: false,
+    })
+    expect(cmd).toBe('claude')
+    expect(args).toContain('--session-id')
+    expect(args).toContain('hoid1')
+    expect(args[args.length - 1]).toBe('takeover prompt')
+  })
+
+  it('hasTranscript:false with mcpConfigPath → --mcp-config pair appended at the end', () => {
+    const { args } = claudeCodeBackend.buildHandoffArgs({
+      sessionId: 'hoid2',
+      system: '',
+      user: 'takeover prompt',
+      hasTranscript: false,
+      mcpConfigPath: '/tmp/mcp.json',
+    })
+    expect(args[args.length - 2]).toBe('--mcp-config')
+    expect(args[args.length - 1]).toBe('/tmp/mcp.json')
+  })
+
+  it('hasTranscript:true → uses --resume + id + the handoff prompt as the last arg; no --session-id', () => {
+    const { args } = claudeCodeBackend.buildHandoffArgs({
+      sessionId: 'hoid3',
+      system: '',
+      user: 'takeover prompt',
+      hasTranscript: true,
+    })
+    expect(args).toContain('--resume')
+    expect(args).toContain('hoid3')
+    expect(args).not.toContain('--session-id')
+    expect(args[args.length - 1]).toBe('takeover prompt')
+  })
+
+  it('hasTranscript:true with mcpConfigPath → prompt is second-to-last, mcp pair last', () => {
+    const { args } = claudeCodeBackend.buildHandoffArgs({
+      sessionId: 'hoid4',
+      system: '',
+      user: 'takeover prompt',
+      hasTranscript: true,
+      mcpConfigPath: '/tmp/mcp.json',
+    })
+    expect(args[args.length - 3]).toBe('takeover prompt')
+    expect(args[args.length - 2]).toBe('--mcp-config')
+    expect(args[args.length - 1]).toBe('/tmp/mcp.json')
+  })
+})
+
+describe('opencodeBackend.buildHandoffArgs', () => {
+  it('includes --prompt with the handoff text', () => {
+    const { args } = opencodeBackend.buildHandoffArgs({
+      sessionId: 'ohid1',
+      system: '',
+      user: 'takeover prompt',
+      hasTranscript: false,
+    })
+    const idx = args.indexOf('--prompt')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('takeover prompt')
+  })
+
+  it('includes --port with port string when opencodePort given', () => {
+    const { args } = opencodeBackend.buildHandoffArgs({
+      sessionId: 'ohid2',
+      system: '',
+      user: 'takeover prompt',
+      hasTranscript: false,
+      opencodePort: 4444,
+    })
+    const idx = args.indexOf('--port')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('4444')
+  })
+})
+
+describe('piBackend.buildHandoffArgs', () => {
+  it('cmd ends with "pi"', () => {
+    const { cmd } = piBackend.buildHandoffArgs({
+      sessionId: 'phid1',
+      system: '',
+      user: 'takeover prompt',
+      hasTranscript: false,
+    })
+    expect(cmd.endsWith('pi')).toBe(true)
+  })
+
+  it('args contain --approve and end with the prompt', () => {
+    const { args } = piBackend.buildHandoffArgs({
+      sessionId: 'phid2',
+      system: '',
+      user: 'takeover prompt',
+      hasTranscript: false,
+    })
+    expect(args).toContain('--approve')
+    expect(args[args.length - 1]).toBe('takeover prompt')
+  })
+
+  it('with non-empty system, includes --append-system-prompt followed by system text', () => {
+    const { args } = piBackend.buildHandoffArgs({
+      sessionId: 'phid3',
+      system: 'pi sys',
+      user: 'takeover prompt',
+      hasTranscript: false,
+    })
+    const idx = args.indexOf('--append-system-prompt')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('pi sys')
+  })
+})
+
 describe('beginStatusTracking presence', () => {
   it('opencodeBackend.beginStatusTracking is a function', () => {
     expect(typeof opencodeBackend.beginStatusTracking).toBe('function')

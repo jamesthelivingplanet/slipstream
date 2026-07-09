@@ -9,6 +9,7 @@
     select,
     resolveNeedsInput,
     setSessionStatus,
+    setSessionAgent,
     cleanupAgent,
     runAppForSession,
     stopAppForSession,
@@ -28,6 +29,8 @@
     getSessionBuffer,
     resumeSession,
     attachRemoteControl,
+    handoffSession,
+    checkAgentCli,
     openInEditor,
     attachSession,
     detachSession,
@@ -40,11 +43,12 @@
   import { mode } from '../theme'
   import { icons } from '../icons'
   import { MOBILE_MEDIA_QUERY } from '../responsive'
-  import type { Session, WorkflowState } from '../types'
+  import type { Session, WorkflowState, BackendKind } from '../types'
   import type { PrStatusDTO } from '../../../electron/shared/contract.js'
   import { getTicketStatus, setTicketStatus } from '../ipc'
   import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
   import { floatingAnchor } from '../floating'
+  import { AGENTS, agentOption } from '../agents'
   import DiffView from './DiffView.svelte'
 
   export let session: Session
@@ -67,6 +71,8 @@
   let exited = false
   let exitCode: number | null = null
   let restarting = false
+  let handoffOpen = false
+  let handingOff = false
   let liveId: string | null | undefined = null
   let simStarted = false
   let showDiff = false
@@ -88,6 +94,9 @@
   $: runKey = appRunKey(session)
   $: appRunning = runKey ? $runningApps.has(runKey) : false
   $: appUrl = runKey ? $appUrls[runKey] : undefined
+
+  $: currentKind = (session.agentKind ?? 'claude-code') as BackendKind
+  $: handoffTargets = AGENTS.filter((a) => a.kind !== currentKind)
 
   function openLink(_event: MouseEvent, uri: string) {
     window.open(uri, '_blank', 'noopener,noreferrer')
@@ -423,6 +432,38 @@
     }
   }
 
+  async function handleHandoff(kind: BackendKind) {
+    if (!hasBackend || !session.id || handingOff) return
+    handingOff = true
+    handoffOpen = false
+    try {
+      const cli = await checkAgentCli(kind)
+      if (!cli.found) {
+        pushToast(
+          'error',
+          `${agentOption(kind).label} CLI ('${cli.bin}') was not found on the server's PATH.`,
+        )
+        return
+      }
+      resumedIds.add(session.id)
+      await handoffSession(session.id, kind)
+      setSessionAgent(session.id, kind)
+      setSessionStatus(session.id, 'running')
+      exited = false
+      exitCode = null
+      cleanupListeners()
+      await startLive()
+      pushToast(
+        'success',
+        `Run handed off to ${agentOption(kind).label} — continuing from the existing worktree.`,
+      )
+    } catch (e) {
+      pushToast('error', cleanError(e))
+    } finally {
+      handingOff = false
+    }
+  }
+
   async function handleOpenEditor() {
     if (!hasBackend || !session.repo || !session.branch) return
     const mobile = typeof window !== 'undefined' && window.matchMedia(MOBILE_MEDIA_QUERY).matches
@@ -502,6 +543,7 @@
 
   function onWindowClick(e: MouseEvent) {
     if (menuOpen && !(e.target as HTMLElement).closest('#ticketStatusSel')) menuOpen = false
+    if (handoffOpen && !(e.target as HTMLElement).closest('#handoffSel')) handoffOpen = false
   }
 
   function onTriggerClick() {
@@ -638,6 +680,25 @@
     on:click={handleRemoteControl}
     >{@html icons.remote} <span class="btn-label">Remote control</span></button
   >
+  <div class="sel-head" id="handoffSel">
+    <button
+      class="btn btn-outline btn-sm"
+      title="Continue this run with a different agent (e.g. when this one hit its limits)"
+      disabled={!hasBackend || !session.id || session.status === 'queued' || handingOff}
+      on:click|stopPropagation={() => (handoffOpen = !handoffOpen)}
+      >{@html icons.refresh}
+      <span class="btn-label">{handingOff ? 'Handing off…' : 'Hand off'}</span></button
+    >
+    {#if handoffOpen}
+      <div class="sel-menu" use:floatingAnchor>
+        {#each handoffTargets as agent (agent.kind)}
+          <button type="button" class="opt" on:click={() => handleHandoff(agent.kind)}>
+            <span>Continue with {agent.label}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
   <button
     class="btn btn-outline btn-sm"
     title="Open the worktree in your configured editor"
@@ -686,12 +747,17 @@
         {exitCode === 0
           ? 'The agent process exited.'
           : `The agent process exited with code ${exitCode}.`}
-        Restart it to keep working in the same worktree.
+        Restart it to keep working in the same worktree, or hand the run off to a different agent.
       </span>
     </div>
     <button class="btn btn-sm" disabled={restarting} on:click={handleRestart}>
       {restarting ? 'Restarting…' : 'Restart'}
     </button>
+    {#each handoffTargets as agent (agent.kind)}
+      <button class="btn btn-sm" disabled={handingOff} on:click={() => handleHandoff(agent.kind)}>
+        Continue with {agent.label}
+      </button>
+    {/each}
   </div>
 {/if}
 

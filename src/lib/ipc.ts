@@ -205,6 +205,12 @@ export function attachRemoteControl(id: string): Promise<SessionDTO> {
   return window.slipstream.attachRemoteControl(id)
 }
 
+/** Continue an existing run with a different agent in the same worktree (FLO-102). */
+export function handoffSession(id: string, agentKind: BackendKind): Promise<SessionDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.handoffSession(id, agentKind)
+}
+
 export function worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo> {
   return hasBackend
     ? window.slipstream.worktreeStatus(repoId, branch)

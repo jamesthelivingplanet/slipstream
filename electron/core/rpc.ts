@@ -22,13 +22,14 @@ import type {
   PromptTemplateDTO,
 } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
-import { buildSystemPrompt } from '../shared/promptComposer.js'
+import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../shared/promptComposer.js'
 import { LOCAL_IDENTITY } from './auth.js'
 import {
   buildAppMcpConfig,
   buildOpencodeMcpConfig,
   writeAppMcpConfig,
 } from '../services/mcpConfig.js'
+import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 import { launchSession } from '../services/sessionLauncher.js'
 import type { LaunchRequest } from '../services/sessionLauncher.js'
@@ -490,6 +491,99 @@ export function createRpc(
           opencodePort,
           mcpConfigPath,
         })
+        sessionMeta.set(id, { repo, branch: persisted.branch })
+        deps.sessionStore.upsert({ ...dto, port })
+        return { ...dto, port }
+      }
+
+      case IPC.handoffSession: {
+        const id = args[0] as string
+        const agentKind = args[1] as BackendKind
+        if (agentKind !== 'claude-code' && agentKind !== 'opencode' && agentKind !== 'pi')
+          throw new Error(`Unknown agent kind: ${String(agentKind)}`)
+        const persisted = ownedSession(id)
+        if (!persisted) throw new Error(`Session not found: ${id}`)
+        // A queued session hasn't started — there is nothing to hand off yet.
+        if (persisted.status === 'queued')
+          throw new Error('Session is queued — it has not started yet')
+        const fromKind: BackendKind = persisted.agentKind ?? 'claude-code'
+        if (fromKind === agentKind)
+          throw new Error(`Session is already running on ${AGENT_LABELS[agentKind]}`)
+        const repo = await deps.repos.resolvePath(persisted.repoId)
+        const cwd = deps.worktrees.pathFor(repo, persisted.branch)
+        let port: number | undefined
+        try {
+          port = await deps.ports.claim(cwd, 'web')
+        } catch {
+          port = undefined
+        }
+        let opencodePort: number | undefined
+        if (agentKind === 'opencode') {
+          try {
+            opencodePort = await deps.ports.claim(cwd, 'opencode')
+          } catch {
+            opencodePort = undefined
+          }
+        }
+        const handoffEnv: Record<string, string> = {}
+        if (port !== undefined) handoffEnv.PORT = String(port)
+        let mcpConfigPath: string | undefined
+        if (deps.appMcp) {
+          // Rewrite the per-session MCP config — it may have been deleted
+          // since the original start (e.g. by cleanup or a data-dir wipe).
+          mcpConfigPath = path.join(deps.appMcp.configDir, `${id}.json`)
+          const config = buildAppMcpConfig({
+            appMcpJsPath: deps.appMcp.appMcpJsPath,
+            electronPath: deps.appMcp.electronPath,
+            dataDir: deps.appMcp.dataDir,
+            sessionId: id,
+            base: repo.base,
+            branch: persisted.branch,
+          })
+          await writeAppMcpConfig(mcpConfigPath, config)
+
+          if (agentKind === 'opencode') {
+            handoffEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
+              buildOpencodeMcpConfig({
+                appMcpJsPath: deps.appMcp.appMcpJsPath,
+                electronPath: deps.appMcp.electronPath,
+                dataDir: deps.appMcp.dataDir,
+                sessionId: id,
+                base: repo.base,
+                branch: persisted.branch,
+              }),
+            )
+          }
+        }
+        const outcome = await resolveOutcome(id)
+        const handoffPrompt = buildHandoffPrompt({
+          tid: persisted.tid,
+          title: persisted.title,
+          prompt: persisted.prompt,
+          fromAgent: AGENT_LABELS[fromKind],
+          branch: persisted.branch,
+          base: repo.base,
+          outcomeSummary: outcome?.summary,
+        })
+        const dto = deps.sessions.handoff({
+          session: persisted,
+          cwd,
+          env: Object.keys(handoffEnv).length > 0 ? handoffEnv : undefined,
+          opencodePort,
+          mcpConfigPath,
+          agentKind,
+          handoffPrompt,
+        })
+        // Same async sid capture as sessionLauncher.ts: opencode's session id only
+        // exists after the TUI boots; status polling starts once it's known.
+        if (agentKind === 'opencode') {
+          void captureOpencodeSessionId({ cwd }).then((sid) => {
+            if (!sid) return
+            deps.sessions.setOpencodeSid(id, sid)
+            const cur = deps.sessionStore.get(id)
+            if (cur) deps.sessionStore.upsert({ ...cur, opencodeSid: sid })
+          })
+        }
         sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })
         return { ...dto, port }

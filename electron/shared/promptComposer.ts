@@ -70,6 +70,48 @@ When the ticket is complete, commit and push your changes yourself using ordinar
 Do not skip this step — it is how the work gets reviewed.`
 }
 
+/** Human-readable labels for handoff prompts (keep in sync with src/lib/agents.ts). */
+export const AGENT_LABELS: Record<BackendKind, string> = {
+  'claude-code': 'Claude Code',
+  opencode: 'OpenCode',
+  pi: 'Pi',
+}
+
+export interface HandoffContext {
+  tid: string
+  title: string
+  /** The original kickoff prompt for the run. */
+  prompt: string
+  /** Label of the agent being handed off FROM, e.g. "Claude Code". */
+  fromAgent: string
+  branch: string
+  base: string
+  /** The previous agent's reported outcome summary, when one exists. */
+  outcomeSummary?: string
+}
+
+export function buildHandoffPrompt(ctx: HandoffContext): string {
+  const { tid, title, prompt, fromAgent, branch, base, outcomeSummary } = ctx
+  const outcomeSection =
+    outcomeSummary && outcomeSummary.trim().length > 0
+      ? `\n\n## Previous agent's last reported summary\n\n${outcomeSummary}`
+      : ''
+
+  return `You are taking over an in-progress run from another agent (${fromAgent}) that became unavailable (e.g. it hit its usage limits). Do not start over — continue from the existing work.
+
+## Original request
+
+${tid}: ${title}
+
+${prompt}${outcomeSection}
+
+## How to pick up the run
+
+The worktree already contains all progress so far — review it before doing anything else. On branch \`${branch}\`, run \`git log ${base}..HEAD\`, \`git status\`, and \`git diff ${base}...HEAD\` to see what has been done. The terminal scrollback from before is not available to you, so rely on the git state and any notes in the worktree.
+
+Then continue the task to completion, following the system-prompt instructions (report your state via the slipstream \`report_status\` tool and open the merge request via \`open_merge_request\` when done).`
+}
+
 export function buildAgentsMdContent(systemPrompt: string): string {
   return systemPrompt
 }

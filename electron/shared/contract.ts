@@ -438,6 +438,15 @@ export interface ResumeSessionInput {
   mcpConfigPath?: string
 }
 
+/** Input for continuing an existing run with a DIFFERENT agent (FLO-102).
+ *  The new backend is spawned in the same worktree under the same session id;
+ *  `handoffPrompt` is the user-level takeover prompt composed by rpc.ts
+ *  (buildHandoffPrompt) — the original `session.prompt` stays persisted. */
+export interface HandoffSessionInput extends ResumeSessionInput {
+  agentKind: BackendKind
+  handoffPrompt: string
+}
+
 export interface ISessionStore {
   list(): SessionDTO[]
   get(id: string): SessionDTO | undefined
@@ -466,6 +475,10 @@ export interface ISessionManager {
   off<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void
   getBuffer(sessionId: string): { data: string; seq: number }
   attachRemoteControl(input: ResumeSessionInput): SessionDTO
+  /** Continue the session with a different agent (FLO-102): kills the previous
+   *  agent's PTY if still live, then spawns `agentKind` in the same worktree
+   *  with the takeover prompt. */
+  handoff(input: HandoffSessionInput): SessionDTO
   /** Record the opencode server's session id so status polling can begin.
    *  No-op for non-opencode sessions or when no port was assigned. */
   setOpencodeSid(sessionId: string, sid: string): void
@@ -626,6 +639,11 @@ export interface SlipstreamApi {
   listSessions(): Promise<SessionDTO[]>
   resumeSession(id: string): Promise<SessionDTO>
   attachRemoteControl(id: string): Promise<SessionDTO>
+  /** Continue an existing run with a different agent in the same worktree
+   *  (FLO-102) — e.g. when the current agent hit its usage limits. Kills the
+   *  old agent process if still live. Rejects for a queued session or when
+   *  `agentKind` equals the session's current agent. */
+  handoffSession(id: string, agentKind: BackendKind): Promise<SessionDTO>
   worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo>
   worktreeDiff(repoId: string, branch: string): Promise<WorktreeDiffDTO>
 
@@ -741,6 +759,7 @@ export const IPC = {
   listSessions: 'session:list',
   resumeSession: 'session:resume',
   attachRemoteControl: 'session:attachRemoteControl',
+  handoffSession: 'session:handoff',
   sessionData: 'session:data', // main → renderer
   sessionStatus: 'session:status', // main → renderer
   sessionExit: 'session:exit', // main → renderer push

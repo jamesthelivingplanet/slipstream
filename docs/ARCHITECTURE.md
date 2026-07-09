@@ -250,6 +250,14 @@ pipeline rules above). `resumeSession`/`attachRemoteControl` return a queued row
 spawning — viewers can't jump the queue — and kill/cleanup of a queued session cancels its
 entry instead of touching a PTY.
 
+FLO-102 adds `IPC.handoffSession` — continuing a run with a different agent in the same
+worktree/session id when the current one hits its limits; `rpc.ts` composes a takeover prompt
+(`buildHandoffPrompt`, in `promptComposer.ts`) from the original prompt plus the previous
+agent's reported outcome, and the new backend's `buildHandoffArgs` (`agentBackend.ts`) spawns
+it. The old PTY is killed first (`sessionManager.ts`'s `handoff`), `opencodeSid` is cleared on
+the DTO, and the sid is re-captured (same pattern as initial start) when handing off *to*
+opencode.
+
 The 256 KB output ring-buffer is scrollback, not a record — it truncates, and it's not
 queryable. FLO-97 gives agents a way to leave a durable, structured final summary: the app
 MCP's `report_outcome` tool (`electron/mcp/appMcp.ts`) writes an `outcome.json` sentinel next

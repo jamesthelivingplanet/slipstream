@@ -295,6 +295,25 @@ describe('wsApi', () => {
       const result = await promise
       expect(result).toEqual({ data: 'prior output', seq: 12 })
     })
+
+    it('sends session:handoff with [id, agentKind] and resolves with the result', async () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      const promise = api.handoffSession('sess-1', 'opencode')
+      const req = lastSent(ws)
+      expect(req.channel).toBe(IPC.handoffSession)
+      expect(req.args).toEqual(['sess-1', 'opencode'])
+
+      ws.simulateMessage({
+        t: 'res',
+        id: req.id,
+        ok: true,
+        result: { id: 'sess-1', agentKind: 'opencode' },
+      })
+      const result = await promise
+      expect(result).toEqual({ id: 'sess-1', agentKind: 'opencode' })
+    })
   })
 
   describe('request queueing before open', () => {
