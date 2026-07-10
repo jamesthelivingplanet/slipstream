@@ -91,6 +91,9 @@ export interface AgentBackend {
   buildStartArgs(ctx: StartArgsCtx): SpawnSpec
   buildResumeArgs(ctx: ResumeArgsCtx): SpawnSpec
   buildRemoteControlArgs(ctx: ResumeArgsCtx): SpawnSpec
+  /** Args for taking over a session started by a DIFFERENT backend (FLO-102).
+   *  `user` in the ctx is the composed handoff prompt. */
+  buildHandoffArgs(ctx: ResumeArgsCtx): SpawnSpec
   /** Begin polling status after launch (poll backends only; PTY backends omit). */
   beginStatusTracking?(ctx: StatusTrackingCtx): void
 }
@@ -171,6 +174,16 @@ export const claudeCodeBackend: AgentBackend = {
     }
     return { cmd: CLAUDE_BIN, args }
   },
+  buildHandoffArgs({ sessionId, system, user, hasTranscript, mcpConfigPath }) {
+    const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
+    const args = hasTranscript
+      ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, sessionId, userPrompt]
+      : [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
+    if (mcpConfigPath) {
+      args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
+    }
+    return { cmd: CLAUDE_BIN, args }
+  },
 }
 
 function opencodePortArgs(port?: number): string[] {
@@ -205,6 +218,13 @@ export const opencodeBackend: AgentBackend = {
   buildRemoteControlArgs(ctx) {
     return buildOpencodeResume(ctx)
   },
+  buildHandoffArgs({ system, user, opencodePort }) {
+    const { userPrompt } = deliverPrompt('opencode', { system, user })
+    return {
+      cmd: OPENCODE_BIN,
+      args: withOpencodePromptArg(opencodePortArgs(opencodePort), userPrompt),
+    }
+  },
   beginStatusTracking({ opencodePort, opencodeSid, isInitialStart, handle }) {
     // On initial start the opencode session id is captured asynchronously by the
     // caller (rpc -> setOpencodeSid), which re-invokes tracking with the sid. We
@@ -235,6 +255,10 @@ export const piBackend: AgentBackend = {
   },
   buildRemoteControlArgs() {
     return { cmd: PI_BIN, args: [PI_APPROVE_FLAG, PI_CONTINUE_FLAG] }
+  },
+  buildHandoffArgs({ system, user }) {
+    const { systemArgs, userPrompt } = deliverPrompt('pi', { system, user })
+    return { cmd: PI_BIN, args: withPiPromptArg([PI_APPROVE_FLAG, ...systemArgs], userPrompt) }
   },
   beginStatusTracking({ cwd, handle }) {
     // Pi writes its session as a JSONL file under ~/.pi/...; the file may not

@@ -509,6 +509,11 @@ export function setSessionPrUrl(id: string, prUrl: string) {
   sessions.update(($s) => $s.map((s) => (s.id === id ? { ...s, prUrl } : s)))
 }
 
+/** Record that a session's run was handed off to a different agent (FLO-102). */
+export function setSessionAgent(id: string, agentKind: BackendKind) {
+  sessions.update(($s) => $s.map((s) => (s.id === id ? { ...s, agentKind } : s)))
+}
+
 /** Update the status of the session identified by its backend UUID. */
 export function setSessionStatus(id: string, status: Status) {
   let prev: Status | undefined

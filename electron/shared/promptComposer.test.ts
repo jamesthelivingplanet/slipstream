@@ -4,6 +4,7 @@ import {
   buildSystemPrompt,
   buildAgentsMdContent,
   deliverPrompt,
+  buildHandoffPrompt,
 } from './promptComposer.js'
 
 describe('defaultUserPrompt', () => {
@@ -146,5 +147,60 @@ describe('deliverPrompt with pi', () => {
     const result = deliverPrompt('pi', { system: '', user: 'usr content' })
     expect(result.systemArgs).toEqual([])
     expect(result.userPrompt).toBe('usr content')
+  })
+})
+
+describe('buildHandoffPrompt', () => {
+  const baseCtx = {
+    tid: 'T-42',
+    title: 'Some feature',
+    prompt: 'Please implement the widget exactly as specced.',
+    fromAgent: 'Claude Code',
+    branch: 'jane-t-42-some-feature',
+    base: 'main',
+  }
+
+  it('signals this is a takeover, not a fresh start', () => {
+    const result = buildHandoffPrompt(baseCtx)
+    expect(result).toContain('taking over an in-progress run')
+    expect(result).toContain('Do not start over')
+  })
+
+  it('includes the fromAgent label', () => {
+    const result = buildHandoffPrompt(baseCtx)
+    expect(result).toContain('Claude Code')
+  })
+
+  it('includes the tid and title', () => {
+    const result = buildHandoffPrompt(baseCtx)
+    expect(result).toContain('T-42: Some feature')
+  })
+
+  it('includes the original prompt verbatim', () => {
+    const result = buildHandoffPrompt(baseCtx)
+    expect(result).toContain('Please implement the widget exactly as specced.')
+  })
+
+  it('tells the agent to inspect git history against base', () => {
+    const result = buildHandoffPrompt(baseCtx)
+    expect(result).toContain('git log main..HEAD')
+  })
+
+  it('includes the branch name', () => {
+    const result = buildHandoffPrompt(baseCtx)
+    expect(result).toContain('jane-t-42-some-feature')
+  })
+
+  it('includes the outcome summary when provided', () => {
+    const result = buildHandoffPrompt({
+      ...baseCtx,
+      outcomeSummary: 'Implemented the API, blocked on flaky CI.',
+    })
+    expect(result).toContain('Implemented the API, blocked on flaky CI.')
+  })
+
+  it('omits "last reported summary" when outcomeSummary is not provided', () => {
+    const result = buildHandoffPrompt(baseCtx)
+    expect(result).not.toContain('last reported summary')
   })
 })
