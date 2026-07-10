@@ -400,6 +400,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.attachRemoteControl, [id]) as Promise<SessionDTO>
     },
 
+    handoffSession(id: string, agentKind: BackendKind): Promise<SessionDTO> {
+      return request(IPC.handoffSession, [id, agentKind]) as Promise<SessionDTO>
+    },
+
     worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo> {
       return request(IPC.worktreeStatus, [repoId, branch]) as Promise<WorktreeInfo>
     },

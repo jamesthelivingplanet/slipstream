@@ -14,6 +14,7 @@ import * as path from 'node:path'
 import * as pty from 'node-pty'
 
 import type {
+  HandoffSessionInput,
   ISessionManager,
   LiveSessionInfo,
   ResumeSessionInput,
@@ -430,6 +431,53 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     })
   }
 
+  function handoff(input: HandoffSessionInput): SessionDTO {
+    const id = input.session.id
+    // The old agent may still be live (an agent stuck at its limit doesn't
+    // necessarily exit) — kill it silently before the new backend takes over.
+    const old = sessions.get(id)
+    if (old) {
+      stopPolling(old)
+      old.watcher?.close()
+      old.watcher = undefined
+      old.disposed = true
+      old.pty.kill()
+      sessions.delete(id)
+    }
+
+    const backend = selectBackend(input.agentKind)
+    const system = input.session.systemPrompt ?? ''
+    const spec = backend.buildHandoffArgs({
+      sessionId: id,
+      system,
+      user: input.handoffPrompt,
+      opencodePort: input.opencodePort,
+      hasTranscript: hasTranscript(id),
+      mcpConfigPath: input.mcpConfigPath,
+    })
+
+    // The DTO switches to the new backend; opencodeSid is deliberately cleared —
+    // it referred to the previous backend's session (a fresh sid is captured by
+    // rpc.ts when the new kind is opencode).
+    const dto: SessionDTO = {
+      ...input.session,
+      agentKind: input.agentKind,
+      opencodeSid: undefined,
+      status: 'running',
+    }
+    return launch({
+      id,
+      cwd: input.cwd,
+      env: input.env,
+      system,
+      dto,
+      backend,
+      spec,
+      opencodePort: input.opencodePort,
+      isInitialStart: false,
+    })
+  }
+
   function has(sessionId: string): boolean {
     return sessions.has(sessionId)
   }
@@ -543,6 +591,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     start,
     resume,
     attachRemoteControl,
+    handoff,
     has,
     write,
     resize,

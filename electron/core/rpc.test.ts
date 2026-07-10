@@ -82,6 +82,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     start: vi.fn().mockReturnValue(makeSession()),
     resume: vi.fn().mockReturnValue(makeSession()),
     attachRemoteControl: vi.fn().mockReturnValue(makeSession()),
+    handoff: vi.fn().mockReturnValue(makeSession()),
     has: vi.fn().mockReturnValue(false),
     write: vi.fn(),
     resize: vi.fn(),
@@ -795,6 +796,59 @@ describe('createRpc', () => {
     )
   })
 
+  describe('handoffSession (FLO-102)', () => {
+    it('calls sessions.handoff with the target agentKind and a handoff prompt containing the original prompt', async () => {
+      deps.sessionStore.upsert(makeSession())
+
+      const result = (await rpc.handle(IPC.handoffSession, ['s1', 'pi'])) as SessionDTO & {
+        port?: number
+      }
+
+      expect(deps.sessions.handoff).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentKind: 'pi',
+          handoffPrompt: expect.stringContaining('fix it'),
+        }),
+      )
+      expect(result.id).toBe('s1')
+      expect(deps.sessionStore.get('s1')?.status).toBe('running')
+    })
+
+    it('throws for a missing session', async () => {
+      await expect(rpc.handle(IPC.handoffSession, ['missing', 'pi'])).rejects.toThrow(
+        'Session not found: missing',
+      )
+    })
+
+    it('throws not-found for a session owned by another identity', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.handoffSession, ['s1', 'pi'])).rejects.toThrow(
+        'Session not found: s1',
+      )
+      expect(deps.sessions.handoff).not.toHaveBeenCalled()
+    })
+
+    it('throws for a queued session and does not call sessions.handoff', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', status: 'queued' }))
+      await expect(rpc.handle(IPC.handoffSession, ['s1', 'pi'])).rejects.toThrow()
+      expect(deps.sessions.handoff).not.toHaveBeenCalled()
+    })
+
+    it('throws when the target agentKind equals the current agentKind', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      await expect(rpc.handle(IPC.handoffSession, ['s1', 'claude-code'])).rejects.toThrow()
+      expect(deps.sessions.handoff).not.toHaveBeenCalled()
+    })
+
+    it('throws "Unknown agent kind: bogus" for a bogus kind', async () => {
+      deps.sessionStore.upsert(makeSession())
+      await expect(rpc.handle(IPC.handoffSession, ['s1', 'bogus'])).rejects.toThrow(
+        'Unknown agent kind: bogus',
+      )
+      expect(deps.sessions.handoff).not.toHaveBeenCalled()
+    })
+  })
+
   it('routes worktreeStatus to worktrees.status with resolved repo and branch', async () => {
     const result = await rpc.handle(IPC.worktreeStatus, ['r1', 't-1-fix-bug'])
     expect(deps.repos.get).toHaveBeenCalledWith('r1')
@@ -964,6 +1018,18 @@ describe('createRpc', () => {
 
       const expected = path.join(configDir, 's1.json')
       expect(deps.sessions.attachRemoteControl).toHaveBeenCalledWith(
+        expect.objectContaining({ mcpConfigPath: expected }),
+      )
+      expect(fs.existsSync(expected)).toBe(true)
+    })
+
+    it('handoffSession rewrites the config file and passes mcpConfigPath to sessions.handoff', async () => {
+      deps.sessionStore.upsert(makeSession())
+
+      await rpc.handle(IPC.handoffSession, ['s1', 'pi'])
+
+      const expected = path.join(configDir, 's1.json')
+      expect(deps.sessions.handoff).toHaveBeenCalledWith(
         expect.objectContaining({ mcpConfigPath: expected }),
       )
       expect(fs.existsSync(expected)).toBe(true)
