@@ -20,6 +20,7 @@
     appRunKey,
     cleanError,
     reviewComments,
+    mobile,
   } from '../stores'
   import {
     hasBackend,
@@ -42,7 +43,6 @@
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
-  import { MOBILE_MEDIA_QUERY } from '../responsive'
   import type { Session, WorkflowState, BackendKind } from '../types'
   import type { PrStatusDTO } from '../../../electron/shared/contract.js'
   import { getTicketStatus, setTicketStatus } from '../ipc'
@@ -81,6 +81,7 @@
   let statusLoading = false
   let statusError: string | null = null
   let menuOpen = false
+  let moreOpen = false
   let lastTid = ''
   let lastNonce = 0
 
@@ -466,9 +467,8 @@
 
   async function handleOpenEditor() {
     if (!hasBackend || !session.repo || !session.branch) return
-    const mobile = typeof window !== 'undefined' && window.matchMedia(MOBILE_MEDIA_QUERY).matches
     try {
-      await openInEditor({ repoId: session.repo, branch: session.branch, mobile })
+      await openInEditor({ repoId: session.repo, branch: session.branch, mobile: $mobile })
       pushToast('success', 'Opening in editor…')
     } catch (e) {
       pushToast('error', cleanError(e))
@@ -542,8 +542,12 @@
   }
 
   function onWindowClick(e: MouseEvent) {
-    if (menuOpen && !(e.target as HTMLElement).closest('#ticketStatusSel')) menuOpen = false
-    if (handoffOpen && !(e.target as HTMLElement).closest('#handoffSel')) handoffOpen = false
+    const t = e.target as HTMLElement
+    if (menuOpen && !t.closest('#ticketStatusSel') && !t.closest('#ticketStatusSelMob'))
+      menuOpen = false
+    if (handoffOpen && !t.closest('#handoffSel') && !t.closest('#handoffSelMob'))
+      handoffOpen = false
+    if (moreOpen && !t.closest('#moreSelMob')) moreOpen = false
   }
 
   function onTriggerClick() {
@@ -578,138 +582,140 @@
     </div>
   </div>
   <div class="spacer"></div>
-  {#if shouldShow}
-    <div class="sel-head" id="ticketStatusSel">
-      {#if statusLoading && !current && available.length === 0}
-        <button class="btn btn-outline btn-sm status-trigger" type="button" disabled>
-          <span class="muted">Loading…</span>
-          <span class="chev">{@html icons.chevronDown}</span>
-        </button>
-      {:else if statusError}
-        <button
-          class="btn btn-outline btn-sm status-trigger"
-          type="button"
-          disabled
-          title={statusError}
-        >
-          <span class="muted">Status unavailable</span>
-          <span class="chev">{@html icons.chevronDown}</span>
-        </button>
-      {:else if available.length === 0}
-        <button class="btn btn-outline btn-sm status-trigger" type="button" disabled>
-          <span class="muted">{current?.name ?? 'No statuses'}</span>
-          <span class="chev">{@html icons.chevronDown}</span>
-        </button>
-      {:else}
-        <button
-          class="btn btn-outline btn-sm status-trigger"
-          type="button"
-          on:click|stopPropagation={onTriggerClick}
-        >
-          <span>{current?.name ?? 'Set status'}</span>
-          <span class="chev">{@html icons.chevronDown}</span>
-        </button>
-        {#if menuOpen}
-          <div class="sel-menu" use:floatingAnchor>
-            {#each available as state (state.id)}
-              <button
-                type="button"
-                class="opt"
-                class:sel={current?.id === state.id}
-                on:click={() => selectState(state)}
-              >
-                <span>{state.name}</span>
-                <span class="check">{@html icons.check}</span>
-              </button>
-            {/each}
-          </div>
+  {#if !$mobile}
+    {#if shouldShow}
+      <div class="sel-head" id="ticketStatusSel">
+        {#if statusLoading && !current && available.length === 0}
+          <button class="btn btn-outline btn-sm status-trigger" type="button" disabled>
+            <span class="muted">Loading…</span>
+            <span class="chev">{@html icons.chevronDown}</span>
+          </button>
+        {:else if statusError}
+          <button
+            class="btn btn-outline btn-sm status-trigger"
+            type="button"
+            disabled
+            title={statusError}
+          >
+            <span class="muted">Status unavailable</span>
+            <span class="chev">{@html icons.chevronDown}</span>
+          </button>
+        {:else if available.length === 0}
+          <button class="btn btn-outline btn-sm status-trigger" type="button" disabled>
+            <span class="muted">{current?.name ?? 'No statuses'}</span>
+            <span class="chev">{@html icons.chevronDown}</span>
+          </button>
+        {:else}
+          <button
+            class="btn btn-outline btn-sm status-trigger"
+            type="button"
+            on:click|stopPropagation={onTriggerClick}
+          >
+            <span>{current?.name ?? 'Set status'}</span>
+            <span class="chev">{@html icons.chevronDown}</span>
+          </button>
+          {#if menuOpen}
+            <div class="sel-menu" use:floatingAnchor>
+              {#each available as state (state.id)}
+                <button
+                  type="button"
+                  class="opt"
+                  class:sel={current?.id === state.id}
+                  on:click={() => selectState(state)}
+                >
+                  <span>{state.name}</span>
+                  <span class="check">{@html icons.check}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
         {/if}
-      {/if}
-    </div>
-  {/if}
-  <button
-    class="btn btn-outline btn-sm"
-    class:btn-active={showDiff}
-    title="Review the worktree diff and comment on lines"
-    disabled={!session.repo || !session.branch}
-    on:click={toggleDiff}
-  >
-    {@html icons.fileDiff} <span class="btn-label">Diff</span>
-    {#if pendingCommentCount > 0}
-      <span class="diff-count">{pendingCommentCount}</span>
+      </div>
     {/if}
-  </button>
-  {#if appRunning}
-    {#if appUrl}
-      <a
+    <button
+      class="btn btn-outline btn-sm"
+      class:btn-active={showDiff}
+      title="Review the worktree diff and comment on lines"
+      disabled={!session.repo || !session.branch}
+      on:click={toggleDiff}
+    >
+      {@html icons.fileDiff} <span class="btn-label">Diff</span>
+      {#if pendingCommentCount > 0}
+        <span class="diff-count">{pendingCommentCount}</span>
+      {/if}
+    </button>
+    {#if appRunning}
+      {#if appUrl}
+        <a
+          class="btn btn-outline btn-sm"
+          title="Open the running app over Tailscale"
+          href={appUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          >{@html icons.externalLink} <span class="btn-label">Open app</span></a
+        >
+      {/if}
+      <button
         class="btn btn-outline btn-sm"
-        title="Open the running app over Tailscale"
-        href={appUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        >{@html icons.externalLink} <span class="btn-label">Open app</span></a
+        title="Stop the running app"
+        disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+        on:click={() => stopAppForSession(session)}
+        >{@html icons.stop} <span class="btn-label">Stop</span></button
+      >
+      <button
+        class="btn btn-outline btn-sm"
+        title="Restart the running app"
+        disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+        on:click={() => restartAppForSession(session)}
+        >{@html icons.refresh} <span class="btn-label">Restart</span></button
+      >
+    {:else}
+      <button
+        class="btn btn-outline btn-sm"
+        title="Run the app using this repository's start command"
+        disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+        on:click={() => runAppForSession(session)}
+        >{@html icons.play} <span class="btn-label">Run</span></button
       >
     {/if}
     <button
       class="btn btn-outline btn-sm"
-      title="Stop the running app"
-      disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-      on:click={() => stopAppForSession(session)}
-      >{@html icons.stop} <span class="btn-label">Stop</span></button
+      title="Relaunch this agent with Claude Code Remote Control"
+      disabled={!hasBackend || !session.id}
+      on:click={handleRemoteControl}
+      >{@html icons.remote} <span class="btn-label">Remote control</span></button
     >
+    <div class="sel-head" id="handoffSel">
+      <button
+        class="btn btn-outline btn-sm"
+        title="Continue this run with a different agent (e.g. when this one hit its limits)"
+        disabled={!hasBackend || !session.id || session.status === 'queued' || handingOff}
+        on:click|stopPropagation={() => (handoffOpen = !handoffOpen)}
+        >{@html icons.refresh}
+        <span class="btn-label">{handingOff ? 'Handing off…' : 'Hand off'}</span></button
+      >
+      {#if handoffOpen}
+        <div class="sel-menu" use:floatingAnchor>
+          {#each handoffTargets as agent (agent.kind)}
+            <button type="button" class="opt" on:click={() => handleHandoff(agent.kind)}>
+              <span>Continue with {agent.label}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
     <button
       class="btn btn-outline btn-sm"
-      title="Restart the running app"
-      disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-      on:click={() => restartAppForSession(session)}
-      >{@html icons.refresh} <span class="btn-label">Restart</span></button
+      title="Open the worktree in your configured editor"
+      disabled={!hasBackend || !session.repo || !session.branch}
+      on:click={handleOpenEditor}
     >
-  {:else}
-    <button
-      class="btn btn-outline btn-sm"
-      title="Run the app using this repository's start command"
-      disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-      on:click={() => runAppForSession(session)}
-      >{@html icons.play} <span class="btn-label">Run</span></button
-    >
+      {@html icons.externalLink} <span class="btn-label">Editor</span>
+    </button>
+    <button class="btn btn-outline btn-sm btn-danger" on:click={handleCleanup}>
+      {@html icons.trash} <span class="btn-label">Clean up</span>
+    </button>
   {/if}
-  <button
-    class="btn btn-outline btn-sm"
-    title="Relaunch this agent with Claude Code Remote Control"
-    disabled={!hasBackend || !session.id}
-    on:click={handleRemoteControl}
-    >{@html icons.remote} <span class="btn-label">Remote control</span></button
-  >
-  <div class="sel-head" id="handoffSel">
-    <button
-      class="btn btn-outline btn-sm"
-      title="Continue this run with a different agent (e.g. when this one hit its limits)"
-      disabled={!hasBackend || !session.id || session.status === 'queued' || handingOff}
-      on:click|stopPropagation={() => (handoffOpen = !handoffOpen)}
-      >{@html icons.refresh}
-      <span class="btn-label">{handingOff ? 'Handing off…' : 'Hand off'}</span></button
-    >
-    {#if handoffOpen}
-      <div class="sel-menu" use:floatingAnchor>
-        {#each handoffTargets as agent (agent.kind)}
-          <button type="button" class="opt" on:click={() => handleHandoff(agent.kind)}>
-            <span>Continue with {agent.label}</span>
-          </button>
-        {/each}
-      </div>
-    {/if}
-  </div>
-  <button
-    class="btn btn-outline btn-sm"
-    title="Open the worktree in your configured editor"
-    disabled={!hasBackend || !session.repo || !session.branch}
-    on:click={handleOpenEditor}
-  >
-    {@html icons.externalLink} <span class="btn-label">Editor</span>
-  </button>
-  <button class="btn btn-outline btn-sm btn-danger" on:click={handleCleanup}>
-    {@html icons.trash} <span class="btn-label">Clean up</span>
-  </button>
 </div>
 
 <div class="term-wrap" class:hidden={showDiff}>
@@ -758,6 +764,154 @@
         Continue with {agent.label}
       </button>
     {/each}
+  </div>
+{/if}
+
+{#if $mobile}
+  <div class="term-actions">
+    {#if shouldShow}
+      <div class="sel-head" id="ticketStatusSelMob">
+        <button
+          class="btn btn-outline btn-sm status-trigger"
+          type="button"
+          disabled={!!statusError || available.length === 0}
+          title={statusError ?? current?.name ?? 'Set status'}
+          on:click|stopPropagation={onTriggerClick}
+        >
+          <span class="stat-dot" style="background:{dot}"></span>
+          <span class="chev">{@html icons.chevronDown}</span>
+        </button>
+        {#if menuOpen}
+          <div class="sel-menu" use:floatingAnchor>
+            {#each available as state (state.id)}
+              <button
+                type="button"
+                class="opt"
+                class:sel={current?.id === state.id}
+                on:click={() => selectState(state)}
+              >
+                <span>{state.name}</span>
+                <span class="check">{@html icons.check}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+    <button
+      class="btn btn-outline btn-sm"
+      class:btn-active={showDiff}
+      title="Review the worktree diff and comment on lines"
+      disabled={!session.repo || !session.branch}
+      on:click={toggleDiff}
+    >
+      {@html icons.fileDiff}
+      {#if pendingCommentCount > 0}
+        <span class="diff-count">{pendingCommentCount}</span>
+      {/if}
+    </button>
+    <div class="sel-head" id="handoffSelMob">
+      <button
+        class="btn btn-outline btn-sm"
+        title="Continue this run with a different agent"
+        disabled={!hasBackend || !session.id || session.status === 'queued' || handingOff}
+        on:click|stopPropagation={() => (handoffOpen = !handoffOpen)}>{@html icons.refresh}</button
+      >
+      {#if handoffOpen}
+        <div class="sel-menu" use:floatingAnchor>
+          {#each handoffTargets as agent (agent.kind)}
+            <button type="button" class="opt" on:click={() => handleHandoff(agent.kind)}>
+              <span>Continue with {agent.label}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+    <button class="btn btn-outline btn-sm btn-danger" title="Clean up" on:click={handleCleanup}>
+      {@html icons.trash}
+    </button>
+    <div class="sel-head" id="moreSelMob">
+      <button
+        class="btn btn-outline btn-sm"
+        type="button"
+        title="More actions"
+        on:click|stopPropagation={() => (moreOpen = !moreOpen)}>{@html icons.more}</button
+      >
+      {#if moreOpen}
+        <div class="sel-menu" use:floatingAnchor>
+          {#if appRunning}
+            {#if appUrl}
+              <button
+                type="button"
+                class="opt"
+                on:click={() => {
+                  moreOpen = false
+                  window.open(appUrl, '_blank', 'noopener,noreferrer')
+                }}
+              >
+                <span>{@html icons.externalLink} Open app</span>
+              </button>
+            {/if}
+            <button
+              type="button"
+              class="opt"
+              disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+              on:click={() => {
+                moreOpen = false
+                stopAppForSession(session)
+              }}
+            >
+              <span>{@html icons.stop} Stop</span>
+            </button>
+            <button
+              type="button"
+              class="opt"
+              disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+              on:click={() => {
+                moreOpen = false
+                restartAppForSession(session)
+              }}
+            >
+              <span>{@html icons.refresh} Restart</span>
+            </button>
+          {:else}
+            <button
+              type="button"
+              class="opt"
+              disabled={!hasBackend || !session.id || !session.branch || !session.repo}
+              on:click={() => {
+                moreOpen = false
+                runAppForSession(session)
+              }}
+            >
+              <span>{@html icons.play} Run</span>
+            </button>
+          {/if}
+          <button
+            type="button"
+            class="opt"
+            disabled={!hasBackend || !session.id}
+            on:click={() => {
+              moreOpen = false
+              handleRemoteControl()
+            }}
+          >
+            <span>{@html icons.remote} Remote control</span>
+          </button>
+          <button
+            type="button"
+            class="opt"
+            disabled={!hasBackend || !session.repo || !session.branch}
+            on:click={() => {
+              moreOpen = false
+              handleOpenEditor()
+            }}
+          >
+            <span>{@html icons.externalLink} Editor</span>
+          </button>
+        </div>
+      {/if}
+    </div>
   </div>
 {/if}
 
