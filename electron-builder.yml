@@ -18,3 +18,4 @@ linux:
 
 mac:
   target: dmg
+  icon: public/icons/icon-512.png
