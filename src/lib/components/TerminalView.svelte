@@ -996,6 +996,13 @@
     color: hsl(var(--muted-foreground));
     display: flex;
   }
+  @media (max-width: 700px) {
+    /* Let app.css's .term-actions square-chip sizing win — the scoped
+       min-width above would otherwise outrank it in the cascade. */
+    .term-actions .status-trigger {
+      min-width: 0;
+    }
+  }
   .sel-head {
     position: relative;
   }
