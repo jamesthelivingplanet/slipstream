@@ -91,7 +91,8 @@ export function createServices(root: string): IpcDeps {
     sessionStore,
   })
   const deps: IpcDeps = {
-    repos: createRepoRegistry(db, root),
+    // TASK-7EA83: managed clones live under ~/.repositories (beside ~/.worktrees), not the app data dir.
+    repos: createRepoRegistry(db, os.homedir()),
     worktrees: createWorktreeManager(os.homedir()),
     sessions,
     ports: createPortBroker(),

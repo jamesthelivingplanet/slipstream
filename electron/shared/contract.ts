@@ -6,10 +6,9 @@
  * to change, that is a coordinated decision. Agents implement against it.
  *
  * Filesystem conventions (locked):
- *   repos      → <root>/.repositories/<id>
+ *   repos      → ~/.repositories/<id>
  *   worktrees  → ~/.worktrees/<org>-<name>/<branch>
  *   branches   → always cut from the repo's base branch (main/master/develop)
- *   <root>     → app data dir (see paths.ts, owned by integration layer)
  */
 
 export type SessionStatus =
@@ -353,7 +352,7 @@ export interface IRepoRegistry {
    *  Stamps the repo with `ownerId` (defaults to 'local' for the single-user tier). */
   register(absPath: string, ownerId?: string): Promise<RepoDTO>
   /** Clone a repo from its git remote URL into the managed location
-   *  (`<root>/.repositories/<id>`) and register it. Idempotent: reuses an
+   *  (`~/.repositories/<id>`) and register it. Idempotent: reuses an
    *  existing managed clone with the same remote. Throws a clear error when the
    *  clone fails (bad URL, auth, network). Stamps `ownerId` (defaults 'local'). */
   registerByUrl(remoteUrl: string, ownerId?: string): Promise<RepoDTO>
