@@ -37,6 +37,7 @@ import type {
   PromptTemplateDTO,
   SessionOutcomeDTO,
   SessionHistoryEntry,
+  SessionAgentEventDTO,
   PrStatusDTO,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
@@ -99,6 +100,8 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   const prListeners = new Set<PrCb>()
   type WriteLockCb = (state: WriteLockState) => void
   const writeLockListeners = new Set<WriteLockCb>()
+  type AgentEventCb = (event: SessionAgentEventDTO) => void
+  const agentEventListeners = new Set<AgentEventCb>()
 
   function isOpen(): boolean {
     return open && !!ws && ws.readyState === WS.OPEN
@@ -207,6 +210,9 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
         } else if (msg.channel === IPC.sessionWriteLock) {
           const [state] = msg.args as [WriteLockState]
           for (const cb of writeLockListeners) cb(state)
+        } else if (msg.channel === IPC.sessionAgentEvent) {
+          const [event] = msg.args as [SessionAgentEventDTO]
+          for (const cb of agentEventListeners) cb(event)
         }
       }
     }
@@ -585,6 +591,15 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     getPrStatus(sessionId: string): Promise<PrStatusDTO | null> {
       return request(IPC.sessionPrStatus, [sessionId]) as Promise<PrStatusDTO | null>
+    },
+
+    listSessionAgentEvents(sessionId: string): Promise<SessionAgentEventDTO[]> {
+      return request(IPC.listSessionAgentEvents, [sessionId]) as Promise<SessionAgentEventDTO[]>
+    },
+
+    onSessionAgentEvent(cb: AgentEventCb): () => void {
+      agentEventListeners.add(cb)
+      return () => agentEventListeners.delete(cb)
     },
   }
 }

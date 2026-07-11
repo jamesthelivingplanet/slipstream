@@ -304,6 +304,41 @@ export interface IOutcomeStore {
   delete(sessionId: string): void
 }
 
+/* ───────── Agent CLI events (FLO-104) ───────── */
+
+/** Why a session is in `needs`, as reported by the slipstream CLI. Carried as
+ *  metadata on the `status` event — deliberately NOT a new SessionStatus
+ *  member, so every status consumer (detector, reaper, UI badges) stays
+ *  reason-blind. */
+export type NeedsReason = 'input' | 'blocked' | 'approval'
+
+/** Extra context on a `status` event sourced from the status.json sentinel. */
+export interface StatusMeta {
+  reason?: NeedsReason
+  message?: string
+}
+
+export type AgentEventKind = 'checkpoint' | 'artifact' | 'approval'
+
+/** One structured event appended by the slipstream CLI to the session's
+ *  events.ndjson sentinel (FLO-104). Persisted, no dedicated UI panel. */
+export interface SessionAgentEventDTO {
+  sessionId: string
+  kind: AgentEventKind
+  message?: string
+  /** Absolute path of the published artifact copy (kind 'artifact' only). */
+  path?: string
+  ts: number // epoch ms, as written by the CLI
+}
+
+export interface IAgentEventStore {
+  /** Idempotent on (sessionId, kind, ts) — watcher replays after a daemon
+   *  restart re-deliver history and must not duplicate rows. */
+  insert(e: SessionAgentEventDTO): void
+  list(sessionId: string): SessionAgentEventDTO[]
+  delete(sessionId: string): void
+}
+
 /** One bucket of a by-repo / by-day usage summary (FLO-94). */
 export interface UsageBucket {
   key: string // repoId (byRepo) or 'YYYY-MM-DD' (byDay)
@@ -404,10 +439,14 @@ export interface IWorktreeManager {
 
 export interface SessionEvents {
   data: (sessionId: string, chunk: string, seq: number) => void
-  status: (sessionId: string, status: SessionStatus) => void
+  /** `meta` is present only when the change came from the status.json
+   *  sentinel and it carried a reason/message (slipstream CLI, FLO-104). */
+  status: (sessionId: string, status: SessionStatus, meta?: StatusMeta) => void
   exit: (sessionId: string, code: number) => void
   pr: (sessionId: string, prUrl: string) => void
   outcome: (sessionId: string, outcome: SessionOutcomeDTO) => void
+  /** Structured checkpoint/artifact/approval event from events.ndjson (FLO-104). */
+  agentEvent: (sessionId: string, event: SessionAgentEventDTO) => void
   /** User keystrokes were written to the session's PTY (write() is only
    *  reachable via the writeSession RPC, i.e. a human typing in a terminal). */
   input: (sessionId: string) => void
@@ -735,6 +774,12 @@ export interface SlipstreamApi {
    *  when the session has no prUrl yet. Never rejects for a provider-side
    *  failure — see PrStatusDTO.error. */
   getPrStatus(sessionId: string): Promise<PrStatusDTO | null>
+
+  /** Persisted checkpoint/artifact/approval events reported by the slipstream
+   *  CLI for an owned session, oldest first (FLO-104). */
+  listSessionAgentEvents(sessionId: string): Promise<SessionAgentEventDTO[]>
+  /** Live agent-event push for sessions this client can see. Returns unsubscribe fn. */
+  onSessionAgentEvent(cb: (event: SessionAgentEventDTO) => void): () => void
 }
 
 export const IPC = {
@@ -801,6 +846,8 @@ export const IPC = {
   getSessionOutcome: 'session:outcome',
   listSessionHistory: 'history:list',
   sessionPrStatus: 'session:prStatus',
+  listSessionAgentEvents: 'session:agentEvents',
+  sessionAgentEvent: 'session:agentEvent', // main → renderer push
 } as const
 
 declare global {

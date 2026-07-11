@@ -169,10 +169,15 @@ export function createRpc(
     emit(IPC.sessionExit, id, code)
   }
 
+  function onAgentEvent(_id: string, event: import('../shared/contract.js').SessionAgentEventDTO) {
+    emit(IPC.sessionAgentEvent, event)
+  }
+
   deps.sessions.on('data', onData)
   deps.sessions.on('status', onStatus)
   deps.sessions.on('pr', onPr)
   deps.sessions.on('exit', onExit)
+  deps.sessions.on('agentEvent', onAgentEvent)
 
   function onLockChange(sessionId: string): void {
     if (!coord!.isViewer(sessionId, clientId)) return
@@ -929,6 +934,14 @@ export function createRpc(
         return resolveOutcome(id)
       }
 
+      case IPC.listSessionAgentEvents: {
+        const id = args[0] as string
+        // Owner-scoped like getSessionOutcome: missing and other-owner rows
+        // surface the same "not found".
+        if (!ownedSession(id)) throw new Error(`Session not found: ${id}`)
+        return deps.agentEventStore?.list(id) ?? []
+      }
+
       case IPC.listSessionHistory: {
         const sessions = deps.sessionStore.list().filter(ownedByCaller)
         sessions.sort((a, b) => b.createdAt - a.createdAt)
@@ -970,6 +983,7 @@ export function createRpc(
     deps.sessions.off('status', onStatus)
     deps.sessions.off('pr', onPr)
     deps.sessions.off('exit', onExit)
+    deps.sessions.off('agentEvent', onAgentEvent)
     if (coord) {
       coord.dropClient(clientId)
       coord.off('change', onLockChange)

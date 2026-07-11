@@ -1,6 +1,11 @@
 import type { Database } from 'better-sqlite3'
 import type { IConfigStore } from './configStore.js'
-import type { ISessionManager, ISessionStore, SessionStatus } from '../shared/contract.js'
+import type {
+  ISessionManager,
+  ISessionStore,
+  SessionStatus,
+  StatusMeta,
+} from '../shared/contract.js'
 import type { NotifyPrefs, PushSubscriptionDTO } from '../shared/contract.js'
 import {
   allPushSubscriptions,
@@ -136,12 +141,12 @@ export function createPushService(deps: {
     notified.delete(sessionId)
   })
 
-  sessions.on('status', (sessionId: string, next: SessionStatus) => {
+  sessions.on('status', (sessionId: string, next: SessionStatus, meta?: StatusMeta) => {
     const prev = lastStatus.get(sessionId)
     lastStatus.set(sessionId, next)
 
     const kind = transitionKind(prev, next)
-    if (kind) notifyTransition(sessionId, next, kind)
+    if (kind) notifyTransition(sessionId, next, kind, meta)
 
     // Reaped sessions suppress their 'exit' event (sessionManager.reap sets
     // disposed before killing the PTY), so clean up here instead — after the
@@ -153,7 +158,11 @@ export function createPushService(deps: {
     sessionId: string,
     next: SessionStatus,
     kind: 'needs' | 'done' | 'running',
+    meta?: StatusMeta,
   ) {
+    // Episode dedupe is per KIND, not per reason: a blocked→approval sequence
+    // within one episode notifies once (both are `needs`). Accepted trade-off —
+    // re-arming on reason change would re-notify on detector flaps too.
     const seen = notified.get(sessionId) ?? new Set<'needs' | 'done' | 'running'>()
     if (seen.has(kind)) return
     seen.add(kind)
@@ -162,8 +171,14 @@ export function createPushService(deps: {
     const session = sessionStore.get(sessionId)
     const tid = session?.tid ?? sessionId
 
+    const needsTitle =
+      meta?.reason === 'blocked'
+        ? `⛔ ${tid} is blocked`
+        : meta?.reason === 'approval'
+          ? `🔐 ${tid} requests approval`
+          : `⚠️ ${tid} needs your input`
     const texts: Record<string, string> = {
-      needs: `⚠️ ${tid} needs your input`,
+      needs: needsTitle,
       done: `✅ ${tid} is done`,
       running: `▶️ ${tid} started`,
     }
@@ -172,7 +187,8 @@ export function createPushService(deps: {
       sessionId,
       tid,
       title: texts[kind],
-      body: session?.title ?? '',
+      // The agent's own message (why it stopped) beats the ticket title.
+      body: meta?.message ?? session?.title ?? '',
       status: next,
     })
 

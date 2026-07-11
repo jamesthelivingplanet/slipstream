@@ -15,6 +15,7 @@ import { createSessionStore, restoreInterruptedSessions } from '../services/sess
 import { createPromptTemplateStore } from '../services/promptTemplates.js'
 import { createTicketWriteback } from '../services/ticketWriteback.js'
 import { createOutcomeStore } from '../services/outcomeStore.js'
+import { createAgentEventStore } from '../services/agentEventStore.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createTailscaleExposer } from '../services/tailscale.js'
@@ -65,6 +66,7 @@ export function createServices(root: string): IpcDeps {
   const configStore = createConfigStore(db, { encryptor: createSafeStorageEncryptor() })
   const sessionStore = createSessionStore(db)
   const outcomeStore = createOutcomeStore(db)
+  const agentEventStore = createAgentEventStore(db)
   // FLO-46: mark orphaned in-flight sessions as interrupted on boot
   restoreInterruptedSessions(sessionStore)
   const runLogger = createRunLogger(root)
@@ -83,7 +85,13 @@ export function createServices(root: string): IpcDeps {
   // finishes with no UI attached still write its final state to SQLite.
   // FLO-97: also persists structured session outcomes reported via the app
   // MCP's report_outcome tool.
-  createSessionPersistence({ sessions, store: sessionStore, outcomes: outcomeStore })
+  // FLO-104: also persists checkpoint/artifact/approval events from events.ndjson.
+  createSessionPersistence({
+    sessions,
+    store: sessionStore,
+    outcomes: outcomeStore,
+    agentEvents: agentEventStore,
+  })
   const push = createPushService({
     config: configStore,
     store: createDbPushStore(db),
@@ -102,6 +110,7 @@ export function createServices(root: string): IpcDeps {
     sessionStore,
     promptTemplates: createPromptTemplateStore(db),
     outcomeStore,
+    agentEventStore,
     editor: createEditorLauncher(),
     appRunner: createAppRunner(),
     tailscale: createTailscaleExposer(),

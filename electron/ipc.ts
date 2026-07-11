@@ -7,6 +7,7 @@ import type {
   ISessionStore,
   IPromptTemplateStore,
   IOutcomeStore,
+  IAgentEventStore,
   IAppRunner,
   ITailscaleExposer,
   TicketSource,
@@ -38,6 +39,10 @@ export interface IpcDeps {
   /** Structured final session outcomes (FLO-97), reported via the app MCP's
    *  report_outcome tool and persisted independent of the output ring buffer. */
   outcomeStore: IOutcomeStore
+  /** Checkpoint/artifact/approval events reported by the slipstream CLI
+   *  (FLO-104). Optional so tests can omit it; listSessionAgentEvents then
+   *  returns []. */
+  agentEventStore?: IAgentEventStore
   editor: IEditorLauncher
   appRunner: IAppRunner
   /** Optional: when present, launched apps are also published on the tailnet. */

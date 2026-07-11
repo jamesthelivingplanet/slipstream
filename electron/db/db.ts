@@ -5,6 +5,7 @@ import type {
   RepoSettings,
   PromptTemplateDTO,
   SessionOutcomeDTO,
+  SessionAgentEventDTO,
 } from '../shared/contract.js'
 import { runMigrations } from './migrations.js'
 
@@ -89,6 +90,7 @@ export function getSession(db: Database.Database, id: string): SessionDTO | unde
 
 export function deleteSession(db: Database.Database, id: string): void {
   db.prepare('DELETE FROM session_outcomes WHERE sessionId = ?').run(id)
+  db.prepare('DELETE FROM session_agent_events WHERE sessionId = ?').run(id)
   db.prepare('DELETE FROM sessions WHERE id = ?').run(id)
 }
 
@@ -128,6 +130,40 @@ export function allSessionOutcomes(db: Database.Database): SessionOutcomeDTO[] {
 
 export function deleteSessionOutcome(db: Database.Database, sessionId: string): void {
   db.prepare('DELETE FROM session_outcomes WHERE sessionId = ?').run(sessionId)
+}
+
+// ── Session agent events (FLO-104) ───────────────────────────────────────────
+
+/** INSERT OR IGNORE on the (sessionId, kind, ts) unique index — the watcher
+ *  replays the whole events.ndjson after a daemon restart, so inserts must be
+ *  idempotent. */
+export function insertSessionAgentEvent(db: Database.Database, e: SessionAgentEventDTO): void {
+  db.prepare(
+    `
+    INSERT OR IGNORE INTO session_agent_events (sessionId, kind, message, path, ts)
+    VALUES (@sessionId, @kind, @message, @path, @ts)
+  `,
+  ).run({ ...e, message: e.message ?? null, path: e.path ?? null })
+}
+
+export function listSessionAgentEvents(
+  db: Database.Database,
+  sessionId: string,
+): SessionAgentEventDTO[] {
+  const rows = db
+    .prepare(
+      'SELECT sessionId, kind, message, path, ts FROM session_agent_events WHERE sessionId = ? ORDER BY ts',
+    )
+    .all(sessionId) as (SessionAgentEventDTO & { message: string | null; path: string | null })[]
+  return rows.map((row) => ({
+    ...row,
+    message: row.message ?? undefined,
+    path: row.path ?? undefined,
+  }))
+}
+
+export function deleteSessionAgentEvents(db: Database.Database, sessionId: string): void {
+  db.prepare('DELETE FROM session_agent_events WHERE sessionId = ?').run(sessionId)
 }
 
 export function deleteRepo(db: Database.Database, id: string): void {
