@@ -4,8 +4,9 @@
  * Agents run arbitrary repo code, so they must not inherit the daemon's
  * internal variables — above all SLIPSTREAM_TOKEN, which would let worktree
  * code open the daemon's WebSocket RPC and drive every other session. The
- * app MCP server does not rely on inheritance either: its env is written
- * explicitly into the per-session MCP config (see mcpConfig.ts).
+ * slipstream CLI needs none of these: its identity comes from the
+ * SLIPSTREAM_DATA_DIR/SESSION_ID/BASE/BRANCH overrides injected per session
+ * (see agentCliProvision.ts), none of which are secrets.
  *
  * Pure (no node-pty import) so it stays unit-testable under plain Node.
  */

@@ -100,6 +100,22 @@ CREATE TABLE session_outcomes (
   reportedAt INTEGER NOT NULL
 )
 `),
+  // 5 — FLO-104: checkpoint/artifact/approval events reported by the slipstream
+  // CLI via events.ndjson. The unique index makes replay idempotent: the
+  // watcher re-delivers the whole file after a daemon restart and inserts use
+  // INSERT OR IGNORE.
+  (db) =>
+    db.exec(`
+CREATE TABLE session_agent_events (
+  sessionId TEXT NOT NULL,
+  kind      TEXT NOT NULL,
+  message   TEXT,
+  path      TEXT,
+  ts        INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_session_agent_events_dedupe
+  ON session_agent_events (sessionId, kind, ts)
+`),
 ]
 
 /** Apply any migrations newer than the DB's current user_version, atomically. */

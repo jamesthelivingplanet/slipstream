@@ -448,6 +448,44 @@ describe('createRpc', () => {
     })
   })
 
+  describe('session agent events (FLO-104)', () => {
+    it('listSessionAgentEvents returns the stored events for an owned session', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      const events = [{ sessionId: 's1', kind: 'checkpoint', message: 'a', ts: 1 }]
+      deps.agentEventStore = {
+        insert: vi.fn(),
+        list: vi.fn().mockReturnValue(events),
+        delete: vi.fn(),
+      }
+
+      const result = await rpc.handle(IPC.listSessionAgentEvents, ['s1'])
+      expect(result).toEqual(events)
+      expect(deps.agentEventStore.list).toHaveBeenCalledWith('s1')
+    })
+
+    it('listSessionAgentEvents rejects for a session the caller does not own', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
+      deps.agentEventStore = { insert: vi.fn(), list: vi.fn(), delete: vi.fn() }
+
+      await expect(rpc.handle(IPC.listSessionAgentEvents, ['hers'])).rejects.toThrow(
+        /Session not found/,
+      )
+      expect(deps.agentEventStore.list).not.toHaveBeenCalled()
+    })
+
+    it('listSessionAgentEvents returns [] when no store is wired (test fallback)', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      const result = await rpc.handle(IPC.listSessionAgentEvents, ['s1'])
+      expect(result).toEqual([])
+    })
+
+    it('fans out agentEvent session events on the push channel', () => {
+      const event = { sessionId: 's1', kind: 'approval', message: 'ok?', ts: 5 }
+      deps._emit('agentEvent', 's1', event)
+      expect(emitted).toContainEqual([IPC.sessionAgentEvent, event])
+    })
+  })
+
   describe('session outcome + history (FLO-97)', () => {
     function makeOutcome(overrides: Partial<SessionOutcomeDTO> = {}): SessionOutcomeDTO {
       return {
@@ -483,9 +521,9 @@ describe('createRpc', () => {
 
       beforeEach(() => {
         dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-outcome-'))
-        deps.appMcp = {
-          configDir: dataDir,
-          appMcpJsPath: '/app/app-mcp.js',
+        deps.agentCli = {
+          binDir: path.join(dataDir, 'bin'),
+          cliJsPath: '/app/slipstream-cli.js',
           electronPath: '/usr/bin/electron',
           dataDir,
         }
@@ -981,83 +1019,59 @@ describe('createRpc', () => {
     expect(result).toEqual({ removed: true })
   })
 
-  describe('app MCP config lifecycle', () => {
-    let configDir: string
+  describe('slipstream CLI session env (FLO-104)', () => {
+    const cliEnv = expect.objectContaining({
+      SLIPSTREAM_DATA_DIR: '/data',
+      SLIPSTREAM_SESSION_ID: 's1',
+      PATH: expect.stringMatching(/^\/data\/bin:/) as unknown,
+    }) as unknown
 
     beforeEach(() => {
-      configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-mcp-'))
-      deps.appMcp = {
-        configDir,
-        appMcpJsPath: '/app/app-mcp.js',
+      deps.agentCli = {
+        binDir: '/data/bin',
+        cliJsPath: '/app/slipstream-cli.js',
         electronPath: '/usr/bin/electron',
         dataDir: '/data',
       }
     })
 
-    afterEach(() => {
-      fs.rmSync(configDir, { recursive: true, force: true })
-    })
-
-    it('resumeSession rewrites the config file and passes mcpConfigPath to sessions.resume', async () => {
+    it('resumeSession passes the CLI identity env + PATH prepend to sessions.resume', async () => {
       deps.sessionStore.upsert(makeSession())
       ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
 
       await rpc.handle(IPC.resumeSession, ['s1'])
 
-      const expected = path.join(configDir, 's1.json')
-      expect(deps.sessions.resume).toHaveBeenCalledWith(
-        expect.objectContaining({ mcpConfigPath: expected }),
-      )
-      expect(fs.existsSync(expected)).toBe(true)
+      expect(deps.sessions.resume).toHaveBeenCalledWith(expect.objectContaining({ env: cliEnv }))
     })
 
-    it('attachRemoteControl rewrites the config file and passes mcpConfigPath', async () => {
+    it('attachRemoteControl passes the CLI identity env', async () => {
       deps.sessionStore.upsert(makeSession())
 
       await rpc.handle(IPC.attachRemoteControl, ['s1'])
 
-      const expected = path.join(configDir, 's1.json')
       expect(deps.sessions.attachRemoteControl).toHaveBeenCalledWith(
-        expect.objectContaining({ mcpConfigPath: expected }),
+        expect.objectContaining({ env: cliEnv }),
       )
-      expect(fs.existsSync(expected)).toBe(true)
     })
 
-    it('handoffSession rewrites the config file and passes mcpConfigPath to sessions.handoff', async () => {
+    it('handoffSession passes the CLI identity env to sessions.handoff', async () => {
       deps.sessionStore.upsert(makeSession())
 
       await rpc.handle(IPC.handoffSession, ['s1', 'pi'])
 
-      const expected = path.join(configDir, 's1.json')
-      expect(deps.sessions.handoff).toHaveBeenCalledWith(
-        expect.objectContaining({ mcpConfigPath: expected }),
-      )
-      expect(fs.existsSync(expected)).toBe(true)
+      expect(deps.sessions.handoff).toHaveBeenCalledWith(expect.objectContaining({ env: cliEnv }))
     })
 
-    it('cleanupSession deletes the per-session config file when removal succeeds', async () => {
-      await rpc.handle(IPC.startSession, [
-        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', sessionId: 's1' },
-      ])
-      const configPath = path.join(configDir, 's1.json')
-      expect(fs.existsSync(configPath)).toBe(true)
+    it('never re-introduces a scrubbed daemon key through the CLI env', async () => {
+      deps.sessionStore.upsert(makeSession())
+      ;(deps.sessions as unknown as { has: ReturnType<typeof vi.fn> }).has.mockReturnValue(false)
 
-      await rpc.handle(IPC.cleanupSession, ['s1'])
-      expect(fs.existsSync(configPath)).toBe(false)
-    })
+      await rpc.handle(IPC.resumeSession, ['s1'])
 
-    it('cleanupSession keeps the config file when removal fails', async () => {
-      await rpc.handle(IPC.startSession, [
-        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', sessionId: 's1' },
-      ])
-      const configPath = path.join(configDir, 's1.json')
-      ;(deps.worktrees.remove as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        removed: false,
-        reason: 'dirty',
-      })
-
-      await rpc.handle(IPC.cleanupSession, ['s1'])
-      expect(fs.existsSync(configPath)).toBe(true)
+      const call = (deps.sessions.resume as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+        env: Record<string, string>
+      }
+      expect(Object.keys(call.env)).not.toContain('SLIPSTREAM_TOKEN')
     })
   })
 

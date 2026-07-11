@@ -112,7 +112,7 @@ export class StatusDetector implements IStatusDetector {
   private exited = false
   private exitCode: number | null = null
 
-  // Out-of-band signal reported via the app MCP's report_status tool.
+  // Out-of-band signal reported via the slipstream CLI's status commands.
   private signalState: 'needs' | 'done' | 'running' | null = null
   private signalAt = 0
 
@@ -141,8 +141,8 @@ export class StatusDetector implements IStatusDetector {
   }
 
   /**
-   * Apply an out-of-band status signal reported via the app MCP's
-   * `report_status` tool. This is the reliable channel: it doesn't depend on
+   * Apply an out-of-band status signal reported via the
+   * slipstream CLI. This is the reliable channel: it doesn't depend on
    * scraping PTY output. `done` is sticky (see status()); `needs`/`running`
    * are overridden only by a strictly-newer PTY marker or a process exit.
    */

@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store'
 import type { Filter, Repo, Session, Status, Ticket, BackendKind, Source } from './types'
-import type { McpStatusDTO, DiagnosticsDTO, SessionDTO } from '../../electron/shared/contract.js'
+import type { CliStatusDTO, DiagnosticsDTO, SessionDTO } from '../../electron/shared/contract.js'
 import { branchFor } from './branch'
 import {
   hasBackend,
@@ -21,7 +21,7 @@ import {
   appStatus,
   onSessionStatus,
   onSessionPr,
-  getMcpStatus as ipcGetMcpStatus,
+  getCliStatus as ipcGetCliStatus,
   getDiagnostics as ipcGetDiagnostics,
 } from './ipc'
 import { pushToast } from './toast'
@@ -144,20 +144,20 @@ export const contentResolvedAt = writable<number>(0)
 // Bumped by the header refresh button to force a re-fetch of the selected agent's content.
 export const contentRefreshNonce = writable<number>(0)
 
-// FLO-61: MCP self-test status, shared between the header dot and the Settings
+// FLO-61: slipstream CLI self-test status, shared between the header dot and the Settings
 // Integrations panel so both read the same data without duplicate fetches.
-export const mcpStatus = writable<McpStatusDTO | null>(null)
-export const mcpChecking = writable(false)
+export const cliStatus = writable<CliStatusDTO | null>(null)
+export const cliChecking = writable(false)
 
-export async function refreshMcpStatus(): Promise<void> {
+export async function refreshCliStatus(): Promise<void> {
   if (!hasBackend) return
-  mcpChecking.set(true)
+  cliChecking.set(true)
   try {
-    mcpStatus.set(await ipcGetMcpStatus())
+    cliStatus.set(await ipcGetCliStatus())
   } catch (e) {
-    mcpStatus.set({ up: false, tools: [], checkedAt: Date.now(), error: cleanError(e) })
+    cliStatus.set({ up: false, commands: [], checkedAt: Date.now(), error: cleanError(e) })
   } finally {
-    mcpChecking.set(false)
+    cliChecking.set(false)
   }
 }
 

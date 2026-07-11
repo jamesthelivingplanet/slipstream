@@ -2,9 +2,11 @@ import { describe, it, expect, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { createSessionPersistence } from './sessionPersistence.js'
 import type {
+  IAgentEventStore,
   IOutcomeStore,
   ISessionManager,
   ISessionStore,
+  SessionAgentEventDTO,
   SessionDTO,
   SessionOutcomeDTO,
 } from '../shared/contract.js'
@@ -61,7 +63,36 @@ function makeFakes() {
     },
   }
 
-  return { emitter, sessions, store, map, upsert, outcomes, outcomeMap, outcomeUpsert }
+  // Mimics the real store's INSERT OR IGNORE on (sessionId, kind, ts).
+  const eventRows: SessionAgentEventDTO[] = []
+  const eventInsert = vi.fn((e: SessionAgentEventDTO) => {
+    if (!eventRows.some((r) => r.sessionId === e.sessionId && r.kind === e.kind && r.ts === e.ts)) {
+      eventRows.push(e)
+    }
+  })
+  const agentEvents: IAgentEventStore = {
+    insert: eventInsert,
+    list: (id) => eventRows.filter((r) => r.sessionId === id),
+    delete: (id) => {
+      for (let i = eventRows.length - 1; i >= 0; i--) {
+        if (eventRows[i].sessionId === id) eventRows.splice(i, 1)
+      }
+    },
+  }
+
+  return {
+    emitter,
+    sessions,
+    store,
+    map,
+    upsert,
+    outcomes,
+    outcomeMap,
+    outcomeUpsert,
+    agentEvents,
+    eventRows,
+    eventInsert,
+  }
 }
 
 describe('createSessionPersistence', () => {
@@ -202,6 +233,53 @@ describe('createSessionPersistence', () => {
 
     expect(outcomeUpsert).toHaveBeenCalledTimes(2)
     expect(outcomes.get('s1')?.summary).toBe('Second attempt')
+  })
+
+  it('persists an agent event when no client is attached (FLO-104)', () => {
+    const { emitter, sessions, store, outcomes, agentEvents, eventRows } = makeFakes()
+    createSessionPersistence({ sessions, store, outcomes, agentEvents })
+
+    const event: SessionAgentEventDTO = {
+      sessionId: 's1',
+      kind: 'checkpoint',
+      message: 'tests green',
+      ts: 1000,
+    }
+    emitter.emit('agentEvent', 's1', event)
+
+    expect(eventRows).toEqual([event])
+  })
+
+  it('is replay-idempotent: re-delivering the same event does not duplicate it', () => {
+    const { emitter, sessions, store, outcomes, agentEvents, eventRows, eventInsert } = makeFakes()
+    createSessionPersistence({ sessions, store, outcomes, agentEvents })
+
+    const event: SessionAgentEventDTO = { sessionId: 's1', kind: 'approval', ts: 42 }
+    // Watcher replays the whole events.ndjson after a daemon restart.
+    emitter.emit('agentEvent', 's1', event)
+    emitter.emit('agentEvent', 's1', event)
+
+    expect(eventInsert).toHaveBeenCalledTimes(2)
+    expect(eventRows).toHaveLength(1)
+  })
+
+  it('tolerates a missing agentEvents store (optional dep)', () => {
+    const { emitter, sessions, store, outcomes } = makeFakes()
+    createSessionPersistence({ sessions, store, outcomes })
+
+    expect(() =>
+      emitter.emit('agentEvent', 's1', { sessionId: 's1', kind: 'checkpoint', ts: 1 }),
+    ).not.toThrow()
+  })
+
+  it('stops persisting agent events after dispose()', () => {
+    const { emitter, sessions, store, outcomes, agentEvents, eventInsert } = makeFakes()
+    const persistence = createSessionPersistence({ sessions, store, outcomes, agentEvents })
+
+    persistence.dispose()
+    emitter.emit('agentEvent', 's1', { sessionId: 's1', kind: 'checkpoint', ts: 1 })
+
+    expect(eventInsert).not.toHaveBeenCalled()
   })
 
   it('stops persisting outcomes after dispose()', () => {

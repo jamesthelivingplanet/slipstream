@@ -47,7 +47,6 @@ export interface StartArgsCtx {
   system: string
   user: string
   opencodePort?: number
-  mcpConfigPath?: string
 }
 
 export interface ResumeArgsCtx {
@@ -58,7 +57,6 @@ export interface ResumeArgsCtx {
   opencodePort?: number
   /** Whether a Claude Code transcript already exists for this session id. */
   hasTranscript: boolean
-  mcpConfigPath?: string
 }
 
 /**
@@ -136,28 +134,22 @@ function withClaudePromptArg(args: string[], prompt: string | null | undefined):
 export const claudeCodeBackend: AgentBackend = {
   kind: 'claude-code',
   statusSource: 'pty',
-  buildStartArgs({ sessionId, system, user, mcpConfigPath }) {
+  buildStartArgs({ sessionId, system, user }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
     const args = withClaudePromptArg(
       [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId],
       userPrompt,
     )
-    if (mcpConfigPath) {
-      args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
-    }
     return { cmd: CLAUDE_BIN, args }
   },
-  buildResumeArgs({ sessionId, system, user, hasTranscript, mcpConfigPath }) {
+  buildResumeArgs({ sessionId, system, user, hasTranscript }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
     const args = hasTranscript
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, sessionId]
       : [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
-    if (mcpConfigPath) {
-      args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
-    }
     return { cmd: CLAUDE_BIN, args }
   },
-  buildRemoteControlArgs({ sessionId, system, user, hasTranscript, mcpConfigPath }) {
+  buildRemoteControlArgs({ sessionId, system, user, hasTranscript }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
     const args = hasTranscript
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, CLAUDE_FLAGS.resume, sessionId]
@@ -169,19 +161,13 @@ export const claudeCodeBackend: AgentBackend = {
           sessionId,
           userPrompt,
         ]
-    if (mcpConfigPath) {
-      args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
-    }
     return { cmd: CLAUDE_BIN, args }
   },
-  buildHandoffArgs({ sessionId, system, user, hasTranscript, mcpConfigPath }) {
+  buildHandoffArgs({ sessionId, system, user, hasTranscript }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
     const args = hasTranscript
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, sessionId, userPrompt]
       : [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
-    if (mcpConfigPath) {
-      args.push(CLAUDE_FLAGS.mcpConfig, mcpConfigPath)
-    }
     return { cmd: CLAUDE_BIN, args }
   },
 }

@@ -72,10 +72,34 @@ describe('buildSystemPrompt', () => {
     expect(result).toContain('tests')
   })
 
-  it('makes the resume-from-needs transition to "running" explicit', () => {
+  it('makes the resume-from-waiting transition to task-started explicit', () => {
     const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
     expect(result.toLowerCase()).toContain('resume')
-    expect(result).toContain('report_status("running")')
+    expect(result).toContain('slipstream task-started')
+  })
+
+  it('names the CLI as the only status channel and points at the skill', () => {
+    const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
+    expect(result).toContain('ONLY through the `slipstream` CLI')
+    expect(result).toContain('slipstream help')
+  })
+
+  it('covers the full lifecycle command set', () => {
+    const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
+    for (const cmd of [
+      'slipstream task-started',
+      'slipstream request-input',
+      'slipstream task-blocked',
+      'slipstream approval-request',
+      'slipstream task-complete',
+    ]) {
+      expect(result).toContain(cmd)
+    }
+  })
+
+  it('routes the merge request through slipstream open-mr', () => {
+    const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
+    expect(result).toContain('slipstream open-mr')
   })
 
   it('instructs reporting "running" before investigating or replying', () => {

@@ -44,4 +44,27 @@ describe('parseStatusSentinel', () => {
     const result = parseStatusSentinel(JSON.stringify({ state: 'done', ts: 1 }))
     expect(result?.message).toBeUndefined()
   })
+
+  describe('reason (FLO-104)', () => {
+    it.each(['input', 'blocked', 'approval'] as const)('preserves reason %s', (reason) => {
+      const result = parseStatusSentinel(JSON.stringify({ state: 'needs', ts: 1, reason }))
+      expect(result).toEqual({ state: 'needs', ts: 1, reason })
+    })
+
+    it('still parses legacy files with no reason', () => {
+      const result = parseStatusSentinel(JSON.stringify({ state: 'needs', ts: 1 }))
+      expect(result).toEqual({ state: 'needs', ts: 1 })
+      expect(result?.reason).toBeUndefined()
+    })
+
+    it('drops an unknown reason instead of rejecting the sentinel', () => {
+      const result = parseStatusSentinel(JSON.stringify({ state: 'needs', ts: 1, reason: 'bogus' }))
+      expect(result).toEqual({ state: 'needs', ts: 1 })
+    })
+
+    it('drops a non-string reason instead of rejecting the sentinel', () => {
+      const result = parseStatusSentinel(JSON.stringify({ state: 'needs', ts: 1, reason: 7 }))
+      expect(result).toEqual({ state: 'needs', ts: 1 })
+    })
+  })
 })

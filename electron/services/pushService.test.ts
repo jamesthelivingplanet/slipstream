@@ -367,6 +367,88 @@ describe('createPushService', () => {
     expect(JSON.parse(payload).body).toBe('Do work')
   })
 
+  describe('status meta (FLO-104 reasons)', () => {
+    async function firstPayload(): Promise<{ title: string; body: string }> {
+      await new Promise((r) => setTimeout(r, 10))
+      const [, payload] = send.mock.calls[0] as [PushSubscriptionDTO, string]
+      return JSON.parse(payload) as { title: string; body: string }
+    }
+
+    it('reason blocked → ⛔ title', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      makeService()
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, {
+        reason: 'blocked',
+        message: 'docker daemon down',
+      })
+      const payload = await firstPayload()
+      expect(payload.title).toContain('⛔')
+      expect(payload.title).toContain('blocked')
+      expect(payload.body).toBe('docker daemon down')
+    })
+
+    it('reason approval → 🔐 title', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      makeService()
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, {
+        reason: 'approval',
+        message: 'drop the table?',
+      })
+      const payload = await firstPayload()
+      expect(payload.title).toContain('🔐')
+      expect(payload.title).toContain('approval')
+    })
+
+    it('reason input (and no reason) → default ⚠️ needs-input title', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      makeService()
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'input' })
+      const payload = await firstPayload()
+      expect(payload.title).toContain('⚠️')
+      expect(payload.title).toContain('needs your input')
+    })
+
+    it('meta.message beats the session title as body', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      const sessionStore2 = makeSessionStore([
+        {
+          id: 's1',
+          tid: 'FLO-42',
+          title: 'Do work',
+          prompt: 'do it',
+          repoId: 'r1',
+          branch: 'flo-42',
+          status: 'running',
+          createdAt: 0,
+        },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStore2,
+        send: send as PushSender,
+        now: () => nowMs,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, {
+        reason: 'input',
+        message: 'Which DB should I use?',
+      })
+      const payload = await firstPayload()
+      expect(payload.body).toBe('Which DB should I use?')
+    })
+
+    it('episode dedupe is unchanged: blocked then approval in one episode notifies once', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      makeService()
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'blocked' })
+      sessions._emit('status', 's1', 'running' satisfies SessionStatus)
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'approval' })
+      await new Promise((r) => setTimeout(r, 10))
+      expect(send).toHaveBeenCalledOnce()
+    })
+  })
+
   it('clears per-session tracking on exit so a restarted session notifies again', async () => {
     const sub = makeSub()
     store.upsert(sub, { needs: true, done: false, running: false }, 0)

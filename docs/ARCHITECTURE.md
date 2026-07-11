@@ -61,7 +61,7 @@ Electron main  ──spawns──▶  daemon (ELECTRON_RUN_AS_NODE=1, server.js)
 | `repoRegistry` | Register/list/get/remove repos in SQLite. `register` **validates** the folder is a git work tree with commits (else throws); idempotent. |
 | `worktreeManager` | `pathFor`/`create`/`status`/`list`/`remove`/`isMerged`. **Guarded remove** refuses dirty or unmerged worktrees unless forced (squash-merged counts as merged, FLO-91). `isMerged` probes whether a branch landed on base — merge commit naming the branch (GitLab/GitHub style) or squash-equivalent patch; `ahead === 0` alone is never merged evidence (a fresh branch looks the same), so `rpc.ts`'s `sessionMerged` combines it with the session's recorded PR. Drives the refresh-button auto-cleanup in `stores.refreshAndReconcile` (the ticket-is-Done trigger rarely fires: providers filter done tickets out of `listTickets`). Diff stats + ahead/behind via git. |
 | `sessionManager` | Spawns `claude --dangerously-skip-permissions "<prompt>"` via **node-pty** in the worktree cwd; emits `data`/`status`/`exit`; `write`/`resize`/`kill`. |
-| `statusDetector` | Classifies a session from PTY output + lifecycle: recent output → `running`; idle + question-like tail → `needs`; exit 0 → `done`, non-zero → `errored`. Coarse heuristics, unit-tested. The MCP `report_status` signal (`applySignal`) overrides the heuristics; see §Session status pipeline. |
+| `statusDetector` | Classifies a session from PTY output + lifecycle: recent output → `running`; idle + question-like tail → `needs`; exit 0 → `done`, non-zero → `errored`. Coarse heuristics, unit-tested. The slipstream CLI status signal (`applySignal`) overrides the heuristics; see §Session status pipeline. |
 | `portBroker` | `floo claim <service>` in the worktree cwd → sticky port; injected as env. Swallowed if `floo` is absent. |
 | ticket provider | `ITicketProvider.listTickets()`. Currently `createEmptyProvider()` (returns `[]`); real Jira/Linear slot in behind the same interface. |
 | `promptTemplates` | `IPromptTemplateStore` — per-repo reusable kickoff prompt templates (FLO-98), synchronous CRUD over the `prompt_templates` table; owner-scoped in `rpc.ts`. |
@@ -72,11 +72,16 @@ A session's `status` has **three producers**, merged in `sessionManager.ts`:
 
 1. **PTY heuristics** (`statusDetector.ts`, backends with `statusSource: 'pty'`) — every
    data chunk is pushed into the detector and `status()` re-derived.
-2. **The MCP sentinel** (the reliable channel) — the app MCP's `report_status` tool writes
-   `status.json` to `<dataDir>/sessions/<id>/`; an `fs.watch` feeds it to
+2. **The CLI sentinel** (the reliable channel) — the `slipstream` CLI's status commands
+   (`task-started` / `request-input` / `task-blocked` / `approval-request` / `task-complete`)
+   write `status.json` to `<dataDir>/sessions/<id>/`; an `fs.watch` feeds it to
    `detector.applySignal()` (PTY backends) or emits it directly (poll backends). An applied
    signal wins over heuristics until a strictly-newer explicit tail marker or process exit;
-   MCP `done` is sticky.
+   CLI `done` is sticky. A `needs` sentinel may carry a `reason` (`input`/`blocked`/`approval`)
+   which rides along as `StatusMeta` on the `status` event — consumers stay reason-blind
+   except presentation (push titles). The same watcher tails `events.ndjson` for
+   checkpoint/artifact/approval events (`agentEvent` event, persisted via migration 5's
+   `session_agent_events`; replay after a daemon restart is deduped by INSERT OR IGNORE).
 3. **Poll-driven backends** (opencode/pi, `statusSource !== 'pty'`) — `beginStatusTracking`
    sets status from the backend's own API/session file; the detector is bypassed because
    full-screen TUI redraws make PTY scraping unreliable.
@@ -97,12 +102,15 @@ Two properties every **consumer** of the `status` event must respect:
   `input`/`exit`/`reaped`.
 
 The **agent-side contract** spans three places that must change together: the system prompt
-(`promptComposer.ts` §"Signaling your state") tells the agent when to call `report_status`;
-the tool description and per-state result text in `appMcp.ts` reinforce the next expected
-transition (agents read tool results — the resume-from-`needs`→`running` call is the one
-they drop most); `statusDetector.ts`/`statusSentinel.ts` consume it. Tests assert on prompt
-and result substrings (`promptComposer.test.ts`, `appMcp.test.ts`), so wording changes
-ripple there.
+(`promptComposer.ts` §"Signaling your state") and the `slipstream` skill
+(`cliSkillDoc.ts`, written into every worktree at `.agents/skills/slipstream/` with a
+`.claude/skills/slipstream` symlink so Claude Code, opencode, and pi all discover the one
+copy) tell the agent when to run the status commands; the per-command stdout nudges in
+`electron/cli/slipstream.ts` reinforce the next expected transition (agents read command
+output — the resume-from-waiting→`task-started` call is the one they drop most);
+`statusDetector.ts`/`statusSentinel.ts`/`agentEventsSentinel.ts` consume the sentinels.
+Tests assert on prompt and output substrings (`promptComposer.test.ts`,
+`slipstream.test.ts`, `cliSkillDoc.test.ts`), so wording changes ripple there.
 
 ## Renderer
 
@@ -242,8 +250,8 @@ at the session's last persisted PTY size (`<id>.size.json`, written by `scrollba
 
 The reaper's counterpart on the *start* side of the lifecycle is the **session scheduler**
 (`electron/services/sessionScheduler.ts`): `IPC.startSession` no longer spawns
-unconditionally. The launch procedure itself (worktree create → port claim → per-session MCP
-config → PTY spawn → persistence → ticket transition) lives in
+unconditionally. The launch procedure itself (worktree create → port claim → CLI session
+env → PTY spawn → persistence → ticket transition) lives in
 `electron/services/sessionLauncher.ts`; `rpc.ts` composes a `LaunchRequest` (system prompt
 built once, at submit time) and hands it to the daemon-singleton scheduler
 (`deps.scheduler`, wired in `core/services.ts`). Under the configurable
@@ -266,8 +274,9 @@ the DTO, and the sid is re-captured (same pattern as initial start) when handing
 opencode.
 
 The 256 KB output ring-buffer is scrollback, not a record — it truncates, and it's not
-queryable. FLO-97 gives agents a way to leave a durable, structured final summary: the app
-MCP's `report_outcome` tool (`electron/mcp/appMcp.ts`) writes an `outcome.json` sentinel next
+queryable. FLO-97 gives agents a way to leave a durable, structured final summary: the
+slipstream CLI's `task-complete` command (`electron/cli/slipstream.ts`) writes an
+`outcome.json` sentinel next
 to `status.json`/`pr.json` in `<dataDir>/sessions/<id>/`. `sessionManager.ts`'s existing
 fs.watch on that directory picks it up, parses it with `outcomeSentinel.ts` (mirrors
 `statusSentinel.ts`), and emits a typed `outcome` event; `sessionPersistence.ts` (FLO-69)

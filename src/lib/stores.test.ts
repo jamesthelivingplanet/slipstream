@@ -21,7 +21,7 @@ vi.mock('./ipc', () => ({
   appStatus: vi.fn(),
   onSessionStatus: vi.fn(),
   onSessionPr: vi.fn(),
-  getMcpStatus: vi.fn(),
+  getCliStatus: vi.fn(),
 }))
 
 import {

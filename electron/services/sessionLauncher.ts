@@ -10,7 +10,6 @@
  * launches with exactly what was requested.
  */
 
-import path from 'node:path'
 import type {
   BackendKind,
   IPortBroker,
@@ -23,7 +22,7 @@ import type {
   TicketSource,
 } from '../shared/contract.js'
 import { captureOpencodeSessionId } from './opencodeSessions.js'
-import { buildAppMcpConfig, buildOpencodeMcpConfig, writeAppMcpConfig } from './mcpConfig.js'
+import { agentSessionEnv, type AgentCliDep } from './agentCliProvision.js'
 
 export interface LaunchRequest {
   sessionId: string
@@ -45,10 +44,10 @@ export interface LaunchDeps {
   ports: IPortBroker
   sessionStore: ISessionStore
   tickets: Pick<ITicketProvider, 'startTicket'>
-  appMcp?: { configDir: string; appMcpJsPath: string; electronPath: string; dataDir: string }
+  agentCli?: AgentCliDep
 }
 
-/** Run the full launch procedure (worktree create, port claims, MCP config,
+/** Run the full launch procedure (worktree create, port claims, CLI env,
  *  PTY spawn, persistence, ticket transition) and return the live session
  *  with its assigned port attached. */
 export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promise<SessionDTO> {
@@ -75,35 +74,6 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     }
   }
 
-  let mcpConfigPath: string | undefined
-  const startEnv: Record<string, string> = {}
-  if (port !== undefined) startEnv.PORT = String(port)
-  if (deps.appMcp) {
-    mcpConfigPath = path.join(deps.appMcp.configDir, `${sessionId}.json`)
-    const config = buildAppMcpConfig({
-      appMcpJsPath: deps.appMcp.appMcpJsPath,
-      electronPath: deps.appMcp.electronPath,
-      dataDir: deps.appMcp.dataDir,
-      sessionId,
-      base: repo.base,
-      branch,
-    })
-    await writeAppMcpConfig(mcpConfigPath, config)
-
-    if (agentKind === 'opencode') {
-      startEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
-        buildOpencodeMcpConfig({
-          appMcpJsPath: deps.appMcp.appMcpJsPath,
-          electronPath: deps.appMcp.electronPath,
-          dataDir: deps.appMcp.dataDir,
-          sessionId,
-          base: repo.base,
-          branch,
-        }),
-      )
-    }
-  }
-
   const session = deps.sessions.start({
     tid,
     title,
@@ -111,12 +81,13 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     repo,
     branch,
     cwd,
-    env: Object.keys(startEnv).length > 0 ? startEnv : undefined,
+    // FLO-104: the slipstream CLI reaches every backend through the PTY env
+    // (PATH + SLIPSTREAM_* identity vars) — no per-backend config files.
+    env: agentSessionEnv(deps.agentCli, { sessionId, base: repo.base, branch, port }),
     systemPrompt,
     agentKind,
     opencodePort,
     sessionId,
-    mcpConfigPath,
     src,
   })
 

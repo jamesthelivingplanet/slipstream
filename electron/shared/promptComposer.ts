@@ -47,13 +47,15 @@ Note: CLAUDE.md already covers repo conventions \u2014 follow it but do not dupl
 
 ## Signaling your state to the app
 
-The app learns your state ONLY through the slipstream MCP \`report_status\` tool — there is no other channel. Your working state is a lifecycle, and every transition MUST be reported the instant it happens:
+The app learns your state ONLY through the \`slipstream\` CLI on your PATH — there is no other channel. Your working state is a lifecycle, and every transition MUST be reported the instant it happens:
 
-1. **running** — call this FIRST, before anything else (before investigating, before replying), whenever you begin working AND every time you resume after being idle or blocked. This includes: starting the ticket, and — most importantly — the instant the user sends a new message while you were in "needs". Do not investigate, do not reply, do not think out loud first: report "running", then act.
-2. **needs** — call this the moment you stop and are waiting on the user (a question, a decision, missing input) and cannot proceed without their reply. Call it right before you stop, not after.
-3. **done** — call this as your final action, after (and only after) the PR is open and acceptance criteria are verified met. Nothing else follows it.
+1. **\`slipstream task-started\`** — run this FIRST, before anything else (before investigating, before replying), whenever you begin working AND every time you resume after waiting on the user. This includes: starting the ticket, and — most importantly — the instant the user sends a new message while you were waiting. Do not investigate, do not reply, do not think out loud first: run \`slipstream task-started\`, then act.
+2. **\`slipstream request-input --message "..."\`** — run this the moment you stop and are waiting on the user (a question, a decision, missing input) and cannot proceed without their reply. Run it right before you stop, not after. Use \`slipstream task-blocked --message "..."\` when you cannot proceed at all, and \`slipstream approval-request --message "..."\` when you need an explicit go-ahead for a risky action.
+3. **\`slipstream task-complete --summary "..."\`** — run this as your final action, after (and only after) the PR is open and acceptance criteria are verified met. Nothing else follows it. The summary is the durable record of the run — the terminal buffer is not.
 
-The transition agents most often drop is #1's resume case: user was asked something, replies, and work resumes silently with no "running" call. Treat "the user just sent a message and I was previously blocked" as an explicit trigger to call \`report_status("running")\` before doing anything else. If you skip any of these calls, the app shows a stale or wrong status to the user.
+The transition agents most often drop is #1's resume case: user was asked something, replies, and work resumes silently with no \`task-started\` call. Treat "the user just sent a message and I was previously waiting" as an explicit trigger to run \`slipstream task-started\` before doing anything else. If you skip any of these calls, the app shows a stale or wrong status to the user.
+
+The \`slipstream\` skill in this worktree documents every command (checkpoints, artifact publishing); \`slipstream help\` prints the same reference.
 
 Ticket:
 ${tid}: ${title}
@@ -62,10 +64,10 @@ ${desc}
 
 ## Git workflow (automated — do not skip)
 
-When the ticket is complete, commit and push your changes yourself using ordinary git commands in your shell (add, commit, rebase, push). Once your branch is pushed, use the **slipstream** MCP tool \`open_merge_request\` to open a merge/pull request:
+When the ticket is complete, commit and push your changes yourself using ordinary git commands in your shell (add, commit, rebase, push). Once your branch is pushed, run \`slipstream open-mr\` to open a merge/pull request:
 
-1. Call \`open_merge_request\` with a concise title (e.g. "${tid}: ${title}") and a brief description of what changed.
-2. Report the URL returned by \`open_merge_request\` in your final message.
+1. Run \`slipstream open-mr --title "${tid}: ${title}" --description "..."\` with a brief description of what changed.
+2. Report the URL it prints in your final message.
 
 Do not skip this step — it is how the work gets reviewed.`
 }
@@ -109,7 +111,7 @@ ${prompt}${outcomeSection}
 
 The worktree already contains all progress so far — review it before doing anything else. On branch \`${branch}\`, run \`git log ${base}..HEAD\`, \`git status\`, and \`git diff ${base}...HEAD\` to see what has been done. The terminal scrollback from before is not available to you, so rely on the git state and any notes in the worktree.
 
-Then continue the task to completion, following the system-prompt instructions (report your state via the slipstream \`report_status\` tool and open the merge request via \`open_merge_request\` when done).`
+Then continue the task to completion, following the system-prompt instructions (report your state via the \`slipstream\` CLI — \`task-started\` now, then the lifecycle commands — and open the merge request via \`slipstream open-mr\` when done).`
 }
 
 export function buildAgentsMdContent(systemPrompt: string): string {

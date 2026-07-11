@@ -1,7 +1,9 @@
 import type {
+  IAgentEventStore,
   IOutcomeStore,
   ISessionManager,
   ISessionStore,
+  SessionAgentEventDTO,
   SessionOutcomeDTO,
   SessionStatus,
 } from '../shared/contract.js'
@@ -31,8 +33,10 @@ export function createSessionPersistence(deps: {
   sessions: Pick<ISessionManager, 'on' | 'off'>
   store: ISessionStore
   outcomes: IOutcomeStore
+  /** Optional: checkpoint/artifact/approval events (FLO-104). */
+  agentEvents?: IAgentEventStore
 }): SessionPersistence {
-  const { sessions, store, outcomes } = deps
+  const { sessions, store, outcomes, agentEvents } = deps
 
   function onStatus(sessionId: string, status: SessionStatus): void {
     const persisted = store.get(sessionId)
@@ -54,15 +58,24 @@ export function createSessionPersistence(deps: {
     outcomes.upsert(outcome)
   }
 
+  // Insert is INSERT OR IGNORE on (sessionId, kind, ts): the watcher replays
+  // the whole events.ndjson after a daemon restart, so re-delivery is expected
+  // and must not duplicate rows.
+  function onAgentEvent(_sessionId: string, event: SessionAgentEventDTO): void {
+    agentEvents?.insert(event)
+  }
+
   sessions.on('status', onStatus)
   sessions.on('pr', onPr)
   sessions.on('outcome', onOutcome)
+  sessions.on('agentEvent', onAgentEvent)
 
   return {
     dispose(): void {
       sessions.off('status', onStatus)
       sessions.off('pr', onPr)
       sessions.off('outcome', onOutcome)
+      sessions.off('agentEvent', onAgentEvent)
     },
   }
 }

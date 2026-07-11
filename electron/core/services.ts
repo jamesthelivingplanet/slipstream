@@ -15,6 +15,8 @@ import { createSessionStore, restoreInterruptedSessions } from '../services/sess
 import { createPromptTemplateStore } from '../services/promptTemplates.js'
 import { createTicketWriteback } from '../services/ticketWriteback.js'
 import { createOutcomeStore } from '../services/outcomeStore.js'
+import { createAgentEventStore } from '../services/agentEventStore.js'
+import { provisionCliWrapper } from '../services/agentCliProvision.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createTailscaleExposer } from '../services/tailscale.js'
@@ -65,6 +67,7 @@ export function createServices(root: string): IpcDeps {
   const configStore = createConfigStore(db, { encryptor: createSafeStorageEncryptor() })
   const sessionStore = createSessionStore(db)
   const outcomeStore = createOutcomeStore(db)
+  const agentEventStore = createAgentEventStore(db)
   // FLO-46: mark orphaned in-flight sessions as interrupted on boot
   restoreInterruptedSessions(sessionStore)
   const runLogger = createRunLogger(root)
@@ -83,7 +86,13 @@ export function createServices(root: string): IpcDeps {
   // finishes with no UI attached still write its final state to SQLite.
   // FLO-97: also persists structured session outcomes reported via the app
   // MCP's report_outcome tool.
-  createSessionPersistence({ sessions, store: sessionStore, outcomes: outcomeStore })
+  // FLO-104: also persists checkpoint/artifact/approval events from events.ndjson.
+  createSessionPersistence({
+    sessions,
+    store: sessionStore,
+    outcomes: outcomeStore,
+    agentEvents: agentEventStore,
+  })
   const push = createPushService({
     config: configStore,
     store: createDbPushStore(db),
@@ -102,6 +111,7 @@ export function createServices(root: string): IpcDeps {
     sessionStore,
     promptTemplates: createPromptTemplateStore(db),
     outcomeStore,
+    agentEventStore,
     editor: createEditorLauncher(),
     appRunner: createAppRunner(),
     tailscale: createTailscaleExposer(),
@@ -109,13 +119,28 @@ export function createServices(root: string): IpcDeps {
     logger: runLogger,
     writeCoordinator: createWriteCoordinator(),
     prStatus: createPrStatusService({ config: configStore }),
-    appMcp: {
-      configDir: path.join(root, 'mcp'),
-      appMcpJsPath: fileURLToPath(new URL('./app-mcp.js', import.meta.url)),
+    agentCli: {
+      binDir: path.join(root, 'bin'),
+      cliJsPath: fileURLToPath(new URL('./slipstream-cli.js', import.meta.url)),
       electronPath: process.execPath,
       dataDir: root,
     },
   }
+
+  // FLO-104: one static wrapper at <root>/bin/slipstream puts the agent CLI on
+  // every session PTY's PATH. Best-effort: a wrapper failure shouldn't stop the
+  // daemon (sessions still run, just without the CLI — health check surfaces it).
+  try {
+    provisionCliWrapper({
+      binDir: deps.agentCli!.binDir,
+      cliJsPath: deps.agentCli!.cliJsPath,
+      electronPath: deps.agentCli!.electronPath,
+    })
+  } catch {
+    // surfaced via getCliStatus
+  }
+  // One-time cleanup of the retired per-session MCP config dir.
+  fs.rmSync(path.join(root, 'mcp'), { recursive: true, force: true })
 
   const reaper = createSessionReaper({
     sessions,
