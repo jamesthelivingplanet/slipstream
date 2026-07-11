@@ -1223,6 +1223,12 @@ body {
     gap: 8px;
   }
 
+  /* Alerts hold text + action buttons; let them wrap instead of overflowing. */
+  .alert {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
   /* Idle agent-config view: smaller padding so it isn't cramped/over-scrolled. */
   .config {
     padding: 20px 14px 28px;
