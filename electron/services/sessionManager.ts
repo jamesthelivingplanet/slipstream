@@ -38,6 +38,8 @@ import {
 import type { RunLogger } from './runLogger.js'
 import { parseStatusSentinel, STATUS_SENTINEL_FILE } from './statusSentinel.js'
 import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from './outcomeSentinel.js'
+import { eventsAfter, AGENT_EVENTS_FILE } from './agentEventsSentinel.js'
+import { writeSlipstreamSkill } from './promptWriter.js'
 
 function spawnAgent(
   cmd: string,
@@ -192,6 +194,9 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     const screen = new ScreenState(cols, rows)
 
     trustDirectory(cwd)
+    // FLO-104: backend-independent — every agent gets the slipstream CLI skill
+    // (canonical .agents/skills + Claude-compat symlink). Best-effort inside.
+    writeSlipstreamSkill(cwd)
     backend.prepareWorktree?.(cwd, system)
 
     // Replay persisted scrollback on resume (not initial start)
@@ -241,12 +246,17 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
           const emittedPrUrl = new Set<string>()
           let lastStatusTs = 0
           let lastOutcomeTs = 0
+          // Deliberately starts at 0: after a daemon restart the whole
+          // events.ndjson history is re-emitted; the DB layer's INSERT OR
+          // IGNORE (unique on sessionId/kind/ts) makes the replay idempotent.
+          let lastAgentEventTs = 0
           try {
             const watcher = fs.watch(sentinelDir, { persistent: false }, (_event, filename) => {
               if (
                 filename !== 'pr.json' &&
                 filename !== STATUS_SENTINEL_FILE &&
-                filename !== OUTCOME_SENTINEL_FILE
+                filename !== OUTCOME_SENTINEL_FILE &&
+                filename !== AGENT_EVENTS_FILE
               )
                 return
 
@@ -286,6 +296,20 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
                 return
               }
 
+              if (filename === AGENT_EVENTS_FILE) {
+                const filePath = path.join(sentinelDir, AGENT_EVENTS_FILE)
+                try {
+                  const content = fs.readFileSync(filePath, 'utf8')
+                  for (const event of eventsAfter(content, lastAgentEventTs, id)) {
+                    lastAgentEventTs = event.ts
+                    emit('agentEvent', id, event)
+                  }
+                } catch {
+                  // Ignore read/parse errors (file may be partially written)
+                }
+                return
+              }
+
               // filename === STATUS_SENTINEL_FILE
               const filePath = path.join(sentinelDir, STATUS_SENTINEL_FILE)
               try {
@@ -293,15 +317,21 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
                 const parsed = parseStatusSentinel(content)
                 if (parsed && parsed.ts > lastStatusTs) {
                   lastStatusTs = parsed.ts
+                  // reason/message ride along as meta so status consumers
+                  // (detector, reaper, badges) stay reason-blind.
+                  const meta =
+                    parsed.reason !== undefined || parsed.message !== undefined
+                      ? { reason: parsed.reason, message: parsed.message }
+                      : undefined
                   const ptyDriven = rec.backend.statusSource === 'pty'
                   if (ptyDriven) {
                     detector.applySignal(parsed.state)
                     const s = detector.status()
                     rec.dto.status = s
-                    emit('status', id, s)
+                    emit('status', id, s, meta)
                   } else {
                     rec.dto.status = parsed.state
-                    emit('status', id, parsed.state)
+                    emit('status', id, parsed.state, meta)
                   }
                 }
               } catch {
@@ -344,7 +374,6 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       system,
       user: input.prompt,
       opencodePort: input.opencodePort,
-      mcpConfigPath: input.mcpConfigPath,
     })
 
     const dto: SessionDTO = {
@@ -389,7 +418,6 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       opencodeSid: input.session.opencodeSid,
       opencodePort: input.opencodePort,
       hasTranscript: hasTranscript(id),
-      mcpConfigPath: input.mcpConfigPath,
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
@@ -427,7 +455,6 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       opencodeSid: input.session.opencodeSid,
       opencodePort: input.opencodePort,
       hasTranscript: hasTranscript(id),
-      mcpConfigPath: input.mcpConfigPath,
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
@@ -468,7 +495,6 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       user: input.handoffPrompt,
       opencodePort: input.opencodePort,
       hasTranscript: hasTranscript(id),
-      mcpConfigPath: input.mcpConfigPath,
     })
 
     // The DTO switches to the new backend; opencodeSid is deliberately cleared —

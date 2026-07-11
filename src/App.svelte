@@ -28,7 +28,7 @@
   import ConfirmDialog from './lib/components/ConfirmDialog.svelte'
   import InstallNudge from './lib/components/InstallNudge.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
-  import McpStatus from './lib/components/McpStatus.svelte'
+  import CliStatus from './lib/components/CliStatus.svelte'
   import { MOBILE_MEDIA_QUERY, DRAWER_MEDIA_QUERY } from './lib/responsive'
 
   // Mobile drawer state — the sidebar is an overlay on narrow viewports.
@@ -142,7 +142,7 @@
       <img src="/icons/icon.svg" alt="Slipstream" class="glyph" />
       <b>Slipstream</b>
       {#if !$mobile}<span class="badge mono">dangerous mode</span>{/if}
-      <McpStatus />
+      <CliStatus />
     </div>
     {#if $selected}
       <button

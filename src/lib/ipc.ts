@@ -24,7 +24,7 @@ import type {
   WriteLockState,
   GcPolicy,
   SchedulerPolicy,
-  McpStatusDTO,
+  CliStatusDTO,
   DiagnosticsDTO,
   AgentCliCheck,
   TicketSource,
@@ -36,6 +36,7 @@ import type {
   PromptTemplateDTO,
   SessionOutcomeDTO,
   SessionHistoryEntry,
+  SessionAgentEventDTO,
   PrStatusDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY, DEFAULT_SCHEDULER_POLICY } from '../../electron/shared/contract.js'
@@ -362,9 +363,9 @@ export function setSchedulerPolicy(policy: SchedulerPolicy): Promise<void> {
 
 // ── MCP status ───────────────────────────────────────────────────────────
 
-export function getMcpStatus(): Promise<McpStatusDTO> {
+export function getCliStatus(): Promise<CliStatusDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.getMcpStatus()
+  return window.slipstream.getCliStatus()
 }
 
 // ── Diagnostics ──────────────────────────────────────────────────────────
@@ -447,6 +448,19 @@ export function getSessionOutcome(sessionId: string): Promise<SessionOutcomeDTO 
  *  most recent first; powers the History view. */
 export function listSessionHistory(): Promise<SessionHistoryEntry[]> {
   return hasBackend ? window.slipstream.listSessionHistory() : Promise.resolve([])
+}
+
+// ── Agent CLI events (FLO-104) ───────────────────────────────────────────────
+
+/** Persisted checkpoint/artifact/approval events for a session, oldest first. */
+export function listSessionAgentEvents(sessionId: string): Promise<SessionAgentEventDTO[]> {
+  return hasBackend ? window.slipstream.listSessionAgentEvents(sessionId) : Promise.resolve([])
+}
+
+/** Subscribe to live agent events. Returns an unsubscribe fn. */
+export function onSessionAgentEvent(cb: (event: SessionAgentEventDTO) => void): () => void {
+  if (!hasBackend) return () => {}
+  return window.slipstream.onSessionAgentEvent(cb)
 }
 
 // ── PR / CI status (FLO-96) ───────────────────────────────────────────────

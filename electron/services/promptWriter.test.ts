@@ -1,9 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import {
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  lstatSync,
+  readlinkSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeAgentsMd, resolveInfoExclude } from './promptWriter.js'
+import { writeAgentsMd, resolveInfoExclude, writeSlipstreamSkill } from './promptWriter.js'
 
 /**
  * Exercises writeAgentsMd against a REAL temp git repo + linked worktree — the
@@ -74,6 +83,60 @@ describe('promptWriter (real git)', () => {
     expect(matches).toBe(1)
     // still clean
     expect(git(wtPath, 'status', '--porcelain').trim()).toBe('')
+  })
+
+  describe('writeSlipstreamSkill (FLO-104)', () => {
+    it('writes the canonical skill under .agents/skills/slipstream', () => {
+      writeSlipstreamSkill(wtPath)
+      const md = readFileSync(join(wtPath, '.agents', 'skills', 'slipstream', 'SKILL.md'), 'utf8')
+      expect(md).toContain('name: slipstream')
+      expect(md).toContain('slipstream task-started')
+    })
+
+    it('symlinks .claude/skills/slipstream to the canonical dir (relative target)', () => {
+      writeSlipstreamSkill(wtPath)
+      const link = join(wtPath, '.claude', 'skills', 'slipstream')
+      expect(lstatSync(link).isSymbolicLink()).toBe(true)
+      expect(readlinkSync(link)).toBe(join('..', '..', '.agents', 'skills', 'slipstream'))
+      // The symlink resolves to a readable SKILL.md (Claude Code follows it).
+      expect(readFileSync(join(link, 'SKILL.md'), 'utf8')).toContain('name: slipstream')
+    })
+
+    it('keeps the worktree clean — both paths excluded, parents untouched', () => {
+      writeSlipstreamSkill(wtPath)
+      expect(git(wtPath, 'status', '--porcelain').trim()).toBe('')
+      expect(git(wtPath, 'check-ignore', '.claude/skills/slipstream').trim()).toBe(
+        '.claude/skills/slipstream',
+      )
+      // Exact patterns only: a repo-owned sibling skill must NOT be ignored.
+      expect(() => git(wtPath, 'check-ignore', '.claude/skills/setup')).toThrow()
+    })
+
+    it('is idempotent — re-running does not duplicate excludes or break the link', () => {
+      writeSlipstreamSkill(wtPath)
+      writeSlipstreamSkill(wtPath)
+      const exclude = readFileSync(resolveInfoExclude(wtPath)!, 'utf8')
+      const count = exclude
+        .split('\n')
+        .filter((l) => l.trim() === '.claude/skills/slipstream').length
+      expect(count).toBe(1)
+      expect(lstatSync(join(wtPath, '.claude', 'skills', 'slipstream')).isSymbolicLink()).toBe(true)
+    })
+
+    it('leaves a pre-existing REAL .claude/skills/slipstream directory alone', () => {
+      const wt = join(root, 'wt-realskill')
+      git(repoPath, 'worktree', 'add', wt, '-b', 'feat-realskill', 'main')
+      const realDir = join(wt, '.claude', 'skills', 'slipstream')
+      mkdirSync(realDir, { recursive: true })
+      writeFileSync(join(realDir, 'SKILL.md'), 'repo-owned\n')
+
+      writeSlipstreamSkill(wt)
+
+      expect(lstatSync(realDir).isSymbolicLink()).toBe(false)
+      expect(readFileSync(join(realDir, 'SKILL.md'), 'utf8')).toBe('repo-owned\n')
+      // Canonical copy still written for pi/opencode.
+      expect(existsSync(join(wt, '.agents', 'skills', 'slipstream', 'SKILL.md'))).toBe(true)
+    })
   })
 
   it('keeps the worktree clean even when the repo has no .gitignore', () => {

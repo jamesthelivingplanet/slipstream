@@ -1,8 +1,8 @@
 /**
  * outcomeSentinel — pure parser for the outcome.json sentinel file written by
- * the app MCP's `report_outcome` tool. Kept dependency-free so it's usable
- * both from the MCP process (Electron ABI) and from sessionManager.ts, and
- * so it's directly unit-testable under plain Node/vitest.
+ * the slipstream CLI's `task-complete` command. Kept dependency-free so it's
+ * usable both from the CLI process (Electron ABI) and from sessionManager.ts,
+ * and so it's directly unit-testable under plain Node/vitest.
  */
 
 import type { OutcomeResult } from '../shared/contract.js'

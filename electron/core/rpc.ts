@@ -24,17 +24,13 @@ import type {
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../shared/promptComposer.js'
 import { LOCAL_IDENTITY } from './auth.js'
-import {
-  buildAppMcpConfig,
-  buildOpencodeMcpConfig,
-  writeAppMcpConfig,
-} from '../services/mcpConfig.js'
+import { agentSessionEnv } from '../services/agentCliProvision.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 import { launchSession } from '../services/sessionLauncher.js'
 import type { LaunchRequest } from '../services/sessionLauncher.js'
 import { readSchedulerPolicy, writeSchedulerPolicy } from '../services/sessionScheduler.js'
-import { checkAppMcp, lastMcpActivity } from '../services/mcpHealth.js'
+import { checkSlipstreamCli, lastCliActivity } from '../services/cliHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
 import { findOnPath, binForKind } from '../services/cliProbe.js'
 import { readTranscriptUsage, buildUsageSummary } from '../services/usage.js'
@@ -104,9 +100,14 @@ export function createRpc(
   async function resolveOutcome(sessionId: string): Promise<SessionOutcomeDTO | null> {
     const stored = deps.outcomeStore.get(sessionId)
     if (stored) return stored
-    if (!deps.appMcp) return null
+    if (!deps.agentCli) return null
     try {
-      const filePath = path.join(deps.appMcp.dataDir, 'sessions', sessionId, OUTCOME_SENTINEL_FILE)
+      const filePath = path.join(
+        deps.agentCli.dataDir,
+        'sessions',
+        sessionId,
+        OUTCOME_SENTINEL_FILE,
+      )
       const content = await fs.promises.readFile(filePath, 'utf8')
       const parsed = parseOutcomeSentinel(content)
       if (!parsed) return null
@@ -169,10 +170,15 @@ export function createRpc(
     emit(IPC.sessionExit, id, code)
   }
 
+  function onAgentEvent(_id: string, event: import('../shared/contract.js').SessionAgentEventDTO) {
+    emit(IPC.sessionAgentEvent, event)
+  }
+
   deps.sessions.on('data', onData)
   deps.sessions.on('status', onStatus)
   deps.sessions.on('pr', onPr)
   deps.sessions.on('exit', onExit)
+  deps.sessions.on('agentEvent', onAgentEvent)
 
   function onLockChange(sessionId: string): void {
     if (!coord!.isViewer(sessionId, clientId)) return
@@ -319,16 +325,6 @@ export function createRpc(
           sessionMeta.delete(id)
           deps.sessionStore.delete(id)
 
-          // Best-effort: drop the per-session MCP config so the files don't
-          // accumulate forever. A failed unlink must not break the cleanup.
-          if (deps.appMcp) {
-            try {
-              await fs.promises.unlink(path.join(deps.appMcp.configDir, `${id}.json`))
-            } catch {
-              // ignore: file already gone or not writable
-            }
-          }
-
           // FLO-35: move the linked ticket back to "To Do" when the agent run
           // is deleted, so the next agent can pick it up. Best-effort — a
           // ticket-API failure must not break the cleanup.
@@ -389,42 +385,16 @@ export function createRpc(
             opencodePort = undefined
           }
         }
-        const resumeEnv: Record<string, string> = {}
-        if (port !== undefined) resumeEnv.PORT = String(port)
-        let mcpConfigPath: string | undefined
-        if (deps.appMcp) {
-          // Rewrite the per-session MCP config — it may have been deleted
-          // since the original start (e.g. by cleanup or a data-dir wipe).
-          mcpConfigPath = path.join(deps.appMcp.configDir, `${id}.json`)
-          const config = buildAppMcpConfig({
-            appMcpJsPath: deps.appMcp.appMcpJsPath,
-            electronPath: deps.appMcp.electronPath,
-            dataDir: deps.appMcp.dataDir,
-            sessionId: id,
-            base: repo.base,
-            branch: persisted.branch,
-          })
-          await writeAppMcpConfig(mcpConfigPath, config)
-
-          if (persisted.agentKind === 'opencode') {
-            resumeEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
-              buildOpencodeMcpConfig({
-                appMcpJsPath: deps.appMcp.appMcpJsPath,
-                electronPath: deps.appMcp.electronPath,
-                dataDir: deps.appMcp.dataDir,
-                sessionId: id,
-                base: repo.base,
-                branch: persisted.branch,
-              }),
-            )
-          }
-        }
         const dto = deps.sessions.resume({
           session: persisted,
           cwd,
-          env: Object.keys(resumeEnv).length > 0 ? resumeEnv : undefined,
+          env: agentSessionEnv(deps.agentCli, {
+            sessionId: id,
+            base: repo.base,
+            branch: persisted.branch,
+            port,
+          }),
           opencodePort,
-          mcpConfigPath,
         })
         sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })
@@ -454,42 +424,16 @@ export function createRpc(
             opencodePort = undefined
           }
         }
-        const remoteEnv: Record<string, string> = {}
-        if (port !== undefined) remoteEnv.PORT = String(port)
-        let mcpConfigPath: string | undefined
-        if (deps.appMcp) {
-          // Rewrite the per-session MCP config — it may have been deleted
-          // since the original start (e.g. by cleanup or a data-dir wipe).
-          mcpConfigPath = path.join(deps.appMcp.configDir, `${id}.json`)
-          const config = buildAppMcpConfig({
-            appMcpJsPath: deps.appMcp.appMcpJsPath,
-            electronPath: deps.appMcp.electronPath,
-            dataDir: deps.appMcp.dataDir,
-            sessionId: id,
-            base: repo.base,
-            branch: persisted.branch,
-          })
-          await writeAppMcpConfig(mcpConfigPath, config)
-
-          if (persisted.agentKind === 'opencode') {
-            remoteEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
-              buildOpencodeMcpConfig({
-                appMcpJsPath: deps.appMcp.appMcpJsPath,
-                electronPath: deps.appMcp.electronPath,
-                dataDir: deps.appMcp.dataDir,
-                sessionId: id,
-                base: repo.base,
-                branch: persisted.branch,
-              }),
-            )
-          }
-        }
         const dto = deps.sessions.attachRemoteControl({
           session: persisted,
           cwd,
-          env: Object.keys(remoteEnv).length > 0 ? remoteEnv : undefined,
+          env: agentSessionEnv(deps.agentCli, {
+            sessionId: id,
+            base: repo.base,
+            branch: persisted.branch,
+            port,
+          }),
           opencodePort,
-          mcpConfigPath,
         })
         sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })
@@ -525,36 +469,6 @@ export function createRpc(
             opencodePort = undefined
           }
         }
-        const handoffEnv: Record<string, string> = {}
-        if (port !== undefined) handoffEnv.PORT = String(port)
-        let mcpConfigPath: string | undefined
-        if (deps.appMcp) {
-          // Rewrite the per-session MCP config — it may have been deleted
-          // since the original start (e.g. by cleanup or a data-dir wipe).
-          mcpConfigPath = path.join(deps.appMcp.configDir, `${id}.json`)
-          const config = buildAppMcpConfig({
-            appMcpJsPath: deps.appMcp.appMcpJsPath,
-            electronPath: deps.appMcp.electronPath,
-            dataDir: deps.appMcp.dataDir,
-            sessionId: id,
-            base: repo.base,
-            branch: persisted.branch,
-          })
-          await writeAppMcpConfig(mcpConfigPath, config)
-
-          if (agentKind === 'opencode') {
-            handoffEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
-              buildOpencodeMcpConfig({
-                appMcpJsPath: deps.appMcp.appMcpJsPath,
-                electronPath: deps.appMcp.electronPath,
-                dataDir: deps.appMcp.dataDir,
-                sessionId: id,
-                base: repo.base,
-                branch: persisted.branch,
-              }),
-            )
-          }
-        }
         const outcome = await resolveOutcome(id)
         const handoffPrompt = buildHandoffPrompt({
           tid: persisted.tid,
@@ -568,9 +482,13 @@ export function createRpc(
         const dto = deps.sessions.handoff({
           session: persisted,
           cwd,
-          env: Object.keys(handoffEnv).length > 0 ? handoffEnv : undefined,
+          env: agentSessionEnv(deps.agentCli, {
+            sessionId: id,
+            base: repo.base,
+            branch: persisted.branch,
+            port,
+          }),
           opencodePort,
-          mcpConfigPath,
           agentKind,
           handoffPrompt,
         })
@@ -820,22 +738,22 @@ export function createRpc(
         void deps.scheduler?.drain() // raising the cap frees slots immediately
         return undefined
 
-      case IPC.getMcpStatus: {
-        if (!deps.appMcp)
-          return { up: false, tools: [], checkedAt: Date.now(), error: 'MCP not configured' }
-        const res = await checkAppMcp({
-          electronPath: deps.appMcp.electronPath,
-          appMcpJsPath: deps.appMcp.appMcpJsPath,
-          dataDir: deps.appMcp.dataDir,
+      case IPC.getCliStatus: {
+        if (!deps.agentCli)
+          return { up: false, commands: [], checkedAt: Date.now(), error: 'CLI not configured' }
+        const res = await checkSlipstreamCli({
+          electronPath: deps.agentCli.electronPath,
+          cliJsPath: deps.agentCli.cliJsPath,
+          dataDir: deps.agentCli.dataDir,
         })
-        const lastActivityAt = await lastMcpActivity(deps.appMcp.dataDir)
+        const lastActivityAt = await lastCliActivity(deps.agentCli.dataDir)
         return { ...res, checkedAt: Date.now(), lastActivityAt }
       }
 
       case IPC.getDiagnostics: {
         const port = Number(process.env.SLIPSTREAM_PORT) || undefined
         const bind = process.env.SLIPSTREAM_BIND ?? '127.0.0.1'
-        const dataDir = deps.appMcp?.dataDir ?? ''
+        const dataDir = deps.agentCli?.dataDir ?? ''
         const repos = (await deps.repos.list()).filter(ownedByCaller)
         return {
           daemon: {
@@ -929,6 +847,14 @@ export function createRpc(
         return resolveOutcome(id)
       }
 
+      case IPC.listSessionAgentEvents: {
+        const id = args[0] as string
+        // Owner-scoped like getSessionOutcome: missing and other-owner rows
+        // surface the same "not found".
+        if (!ownedSession(id)) throw new Error(`Session not found: ${id}`)
+        return deps.agentEventStore?.list(id) ?? []
+      }
+
       case IPC.listSessionHistory: {
         const sessions = deps.sessionStore.list().filter(ownedByCaller)
         sessions.sort((a, b) => b.createdAt - a.createdAt)
@@ -970,6 +896,7 @@ export function createRpc(
     deps.sessions.off('status', onStatus)
     deps.sessions.off('pr', onPr)
     deps.sessions.off('exit', onExit)
+    deps.sessions.off('agentEvent', onAgentEvent)
     if (coord) {
       coord.dropClient(clientId)
       coord.off('change', onLockChange)

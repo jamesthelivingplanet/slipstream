@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
+import { buildSlipstreamSkillMd } from '../shared/cliSkillDoc.js'
+
 /**
  * Write AGENTS.md to the worktree root so OpenCode auto-discovers it as system prompt.
  * Also ensures AGENTS.md is ignored so it can't be accidentally committed.
@@ -15,6 +17,52 @@ export function writeAgentsMd(worktreePath: string, content: string): void {
   const agentsMdPath = path.join(worktreePath, 'AGENTS.md')
   fs.writeFileSync(agentsMdPath, content, 'utf8')
   ensureIgnored(worktreePath, 'AGENTS.md')
+}
+
+/** Canonical in-worktree skill dir — the agentskills.io open-standard location,
+ *  discovered natively by pi and opencode. */
+const SKILL_CANONICAL_DIR = path.join('.agents', 'skills', 'slipstream')
+/** Claude Code doesn't read `.agents/skills/`, but its docs explicitly support
+ *  a skill dir entry that is a symlink — so this links to the canonical dir. */
+const SKILL_CLAUDE_LINK = path.join('.claude', 'skills', 'slipstream')
+
+/**
+ * Write the `slipstream` CLI skill into a session worktree — ONE canonical
+ * copy at `.agents/skills/slipstream/SKILL.md` plus a relative symlink at
+ * `.claude/skills/slipstream` for Claude Code (FLO-104). Both paths are added
+ * to `.git/info/exclude` (never `.gitignore` — see writeAgentsMd) so the
+ * worktree stays clean. Best-effort: any failure is swallowed so a skill-write
+ * problem never breaks agent launch. POSIX-only symlink — the app targets
+ * Linux/macOS only.
+ */
+export function writeSlipstreamSkill(worktreePath: string): void {
+  try {
+    const canonicalDir = path.join(worktreePath, SKILL_CANONICAL_DIR)
+    fs.mkdirSync(canonicalDir, { recursive: true })
+    fs.writeFileSync(path.join(canonicalDir, 'SKILL.md'), buildSlipstreamSkillMd(), 'utf8')
+
+    const linkPath = path.join(worktreePath, SKILL_CLAUDE_LINK)
+    // Relative target so the worktree can move without breaking the link.
+    const target = path.relative(path.dirname(linkPath), canonicalDir)
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true })
+    const existing = fs.lstatSync(linkPath, { throwIfNoEntry: false })
+    if (existing?.isSymbolicLink()) {
+      if (fs.readlinkSync(linkPath) !== target) {
+        fs.unlinkSync(linkPath)
+        fs.symlinkSync(target, linkPath)
+      }
+    } else if (!existing) {
+      fs.symlinkSync(target, linkPath)
+    }
+    // else: a real (repo-owned) dir/file already sits there — leave it alone.
+
+    // Exact patterns only: repos may track their own .claude/skills/* (this
+    // one does), so never ignore the parent dirs.
+    ensureIgnored(worktreePath, `${SKILL_CANONICAL_DIR}/`)
+    ensureIgnored(worktreePath, SKILL_CLAUDE_LINK)
+  } catch {
+    // best-effort
+  }
 }
 
 /**
@@ -41,7 +89,7 @@ export function resolveInfoExclude(worktreePath: string): string | null {
  * Ensure `pattern` is listed in the local `.git/info/exclude`. Best-effort: any
  * git/fs error is swallowed so a failure to ignore never breaks agent launch.
  */
-function ensureIgnored(worktreePath: string, pattern: string): void {
+export function ensureIgnored(worktreePath: string, pattern: string): void {
   try {
     const excludePath = resolveInfoExclude(worktreePath)
     if (!excludePath) return

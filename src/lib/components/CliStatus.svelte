@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { hasBackend } from '../ipc'
-  import { mcpStatus, mcpChecking, refreshMcpStatus } from '../stores'
+  import { cliStatus, cliChecking, refreshCliStatus } from '../stores'
 
   let open = false
 
@@ -10,7 +10,7 @@
   }
 
   onMount(() => {
-    if (hasBackend) refreshMcpStatus()
+    if (hasBackend) refreshCliStatus()
   })
 
   function relTime(ms: number): string {
@@ -27,8 +27,8 @@
   }
 
   $: state =
-    $mcpStatus === null ? ($mcpChecking ? 'checking' : 'unknown') : $mcpStatus.up ? 'up' : 'down'
-  $: dotLabel = state === 'up' ? 'MCP: up' : state === 'down' ? 'MCP: unreachable' : 'MCP: checking'
+    $cliStatus === null ? ($cliChecking ? 'checking' : 'unknown') : $cliStatus.up ? 'up' : 'down'
+  $: dotLabel = state === 'up' ? 'CLI: up' : state === 'down' ? 'CLI: unreachable' : 'CLI: checking'
 </script>
 
 <svelte:window on:click={onWindowClick} />
@@ -57,47 +57,39 @@
           class:down={state === 'down'}
           class:checking={state === 'checking' || state === 'unknown'}
         ></span>
-        <span class="mcp-title">MCP server</span>
+        <span class="mcp-title">slipstream CLI</span>
         <span class="mcp-state"
           >{state === 'up' ? 'Up' : state === 'down' ? 'Unreachable' : 'Checking'}</span
         >
       </div>
 
-      {#if $mcpStatus?.serverName || $mcpStatus?.protocolVersion}
-        <div class="mcp-meta mono muted">
-          {$mcpStatus?.serverName ?? ''}{$mcpStatus?.serverName && $mcpStatus?.protocolVersion
-            ? ' · '
-            : ''}{$mcpStatus?.protocolVersion ?? ''}
-        </div>
-      {/if}
-
-      {#if $mcpStatus?.tools?.length}
+      {#if $cliStatus?.commands?.length}
         <div class="mcp-tools">
-          {#each $mcpStatus.tools as tool (tool)}
-            <span class="mcp-tool mono">{tool}</span>
+          {#each $cliStatus.commands as command (command)}
+            <span class="mcp-tool mono">{command}</span>
           {/each}
         </div>
       {/if}
 
-      {#if $mcpStatus}
-        <div class="mcp-line muted">Checked {relTime($mcpStatus.checkedAt)} ago</div>
-        {#if $mcpStatus.lastActivityAt}
-          <div class="mcp-line muted">Last used {relTime($mcpStatus.lastActivityAt)} ago</div>
+      {#if $cliStatus}
+        <div class="mcp-line muted">Checked {relTime($cliStatus.checkedAt)} ago</div>
+        {#if $cliStatus.lastActivityAt}
+          <div class="mcp-line muted">Last used {relTime($cliStatus.lastActivityAt)} ago</div>
         {:else}
           <div class="mcp-line muted">No agent has used it yet</div>
         {/if}
       {/if}
 
-      {#if $mcpStatus?.error}
-        <div class="mcp-error">{$mcpStatus.error}</div>
+      {#if $cliStatus?.error}
+        <div class="mcp-error">{$cliStatus.error}</div>
       {/if}
 
       <button
         class="btn btn-outline btn-sm mcp-recheck"
-        on:click={() => refreshMcpStatus()}
-        disabled={$mcpChecking}
+        on:click={() => refreshCliStatus()}
+        disabled={$cliChecking}
       >
-        {$mcpChecking ? 'Checking…' : 'Recheck'}
+        {$cliChecking ? 'Checking…' : 'Recheck'}
       </button>
     </div>
   {/if}
@@ -156,12 +148,6 @@
     margin-left: auto;
     font-size: 11px;
     color: hsl(var(--muted-foreground));
-  }
-
-  .mcp-meta {
-    font-size: 11px;
-    margin-bottom: 8px;
-    word-break: break-word;
   }
 
   .mcp-tools {
