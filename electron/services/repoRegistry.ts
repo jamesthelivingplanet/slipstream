@@ -74,6 +74,8 @@ function buildRepoDTO(absPath: string, remoteUrl: string | null, ownerId: string
   return { id, org, name, base, path: absPath, remoteUrl: remoteUrl ?? undefined, ownerId }
 }
 
+/** `root` is the directory under which the managed `.repositories/` dir is
+ *  created (the user's home dir in production). */
 export function createRepoRegistry(db: Database.Database, root: string): IRepoRegistry {
   backfillRemoteUrls(db)
   const managedPath = (id: string) => join(root, '.repositories', id)
