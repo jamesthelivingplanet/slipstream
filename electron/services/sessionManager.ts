@@ -26,6 +26,7 @@ import { buildAgentEnv } from './agentEnv.js'
 import { StatusDetector } from './statusDetector.js'
 import { OutputBuffer } from './outputBuffer.js'
 import { ScrollbackStore } from './scrollbackStore.js'
+import { ScreenState, serializeScrollback } from './screenState.js'
 import { trustDirectory } from './claudeTrust.js'
 import { hasTranscript } from './transcripts.js'
 import {
@@ -42,12 +43,14 @@ function spawnAgent(
   cmd: string,
   args: string[],
   cwd: string,
+  cols: number,
+  rows: number,
   env?: Record<string, string>,
 ): pty.IPty {
   return pty.spawn(cmd, args, {
     name: 'xterm-color',
-    cols: 80,
-    rows: 30,
+    cols,
+    rows,
     cwd,
     // Scrubbed: agents run arbitrary repo code and must not inherit the
     // daemon's internal env (SLIPSTREAM_TOKEN above all) — see agentEnv.ts.
@@ -62,6 +65,7 @@ interface SessionRecord {
   detector: StatusDetector
   buffer: OutputBuffer
   scrollback: ScrollbackStore | null
+  screen: ScreenState
   dto: SessionDTO
   backend: AgentBackend
   disposed?: boolean
@@ -90,7 +94,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
   // ── Shared wiring helper ───────────────────────────────────────────────────
 
   function wire(id: string, rec: SessionRecord) {
-    const { pty: proc, detector, buffer, scrollback } = rec
+    const { pty: proc, detector, buffer, scrollback, screen } = rec
     // Poll-driven backends (opencode's embedded server, pi's session file) are
     // full-screen TUIs whose redraws make PTY-scraped markers unreliable, so
     // their status comes from beginStatusTracking instead of the StatusDetector.
@@ -98,6 +102,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     proc.onData((chunk: string) => {
       rec.lastActivityAt = Date.now()
       const seq = buffer.push(chunk)
+      screen.write(chunk, seq)
       if (scrollback) scrollback.append(id, chunk)
       detector.push(chunk)
       emit('data', id, chunk, seq)
@@ -124,6 +129,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
         status: s,
         tail: buffer.snapshot().data,
       })
+      screen.dispose()
       emit('status', id, s)
       emit('exit', id, exitCode)
       if (sessions.get(id) === rec) sessions.delete(id)
@@ -179,6 +185,11 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     const detector = new StatusDetector()
     const buffer = new OutputBuffer()
     const scrollback = root ? new ScrollbackStore(root) : null
+    // Resume a resumed agent at the geometry the client last used (persisted
+    // by resize()), not an arbitrary default — otherwise the agent's first
+    // repaint targets the wrong size and the initial snapshot looks wrong.
+    const { cols, rows } = scrollback?.getSize(id) ?? { cols: 80, rows: 30 }
+    const screen = new ScreenState(cols, rows)
 
     trustDirectory(cwd)
     backend.prepareWorktree?.(cwd, system)
@@ -188,12 +199,13 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       const replay = scrollback.read(id)
       if (replay.length > 0) {
         const seq = buffer.push(replay)
+        screen.write(replay, seq)
         // Emit replayed data so clients can render it before live stream resumes
         emit('data', id, replay, seq)
       }
     }
 
-    const proc = spawnAgent(spec.cmd, spec.args, cwd, env)
+    const proc = spawnAgent(spec.cmd, spec.args, cwd, cols, rows, env)
 
     // Forensic log of the spawn (before the process might fail)
     logger?.spawn(id, {
@@ -211,6 +223,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       detector,
       buffer,
       scrollback,
+      screen,
       dto,
       backend,
       opencodePort: params.opencodePort,
@@ -401,6 +414,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       const old = sessions.get(id)!
       old.disposed = true
       old.pty.kill()
+      old.screen.dispose()
       sessions.delete(id)
     }
 
@@ -442,6 +456,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       old.watcher = undefined
       old.disposed = true
       old.pty.kill()
+      old.screen.dispose()
       sessions.delete(id)
     }
 
@@ -493,6 +508,8 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     const rec = sessions.get(sessionId)
     if (!rec) return
     rec.pty.resize(cols, rows)
+    rec.screen.resize(cols, rows)
+    rec.scrollback?.setSize(sessionId, cols, rows)
   }
 
   function kill(sessionId: string): void {
@@ -503,6 +520,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     rec.watcher = undefined
     rec.disposed = true
     rec.pty.kill()
+    rec.screen.dispose()
     sessions.delete(sessionId)
   }
 
@@ -514,15 +532,21 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     emitter.removeListener(event, listener as (...args: unknown[]) => void)
   }
 
-  function getBuffer(sessionId: string): { data: string; seq: number } {
+  async function getBuffer(sessionId: string): Promise<{ data: string; seq: number }> {
     const rec = sessions.get(sessionId)
-    if (rec) return rec.buffer.snapshot()
+    if (rec) return rec.screen.snapshot()
 
-    // Session not live — try to read persisted scrollback
+    // Session not live — try to read persisted scrollback. seq must stay the
+    // RAW length (matching the seq domain OutputBuffer seeds on resume-replay)
+    // so the client's duplicate-chunk filtering still lines up; a serialized
+    // length would be a different, incompatible number.
     if (root) {
       const store = new ScrollbackStore(root)
-      const data = store.read(sessionId)
-      return { data, seq: data.length }
+      const raw = store.read(sessionId)
+      if (raw.length === 0) return { data: '', seq: 0 }
+      const size = store.getSize(sessionId) ?? { cols: 80, rows: 30 }
+      const data = await serializeScrollback(raw, size.cols, size.rows)
+      return { data, seq: raw.length }
     }
     return { data: '', seq: 0 }
   }
@@ -538,6 +562,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       } catch {
         /* already gone */
       }
+      rec.screen.dispose()
     }
     sessions.clear()
   }
@@ -569,6 +594,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     } catch {
       /* already gone */
     }
+    rec.screen.dispose()
     sessions.delete(sessionId)
   }
 

@@ -5,6 +5,10 @@
  * Bounds total file size to MAX_CHARS (256 KB) consistent with the in-memory
  * OutputBuffer. Writes synchronously after each append — low-frequency data.
  * Provides a read snapshot for replay on session resume/restart.
+ *
+ * Also persists the last-known PTY size alongside the log (`<id>.size.json`),
+ * so a dead session's scrollback can be serialized (screenState.ts) at the
+ * geometry it was actually produced at, instead of an arbitrary default.
  */
 
 import fs from 'node:fs'
@@ -23,6 +27,10 @@ export class ScrollbackStore {
 
   private filePath(sessionId: string): string {
     return path.join(this.root, SUBDIR, `${sessionId}.log`)
+  }
+
+  private sizeFilePath(sessionId: string): string {
+    return path.join(this.root, SUBDIR, `${sessionId}.size.json`)
   }
 
   /**
@@ -60,7 +68,8 @@ export class ScrollbackStore {
   }
 
   /**
-   * Delete the scrollback file for a session (cleanup on session delete).
+   * Delete the scrollback file (and persisted size, if any) for a session
+   * (cleanup on session delete).
    */
   delete(sessionId: string): void {
     const file = this.filePath(sessionId)
@@ -68,6 +77,38 @@ export class ScrollbackStore {
       fs.unlinkSync(file)
     } catch {
       // ignore
+    }
+    try {
+      fs.unlinkSync(this.sizeFilePath(sessionId))
+    } catch {
+      // ignore
+    }
+  }
+
+  /** Persist the last-known PTY size for a session (best-effort). */
+  setSize(sessionId: string, cols: number, rows: number): void {
+    try {
+      fs.writeFileSync(this.sizeFilePath(sessionId), JSON.stringify({ cols, rows }), 'utf8')
+    } catch {
+      // best-effort: never let scrollback crash the session
+    }
+  }
+
+  /**
+   * Read the last-known PTY size for a session. Returns null if no size was
+   * ever persisted, or the file is missing/corrupt/non-positive.
+   */
+  getSize(sessionId: string): { cols: number; rows: number } | null {
+    try {
+      const raw = fs.readFileSync(this.sizeFilePath(sessionId), 'utf8')
+      const parsed = JSON.parse(raw) as { cols?: unknown; rows?: unknown }
+      const { cols, rows } = parsed
+      if (typeof cols === 'number' && typeof rows === 'number' && cols > 0 && rows > 0) {
+        return { cols, rows }
+      }
+      return null
+    } catch {
+      return null
     }
   }
 }

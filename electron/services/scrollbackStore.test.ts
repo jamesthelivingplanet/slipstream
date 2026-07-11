@@ -53,6 +53,50 @@ describe('ScrollbackStore', () => {
     it('is a no-op for missing session', () => {
       expect(() => store.delete('nonexistent')).not.toThrow()
     })
+
+    it('also removes the persisted size file', () => {
+      const id = randomUUID()
+      store.append(id, 'data')
+      store.setSize(id, 120, 40)
+      expect(store.getSize(id)).toEqual({ cols: 120, rows: 40 })
+      store.delete(id)
+      expect(store.getSize(id)).toBeNull()
+    })
+  })
+
+  describe('setSize / getSize — persisted terminal geometry', () => {
+    it('round-trips a persisted size', () => {
+      const id = randomUUID()
+      store.setSize(id, 100, 32)
+      expect(store.getSize(id)).toEqual({ cols: 100, rows: 32 })
+    })
+
+    it('overwrites a previously persisted size', () => {
+      const id = randomUUID()
+      store.setSize(id, 80, 30)
+      store.setSize(id, 200, 55)
+      expect(store.getSize(id)).toEqual({ cols: 200, rows: 55 })
+    })
+
+    it('returns null for an unknown session id', () => {
+      expect(store.getSize('nonexistent')).toBeNull()
+    })
+
+    it('returns null for a corrupt size file', () => {
+      const id = randomUUID()
+      const file = path.join(tmpDir, 'scrollback', `${id}.size.json`)
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(file, 'not json', 'utf8')
+      expect(store.getSize(id)).toBeNull()
+    })
+
+    it('returns null for non-positive dimensions', () => {
+      const id = randomUUID()
+      const file = path.join(tmpDir, 'scrollback', `${id}.size.json`)
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(file, JSON.stringify({ cols: 0, rows: -1 }), 'utf8')
+      expect(store.getSize(id)).toBeNull()
+    })
   })
 
   describe('bounding — 256 KB cap', () => {

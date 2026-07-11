@@ -227,9 +227,16 @@ timer — it never reaps a PTY. PTYs are ended solely by:
   Policy is edited under Settings → Behavior → "Session cleanup" and stored in the `gc.policy`
   config key.
 
-A late-reconnecting client recovers missed output by calling `IPC.getSessionBuffer`, which
-returns the session's `OutputBuffer` snapshot (`electron/services/outputBuffer.ts`) — a
-bounded ring-buffer of the last 256 KB of PTY output.
+A late-reconnecting client recovers missed output by calling `IPC.getSessionBuffer`. This
+returns a *serialized screen snapshot* (FLO-103), not raw ring-buffer bytes: each live session
+mirrors its PTY output into a headless terminal (`electron/services/screenState.ts`, built on
+`@xterm/headless` + `@xterm/addon-serialize`) and `getBuffer` serializes its current
+screen + scrollback on demand — a clean, geometry-consistent repaint regardless of truncation
+or where in an ANSI escape sequence the raw stream happened to be cut. The `OutputBuffer`
+(`electron/services/outputBuffer.ts`) still exists for seq bookkeeping (duplicate-chunk
+filtering across the live subscribe/snapshot race) and the forensic exit-log tail. Dead
+sessions are served by running their raw scrollback file through a temporary headless terminal
+at the session's last persisted PTY size (`<id>.size.json`, written by `scrollbackStore.ts`).
 
 ### Session-start scheduling (FLO-95)
 

@@ -49,6 +49,7 @@
   import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
   import { floatingAnchor } from '../floating'
   import { AGENTS, agentOption } from '../agents'
+  import { ReplayGate } from '../replayGate.js'
   import DiffView from './DiffView.svelte'
 
   export let session: Session
@@ -195,7 +196,15 @@
     runSimulation()
   }
 
+  let destroyed = false
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+
   onDestroy(() => {
+    destroyed = true
+    if (retryTimer) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
     contentLoading.set(false)
     cleanupListeners()
     cleanupSimulation()
@@ -209,6 +218,22 @@
   let ro: ResizeObserver | null = null
   let offResize: (() => void) | null = null
   const resumedIds = new Set<string>()
+
+  // On a fresh start the session row only exists once the backend has
+  // finished creating the worktree + spawning the PTY (sessionLauncher.ts),
+  // so the very first getSessionBuffer call can 404 while that's in flight.
+  // Retry (instead of a one-shot fail()) until the backend session
+  // materializes, so attach/resize/write-lock wiring lands too — a one-shot
+  // fail() alone would leave the client permanently view-only at 80x30.
+  function scheduleLiveRetry() {
+    if (retryTimer) return
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      if (destroyed || exited || session.status === 'errored') return
+      cleanupListeners()
+      void startLive()
+    }, 1000)
+  }
 
   async function startLive() {
     if (liveId !== null && liveId !== session.id) cleanupListeners()
@@ -236,23 +261,31 @@
       term.focus()
     }, 40)
 
-    let snapSeq = -1
-    const held: Array<[string, number]> = []
+    if (session.id) {
+      const lock = await attachSession(session.id)
+      canWrite = lock.canWrite
+      viewers = lock.viewers
+    }
+    // The backend serializes the screen at the PTY's current size, so the
+    // PTY must be resized to OUR size before we ask for the snapshot — this
+    // also makes the agent's next repaint target the right geometry.
+    try {
+      fit.fit()
+    } catch {}
+    if (session.id) resizeSession(session.id, term.cols, term.rows)
+
+    const gate = new ReplayGate((chunk) => term.write(chunk))
     offData = onSessionData((sid, chunk, seq) => {
       if (sid !== session.id) return
-      if (snapSeq < 0) {
-        held.push([chunk, seq])
-        return
-      }
-      term.write(chunk)
+      gate.push(chunk, seq)
     })
-    const snap = await getSessionBuffer(session.id ?? '')
-    term.write(snap.data)
-    for (const [chunk, seq] of held) {
-      if (seq > snap.seq) term.write(chunk)
+    try {
+      const snap = await getSessionBuffer(session.id ?? '')
+      gate.applySnapshot(snap.data, snap.seq)
+    } catch {
+      gate.fail()
+      scheduleLiveRetry()
     }
-    held.length = 0
-    snapSeq = snap.seq
 
     offWriteLock = onSessionWriteLock((state) => {
       if (state.sessionId !== session.id) return
@@ -264,11 +297,6 @@
       exited = true
       exitCode = code
     })
-    if (session.id) {
-      const lock = await attachSession(session.id)
-      canWrite = lock.canWrite
-      viewers = lock.viewers
-    }
 
     onDataSub = term.onData((d) => {
       if (session.id && canWrite) writeSession(session.id, d)

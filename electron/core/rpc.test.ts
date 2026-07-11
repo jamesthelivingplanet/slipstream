@@ -88,7 +88,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     resize: vi.fn(),
     kill: vi.fn(),
     killAll: vi.fn(),
-    getBuffer: vi.fn().mockReturnValue({ data: 'buffered output', seq: 15 }),
+    getBuffer: vi.fn().mockResolvedValue({ data: 'buffered output', seq: 15 }),
     setOpencodeSid: vi.fn(),
     on(event: string, listener: Listener) {
       listeners[event] ??= []
