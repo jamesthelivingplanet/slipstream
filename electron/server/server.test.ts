@@ -66,7 +66,7 @@ function makeFakeDeps(): IpcDeps {
     resize: vi.fn(),
     kill: vi.fn(),
     killAll: vi.fn(),
-    getBuffer: vi.fn().mockReturnValue({ data: '', seq: 0 }),
+    getBuffer: vi.fn().mockResolvedValue({ data: '', seq: 0 }),
     setOpencodeSid: vi.fn(),
     liveSessions: vi.fn().mockReturnValue([]),
     reap: vi.fn(),
@@ -209,7 +209,9 @@ function makeSurvivalDeps(): {
     }),
     getBuffer: vi
       .fn()
-      .mockImplementation((id: string) => liveMap.get(id)?.snapshot() ?? { data: '', seq: 0 }),
+      .mockImplementation((id: string) =>
+        Promise.resolve(liveMap.get(id)?.snapshot() ?? { data: '', seq: 0 }),
+      ),
     setOpencodeSid: vi.fn(),
     liveSessions: vi.fn().mockReturnValue([]),
     reap: vi.fn().mockImplementation((id: string) => {

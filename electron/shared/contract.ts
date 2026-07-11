@@ -472,7 +472,7 @@ export interface ISessionManager {
   killAll(): void
   on<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void
   off<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void
-  getBuffer(sessionId: string): { data: string; seq: number }
+  getBuffer(sessionId: string): Promise<{ data: string; seq: number }>
   attachRemoteControl(input: ResumeSessionInput): SessionDTO
   /** Continue the session with a different agent (FLO-102): kills the previous
    *  agent's PTY if still live, then spawns `agentKind` in the same worktree
