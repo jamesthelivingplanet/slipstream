@@ -303,7 +303,6 @@ describe('claudeCodeBackend.buildHandoffArgs', () => {
     expect(args).not.toContain('--session-id')
     expect(args[args.length - 1]).toBe('takeover prompt')
   })
-
 })
 
 describe('opencodeBackend.buildHandoffArgs', () => {

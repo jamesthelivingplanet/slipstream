@@ -84,8 +84,10 @@ doc only when the symptom matches what you're seeing.
   over. React **once per episode**, re-armed by the `input` event (real user keystrokes) —
   `pushService.ts` is the reference. Pipeline + producer rules:
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §Session status pipeline.
-- **The agent status contract lives in three files** that must change together:
-  `promptComposer.ts` (system prompt), `appMcp.ts` (`report_status` description + result
-  text), `statusDetector.ts`/`statusSentinel.ts` (consumption). Tests assert on the prompt
-  and result wording, so string tweaks ripple into `promptComposer.test.ts`/`appMcp.test.ts`.
+- **The agent status contract lives in three places** that must change together:
+  `promptComposer.ts` + `cliSkillDoc.ts` (system prompt + the `slipstream` worktree skill),
+  `electron/cli/slipstream.ts` (command set + per-command stdout nudges), and
+  `statusDetector.ts`/`statusSentinel.ts`/`agentEventsSentinel.ts` (consumption). Tests
+  assert on the prompt and output wording, so string tweaks ripple into
+  `promptComposer.test.ts`/`slipstream.test.ts`/`cliSkillDoc.test.ts`.
   Detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §Session status pipeline.

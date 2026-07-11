@@ -448,6 +448,44 @@ describe('createRpc', () => {
     })
   })
 
+  describe('session agent events (FLO-104)', () => {
+    it('listSessionAgentEvents returns the stored events for an owned session', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      const events = [{ sessionId: 's1', kind: 'checkpoint', message: 'a', ts: 1 }]
+      deps.agentEventStore = {
+        insert: vi.fn(),
+        list: vi.fn().mockReturnValue(events),
+        delete: vi.fn(),
+      }
+
+      const result = await rpc.handle(IPC.listSessionAgentEvents, ['s1'])
+      expect(result).toEqual(events)
+      expect(deps.agentEventStore.list).toHaveBeenCalledWith('s1')
+    })
+
+    it('listSessionAgentEvents rejects for a session the caller does not own', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
+      deps.agentEventStore = { insert: vi.fn(), list: vi.fn(), delete: vi.fn() }
+
+      await expect(rpc.handle(IPC.listSessionAgentEvents, ['hers'])).rejects.toThrow(
+        /Session not found/,
+      )
+      expect(deps.agentEventStore.list).not.toHaveBeenCalled()
+    })
+
+    it('listSessionAgentEvents returns [] when no store is wired (test fallback)', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      const result = await rpc.handle(IPC.listSessionAgentEvents, ['s1'])
+      expect(result).toEqual([])
+    })
+
+    it('fans out agentEvent session events on the push channel', () => {
+      const event = { sessionId: 's1', kind: 'approval', message: 'ok?', ts: 5 }
+      deps._emit('agentEvent', 's1', event)
+      expect(emitted).toContainEqual([IPC.sessionAgentEvent, event])
+    })
+  })
+
   describe('session outcome + history (FLO-97)', () => {
     function makeOutcome(overrides: Partial<SessionOutcomeDTO> = {}): SessionOutcomeDTO {
       return {

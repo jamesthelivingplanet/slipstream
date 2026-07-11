@@ -78,6 +78,25 @@ describe('runMigrations', () => {
     expect(f.version).toBe(MIGRATIONS.length)
   })
 
+  describe('migration 5 (FLO-104 session_agent_events)', () => {
+    it('creates the session_agent_events table + dedupe index on a fresh DB', () => {
+      const f = makeFakeDb({ userVersion: 0 })
+      runMigrations(f.db)
+      const sql = f.execLog.find((s) => s.includes('CREATE TABLE session_agent_events'))
+      expect(sql).toBeDefined()
+      expect(sql).toContain('CREATE UNIQUE INDEX idx_session_agent_events_dedupe')
+      expect(sql).toContain('(sessionId, kind, ts)')
+    })
+
+    it('runs only the new migration for a DB already at version 4', () => {
+      const f = makeFakeDb({ userVersion: 4 })
+      runMigrations(f.db)
+      expect(f.version).toBe(MIGRATIONS.length)
+      expect(f.execLog).toHaveLength(MIGRATIONS.length - 4)
+      expect(f.execLog[0]).toContain('CREATE TABLE session_agent_events')
+    })
+  })
+
   describe('migration 3 (FLO-98 prompt_templates)', () => {
     it('creates the prompt_templates table on a fresh DB', () => {
       const f = makeFakeDb({ userVersion: 0 })

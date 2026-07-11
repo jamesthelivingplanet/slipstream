@@ -40,7 +40,11 @@ export interface CliDeps {
   branch: string
   stdout(text: string): void
   stderr(text: string): void
-  writeStatus(state: 'running' | 'needs' | 'done', message?: string, reason?: NeedsReason): Promise<void>
+  writeStatus(
+    state: 'running' | 'needs' | 'done',
+    message?: string,
+    reason?: NeedsReason,
+  ): Promise<void>
   writeOutcome(result: OutcomeResult, summary: string, details?: string): Promise<void>
   appendEvent(kind: AgentEventKind, message?: string, artifactPath?: string): Promise<void>
   /** Copy `file` into the session's artifact store; resolves the destination path. */
@@ -70,7 +74,11 @@ function nudge(state: 'running' | 'needs' | 'done', reason?: NeedsReason): strin
   switch (state) {
     case 'needs': {
       const what =
-        reason === 'blocked' ? 'blocked' : reason === 'approval' ? 'awaiting approval' : 'needs input'
+        reason === 'blocked'
+          ? 'blocked'
+          : reason === 'approval'
+            ? 'awaiting approval'
+            : 'needs input'
       return (
         `Status reported: ${what}. The app now shows you as waiting on the user. ` +
         'When they respond and you resume work, run `slipstream task-started` as your ' +
@@ -107,7 +115,9 @@ Report your working state to the Slipstream app. Commands:
 Exit codes: 0 ok, 1 usage error, 2 not in a Slipstream session, 3 operation failed.`
 
 /** Hand-rolled flag parser: `--flag value` and `--flag=value`; the rest are positionals. */
-export function parseArgs(args: string[]): { flags: Record<string, string>; positionals: string[] } | null {
+export function parseArgs(
+  args: string[],
+): { flags: Record<string, string>; positionals: string[] } | null {
   const flags: Record<string, string> = {}
   const positionals: string[] = []
   for (let i = 0; i < args.length; i++) {
@@ -281,7 +291,13 @@ export async function main(): Promise<void> {
   let branch = process.env.SLIPSTREAM_BRANCH ?? ''
   if (!branch) {
     try {
-      const { stdout: out } = await execFile('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'])
+      const { stdout: out } = await execFile('git', [
+        '-C',
+        cwd,
+        'rev-parse',
+        '--abbrev-ref',
+        'HEAD',
+      ])
       branch = out.trim()
     } catch {
       branch = ''

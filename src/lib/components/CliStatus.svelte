@@ -150,7 +150,6 @@
     color: hsl(var(--muted-foreground));
   }
 
-
   .mcp-tools {
     display: flex;
     flex-wrap: wrap;
