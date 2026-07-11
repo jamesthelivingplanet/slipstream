@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { mcpStatus, mcpChecking, refreshMcpStatus } from '../../stores'
+  import { cliStatus, cliChecking, refreshCliStatus } from '../../stores'
   import {
     hasBackend,
     getGitToken,
@@ -194,7 +194,7 @@
     loadJiraSettings()
     loadGithubToken()
     loadGitlabToken()
-    refreshMcpStatus()
+    refreshCliStatus()
   })
 </script>
 
@@ -202,50 +202,44 @@
   <span class="tab-title">Integrations</span>
 </div>
 <div>
-  <span class="lbl-f">MCP server</span>
+  <span class="lbl-f">slipstream CLI</span>
   <p class="integration-hint">
-    Lets a finished agent push its branch, open the PR, and report status back to Slipstream.
+    Lets an agent report status, record checkpoints, publish artifacts, and open the PR back to
+    Slipstream.
   </p>
   <div class="mcp-settings-row">
     <span
       class="mcp-settings-dot"
-      class:up={$mcpStatus?.up}
-      class:down={$mcpStatus && !$mcpStatus.up}
+      class:up={$cliStatus?.up}
+      class:down={$cliStatus && !$cliStatus.up}
     ></span>
     <span class="mcp-settings-state"
-      >{$mcpStatus === null ? 'Checking' : $mcpStatus.up ? 'Up' : 'Unreachable'}</span
+      >{$cliStatus === null ? 'Checking' : $cliStatus.up ? 'Up' : 'Unreachable'}</span
     >
-    {#if $mcpStatus?.serverName || $mcpStatus?.protocolVersion}
-      <span class="mono muted mcp-settings-meta">
-        {$mcpStatus?.serverName ?? ''}{$mcpStatus?.serverName && $mcpStatus?.protocolVersion
-          ? ' · '
-          : ''}{$mcpStatus?.protocolVersion ?? ''}
-      </span>
-    {/if}
   </div>
-  {#if $mcpStatus?.tools?.length}
+  {#if $cliStatus?.commands?.length}
     <div class="mcp-settings-tools">
-      {#each $mcpStatus.tools as tool (tool)}
-        <span class="mcp-settings-tool mono">{tool}</span>
+      {#each $cliStatus.commands as command (command)}
+        <span class="mcp-settings-tool mono">{command}</span>
       {/each}
     </div>
   {/if}
-  {#if $mcpStatus}
+  {#if $cliStatus}
     <p class="integration-hint muted">
-      Checked {mcpRelTime($mcpStatus.checkedAt)} ago{#if $mcpStatus.lastActivityAt}
-        · Last used {mcpRelTime($mcpStatus.lastActivityAt)} ago{:else}
+      Checked {mcpRelTime($cliStatus.checkedAt)} ago{#if $cliStatus.lastActivityAt}
+        · Last used {mcpRelTime($cliStatus.lastActivityAt)} ago{:else}
         · No agent has used it yet{/if}
     </p>
   {/if}
-  {#if $mcpStatus?.error}
-    <p class="mcp-settings-error">{$mcpStatus.error}</p>
+  {#if $cliStatus?.error}
+    <p class="mcp-settings-error">{$cliStatus.error}</p>
   {/if}
   <button
     class="btn btn-outline btn-sm"
-    on:click={() => refreshMcpStatus()}
-    disabled={$mcpChecking}
+    on:click={() => refreshCliStatus()}
+    disabled={$cliChecking}
   >
-    {$mcpChecking ? 'Checking…' : 'Test connection'}
+    {$cliChecking ? 'Checking…' : 'Test connection'}
   </button>
 </div>
 
@@ -491,9 +485,6 @@
   .mcp-settings-state {
     font-size: 12.5px;
     font-weight: 500;
-  }
-  .mcp-settings-meta {
-    font-size: 11px;
   }
   .mcp-settings-tools {
     display: flex;

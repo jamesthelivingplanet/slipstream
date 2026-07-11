@@ -24,7 +24,7 @@ import type {
   WriteLockState,
   GcPolicy,
   SchedulerPolicy,
-  McpStatusDTO,
+  CliStatusDTO,
   DiagnosticsDTO,
   AgentCliCheck,
   TicketSource,
@@ -363,9 +363,9 @@ export function setSchedulerPolicy(policy: SchedulerPolicy): Promise<void> {
 
 // ── MCP status ───────────────────────────────────────────────────────────
 
-export function getMcpStatus(): Promise<McpStatusDTO> {
+export function getCliStatus(): Promise<CliStatusDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.getMcpStatus()
+  return window.slipstream.getCliStatus()
 }
 
 // ── Diagnostics ──────────────────────────────────────────────────────────

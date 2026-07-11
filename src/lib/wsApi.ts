@@ -26,7 +26,7 @@ import type {
   WriteLockState,
   GcPolicy,
   SchedulerPolicy,
-  McpStatusDTO,
+  CliStatusDTO,
   DiagnosticsDTO,
   TicketSource,
   AgentCliCheck,
@@ -544,8 +544,8 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.setSchedulerPolicy, [policy]) as Promise<void>
     },
 
-    getMcpStatus(): Promise<McpStatusDTO> {
-      return request(IPC.getMcpStatus, []) as Promise<McpStatusDTO>
+    getCliStatus(): Promise<CliStatusDTO> {
+      return request(IPC.getCliStatus, []) as Promise<CliStatusDTO>
     },
 
     getDiagnostics(): Promise<DiagnosticsDTO> {

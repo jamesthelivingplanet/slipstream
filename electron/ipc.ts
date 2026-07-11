@@ -53,9 +53,11 @@ export interface IpcDeps {
   /** Shared per-session write-lock coordinator. Optional: when absent, rpc treats
    *  every client as the writer (single-user / test fallback). */
   writeCoordinator?: import('./services/writeCoordinator.js').IWriteCoordinator
-  appMcp?: {
-    configDir: string
-    appMcpJsPath: string
+  /** Agent-facing `slipstream` CLI provisioning (FLO-104): wrapper location,
+   *  bundled CLI entry, and the data root the CLI writes sentinels under. */
+  agentCli?: {
+    binDir: string
+    cliJsPath: string
     electronPath: string
     dataDir: string
   }

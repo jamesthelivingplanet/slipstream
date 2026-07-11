@@ -16,6 +16,7 @@ import { createPromptTemplateStore } from '../services/promptTemplates.js'
 import { createTicketWriteback } from '../services/ticketWriteback.js'
 import { createOutcomeStore } from '../services/outcomeStore.js'
 import { createAgentEventStore } from '../services/agentEventStore.js'
+import { provisionCliWrapper } from '../services/agentCliProvision.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createTailscaleExposer } from '../services/tailscale.js'
@@ -118,13 +119,28 @@ export function createServices(root: string): IpcDeps {
     logger: runLogger,
     writeCoordinator: createWriteCoordinator(),
     prStatus: createPrStatusService({ config: configStore }),
-    appMcp: {
-      configDir: path.join(root, 'mcp'),
-      appMcpJsPath: fileURLToPath(new URL('./app-mcp.js', import.meta.url)),
+    agentCli: {
+      binDir: path.join(root, 'bin'),
+      cliJsPath: fileURLToPath(new URL('./slipstream-cli.js', import.meta.url)),
       electronPath: process.execPath,
       dataDir: root,
     },
   }
+
+  // FLO-104: one static wrapper at <root>/bin/slipstream puts the agent CLI on
+  // every session PTY's PATH. Best-effort: a wrapper failure shouldn't stop the
+  // daemon (sessions still run, just without the CLI — health check surfaces it).
+  try {
+    provisionCliWrapper({
+      binDir: deps.agentCli!.binDir,
+      cliJsPath: deps.agentCli!.cliJsPath,
+      electronPath: deps.agentCli!.electronPath,
+    })
+  } catch {
+    // surfaced via getCliStatus
+  }
+  // One-time cleanup of the retired per-session MCP config dir.
+  fs.rmSync(path.join(root, 'mcp'), { recursive: true, force: true })
 
   const reaper = createSessionReaper({
     sessions,

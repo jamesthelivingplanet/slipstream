@@ -51,17 +51,15 @@ export interface SchedulerPolicy {
   maxConcurrent: number // 0 = unlimited: every start fires immediately (pre-FLO-95 behavior)
 }
 export const DEFAULT_SCHEDULER_POLICY: SchedulerPolicy = { maxConcurrent: 0 }
-/** Result of an out-of-band self-test handshake against the app's own MCP
- *  server (electron/mcp/appMcp.ts). Never spawned inside an agent session —
- *  see McpHealthParams / checkAppMcp — so it adds no agent context. */
-export interface McpStatusDTO {
-  up: boolean // true iff the app's self-test handshake succeeded
-  serverName?: string // serverInfo.name from initialize
-  protocolVersion?: string // protocolVersion from initialize
-  tools: string[] // tool names from tools/list
+/** Result of an out-of-band self-test of the agent-facing `slipstream` CLI
+ *  (electron/cli/slipstream.ts). Never run inside an agent session — see
+ *  CliHealthParams / checkSlipstreamCli — so it adds no agent context. */
+export interface CliStatusDTO {
+  up: boolean // true iff the self-test (`slipstream help`) exited 0 with usage text
+  commands: string[] // command names parsed from the usage output
   checkedAt: number // epoch ms of this self-test
   error?: string // present when up === false
-  lastActivityAt?: number // epoch ms of most recent real MCP activity (status.json/pr.json mtime across sessions), if any
+  lastActivityAt?: number // epoch ms of most recent real CLI activity (sentinel mtimes across sessions), if any
 }
 
 export interface RepoDiagnostic {
@@ -464,7 +462,6 @@ export interface StartSessionInput {
   systemPrompt?: string
   agentKind?: BackendKind
   opencodePort?: number
-  mcpConfigPath?: string
   sessionId?: string
 }
 
@@ -473,7 +470,6 @@ export interface ResumeSessionInput {
   cwd: string
   env?: Record<string, string>
   opencodePort?: number
-  mcpConfigPath?: string
 }
 
 /** Input for continuing an existing run with a DIFFERENT agent (FLO-102).
@@ -729,14 +725,14 @@ export interface SlipstreamApi {
   getSchedulerPolicy(): Promise<SchedulerPolicy>
   setSchedulerPolicy(policy: SchedulerPolicy): Promise<void>
 
-  /** Out-of-band self-test of the app's own MCP server: spawns it directly
-   *  and runs the initialize/tools-list handshake outside of any agent
-   *  session, so it never adds anything to an agent's context. */
-  getMcpStatus(): Promise<McpStatusDTO>
+  /** Out-of-band self-test of the agent-facing `slipstream` CLI: spawns it
+   *  directly (`slipstream help`) outside of any agent session, so it never
+   *  adds anything to an agent's context. */
+  getCliStatus(): Promise<CliStatusDTO>
 
   /** Everything a Settings → Diagnostics tab needs: daemon identity, runtime
    *  versions, and per-repo path/remote health. Extends (does not duplicate)
-   *  getMcpStatus — call that separately for the MCP self-test section. */
+   *  getCliStatus — call that separately for the CLI self-test section. */
   getDiagnostics(): Promise<DiagnosticsDTO>
 
   /** Preflight check for the New Agent dialog: is `kind`'s CLI binary on PATH
@@ -835,7 +831,7 @@ export const IPC = {
   setGcPolicy: 'gc:setPolicy',
   getSchedulerPolicy: 'scheduler:getPolicy',
   setSchedulerPolicy: 'scheduler:setPolicy',
-  getMcpStatus: 'mcp:status',
+  getCliStatus: 'cli:status',
   getDiagnostics: 'diag:get',
   checkAgentCli: 'agent:checkCli',
   sessionUsage: 'session:usage',

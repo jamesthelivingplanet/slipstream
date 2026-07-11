@@ -291,18 +291,6 @@ describe('claudeCodeBackend.buildHandoffArgs', () => {
     expect(args[args.length - 1]).toBe('takeover prompt')
   })
 
-  it('hasTranscript:false with mcpConfigPath → --mcp-config pair appended at the end', () => {
-    const { args } = claudeCodeBackend.buildHandoffArgs({
-      sessionId: 'hoid2',
-      system: '',
-      user: 'takeover prompt',
-      hasTranscript: false,
-      mcpConfigPath: '/tmp/mcp.json',
-    })
-    expect(args[args.length - 2]).toBe('--mcp-config')
-    expect(args[args.length - 1]).toBe('/tmp/mcp.json')
-  })
-
   it('hasTranscript:true → uses --resume + id + the handoff prompt as the last arg; no --session-id', () => {
     const { args } = claudeCodeBackend.buildHandoffArgs({
       sessionId: 'hoid3',
@@ -316,18 +304,6 @@ describe('claudeCodeBackend.buildHandoffArgs', () => {
     expect(args[args.length - 1]).toBe('takeover prompt')
   })
 
-  it('hasTranscript:true with mcpConfigPath → prompt is second-to-last, mcp pair last', () => {
-    const { args } = claudeCodeBackend.buildHandoffArgs({
-      sessionId: 'hoid4',
-      system: '',
-      user: 'takeover prompt',
-      hasTranscript: true,
-      mcpConfigPath: '/tmp/mcp.json',
-    })
-    expect(args[args.length - 3]).toBe('takeover prompt')
-    expect(args[args.length - 2]).toBe('--mcp-config')
-    expect(args[args.length - 1]).toBe('/tmp/mcp.json')
-  })
 })
 
 describe('opencodeBackend.buildHandoffArgs', () => {

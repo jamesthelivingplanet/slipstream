@@ -374,7 +374,6 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       system,
       user: input.prompt,
       opencodePort: input.opencodePort,
-      mcpConfigPath: input.mcpConfigPath,
     })
 
     const dto: SessionDTO = {
@@ -419,7 +418,6 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       opencodeSid: input.session.opencodeSid,
       opencodePort: input.opencodePort,
       hasTranscript: hasTranscript(id),
-      mcpConfigPath: input.mcpConfigPath,
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
@@ -457,7 +455,6 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       opencodeSid: input.session.opencodeSid,
       opencodePort: input.opencodePort,
       hasTranscript: hasTranscript(id),
-      mcpConfigPath: input.mcpConfigPath,
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
@@ -498,7 +495,6 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       user: input.handoffPrompt,
       opencodePort: input.opencodePort,
       hasTranscript: hasTranscript(id),
-      mcpConfigPath: input.mcpConfigPath,
     })
 
     // The DTO switches to the new backend; opencodeSid is deliberately cleared —
