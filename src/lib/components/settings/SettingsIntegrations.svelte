@@ -10,6 +10,7 @@
     listTicketScopes,
   } from '../../ipc'
   import { pushToast } from '../../toast'
+  import SettingsSection from './SettingsSection.svelte'
   import type { ScopeOption, TicketSourceSettings } from '../../../../electron/shared/contract.js'
 
   function emptySettings(): TicketSourceSettings {
@@ -201,8 +202,7 @@
 <div class="tab-header">
   <span class="tab-title">Integrations</span>
 </div>
-<div>
-  <span class="lbl-f">slipstream CLI</span>
+<SettingsSection title="slipstream CLI">
   <p class="integration-hint">
     Lets an agent report status, record checkpoints, publish artifacts, and open the PR back to
     Slipstream.
@@ -241,10 +241,9 @@
   >
     {$cliChecking ? 'Checking…' : 'Test connection'}
   </button>
-</div>
+</SettingsSection>
 
-<div>
-  <span class="lbl-f">Linear</span>
+<SettingsSection title="Linear">
   <p class="integration-hint">Personal API key from Linear → Settings → API → Personal API keys.</p>
   <div class="path-add">
     <input
@@ -312,10 +311,9 @@
       </button>
     </div>
   {/if}
-</div>
+</SettingsSection>
 
-<div>
-  <span class="lbl-f">Jira Cloud</span>
+<SettingsSection title="Jira Cloud">
   <p class="integration-hint">
     Base URL, account email, and an API token from Atlassian account settings → Security → API
     tokens.
@@ -412,10 +410,9 @@
       </button>
     </div>
   {/if}
-</div>
+</SettingsSection>
 
-<div>
-  <span class="lbl-f">GitHub Token</span>
+<SettingsSection title="GitHub Token">
   <p class="integration-hint">Personal access token with repo scope.</p>
   <div class="path-add">
     <input
@@ -436,9 +433,8 @@
   {#if !hasBackend}
     <p class="integration-hint muted">Backend not available in browser-only mode.</p>
   {/if}
-</div>
-<div>
-  <span class="lbl-f">GitLab Token</span>
+</SettingsSection>
+<SettingsSection title="GitLab Token">
   <p class="integration-hint">Personal access token with repo scope.</p>
   <div class="path-add">
     <input
@@ -459,7 +455,7 @@
   {#if !hasBackend}
     <p class="integration-hint muted">Backend not available in browser-only mode.</p>
   {/if}
-</div>
+</SettingsSection>
 
 <style>
   .mcp-settings-row {
