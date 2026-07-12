@@ -30,13 +30,22 @@ export class ReplayGate {
     this.held.push([chunk, seq])
   }
 
-  /** Write the snapshot, then flush held chunks newer than it (seq > snap
-   *  seq), dropping duplicates. No-op if already open. */
+  /** Write the snapshot, then flush held chunks newer than it, dropping
+   *  duplicates. No-op if already open.
+   *
+   *  `seq`/`chunkSeq` are cumulative character counts (see OutputBuffer.push),
+   *  and the server coalesces PTY output into 40ms batches (rpc.ts), so a
+   *  held batch's seq is its END, not its start. A batch can therefore
+   *  STRADDLE the snapshot boundary — start before `seq`, end after it — in
+   *  which case only the bytes beyond the boundary are new; replaying the
+   *  batch whole would double-write its covered head into the terminal. */
   applySnapshot(data: string, seq: number): void {
     if (this.open) return
     this.sink(data)
     for (const [chunk, chunkSeq] of this.held) {
-      if (chunkSeq > seq) this.sink(chunk)
+      if (chunkSeq <= seq) continue // fully covered by the snapshot
+      const startSeq = chunkSeq - chunk.length
+      this.sink(startSeq >= seq ? chunk : chunk.slice(seq - startSeq))
     }
     this.held.length = 0
     // Clamp: `open` is `snapSeq >= 0`, so a producer handing us a negative

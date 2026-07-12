@@ -246,6 +246,17 @@ filtering across the live subscribe/snapshot race) and the forensic exit-log tai
 sessions are served by running their raw scrollback file through a temporary headless terminal
 at the session's last persisted PTY size (`<id>.size.json`, written by `scrollbackStore.ts`).
 
+The client side of this is `wsApi`'s `onConnectionChange(cb)`: it fires on every open/close
+transition, and a `visibilitychange`/`online`/`pageshow` listener either short-circuits a
+pending reconnect backoff or (socket looks open) pings with a short 3s deadline — vs. the
+regular heartbeat's 10s — so a half-dead socket after backgrounding surfaces in seconds, not
+up to ~25s. `TerminalView.svelte` subscribes and, on `false → true`, re-runs the same
+`resync()` used on first attach (re-resume, re-`attachSession` since the server assigned a
+new `clientId`, re-resize, fresh `getSessionBuffer` snapshot) — a reconnect is otherwise
+indistinguishable from a fresh mount client-side. `ReplayGate.applySnapshot` also slices
+(rather than drops-or-keeps-whole) a held batch straddling the snapshot's `seq` boundary,
+since the server stamps each coalesced 40ms batch with its *end* seq.
+
 ### Session-start scheduling (FLO-95)
 
 The reaper's counterpart on the *start* side of the lifecycle is the **session scheduler**

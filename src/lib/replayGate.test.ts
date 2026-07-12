@@ -2,17 +2,21 @@ import { describe, it, expect } from 'vitest'
 import { ReplayGate } from './replayGate.js'
 
 describe('ReplayGate', () => {
-  it('holds chunks until the snapshot resolves, then flushes duplicates dropped', () => {
+  it('holds chunks until the snapshot resolves, then flushes only chunks newer than it', () => {
     const sunk: string[] = []
     const gate = new ReplayGate((chunk) => sunk.push(chunk))
 
-    gate.push('live-a', 10)
-    gate.push('live-b', 20) // duplicate — already covered by the snapshot below
+    // seq is a cumulative character count (see OutputBuffer.push): 'live-a'
+    // (6 chars) is the first chunk ever pushed, ending at seq 6; 'live-b' (6
+    // chars) immediately follows, ending at seq 12 — so it starts exactly at
+    // the seq-6 snapshot boundary below (no straddle; see the dedicated
+    // straddling-batch tests further down for that case).
+    gate.push('live-a', 6) // fully covered by the snapshot — dropped
+    gate.push('live-b', 12) // entirely newer than the snapshot — kept whole
     expect(sunk).toEqual([]) // nothing sunk while closed
 
-    gate.applySnapshot('snapshot', 15)
+    gate.applySnapshot('snapshot', 6)
 
-    // Snapshot written first, then only chunks newer than snap.seq (15).
     expect(sunk).toEqual(['snapshot', 'live-b'])
   })
 
@@ -96,5 +100,48 @@ describe('ReplayGate', () => {
     gate.fail() // should not re-flush or re-open
 
     expect(sunk).toEqual(['snap', 'held-after-open'])
+  })
+
+  describe('straddling batches (FLO-103 reconnect resync)', () => {
+    // The server coalesces PTY chunks into 40ms batches and stamps each
+    // pushed batch with the LAST chunk's cumulative seq (seq = end of the
+    // batch, not its start — see electron/services/outputBuffer.ts). A batch
+    // can straddle the snapshot boundary: start before the snapshot's seq,
+    // end after it. Only the bytes past the boundary are new.
+
+    it('a batch fully BEFORE the snapshot seq is dropped entirely', () => {
+      const sunk: string[] = []
+      const gate = new ReplayGate((chunk) => sunk.push(chunk))
+
+      // 'held' is 4 chars, ending at cumulative seq 10 (so it spans [6, 10)).
+      gate.push('held', 10)
+      gate.applySnapshot('snap', 20) // snapshot already covers past seq 10
+
+      expect(sunk).toEqual(['snap'])
+    })
+
+    it('a batch fully AFTER the snapshot seq is written whole', () => {
+      const sunk: string[] = []
+      const gate = new ReplayGate((chunk) => sunk.push(chunk))
+
+      // 'held' spans [10, 14) — starts at/after the snapshot's seq of 10.
+      gate.push('held', 14)
+      gate.applySnapshot('snap', 10)
+
+      expect(sunk).toEqual(['snap', 'held'])
+    })
+
+    it('a batch straddling the snapshot seq is sliced to only the new tail', () => {
+      const sunk: string[] = []
+      const gate = new ReplayGate((chunk) => sunk.push(chunk))
+
+      // 'abcdefghij' is 10 chars ending at cumulative seq 30, so it spans
+      // [20, 30). A snapshot at seq 25 covers [20, 25) of it — only the last
+      // 5 chars ('fghij') are new.
+      gate.push('abcdefghij', 30)
+      gate.applySnapshot('snap', 25)
+
+      expect(sunk).toEqual(['snap', 'fghij'])
+    })
   })
 })

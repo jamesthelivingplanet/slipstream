@@ -9,6 +9,7 @@
     select,
     subscribeSessionStatus,
     subscribeSessionPr,
+    subscribeConnectionChange,
     mobile,
     drawer,
     contentLoading,
@@ -69,6 +70,7 @@
   onMount(() => {
     const offStatus = subscribeSessionStatus()
     const offPr = subscribeSessionPr()
+    const offConnection = subscribeConnectionChange()
 
     initFromBackend().then(() => {
       return refreshAndReconcile().then(() => {
@@ -103,6 +105,7 @@
     return () => {
       offStatus()
       offPr()
+      offConnection()
       window.removeEventListener('resize', checkViewport)
       window.removeEventListener('orientationchange', checkViewport)
     }

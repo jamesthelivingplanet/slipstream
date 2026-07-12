@@ -776,6 +776,10 @@ export interface SlipstreamApi {
   listSessionAgentEvents(sessionId: string): Promise<SessionAgentEventDTO[]>
   /** Live agent-event push for sessions this client can see. Returns unsubscribe fn. */
   onSessionAgentEvent(cb: (event: SessionAgentEventDTO) => void): () => void
+
+  /** Subscribe to transport connection state (true = connected). Fires on every
+   *  transition; used by the UI to resync terminals after a reconnect. */
+  onConnectionChange(cb: (connected: boolean) => void): () => void
 }
 
 export const IPC = {

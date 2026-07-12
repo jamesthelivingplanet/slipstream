@@ -470,3 +470,11 @@ export function onSessionAgentEvent(cb: (event: SessionAgentEventDTO) => void): 
 export function getPrStatus(sessionId: string): Promise<PrStatusDTO | null> {
   return hasBackend ? window.slipstream.getPrStatus(sessionId) : Promise.resolve(null)
 }
+
+// ── Transport connectivity ──────────────────────────────────────────────────
+
+/** Subscribe to backend transport connectivity (reconnects). Returns an unsubscribe fn. */
+export function onConnectionChange(cb: (connected: boolean) => void): () => void {
+  if (!hasBackend) return () => {}
+  return window.slipstream.onConnectionChange(cb)
+}
