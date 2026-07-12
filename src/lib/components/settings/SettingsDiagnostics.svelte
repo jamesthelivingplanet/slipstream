@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { hasBackend } from '../../ipc'
+  import SettingsSection from './SettingsSection.svelte'
   import {
     diagnostics,
     diagChecking,
@@ -61,122 +62,133 @@
   <p class="integration-hint muted">Backend not available in browser-only mode.</p>
 {/if}
 
-<div class="diag-section">
-  <span class="lbl-f">Versions</span>
-  <div class="diag-grid">
-    <span class="diag-key muted">App</span>
-    <span class="mono">{appVersion} · {appGitHash}</span>
-    <span class="diag-key muted">Electron</span>
-    <span class="mono">{$diagnostics?.versions?.electron ?? '—'}</span>
-    <span class="diag-key muted">Node</span>
-    <span class="mono">{$diagnostics?.versions?.node ?? '—'}</span>
-    <span class="diag-key muted">V8</span>
-    <span class="mono">{$diagnostics?.versions?.v8 ?? '—'}</span>
-    <span class="diag-key muted">Chrome</span>
-    <span class="mono">{$diagnostics?.versions?.chrome ?? '—'}</span>
+<SettingsSection title="Versions">
+  <div class="diag-section">
+    <div class="diag-grid">
+      <span class="diag-key muted">App</span>
+      <span class="mono">{appVersion} · {appGitHash}</span>
+      <span class="diag-key muted">Electron</span>
+      <span class="mono">{$diagnostics?.versions?.electron ?? '—'}</span>
+      <span class="diag-key muted">Node</span>
+      <span class="mono">{$diagnostics?.versions?.node ?? '—'}</span>
+      <span class="diag-key muted">V8</span>
+      <span class="mono">{$diagnostics?.versions?.v8 ?? '—'}</span>
+      <span class="diag-key muted">Chrome</span>
+      <span class="mono">{$diagnostics?.versions?.chrome ?? '—'}</span>
+    </div>
   </div>
-</div>
+</SettingsSection>
 
-<div class="diag-section">
-  <span class="lbl-f">Daemon</span>
-  <div class="diag-grid">
-    <span class="diag-key muted">WS URL</span>
-    <span class="mono">{$diagnostics?.daemon?.wsUrl ?? '—'}</span>
-    <span class="diag-key muted">HTTP base</span>
-    <span class="mono">{$diagnostics?.daemon?.httpBase ?? '—'}</span>
-    <span class="diag-key muted">Port</span>
-    <span class="mono">{$diagnostics?.daemon?.port ?? '—'}</span>
-    <span class="diag-key muted">PID</span>
-    <span class="mono">{$diagnostics?.daemon?.pid ?? '—'}</span>
-    <span class="diag-key muted">Mode</span>
-    <span class="mono">{$diagnostics?.daemon?.mode ?? '—'}</span>
-    <span class="diag-key muted">Startup</span>
-    <span class="mono">{daemonReused}</span>
-    <span class="diag-key muted">Data dir</span>
-    <span class="mono">{$diagnostics?.daemon?.dataDir ?? '—'}</span>
-    <span class="diag-key muted">DB path</span>
-    <span class="mono">{$diagnostics?.daemon?.dbPath ?? '—'}</span>
+<SettingsSection title="Daemon">
+  <div class="diag-section">
+    <div class="diag-grid">
+      <span class="diag-key muted">WS URL</span>
+      <span class="mono">{$diagnostics?.daemon?.wsUrl ?? '—'}</span>
+      <span class="diag-key muted">HTTP base</span>
+      <span class="mono">{$diagnostics?.daemon?.httpBase ?? '—'}</span>
+      <span class="diag-key muted">Port</span>
+      <span class="mono">{$diagnostics?.daemon?.port ?? '—'}</span>
+      <span class="diag-key muted">PID</span>
+      <span class="mono">{$diagnostics?.daemon?.pid ?? '—'}</span>
+      <span class="diag-key muted">Mode</span>
+      <span class="mono">{$diagnostics?.daemon?.mode ?? '—'}</span>
+      <span class="diag-key muted">Startup</span>
+      <span class="mono">{daemonReused}</span>
+      <span class="diag-key muted">Data dir</span>
+      <span class="mono">{$diagnostics?.daemon?.dataDir ?? '—'}</span>
+      <span class="diag-key muted">DB path</span>
+      <span class="mono">{$diagnostics?.daemon?.dbPath ?? '—'}</span>
+    </div>
   </div>
-</div>
+</SettingsSection>
 
-<div class="diag-section">
-  <span class="lbl-f">Repositories</span>
-  {#if $diagnostics?.repos?.length}
-    <div class="diag-repos">
-      {#each $diagnostics.repos as repo (repo.id)}
-        <div class="diag-repo">
-          <div class="diag-repo-head">
-            <span class="diag-repo-name">{repo.org}/{repo.name}</span>
-            <span class="mono muted diag-repo-id">{repo.id}</span>
-          </div>
-          <div class="mono muted diag-repo-path">{repo.path}</div>
-          <div class="diag-badges">
-            <span class="diag-badge" class:ok={repo.exists} class:bad={!repo.exists}>
-              <span class="diag-dot" class:up={repo.exists} class:down={!repo.exists}></span>
-              exists: {repo.exists ? 'yes' : 'no'}
-            </span>
-            <span class="diag-badge" class:ok={repo.isWorktree} class:bad={!repo.isWorktree}>
-              <span class="diag-dot" class:up={repo.isWorktree} class:down={!repo.isWorktree}
-              ></span>
-              worktree: {repo.isWorktree ? 'yes' : 'no'}
-            </span>
-            <span class="diag-badge" class:ok={repo.remoteMatches} class:bad={!repo.remoteMatches}>
-              <span class="diag-dot" class:up={repo.remoteMatches} class:down={!repo.remoteMatches}
-              ></span>
-              remote: {repo.remoteMatches ? 'matched' : 'mismatch'}
-            </span>
-          </div>
-          {#if !repo.remoteMatches && repo.configuredRemote && repo.actualRemote}
-            <div class="diag-remote-detail mono muted">
-              configured: {repo.configuredRemote}<br />
-              actual: {repo.actualRemote}
+<SettingsSection title="Repositories">
+  <div class="diag-section">
+    {#if $diagnostics?.repos?.length}
+      <div class="diag-repos">
+        {#each $diagnostics.repos as repo (repo.id)}
+          <div class="diag-repo">
+            <div class="diag-repo-head">
+              <span class="diag-repo-name">{repo.org}/{repo.name}</span>
+              <span class="mono muted diag-repo-id">{repo.id}</span>
             </div>
-          {/if}
-        </div>
-      {/each}
-    </div>
-  {:else}
-    <p class="integration-hint muted">No repositories registered.</p>
-  {/if}
-</div>
-
-<div class="diag-section">
-  <span class="lbl-f">CLI self-test</span>
-  <div class="mcp-settings-row">
-    <span
-      class="mcp-settings-dot"
-      class:up={$cliStatus?.up}
-      class:down={$cliStatus && !$cliStatus.up}
-    ></span>
-    <span class="mcp-settings-state"
-      >{$cliStatus === null ? 'Checking' : $cliStatus.up ? 'Up' : 'Unreachable'}</span
-    >
+            <div class="mono muted diag-repo-path">{repo.path}</div>
+            <div class="diag-badges">
+              <span class="diag-badge" class:ok={repo.exists} class:bad={!repo.exists}>
+                <span class="diag-dot" class:up={repo.exists} class:down={!repo.exists}></span>
+                exists: {repo.exists ? 'yes' : 'no'}
+              </span>
+              <span class="diag-badge" class:ok={repo.isWorktree} class:bad={!repo.isWorktree}>
+                <span class="diag-dot" class:up={repo.isWorktree} class:down={!repo.isWorktree}
+                ></span>
+                worktree: {repo.isWorktree ? 'yes' : 'no'}
+              </span>
+              <span
+                class="diag-badge"
+                class:ok={repo.remoteMatches}
+                class:bad={!repo.remoteMatches}
+              >
+                <span
+                  class="diag-dot"
+                  class:up={repo.remoteMatches}
+                  class:down={!repo.remoteMatches}
+                ></span>
+                remote: {repo.remoteMatches ? 'matched' : 'mismatch'}
+              </span>
+            </div>
+            {#if !repo.remoteMatches && repo.configuredRemote && repo.actualRemote}
+              <div class="diag-remote-detail mono muted">
+                configured: {repo.configuredRemote}<br />
+                actual: {repo.actualRemote}
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <p class="integration-hint muted">No repositories registered.</p>
+    {/if}
   </div>
-  {#if $cliStatus?.commands?.length}
-    <div class="mcp-settings-tools">
-      {#each $cliStatus.commands as command (command)}
-        <span class="mcp-settings-tool mono">{command}</span>
-      {/each}
+</SettingsSection>
+
+<SettingsSection title="CLI self-test">
+  <div class="diag-section">
+    <div class="mcp-settings-row">
+      <span
+        class="mcp-settings-dot"
+        class:up={$cliStatus?.up}
+        class:down={$cliStatus && !$cliStatus.up}
+      ></span>
+      <span class="mcp-settings-state"
+        >{$cliStatus === null ? 'Checking' : $cliStatus.up ? 'Up' : 'Unreachable'}</span
+      >
     </div>
-  {/if}
-  {#if $cliStatus}
-    <p class="integration-hint muted">
-      Checked {relTime($cliStatus.checkedAt)} ago{#if $cliStatus.lastActivityAt}
-        · Last used {relTime($cliStatus.lastActivityAt)} ago{:else}
-        · No agent has used it yet{/if}
-    </p>
-  {/if}
-  {#if $cliStatus?.error}
-    <p class="mcp-settings-error">{$cliStatus.error}</p>
-  {/if}
-  <button
-    class="btn btn-outline btn-sm"
-    on:click={() => refreshCliStatus()}
-    disabled={$cliChecking}
-  >
-    {$cliChecking ? 'Checking…' : 'Test connection'}
-  </button>
-</div>
+    {#if $cliStatus?.commands?.length}
+      <div class="mcp-settings-tools">
+        {#each $cliStatus.commands as command (command)}
+          <span class="mcp-settings-tool mono">{command}</span>
+        {/each}
+      </div>
+    {/if}
+    {#if $cliStatus}
+      <p class="integration-hint muted">
+        Checked {relTime($cliStatus.checkedAt)} ago{#if $cliStatus.lastActivityAt}
+          · Last used {relTime($cliStatus.lastActivityAt)} ago{:else}
+          · No agent has used it yet{/if}
+      </p>
+    {/if}
+    {#if $cliStatus?.error}
+      <p class="mcp-settings-error">{$cliStatus.error}</p>
+    {/if}
+    <button
+      class="btn btn-outline btn-sm"
+      on:click={() => refreshCliStatus()}
+      disabled={$cliChecking}
+    >
+      {$cliChecking ? 'Checking…' : 'Test connection'}
+    </button>
+  </div>
+</SettingsSection>
 
 <style>
   .tab-header {

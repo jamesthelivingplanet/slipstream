@@ -10,6 +10,7 @@
     setSchedulerPolicy,
   } from '../../ipc'
   import { pushToast } from '../../toast'
+  import SettingsSection from './SettingsSection.svelte'
   import type { GcPolicy, SchedulerPolicy } from '../../../../electron/shared/contract.js'
   import {
     DEFAULT_GC_POLICY,
@@ -120,49 +121,52 @@
 <div class="tab-header">
   <span class="tab-title">Behavior</span>
 </div>
-<div>
-  <span class="lbl-f">Editor command</span>
-  <p class="integration-hint">
-    Command run to open a worktree in your editor, e.g. <code>code</code> (VS Code) or
-    <code>zed</code> (Zed). The worktree path is appended as an argument.
-  </p>
-  <input
-    type="text"
-    class="path-input"
-    placeholder="code"
-    bind:value={editorCommand}
-    disabled={editorPending || !hasBackend}
-  />
-</div>
-<div>
-  <span class="lbl-f">Mobile editor command (optional)</span>
-  <p class="integration-hint">
-    Used instead when opening from the mobile layout. Leave blank to use the editor command above.
-    Tip: a web-accessible editor such as <code>code serve-web</code> works well here.
-  </p>
-  <div class="path-add">
-    <input
-      type="text"
-      class="path-input"
-      placeholder="code serve-web"
-      bind:value={mobileEditorCommand}
-      disabled={editorPending || !hasBackend}
-    />
-    <button
-      class="btn btn-outline btn-sm"
-      on:click={saveEditorConfig}
-      disabled={editorPending || !hasBackend}
-    >
-      Save
-    </button>
+<SettingsSection title="Editor">
+  <div class="editor-fields">
+    <div>
+      <span class="lbl-f">Editor command</span>
+      <p class="integration-hint">
+        Command run to open a worktree in your editor, e.g. <code>code</code> (VS Code) or
+        <code>zed</code> (Zed). The worktree path is appended as an argument.
+      </p>
+      <input
+        type="text"
+        class="path-input"
+        placeholder="code"
+        bind:value={editorCommand}
+        disabled={editorPending || !hasBackend}
+      />
+    </div>
+    <div>
+      <span class="lbl-f">Mobile editor command (optional)</span>
+      <p class="integration-hint">
+        Used instead when opening from the mobile layout. Leave blank to use the editor command
+        above. Tip: a web-accessible editor such as <code>code serve-web</code> works well here.
+      </p>
+      <div class="path-add">
+        <input
+          type="text"
+          class="path-input"
+          placeholder="code serve-web"
+          bind:value={mobileEditorCommand}
+          disabled={editorPending || !hasBackend}
+        />
+        <button
+          class="btn btn-outline btn-sm"
+          on:click={saveEditorConfig}
+          disabled={editorPending || !hasBackend}
+        >
+          Save
+        </button>
+      </div>
+      {#if !hasBackend}
+        <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+      {/if}
+    </div>
   </div>
-  {#if !hasBackend}
-    <p class="integration-hint muted">Backend not available in browser-only mode.</p>
-  {/if}
-</div>
+</SettingsSection>
 
-<div>
-  <span class="lbl-f">Session cleanup (cost guard)</span>
+<SettingsSection title="Session cleanup (cost guard)">
   <p class="integration-hint">
     Automatically stop abandoned or idle agent sessions so forgotten agents don't keep burning
     compute. Reaped sessions stay visible in the sidebar marked <b>Reaped</b>.
@@ -218,10 +222,9 @@
   {#if !hasBackend}
     <p class="integration-hint muted">Backend not available in browser-only mode.</p>
   {/if}
-</div>
+</SettingsSection>
 
-<div>
-  <span class="lbl-f">Concurrency</span>
+<SettingsSection title="Concurrency">
   <p class="integration-hint">
     Cap how many agent sessions run at once. Starts beyond the cap are queued and launch
     automatically as running agents finish or are reaped.
@@ -246,4 +249,12 @@
   {#if !hasBackend}
     <p class="integration-hint muted">Backend not available in browser-only mode.</p>
   {/if}
-</div>
+</SettingsSection>
+
+<style>
+  .editor-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+</style>
