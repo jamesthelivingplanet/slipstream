@@ -557,6 +557,100 @@ describe('wsApi', () => {
     })
   })
 
+  describe('onConnectionChange', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('fires true on open, false on close, true again on reconnect', async () => {
+      vi.useFakeTimers()
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const received: boolean[] = []
+      api.onConnectionChange((connected) => received.push(connected))
+
+      const ws1 = openWs()
+      expect(received).toEqual([true])
+
+      ws1.simulateClose(1006)
+      expect(received).toEqual([true, false])
+
+      await vi.advanceTimersByTimeAsync(500) // reconnect backoff
+      const ws2 = getWs()
+      expect(ws2).not.toBe(ws1)
+      ws2.simulateOpen()
+      expect(received).toEqual([true, false, true])
+    })
+
+    it('unsubscribe stops delivery', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const received: boolean[] = []
+      const unsub = api.onConnectionChange((connected) => received.push(connected))
+
+      const ws = openWs()
+      unsub()
+      ws.simulateClose(1006)
+
+      expect(received).toEqual([true]) // close after unsubscribe not delivered
+    })
+  })
+
+  describe('foreground fast-probe (visibilitychange/online/pageshow)', () => {
+    // These exercise the module-level listeners registered in createWsApi
+    // against globalThis.document/window — only meaningful when those are
+    // stubbed before createWsApi runs, since the module guards with
+    // `typeof document/window !== 'undefined'` for the plain-Node test env.
+    afterEach(() => {
+      vi.useRealTimers()
+      delete (globalThis as { document?: unknown }).document
+      delete (globalThis as { window?: unknown }).window
+    })
+
+    function stubBrowserGlobals() {
+      const listeners: Record<string, Array<() => void>> = {}
+      const fakeDoc = {
+        visibilityState: 'visible' as 'visible' | 'hidden',
+        addEventListener: (type: string, cb: () => void) => {
+          ;(listeners[type] ??= []).push(cb)
+        },
+      }
+      const fakeWin = {
+        addEventListener: (type: string, cb: () => void) => {
+          ;(listeners[type] ??= []).push(cb)
+        },
+      }
+      ;(globalThis as { document?: unknown }).document = fakeDoc
+      ;(globalThis as { window?: unknown }).window = fakeWin
+      return {
+        fire: (type: string) => listeners[type]?.forEach((cb) => cb()),
+        setHidden: (hidden: boolean) => {
+          fakeDoc.visibilityState = hidden ? 'hidden' : 'visible'
+        },
+      }
+    }
+
+    it('short-circuits a pending reconnect backoff on visibilitychange', async () => {
+      vi.useFakeTimers()
+      const { fire } = stubBrowserGlobals()
+
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws1 = getWs()
+      ws1.simulateOpen()
+      ws1.simulateClose(1006) // schedules a 500ms reconnect backoff
+
+      // Well before the 500ms backoff would fire, the tab comes back to the
+      // foreground — this should short-circuit the wait and reconnect now.
+      fire('visibilitychange')
+      // The reconnect happens synchronously off the fast-probe (no timer wait).
+      const ws2 = getWs()
+      expect(ws2).not.toBe(ws1)
+
+      const received: boolean[] = []
+      api.onConnectionChange((c) => received.push(c))
+      ws2.simulateOpen()
+      expect(received).toEqual([true])
+    })
+  })
+
   describe('heartbeat', () => {
     afterEach(() => {
       vi.useRealTimers()

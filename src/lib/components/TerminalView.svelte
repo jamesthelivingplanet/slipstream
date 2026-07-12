@@ -39,6 +39,7 @@
     onSessionWriteLock,
     onSessionExit,
     getPrStatus,
+    onConnectionChange,
   } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
@@ -67,6 +68,21 @@
   let offWriteLock: (() => void) | null = null
   let offExit: (() => void) | null = null
   let onDataSub: IDisposable | null = null
+  // Current gate for the live session — reassigned on every resync() so the
+  // long-lived onSessionData subscription (wired once in startLive) always
+  // routes to the gate for the LATEST attach/snapshot round, not a stale one.
+  let gate: ReplayGate | null = null
+  // Set true on a transport disconnect, cleared (and triggers a resync) on
+  // the next reconnect — see the onConnectionChange subscription in onMount.
+  let wasDisconnected = false
+  // Generation counter so overlapping resync() calls can't interleave —
+  // e.g. a reconnect resync racing a scheduleLiveRetry-driven startLive().
+  // Each resync resets the terminal and then (after awaits) writes a full
+  // serialized snapshot; two in flight means the older one's snapshot lands
+  // AFTER the newer one's reset, permanently duplicating the scrollback
+  // (nothing but reset ever clears it). Only the latest generation may touch
+  // the terminal — superseded calls bail after every await.
+  let resyncGen = 0
   let canWrite = true
   let viewers = 1
   let exited = false
@@ -131,9 +147,25 @@
       if (term) term.options.theme = terminalTheme()
     })
 
+    // FLO-103: after a WS reconnect the server assigns a new clientId, so the
+    // old write-lock/attach state is gone and any PTY bytes emitted while we
+    // were disconnected were never received — resync from scratch (attach,
+    // resize, fresh snapshot) rather than leaving the terminal frozen/stale.
+    const offConnection = onConnectionChange((connected) => {
+      if (!connected) {
+        wasDisconnected = true
+        return
+      }
+      if (wasDisconnected) {
+        wasDisconnected = false
+        void resync({ force: true })
+      }
+    })
+
     return () => {
       window.removeEventListener('resize', onResize)
       unsub()
+      offConnection()
     }
   })
 
@@ -235,23 +267,59 @@
     }, 1000)
   }
 
-  async function startLive() {
-    if (liveId !== null && liveId !== session.id) cleanupListeners()
-    liveId = session.id
-    exited = false
-    exitCode = null
+  /**
+   * (Re)attach to the live session: resume (idempotent), take the write
+   * lock, resize the PTY to our size, reset the terminal, and replay a
+   * fresh snapshot through a new ReplayGate. Used both by startLive() (first
+   * attach) and by the onConnectionChange handler after a WS reconnect —
+   * the server hands out a new clientId on reconnect, so the old write-lock
+   * state is gone and any bytes emitted while we were disconnected were
+   * never received, same as a fresh mount.
+   */
+  async function resync(opts?: { force?: boolean }) {
+    if (destroyed || exited || !session.id) return
+    // FLO-95: a queued session hasn't started yet — attaching/resuming would
+    // be a no-op backend-side (the scheduler guards against jumping the
+    // queue) and there's no PTY yet to snapshot. Poll via the existing live
+    // retry loop (the same one that covers the fresh-start buffer 404) until
+    // the scheduler starts it.
+    if (session.status === 'queued') {
+      scheduleLiveRetry()
+      return
+    }
+    const id = session.id
+    const gen = ++resyncGen
 
-    // FLO-95: a queued session hasn't started yet — resuming it would be a
-    // no-op backend-side (the scheduler guards against jumping the queue),
-    // and its PTY data/status arrive automatically once a slot frees.
-    if (session.id && session.status !== 'queued' && !resumedIds.has(session.id)) {
-      resumedIds.add(session.id)
+    // On a reconnect (`force`) call resumeSession regardless of resumedIds —
+    // the daemon may have restarted while we were away, and resumeSession is
+    // idempotent (returns the live dto if already running).
+    if (opts?.force || !resumedIds.has(id)) {
+      resumedIds.add(id)
       try {
-        await resumeSession(session.id)
+        await resumeSession(id)
       } catch {
         /* already live or not found */
       }
+      if (gen !== resyncGen || destroyed) return
     }
+
+    try {
+      const lock = await attachSession(id)
+      if (gen !== resyncGen || destroyed) return
+      canWrite = lock.canWrite
+      viewers = lock.viewers
+    } catch {
+      if (gen !== resyncGen || destroyed) return
+      // Leave the previous lock state; scheduleLiveRetry (below, on snapshot
+      // failure) or the next reconnect will retry the whole sequence.
+    }
+    // The backend serializes the screen at the PTY's current size, so the
+    // PTY must be resized to OUR size before we ask for the snapshot — this
+    // also makes the agent's next repaint target the right geometry.
+    try {
+      fit.fit()
+    } catch {}
+    resizeSession(id, term.cols, term.rows)
 
     term.reset()
     setTimeout(() => {
@@ -261,32 +329,42 @@
       term.focus()
     }, 40)
 
-    if (session.id) {
-      const lock = await attachSession(session.id)
-      canWrite = lock.canWrite
-      viewers = lock.viewers
-    }
-    // The backend serializes the screen at the PTY's current size, so the
-    // PTY must be resized to OUR size before we ask for the snapshot — this
-    // also makes the agent's next repaint target the right geometry.
+    const myGate = new ReplayGate((chunk) => term.write(chunk))
+    gate = myGate
     try {
-      fit.fit()
-    } catch {}
-    if (session.id) resizeSession(session.id, term.cols, term.rows)
-
-    const gate = new ReplayGate((chunk) => term.write(chunk))
-    offData = onSessionData((sid, chunk, seq) => {
-      if (sid !== session.id) return
-      gate.push(chunk, seq)
-    })
-    try {
-      const snap = await getSessionBuffer(session.id ?? '')
-      gate.applySnapshot(snap.data, snap.seq)
+      const snap = await getSessionBuffer(id)
+      // Superseded while the snapshot was in flight: the newer resync has
+      // already reset the terminal — writing OUR full snapshot now would
+      // duplicate the scrollback. Its own snapshot covers everything.
+      if (gen !== resyncGen || destroyed) return
+      myGate.applySnapshot(snap.data, snap.seq)
     } catch {
-      gate.fail()
+      if (gen !== resyncGen || destroyed) return
+      myGate.fail()
       scheduleLiveRetry()
     }
+  }
 
+  async function startLive() {
+    if (liveId !== null && liveId !== session.id) cleanupListeners()
+    liveId = session.id
+    exited = false
+    exitCode = null
+
+    // Clear the previous session's screen immediately on switch. resync()
+    // resets again right before writing the snapshot — that's what keeps the
+    // reset/snapshot pair atomic vs. concurrent resyncs — but that reset only
+    // happens after its awaits, and not at all while the session is still
+    // queued, so without this the old session's content would linger under
+    // the new session's header.
+    term.reset()
+
+    // One-time wiring for this attach's lifetime — reused across resync()
+    // calls (initial + reconnect) so we never stack duplicate listeners.
+    offData = onSessionData((sid, chunk, seq) => {
+      if (sid !== session.id) return
+      gate?.push(chunk, seq)
+    })
     offWriteLock = onSessionWriteLock((state) => {
       if (state.sessionId !== session.id) return
       canWrite = state.canWrite
@@ -297,7 +375,6 @@
       exited = true
       exitCode = code
     })
-
     onDataSub = term.onData((d) => {
       if (session.id && canWrite) writeSession(session.id, d)
     })
@@ -314,6 +391,8 @@
     }
     window.addEventListener('resize', sendResize)
     offResize = () => window.removeEventListener('resize', sendResize)
+
+    await resync()
   }
 
   function cleanupListeners() {
@@ -341,6 +420,7 @@
       onDataSub.dispose()
       onDataSub = null
     }
+    gate = null
     liveId = null
   }
 

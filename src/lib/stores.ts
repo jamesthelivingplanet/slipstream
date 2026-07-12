@@ -21,6 +21,7 @@ import {
   appStatus,
   onSessionStatus,
   onSessionPr,
+  onConnectionChange,
   getCliStatus as ipcGetCliStatus,
   getDiagnostics as ipcGetDiagnostics,
 } from './ipc'
@@ -502,6 +503,29 @@ export function subscribeSessionStatus(): () => void {
 export function subscribeSessionPr(): () => void {
   if (!hasBackend) return () => {}
   return onSessionPr((id, prUrl) => setSessionPrUrl(id, prUrl))
+}
+
+/**
+ * Subscribe to transport reconnects and re-seed `sessions` from the backend
+ * (FLO-103). Any status/exit/PR pushes missed while disconnected are lost —
+ * a plain refresh (no clever merging) is the simplest way to reconcile, and
+ * matches what a manual remount already did before reconnect handling existed.
+ */
+export function subscribeConnectionChange(): () => void {
+  if (!hasBackend) return () => {}
+  let wasDisconnected = false
+  return onConnectionChange((connected) => {
+    if (!connected) {
+      wasDisconnected = true
+      return
+    }
+    if (!wasDisconnected) return
+    wasDisconnected = false
+    listSessions()
+      .then((dtos) => sessions.set(dtos.map(dtoToSession)))
+      .then(() => refreshDiffStats().catch(() => {}))
+      .catch(() => {})
+  })
 }
 
 /** Update the PR/MR URL of the session identified by its backend UUID. */

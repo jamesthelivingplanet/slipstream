@@ -52,6 +52,11 @@ const RECONNECT_DELAYS = [500, 1000, 2000, 5000, 10000]
 // and force-closed to trigger the existing reconnect path.
 const HEARTBEAT_INTERVAL_MS = 15_000
 const PONG_TIMEOUT_MS = 10_000
+// Foreground fast-probe (visibilitychange/online/pageshow): a much shorter
+// deadline than the regular heartbeat's PONG_TIMEOUT_MS — the user is looking
+// at the screen right now, so we want to detect a half-dead socket and kick
+// off reconnect in ~3s instead of waiting out the next full heartbeat cycle.
+const FOREGROUND_PONG_TIMEOUT_MS = 3_000
 
 export interface WsApiOpts {
   url: string // e.g. ws://host:port/rpc
@@ -85,6 +90,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   let reconnectAttempt = 0
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined
   let pongTimeout: ReturnType<typeof setTimeout> | undefined
+  // Handle for the backoff timer scheduled by scheduleReconnect(), so a
+  // foreground fast-probe (visibilitychange/online/pageshow) can cancel the
+  // wait and reconnect immediately instead of sitting out the delay.
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 
   // In-flight request map
   const pending = new Map<string, PendingReq>()
@@ -102,6 +111,12 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   const writeLockListeners = new Set<WriteLockCb>()
   type AgentEventCb = (event: SessionAgentEventDTO) => void
   const agentEventListeners = new Set<AgentEventCb>()
+  type ConnectionCb = (connected: boolean) => void
+  const connectionListeners = new Set<ConnectionCb>()
+
+  function notifyConnection(connected: boolean) {
+    for (const cb of connectionListeners) cb(connected)
+  }
 
   function isOpen(): boolean {
     return open && !!ws && ws.readyState === WS.OPEN
@@ -166,6 +181,7 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       }
       queue.length = 0
       startHeartbeat()
+      notifyConnection(true)
     }
 
     ws.onmessage = (evt: MessageEvent) => {
@@ -220,6 +236,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     ws.onclose = (evt: CloseEvent) => {
       open = false
       stopHeartbeat()
+      // Notify on every close transition, including the auth-error path below —
+      // the UI's "connected" state should reflect reality even though that path
+      // doesn't retry.
+      notifyConnection(false)
       // Reject all in-flight requests
       for (const [, p] of pending) {
         if (p.timer !== undefined) clearTimeout(p.timer)
@@ -252,9 +272,51 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     if (destroyed) return
     const delay = RECONNECT_DELAYS[Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1)]
     reconnectAttempt++
-    setTimeout(() => {
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined
       connect()
     }, delay)
+  }
+
+  // ── Foreground fast-probe ───────────────────────────────────────────────
+  // A backgrounded tab/app can sit on a half-dead socket for up to
+  // HEARTBEAT_INTERVAL_MS + PONG_TIMEOUT_MS (~25s) before the regular
+  // heartbeat notices. When the app comes back to the foreground (tab
+  // refocus, phone unlock, network change), probe immediately instead of
+  // waiting out that window.
+  function onForeground() {
+    if (destroyed) return
+    if (reconnectTimer !== undefined) {
+      // A backoff wait was in progress — the user is looking at the screen
+      // now, so don't make them wait out the remaining delay.
+      clearTimeout(reconnectTimer)
+      reconnectTimer = undefined
+      reconnectAttempt = 0
+      connect()
+      return
+    }
+    if (isOpen()) {
+      if (pongTimeout === undefined) {
+        ws!.send(JSON.stringify({ t: 'ping' }))
+        pongTimeout = setTimeout(() => {
+          pongTimeout = undefined
+          // No pong within the short foreground deadline — treat as half-dead
+          // and force-close so the existing onclose -> reconnect path kicks in.
+          ws?.close()
+        }, FOREGROUND_PONG_TIMEOUT_MS)
+      }
+      // else: a heartbeat pong is already pending — don't stack a second timer.
+    }
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') onForeground()
+    })
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', onForeground)
+    window.addEventListener('pageshow', onForeground)
   }
 
   function send(req: WireReq): void {
@@ -600,6 +662,11 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     onSessionAgentEvent(cb: AgentEventCb): () => void {
       agentEventListeners.add(cb)
       return () => agentEventListeners.delete(cb)
+    },
+
+    onConnectionChange(cb: ConnectionCb): () => void {
+      connectionListeners.add(cb)
+      return () => connectionListeners.delete(cb)
     },
   }
 }
