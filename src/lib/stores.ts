@@ -1,6 +1,11 @@
 import { writable, derived, get } from 'svelte/store'
 import type { Filter, Repo, Session, Status, Ticket, BackendKind, Source } from './types'
-import type { CliStatusDTO, DiagnosticsDTO, SessionDTO } from '../../electron/shared/contract.js'
+import type {
+  CliStatusDTO,
+  DiagnosticsDTO,
+  SessionDTO,
+  WorktreeUpdateMode,
+} from '../../electron/shared/contract.js'
 import { branchFor } from './branch'
 import {
   hasBackend,
@@ -16,6 +21,7 @@ import {
   cleanupSession,
   sessionMerged,
   worktreeStatus,
+  worktreeUpdateFromBase,
   runApp,
   stopApp,
   appStatus,
@@ -70,6 +76,7 @@ export function dtoToSession(dto: SessionDTO): Session {
     branch: dto.branch,
     add: 0,
     del: 0,
+    behind: 0,
     ago: '',
     prompt: dto.prompt,
     port: dto.port,
@@ -245,7 +252,12 @@ export async function refreshDiffStats(): Promise<void> {
     started.map(async (s) => {
       try {
         const info = await worktreeStatus(s.repo as string, s.branch as string)
-        patch(s.id as string, (x) => ({ ...x, add: info.added, del: info.deleted }))
+        patch(s.id as string, (x) => ({
+          ...x,
+          add: info.added,
+          del: info.deleted,
+          behind: info.behind,
+        }))
       } catch {
         // leave existing values on failure
       }
@@ -341,6 +353,7 @@ export function createAgentFromTicket(
       branch: null,
       add: 0,
       del: 0,
+      behind: 0,
       ago: 'draft',
       prompt,
       description: ticket.description,
@@ -374,6 +387,7 @@ export function createBlankAgent(
       branch: null,
       add: 0,
       del: 0,
+      behind: 0,
       ago: 'draft',
       prompt,
       activity: { text: 'Not started.' },
@@ -638,6 +652,41 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
       pushToast('success', `Cleaned up ${s.tid}`)
       return true
     }
+    return false
+  } catch (e) {
+    pushToast('error', cleanError(e))
+    return false
+  }
+}
+
+/** Bring a session's worktree up to date with its repo base. Rebase is the
+ *  default; merge is the alternative. Conflicts are aborted backend-side —
+ *  the worktree is never left mid-operation. */
+export async function updateAgentFromBase(s: Session, mode: WorktreeUpdateMode): Promise<boolean> {
+  if (!hasBackend || !s.repo || !s.branch) return false
+  const base = repoById(s.repo)?.base ?? 'base'
+  try {
+    const res = await worktreeUpdateFromBase(s.repo, s.branch, mode)
+    const info = res.info
+    if (info && s.id) {
+      patch(s.id, (x) => ({ ...x, behind: info.behind, add: info.added, del: info.deleted }))
+    }
+    if (res.stashSaved) {
+      pushToast(
+        'warning',
+        'Uncommitted changes conflicted when re-applying — they are saved in the git stash (`git stash pop` to recover).',
+      )
+    }
+    if (res.updated) {
+      pushToast(
+        'success',
+        mode === 'rebase'
+          ? `${s.tid}: rebased ${s.branch} onto ${base}`
+          : `${s.tid}: merged ${base} into ${s.branch}`,
+      )
+      return true
+    }
+    pushToast('error', res.reason ?? `Could not update ${s.branch} from ${base}`)
     return false
   } catch (e) {
     pushToast('error', cleanError(e))

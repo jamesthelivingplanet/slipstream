@@ -305,6 +305,13 @@
                   <span class="r-diff mono">
                     <span class="add">+{s.add}</span>
                     <span class="del">−{s.del}</span>
+                    {#if s.behind > 0}
+                      <span
+                        class="behind"
+                        title={`${s.behind} commit${s.behind === 1 ? '' : 's'} behind base`}
+                        >↓{s.behind}</span
+                      >
+                    {/if}
                   </span>
                 {/if}
                 {#if costFor(s)}
@@ -668,6 +675,9 @@
   }
   .r-diff .del {
     color: hsl(var(--st-error));
+  }
+  .r-diff .behind {
+    color: hsl(var(--st-needs));
   }
   .r-cost {
     font-size: 11px;

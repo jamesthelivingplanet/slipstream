@@ -17,6 +17,8 @@ import type {
   WorkflowState,
   WorktreeInfo,
   WorktreeDiffDTO,
+  WorktreeUpdateMode,
+  WorktreeUpdateResultDTO,
   EditorConfig,
   NotifyPrefs,
   PushSubscriptionDTO,
@@ -222,6 +224,15 @@ export function worktreeDiff(repoId: string, branch: string): Promise<WorktreeDi
   return hasBackend
     ? window.slipstream.worktreeDiff(repoId, branch)
     : Promise.resolve({ branch: '', base: '', mergeBase: '', files: [], truncated: false })
+}
+
+export function worktreeUpdateFromBase(
+  repoId: string,
+  branch: string,
+  mode: WorktreeUpdateMode,
+): Promise<WorktreeUpdateResultDTO> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.worktreeUpdateFromBase(repoId, branch, mode)
 }
 
 // ── Editor ─────────────────────────────────────────────────────────────────
