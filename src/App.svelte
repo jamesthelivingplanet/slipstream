@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import {
     selected,
+    selectedId,
     dialogOpen,
     settingsOpen,
     initFromBackend,
@@ -135,7 +136,10 @@
   })
 
   // When an agent is selected on mobile/medium, close the drawer.
-  $: if ($selected && $drawer) listOpen = false
+  // Keyed off $selectedId (a primitive) rather than $selected: the derived
+  // session object re-emits on every PTY status broadcast, which would
+  // close the drawer while the user is browsing it (TASK-NBDMS).
+  $: if ($selectedId && $drawer) listOpen = false
 </script>
 
 <div class="app" style="--kb-inset:{$keyboardInset}px">
