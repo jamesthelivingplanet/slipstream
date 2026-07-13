@@ -5,6 +5,8 @@ import {
   MOBILE_BREAKPOINT,
   DRAWER_DISMISS_PX,
   shouldDismissDrawer,
+  keyboardInset,
+  KEYBOARD_MIN_INSET,
 } from './responsive.js'
 
 describe('responsive', () => {
@@ -65,5 +67,44 @@ describe('drawer dismiss', () => {
   it('does not dismiss upward (negative) drags', () => {
     expect(shouldDismissDrawer(-10)).toBe(false)
     expect(shouldDismissDrawer(-400)).toBe(false)
+  })
+})
+
+describe('keyboardInset', () => {
+  it('returns 0 when the visual viewport matches the window', () => {
+    expect(keyboardInset(800, 800, 0)).toBe(0)
+  })
+
+  it('returns 0 for a shortfall below the threshold (URL-bar chrome)', () => {
+    expect(keyboardInset(800, 740, 0)).toBe(0)
+  })
+
+  it('returns 0 right at one below the threshold', () => {
+    expect(keyboardInset(800, 800 - (KEYBOARD_MIN_INSET - 1), 0)).toBe(0)
+  })
+
+  it('returns the inset for a keyboard-sized shortfall', () => {
+    expect(keyboardInset(800, 450, 0)).toBe(350)
+  })
+
+  it('returns the inset right at the threshold', () => {
+    expect(keyboardInset(800, 800 - KEYBOARD_MIN_INSET, 0)).toBe(KEYBOARD_MIN_INSET)
+  })
+
+  it('accounts for offsetTop (iOS scrolls the visual viewport)', () => {
+    expect(keyboardInset(800, 450, 350)).toBe(0)
+  })
+
+  it('is never negative', () => {
+    expect(keyboardInset(800, 900, 0)).toBe(0)
+    expect(keyboardInset(800, 800, 100)).toBe(0)
+  })
+
+  it('reports 0 while pinch-zoomed', () => {
+    expect(keyboardInset(800, 400, 0, 2)).toBe(0)
+  })
+
+  it('still reports an inset at explicit scale 1', () => {
+    expect(keyboardInset(800, 450, 0, 1)).toBe(350)
   })
 })

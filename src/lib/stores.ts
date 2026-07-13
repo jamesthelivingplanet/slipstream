@@ -133,6 +133,9 @@ export const historyOpen = writable<boolean>(false)
 /** True when the viewport is at or below the mobile breakpoint. Synced from App.svelte. */
 export const mobile = writable<boolean>(false)
 
+/** Height (px) of the on-screen keyboard overlapping the viewport (mobile). Synced from App.svelte. */
+export const keyboardInset = writable<number>(0)
+
 /** True when the viewport is at or below the drawer breakpoint (≤900px), meaning
  *  the agent list sidebar should be a toggleable overlay drawer. Synced from App.svelte. */
 export const drawer = writable<boolean>(false)
