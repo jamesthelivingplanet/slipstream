@@ -12,6 +12,7 @@
     subscribeConnectionChange,
     mobile,
     drawer,
+    keyboardInset,
     contentLoading,
     contentResolvedAt,
     contentRefreshNonce,
@@ -30,7 +31,11 @@
   import InstallNudge from './lib/components/InstallNudge.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
   import CliStatus from './lib/components/CliStatus.svelte'
-  import { MOBILE_MEDIA_QUERY, DRAWER_MEDIA_QUERY } from './lib/responsive'
+  import {
+    MOBILE_MEDIA_QUERY,
+    DRAWER_MEDIA_QUERY,
+    keyboardInset as computeKeyboardInset,
+  } from './lib/responsive'
 
   // Mobile drawer state — the sidebar is an overlay on narrow viewports.
   let listOpen = false
@@ -102,12 +107,30 @@
     checkViewport()
     window.addEventListener('resize', checkViewport)
     window.addEventListener('orientationchange', checkViewport)
+
+    // Track the on-screen keyboard via visualViewport so the bottom bars
+    // (mobile composer + .term-actions) can shift up above it.
+    const vv = window.visualViewport
+    const onVv = () => {
+      if (!vv) return
+      keyboardInset.set(computeKeyboardInset(window.innerHeight, vv.height, vv.offsetTop, vv.scale))
+    }
+    if (vv) {
+      vv.addEventListener('resize', onVv)
+      vv.addEventListener('scroll', onVv)
+      onVv()
+    }
+
     return () => {
       offStatus()
       offPr()
       offConnection()
       window.removeEventListener('resize', checkViewport)
       window.removeEventListener('orientationchange', checkViewport)
+      if (vv) {
+        vv.removeEventListener('resize', onVv)
+        vv.removeEventListener('scroll', onVv)
+      }
     }
   })
 
@@ -115,7 +138,7 @@
   $: if ($selected && $drawer) listOpen = false
 </script>
 
-<div class="app">
+<div class="app" style="--kb-inset:{$keyboardInset}px">
   <header class="bar">
     {#if $drawer}
       <!-- Hamburger: toggles the agent list drawer on mobile/medium -->

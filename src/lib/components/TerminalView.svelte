@@ -52,6 +52,7 @@
   import { AGENTS, agentOption } from '../agents'
   import { ReplayGate } from '../replayGate.js'
   import DiffView from './DiffView.svelte'
+  import MobileTermInput from './MobileTermInput.svelte'
 
   export let session: Session
 
@@ -326,7 +327,9 @@
       try {
         fit.fit()
       } catch {}
-      term.focus()
+      // On mobile the composer input (MobileTermInput) is the typing surface;
+      // focusing xterm's hidden textarea would pop the raw on-screen keyboard.
+      if (!$mobile) term.focus()
     }, 40)
 
     const myGate = new ReplayGate((chunk) => term.write(chunk))
@@ -445,7 +448,7 @@
       try {
         fit.fit()
       } catch {}
-      term.focus()
+      if (!$mobile) term.focus()
     }, 40)
     if (!r) return
     const lines = buildScript(session, r)
@@ -513,7 +516,7 @@
       const lock = await takeWrite(session.id)
       canWrite = lock.canWrite
       viewers = lock.viewers
-      term.focus()
+      if (!$mobile) term.focus()
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : String(e))
     }
@@ -589,7 +592,7 @@
       try {
         fit.fit()
       } catch {}
-      term.focus()
+      if (!$mobile) term.focus()
     }, 40)
   }
 
@@ -873,6 +876,16 @@
       </button>
     {/each}
   </div>
+{/if}
+
+{#if $mobile && liveMode && !exited && !showDiff}
+  <!-- TerminalView is reused across sessions, so key the composer to reset its diff base on switch. -->
+  {#key session.id}
+    <MobileTermInput
+      disabled={!canWrite}
+      onData={(d) => session.id && writeSession(session.id, d)}
+    />
+  {/key}
 {/if}
 
 {#if $mobile}

@@ -140,6 +140,9 @@ button {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Lifts the bottom bars above the mobile on-screen keyboard — set from
+     App.svelte via visualViewport (0px when no keyboard is visible). */
+  padding-bottom: var(--kb-inset, 0px);
 }
 
 header.bar {
@@ -1216,6 +1219,41 @@ body {
     min-width: 0;
     max-width: 40px;
     width: 40px;
+  }
+
+  /* Mobile PTY composer: single-line input pinned above .term-actions that
+     mirrors keystrokes (and deletions) onto the PTY. */
+  .term-input {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 6px;
+    padding: 8px 8px 0;
+    background: hsl(var(--background));
+    border-top: 1px solid hsl(var(--border));
+  }
+  .term-input input {
+    flex: 1;
+    min-width: 0;
+    height: 40px;
+    padding: 0 12px;
+    border-radius: var(--radius);
+    border: 1px solid hsl(var(--input));
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: 'Geist Mono', monospace;
+    font-size: 16px; /* ≥16px so iOS Safari doesn't zoom on focus */
+  }
+  .term-input input:focus-visible {
+    outline: none;
+    border-color: hsl(var(--ring));
+  }
+  .term-input input:disabled {
+    opacity: 0.5;
+  }
+  /* The composer already has its own top border — avoid doubling it up
+     when it sits directly above .term-actions. */
+  .term-input + .term-actions {
+    border-top: none;
   }
 
   /* App header: tighter gap so the controls never overflow on narrow phones. */
