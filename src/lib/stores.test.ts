@@ -15,6 +15,7 @@ vi.mock('./ipc', () => ({
   killSession: vi.fn(),
   cleanupSession: vi.fn(),
   sessionMerged: vi.fn(),
+  getTicketStatus: vi.fn(),
   worktreeStatus: vi.fn(),
   worktreeUpdateFromBase: vi.fn(),
   runApp: vi.fn(),
@@ -32,6 +33,7 @@ import {
   stopApp,
   listTickets,
   sessionMerged,
+  getTicketStatus,
   startSession,
   worktreeUpdateFromBase,
 } from './ipc'
@@ -775,15 +777,24 @@ describe('refreshAndReconcile merged-branch cleanup', () => {
     vi.clearAllMocks()
     vi.mocked(listTickets).mockResolvedValue([])
     vi.mocked(killSession).mockResolvedValue(undefined)
+    vi.mocked(getTicketStatus).mockResolvedValue({
+      current: { id: 'st1', name: 'In Progress', type: 'started' },
+      available: [],
+    })
   })
 
-  it('cleans up a session whose branch is merged into base', async () => {
+  it('cleans up a session whose branch is merged into base and whose ticket is Done', async () => {
     vi.mocked(sessionMerged).mockResolvedValue({ merged: true, via: 'merge-commit' })
+    vi.mocked(getTicketStatus).mockResolvedValue({
+      current: { id: 'st2', name: 'Done', type: 'completed' },
+      available: [],
+    })
     vi.mocked(cleanupSession).mockResolvedValue({ removed: true })
 
     await refreshAndReconcile()
 
     expect(sessionMerged).toHaveBeenCalledWith('u1')
+    expect(getTicketStatus).toHaveBeenCalledWith('A', 'linear')
     expect(cleanupSession).toHaveBeenCalledWith('u1', { force: false })
     expect(get(sessions).find((s) => s.id === 'u1')).toBeUndefined()
   })
@@ -806,8 +817,34 @@ describe('refreshAndReconcile merged-branch cleanup', () => {
     expect(get(sessions)).toHaveLength(1)
   })
 
+  it('does not clean a merged session whose linked ticket is not yet Done (TASK-TZGBP)', async () => {
+    vi.mocked(sessionMerged).mockResolvedValue({ merged: true, via: 'merge-commit' })
+    // default beforeEach mock resolves a non-completed ticket status
+
+    await refreshAndReconcile()
+
+    expect(sessionMerged).toHaveBeenCalledWith('u1')
+    expect(getTicketStatus).toHaveBeenCalledWith('A', 'linear')
+    expect(cleanupSession).not.toHaveBeenCalled()
+    expect(get(sessions).find((s) => s.id === 'u1')).toBeDefined()
+  })
+
+  it('a ticket-status probe failure does not break the refresh or clean anything', async () => {
+    vi.mocked(sessionMerged).mockResolvedValue({ merged: true, via: 'merge-commit' })
+    vi.mocked(getTicketStatus).mockRejectedValue(new Error('no such ticket'))
+
+    await refreshAndReconcile()
+
+    expect(cleanupSession).not.toHaveBeenCalled()
+    expect(get(sessions).find((s) => s.id === 'u1')).toBeDefined()
+  })
+
   it('never force-removes: a merged session with a dirty worktree is kept with a warning', async () => {
     vi.mocked(sessionMerged).mockResolvedValue({ merged: true, via: 'squash' })
+    vi.mocked(getTicketStatus).mockResolvedValue({
+      current: { id: 'st2', name: 'Done', type: 'completed' },
+      available: [],
+    })
     vi.mocked(cleanupSession).mockResolvedValue({ removed: false, reason: '2 files changed' })
 
     await refreshAndReconcile()

@@ -20,6 +20,7 @@ import {
   killSession,
   cleanupSession,
   sessionMerged,
+  getTicketStatus,
   worktreeStatus,
   worktreeUpdateFromBase,
   runApp,
@@ -695,12 +696,19 @@ export async function updateAgentFromBase(s: Session, mode: WorktreeUpdateMode):
 }
 
 /** Pull latest tickets, refresh the sidebar list, and tear down agents whose
- *  work has landed. Two triggers, OR'd:
- *  - the linked ticket is now Done (only fires if the provider returns done
- *    tickets — most filter them out of the list, so this rarely triggers), or
+ *  work has landed and been signed off.
+ *  - the linked ticket is now Done in the pulled ticket list (only fires if
+ *    the provider returns done tickets — most filter them out of the list,
+ *    so this rarely triggers), or
  *  - the session's branch is merged into base per `sessionMerged` (merge
  *    commit naming the branch, squash-equivalent patch, or recorded PR with
- *    zero commits left off base). This is the reliable, git-truth trigger. */
+ *    zero commits left off base) *and* the linked ticket has been marked
+ *    Done (`getTicketStatus` reports `current.type === 'completed'`).
+ *  A merged branch alone no longer tears the agent down (TASK-TZGBP): the
+ *  user is the final sign-off, since cleanup's `resetTicket` would otherwise
+ *  bounce a still-"In Progress" ticket back to To Do the moment the PR
+ *  merges. Once the ticket is Done, `resetTicket` is a no-op for both
+ *  providers, so the merged+done session can be cleaned safely. */
 export async function refreshAndReconcile(): Promise<void> {
   if (!hasBackend) return
   let dtos
@@ -720,9 +728,12 @@ export async function refreshAndReconcile(): Promise<void> {
     if (!s.id || toClean.has(s.id)) continue
     try {
       const probe = await sessionMerged(s.id)
-      if (probe.merged) toClean.set(s.id, s)
+      if (!probe.merged) continue
+      const status = await getTicketStatus(s.tid, s.src)
+      if (status.current?.type === 'completed') toClean.set(s.id, s)
     } catch {
-      // per-session probe failure (offline, repo gone) must not break refresh
+      // per-session probe failure (offline, repo gone, no real ticket for a
+      // draft/TASK-only session) must not break refresh — just keep it
     }
   }
   for (const s of toClean.values()) {
