@@ -15,6 +15,7 @@
     stopAppForSession,
     restartAppForSession,
     refreshAppStatus,
+    updateAgentFromBase,
     runningApps,
     appUrls,
     appRunKey,
@@ -45,7 +46,7 @@
   import { mode } from '../theme'
   import { icons } from '../icons'
   import type { Session, WorkflowState, BackendKind } from '../types'
-  import type { PrStatusDTO } from '../../../electron/shared/contract.js'
+  import type { PrStatusDTO, WorktreeUpdateMode } from '../../../electron/shared/contract.js'
   import { getTicketStatus, setTicketStatus } from '../ipc'
   import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
   import { floatingAnchor } from '../floating'
@@ -92,6 +93,8 @@
   let restarting = false
   let handoffOpen = false
   let handingOff = false
+  let updateBaseOpen = false
+  let updatingBase = false
   let liveId: string | null | undefined = null
   let simStarted = false
   let showDiff = false
@@ -111,6 +114,7 @@
   let mounted = false
 
   $: r = repoById(session.repo)
+  $: base = r?.base ?? 'base'
   $: pendingCommentCount = ($reviewComments[session.id ?? ''] ?? []).length
   $: dot =
     session.status === 'idle' || session.status === 'queued'
@@ -675,6 +679,16 @@
     }
   }
 
+  async function handleUpdateFromBase(updateMode: WorktreeUpdateMode) {
+    updateBaseOpen = false
+    updatingBase = true
+    try {
+      await updateAgentFromBase(session, updateMode)
+    } finally {
+      updatingBase = false
+    }
+  }
+
   async function handleOpenEditor() {
     if (!hasBackend || !session.repo || !session.branch) return
     try {
@@ -757,6 +771,7 @@
       menuOpen = false
     if (handoffOpen && !t.closest('#handoffSel') && !t.closest('#handoffSelMob'))
       handoffOpen = false
+    if (updateBaseOpen && !t.closest('#updateBaseSel')) updateBaseOpen = false
     if (moreOpen && !t.closest('#moreSelMob')) moreOpen = false
   }
 
@@ -778,6 +793,14 @@
     <div class="m">
       <span class="badge mono">{@html icons.folder} {r?.org}/{r?.name}</span>
       <span class="badge mono">{@html icons.gitBranch} {session.branch}</span>
+      {#if session.behind > 0}
+        <span
+          class="badge mono badge-behind"
+          title={`This worktree is ${session.behind} commit${session.behind === 1 ? '' : 's'} behind ${base}`}
+        >
+          ↓ {session.behind} behind {base}
+        </span>
+      {/if}
       {#if liveMode && viewers > 1}
         <span class="badge mono">{viewers} viewers</span>
       {/if}
@@ -914,6 +937,37 @@
         </div>
       {/if}
     </div>
+    {#if session.behind > 0}
+      <div class="sel-head" id="updateBaseSel">
+        <button
+          class="btn btn-outline btn-sm"
+          title={`Rebase ${session.branch} onto the latest ${base} (uncommitted changes are autostashed)`}
+          disabled={!hasBackend || !session.repo || !session.branch || updatingBase}
+          on:click={() => handleUpdateFromBase('rebase')}
+        >
+          {@html icons.refresh}
+          <span class="btn-label">{updatingBase ? 'Updating…' : `Update from ${base}`}</span>
+        </button>
+        <button
+          class="btn btn-outline btn-sm btn-icon"
+          title="Choose rebase or merge"
+          disabled={!hasBackend || updatingBase}
+          on:click|stopPropagation={() => (updateBaseOpen = !updateBaseOpen)}
+        >
+          {@html icons.chevronDown}
+        </button>
+        {#if updateBaseOpen}
+          <div class="sel-menu" use:floatingAnchor>
+            <button type="button" class="opt" on:click={() => handleUpdateFromBase('rebase')}>
+              <span>Rebase onto {base} (recommended)</span>
+            </button>
+            <button type="button" class="opt" on:click={() => handleUpdateFromBase('merge')}>
+              <span>Merge {base} into {session.branch}</span>
+            </button>
+          </div>
+        {/if}
+      </div>
+    {/if}
     <button
       class="btn btn-outline btn-sm"
       title="Open the worktree in your configured editor"
@@ -1129,6 +1183,30 @@
           >
             <span>{@html icons.externalLink} Editor</span>
           </button>
+          {#if session.behind > 0}
+            <button
+              type="button"
+              class="opt"
+              disabled={!hasBackend || !session.repo || !session.branch || updatingBase}
+              on:click={() => {
+                moreOpen = false
+                handleUpdateFromBase('rebase')
+              }}
+            >
+              <span>{@html icons.refresh} Update from {base} (rebase)</span>
+            </button>
+            <button
+              type="button"
+              class="opt"
+              disabled={!hasBackend || !session.repo || !session.branch || updatingBase}
+              on:click={() => {
+                moreOpen = false
+                handleUpdateFromBase('merge')
+              }}
+            >
+              <span>{@html icons.refresh} Merge {base} into branch</span>
+            </button>
+          {/if}
         </div>
       {/if}
     </div>
@@ -1159,6 +1237,10 @@
     border-color: hsl(var(--st-error) / 0.4);
   }
   .pr-badge-needs {
+    color: hsl(var(--st-needs));
+    border-color: hsl(var(--st-needs) / 0.4);
+  }
+  .badge-behind {
     color: hsl(var(--st-needs));
     border-color: hsl(var(--st-needs) / 0.4);
   }

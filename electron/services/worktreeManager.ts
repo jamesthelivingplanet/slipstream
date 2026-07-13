@@ -8,6 +8,8 @@ import type {
   RepoDTO,
   WorktreeDiffDTO,
   WorktreeInfo,
+  WorktreeUpdateMode,
+  WorktreeUpdateResultDTO,
 } from '../shared/contract.js'
 import { parseUnifiedDiff } from './diffParser.js'
 
@@ -93,6 +95,16 @@ export function isMissingWorktreeError(err: unknown): boolean {
   return /not a working tree|No such file or directory|not a git repository/i.test(msg)
 }
 
+/** True when git output indicates a content conflict (rebase or merge). */
+export function isConflictOutput(output: string): boolean {
+  return /CONFLICT|could not apply|Automatic merge failed|would be overwritten/i.test(output)
+}
+
+/** True when git parked the autostash in the stash list because re-applying it conflicted. */
+export function hasAutostashConflict(output: string): boolean {
+  return /autostash resulted in conflicts|safe in the stash/i.test(output)
+}
+
 // ── Implementation ────────────────────────────────────────────────────────────
 
 const execFileAsync = promisify(execFile)
@@ -131,6 +143,25 @@ async function git(
         cause: err,
       },
     )
+  }
+}
+
+/** Like git(), but never throws — conflict handling needs the exit code and
+ *  full output of a failed rebase/merge, not an exception. */
+async function gitResult(
+  args: string[],
+  opts?: { cwd?: string },
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync('git', args, {
+      encoding: 'utf8',
+      cwd: opts?.cwd,
+    })
+    return { code: 0, stdout, stderr: stderr ?? '' }
+  } catch (err: unknown) {
+    const e = err as { code?: number | string; status?: number; stdout?: string; stderr?: string }
+    const exitCode = typeof e.code === 'number' ? e.code : (e.status ?? -1)
+    return { code: exitCode, stdout: e.stdout ?? '', stderr: e.stderr ?? '' }
   }
 }
 
@@ -430,6 +461,83 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       }
 
       return { branch, path: wt, dirty, ahead, behind, added, deleted }
+    },
+
+    /**
+     * Bring the worktree's branch up to date with repo.base. Refreshes base
+     * from origin first (offline-safe, same as create()), then runs
+     * `rebase --autostash` or `merge --autostash --no-edit`. Never leaves the
+     * worktree mid-operation: any non-zero exit triggers an unconditional
+     * `--abort`, restoring the pre-attempt state. An up-to-date branch still
+     * runs the rebase/merge (a cheap no-op) rather than short-circuiting, so a
+     * base advance revealed by the fetch is always picked up.
+     */
+    async updateFromBase(
+      repo: RepoDTO,
+      branch: string,
+      opts: { mode: WorktreeUpdateMode },
+    ): Promise<WorktreeUpdateResultDTO> {
+      const { mode } = opts
+      const wt = this.pathFor(repo, branch)
+
+      if (!existsSync(wt)) {
+        return { updated: false, mode, reason: `Worktree for "${branch}" is missing.` }
+      }
+
+      let head: string
+      try {
+        head = (await git(['-C', wt, 'rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+      } catch (err) {
+        const reason = isMissingWorktreeError(err)
+          ? `Worktree for "${branch}" is missing.`
+          : err instanceof Error
+            ? err.message
+            : String(err)
+        return { updated: false, mode, reason }
+      }
+      if (head !== branch) {
+        return { updated: false, mode, reason: `Worktree is on "${head}", expected "${branch}".` }
+      }
+
+      const baseRef = await pullBaseStartPoint(repo.path, repo.base)
+
+      const res =
+        mode === 'rebase'
+          ? await gitResult(['-C', wt, 'rebase', '--autostash', baseRef])
+          : await gitResult(['-C', wt, 'merge', '--autostash', '--no-edit', baseRef])
+
+      if (res.code === 0) {
+        const stashSaved = hasAutostashConflict(res.stdout + res.stderr)
+        return { updated: true, mode, stashSaved, info: await this.status(repo, branch) }
+      }
+
+      // Non-zero exit — unconditionally abort so the worktree is never left
+      // mid-rebase/mid-merge.
+      const abort = await gitResult(['-C', wt, mode === 'rebase' ? 'rebase' : 'merge', '--abort'])
+      const conflicted = abort.code === 0 || isConflictOutput(res.stdout + res.stderr)
+      const stashSaved = hasAutostashConflict(res.stdout + res.stderr + abort.stdout + abort.stderr)
+
+      let reason: string
+      if (conflicted) {
+        reason = `${mode === 'rebase' ? `Rebase onto ${repo.base}` : `Merge of ${repo.base}`} hit conflicts — the worktree was restored to its previous state.`
+      } else {
+        const firstNonEmptyLine = (text: string): string | undefined =>
+          text
+            .split('\n')
+            .map((l) => l.trim())
+            .find((l) => l.length > 0)
+        reason =
+          firstNonEmptyLine(res.stderr) ?? firstNonEmptyLine(res.stdout) ?? `git ${mode} failed`
+      }
+
+      let info: WorktreeInfo | undefined
+      try {
+        info = await this.status(repo, branch)
+      } catch {
+        // leave undefined
+      }
+
+      return { updated: false, mode, conflicted, stashSaved, reason, info }
     },
 
     async diff(repo: RepoDTO, branch: string): Promise<WorktreeDiffDTO> {

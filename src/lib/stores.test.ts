@@ -16,6 +16,7 @@ vi.mock('./ipc', () => ({
   cleanupSession: vi.fn(),
   sessionMerged: vi.fn(),
   worktreeStatus: vi.fn(),
+  worktreeUpdateFromBase: vi.fn(),
   runApp: vi.fn(),
   stopApp: vi.fn(),
   appStatus: vi.fn(),
@@ -32,6 +33,7 @@ import {
   listTickets,
   sessionMerged,
   startSession,
+  worktreeUpdateFromBase,
 } from './ipc'
 import {
   sessions,
@@ -44,6 +46,7 @@ import {
   discardDraft,
   setSessionPrUrl,
   cleanupAgent,
+  updateAgentFromBase,
   contentLoading,
   contentResolvedAt,
   contentRefreshNonce,
@@ -280,6 +283,7 @@ describe('setSessionPrUrl', () => {
         branch: null,
         add: 0,
         del: 0,
+        behind: 0,
         ago: '',
         activity: { text: '' },
       },
@@ -293,6 +297,7 @@ describe('setSessionPrUrl', () => {
         branch: null,
         add: 0,
         del: 0,
+        behind: 0,
         ago: '',
         activity: { text: '' },
       },
@@ -315,6 +320,7 @@ describe('setSessionPrUrl', () => {
         branch: null,
         add: 0,
         del: 0,
+        behind: 0,
         ago: '',
         activity: { text: '' },
       },
@@ -344,6 +350,7 @@ describe('cleanupAgent auto-reconcile', () => {
       branch: 'A-branch',
       add: 0,
       del: 0,
+      behind: 0,
       ago: '',
       activity: { text: '' },
       ...overrides,
@@ -411,6 +418,113 @@ describe('cleanupAgent auto-reconcile', () => {
     expect(result).toBe(false)
     expect(cleanupSession).toHaveBeenCalledTimes(1)
     expect(get(sessions).find((s) => s.tid === 'A')).toBeDefined()
+  })
+})
+
+describe('updateAgentFromBase (FLO-93)', () => {
+  function makeSession(overrides: Partial<Session> = {}): Session {
+    return {
+      id: 'u1',
+      tid: 'A',
+      src: 'linear',
+      status: 'running',
+      title: 'Some task',
+      repo: 'repo1',
+      branch: 'A-branch',
+      add: 0,
+      del: 0,
+      behind: 3,
+      ago: '',
+      activity: { text: '' },
+      ...overrides,
+    } as Session
+  }
+
+  beforeEach(() => {
+    sessions.set([makeSession()])
+    repos.set([{ id: 'repo1', org: 'acme', name: 'widgets', base: 'main' }])
+    toasts.set([])
+    vi.clearAllMocks()
+  })
+
+  it('on updated:true patches behind/add/del from info and pushes a success toast', async () => {
+    vi.mocked(worktreeUpdateFromBase).mockResolvedValue({
+      updated: true,
+      mode: 'rebase',
+      info: {
+        branch: 'A-branch',
+        path: '/tmp/x',
+        dirty: false,
+        ahead: 1,
+        behind: 0,
+        added: 3,
+        deleted: 1,
+      },
+    })
+    const session = makeSession()
+
+    const result = await updateAgentFromBase(session, 'rebase')
+
+    expect(result).toBe(true)
+    expect(worktreeUpdateFromBase).toHaveBeenCalledWith('repo1', 'A-branch', 'rebase')
+    const stored = get(sessions).find((s) => s.id === 'u1')
+    expect(stored?.behind).toBe(0)
+    expect(stored?.add).toBe(3)
+    expect(stored?.del).toBe(1)
+    const successToast = get(toasts).find((t) => t.type === 'success')
+    expect(successToast?.message).toContain('rebased A-branch onto main')
+  })
+
+  it('on updated:false surfaces the reason in an error toast and returns false', async () => {
+    vi.mocked(worktreeUpdateFromBase).mockResolvedValue({
+      updated: false,
+      mode: 'rebase',
+      conflicted: true,
+      reason: 'Rebase onto main hit conflicts and was aborted.',
+    })
+    const session = makeSession()
+
+    const result = await updateAgentFromBase(session, 'rebase')
+
+    expect(result).toBe(false)
+    const errorToast = get(toasts).find((t) => t.type === 'error')
+    expect(errorToast?.message).toBe('Rebase onto main hit conflicts and was aborted.')
+  })
+
+  it('on stashSaved:true pushes a warning toast in addition to the outcome toast', async () => {
+    vi.mocked(worktreeUpdateFromBase).mockResolvedValue({
+      updated: true,
+      mode: 'rebase',
+      stashSaved: true,
+      info: {
+        branch: 'A-branch',
+        path: '/tmp/x',
+        dirty: false,
+        ahead: 1,
+        behind: 1,
+        added: 0,
+        deleted: 0,
+      },
+    })
+    const session = makeSession()
+
+    const result = await updateAgentFromBase(session, 'rebase')
+
+    expect(result).toBe(true)
+    const warningToast = get(toasts).find((t) => t.type === 'warning')
+    expect(warningToast).toBeDefined()
+    expect(warningToast?.message).toContain('git stash')
+  })
+
+  it('on a rejected promise pushes an error toast and returns false', async () => {
+    vi.mocked(worktreeUpdateFromBase).mockRejectedValue(new Error('network down'))
+    const session = makeSession()
+
+    const result = await updateAgentFromBase(session, 'merge')
+
+    expect(result).toBe(false)
+    const errorToast = get(toasts).find((t) => t.type === 'error')
+    expect(errorToast?.message).toBe('network down')
   })
 })
 
@@ -544,6 +658,7 @@ describe('runApp / stopApp store integration', () => {
       branch: 'A-branch',
       add: 0,
       del: 0,
+      behind: 0,
       ago: '',
       activity: { text: '' },
       ...overrides,
@@ -647,6 +762,7 @@ describe('refreshAndReconcile merged-branch cleanup', () => {
       branch: 'A-branch',
       add: 0,
       del: 0,
+      behind: 0,
       ago: '',
       activity: { text: '' },
       ...overrides,

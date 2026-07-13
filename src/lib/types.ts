@@ -46,6 +46,7 @@ export interface Session {
   branch: string | null
   add: number
   del: number
+  behind: number
   ago: string
   prompt?: string
   description?: string

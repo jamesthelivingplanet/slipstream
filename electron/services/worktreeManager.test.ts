@@ -6,6 +6,8 @@ import {
   parsePorcelainWorktreeList,
   createWorktreeManager,
   isMissingWorktreeError,
+  isConflictOutput,
+  hasAutostashConflict,
 } from './worktreeManager.js'
 import type { RepoDTO } from '../shared/contract.js'
 
@@ -163,5 +165,45 @@ describe('isMissingWorktreeError', () => {
 
   it('returns false for other git errors', () => {
     expect(isMissingWorktreeError(new Error('some other git failure'))).toBe(false)
+  })
+})
+
+// ── isConflictOutput ──────────────────────────────────────────────────────────
+
+describe('isConflictOutput', () => {
+  it('detects a CONFLICT marker', () => {
+    expect(isConflictOutput('CONFLICT (content): Merge conflict in README.md')).toBe(true)
+  })
+
+  it('detects a rebase "could not apply" failure', () => {
+    expect(isConflictOutput('error: could not apply abc1234... some commit message')).toBe(true)
+  })
+
+  it('detects an "Automatic merge failed" message', () => {
+    expect(
+      isConflictOutput('Automatic merge failed; fix conflicts and then commit the result.'),
+    ).toBe(true)
+  })
+
+  it('returns false for an unrelated git error', () => {
+    expect(isConflictOutput("fatal: invalid upstream 'nope'")).toBe(false)
+  })
+})
+
+// ── hasAutostashConflict ──────────────────────────────────────────────────────
+
+describe('hasAutostashConflict', () => {
+  it('detects a parked autostash after a conflicting re-apply', () => {
+    expect(
+      hasAutostashConflict(
+        'Applying autostash resulted in conflicts.\nYour changes are safe in the stash.',
+      ),
+    ).toBe(true)
+  })
+
+  it('returns false for ordinary rebase success output', () => {
+    expect(hasAutostashConflict('Successfully rebased and updated refs/heads/feature-x.')).toBe(
+      false,
+    )
   })
 })
