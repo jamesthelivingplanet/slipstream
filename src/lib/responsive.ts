@@ -31,3 +31,23 @@ export const DRAWER_DISMISS_PX = 72
 export function shouldDismissDrawer(deltaY: number): boolean {
   return deltaY >= DRAWER_DISMISS_PX
 }
+
+/** Minimum visual-viewport shortfall (px) treated as an on-screen keyboard —
+ *  smaller deltas are browser chrome (URL bar) show/hide, not a keyboard. */
+export const KEYBOARD_MIN_INSET = 80
+
+/** Height (px) of the on-screen keyboard overlapping the layout viewport,
+ *  derived from window.innerHeight vs. the visual viewport. 0 when no
+ *  keyboard is judged visible. */
+export function keyboardInset(
+  innerHeight: number,
+  vvHeight: number,
+  vvOffsetTop: number,
+  vvScale = 1,
+): number {
+  // While pinch-zoomed the visual viewport is smaller than the layout
+  // viewport for reasons unrelated to a keyboard — report no inset.
+  if (Math.abs(vvScale - 1) > 0.01) return 0
+  const inset = Math.round(innerHeight - vvHeight - vvOffsetTop)
+  return inset >= KEYBOARD_MIN_INSET ? inset : 0
+}
