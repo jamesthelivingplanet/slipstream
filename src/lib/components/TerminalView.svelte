@@ -51,6 +51,7 @@
   import { floatingAnchor } from '../floating'
   import { AGENTS, agentOption } from '../agents'
   import { ReplayGate } from '../replayGate.js'
+  import { TouchScrollTracker, momentumStep } from '../touchScroll.js'
   import DiffView from './DiffView.svelte'
   import MobileTermInput from './MobileTermInput.svelte'
 
@@ -127,6 +128,84 @@
     window.open(uri, '_blank', 'noopener,noreferrer')
   }
 
+  // ── Touch scroll (mobile) ────────────────────────────────────────────────
+  // xterm's built-in touch-pan scrolling only engages while the running TUI
+  // has NOT enabled mouse reporting (coreMouseService gates it on
+  // `!areMouseEventsActive`); Claude Code and friends turn mouse tracking on,
+  // which silently disables xterm's native touch scroll. These handlers
+  // manually drive term.scrollLines() from raw touch events, but only while
+  // `term.modes.mouseTrackingMode !== 'none'` — otherwise xterm's own
+  // handling is live and driving it here too would double-scroll.
+  let touchTracker: TouchScrollTracker | null = null
+  let momentumRaf: number | null = null
+
+  function stopMomentum() {
+    if (momentumRaf !== null) {
+      cancelAnimationFrame(momentumRaf)
+      momentumRaf = null
+    }
+  }
+
+  function terminalCellHeight(): number {
+    const screen = mountEl?.querySelector<HTMLElement>('.xterm-screen')
+    const rows = term?.rows ?? 0
+    return screen && rows > 0 && screen.clientHeight > 0 ? screen.clientHeight / rows : 16
+  }
+
+  function runMomentum(velocity: number) {
+    stopMomentum()
+    let v = velocity
+    let remainder = 0
+    let last = performance.now()
+    const frame = (now: number) => {
+      // Guard against the terminal being disposed mid-glide (onDestroy sets
+      // `destroyed` before term?.dispose()).
+      if (destroyed) {
+        momentumRaf = null
+        return
+      }
+      const dt = now - last
+      last = now
+      const step = momentumStep(v, dt, remainder)
+      v = step.velocity
+      remainder = step.remainder
+      if (step.lines !== 0) term.scrollLines(step.lines)
+      if (v === 0) {
+        momentumRaf = null
+        return
+      }
+      momentumRaf = requestAnimationFrame(frame)
+    }
+    momentumRaf = requestAnimationFrame(frame)
+  }
+
+  function onTouchStart(e: TouchEvent) {
+    stopMomentum()
+    if (e.touches.length > 1 || !touchTracker) return
+    touchTracker.start(e.touches[0].clientY, e.timeStamp)
+  }
+
+  function onTouchMove(e: TouchEvent) {
+    if (e.touches.length > 1) {
+      onTouchEnd(e)
+      return
+    }
+    if (!touchTracker || term.modes.mouseTrackingMode === 'none') return
+    const lines = touchTracker.move(e.touches[0].clientY, e.timeStamp)
+    if (lines !== 0) term.scrollLines(lines)
+    e.preventDefault()
+  }
+
+  function onTouchEnd(e: TouchEvent) {
+    if (!touchTracker || term.modes.mouseTrackingMode === 'none') return
+    const velocity = touchTracker.end(e.timeStamp)
+    if (velocity !== 0) runMomentum(velocity)
+  }
+
+  function onTouchCancel() {
+    stopMomentum()
+  }
+
   onMount(() => {
     term = new Terminal({
       fontFamily: "'Geist Mono', monospace",
@@ -143,6 +222,12 @@
     try {
       fit.fit()
     } catch {}
+
+    touchTracker = new TouchScrollTracker(terminalCellHeight)
+    mountEl.addEventListener('touchstart', onTouchStart, { passive: true })
+    mountEl.addEventListener('touchmove', onTouchMove, { passive: false })
+    mountEl.addEventListener('touchend', onTouchEnd, { passive: true })
+    mountEl.addEventListener('touchcancel', onTouchCancel, { passive: true })
 
     const onResize = () => {
       try {
@@ -175,6 +260,11 @@
       window.removeEventListener('resize', onResize)
       unsub()
       offConnection()
+      mountEl.removeEventListener('touchstart', onTouchStart)
+      mountEl.removeEventListener('touchmove', onTouchMove)
+      mountEl.removeEventListener('touchend', onTouchEnd)
+      mountEl.removeEventListener('touchcancel', onTouchCancel)
+      stopMomentum()
     }
   })
 
@@ -242,6 +332,7 @@
 
   onDestroy(() => {
     destroyed = true
+    stopMomentum()
     if (retryTimer) {
       clearTimeout(retryTimer)
       retryTimer = null
