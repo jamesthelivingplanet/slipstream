@@ -483,6 +483,11 @@ html[data-mode='light'] .seg.on {
   flex: 1;
   padding: 12px 14px;
   overflow: hidden;
+  /* Own touch gestures entirely — the browser must never pan the page or
+     trigger pull-to-refresh while a finger drags over the terminal (see the
+     touch scroll handlers in TerminalView.svelte). */
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 .term-mount {
   height: 100%;
