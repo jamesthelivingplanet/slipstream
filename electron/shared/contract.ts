@@ -131,6 +131,26 @@ export interface WorktreeInfo {
   deleted: number
 }
 
+export type WorktreeUpdateMode = 'rebase' | 'merge'
+
+/**
+ * Result of IWorktreeManager.updateFromBase. Action-style result object
+ * (like remove()) — expected failures are data, not thrown errors.
+ */
+export interface WorktreeUpdateResultDTO {
+  updated: boolean
+  mode: WorktreeUpdateMode
+  /** The rebase/merge hit conflicts; it was aborted and the worktree restored. */
+  conflicted?: boolean
+  /** Human-readable reason when updated === false. */
+  reason?: string
+  /** Uncommitted changes could not be re-applied after the operation (or its
+   *  abort) and were left in `git stash` by --autostash. */
+  stashSaved?: boolean
+  /** Fresh worktree status after the attempt, when determinable. */
+  info?: WorktreeInfo
+}
+
 export interface DiffLineDTO {
   kind: 'context' | 'add' | 'del'
   text: string // content without the leading +/-/space marker
@@ -428,6 +448,17 @@ export interface IWorktreeManager {
     branch: string,
   ): Promise<{ merged: boolean; via?: 'merge-commit' | 'squash'; ahead: number }>
   status(repo: RepoDTO, branch: string): Promise<WorktreeInfo>
+  /**
+   * Bring the worktree's branch up to date with repo.base: refresh base from
+   * origin (offline-safe), then rebase (default) or merge with --autostash.
+   * On conflict the operation is aborted and the worktree restored — it is
+   * never left mid-rebase/mid-merge.
+   */
+  updateFromBase(
+    repo: RepoDTO,
+    branch: string,
+    opts: { mode: WorktreeUpdateMode },
+  ): Promise<WorktreeUpdateResultDTO>
   /** Structured diff of the worktree vs merge-base(repo.base, HEAD) — includes
    *  uncommitted and untracked changes. Returns an `error` DTO rather than
    *  throwing when the worktree/merge-base is unavailable. */
@@ -680,6 +711,11 @@ export interface SlipstreamApi {
   handoffSession(id: string, agentKind: BackendKind): Promise<SessionDTO>
   worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo>
   worktreeDiff(repoId: string, branch: string): Promise<WorktreeDiffDTO>
+  worktreeUpdateFromBase(
+    repoId: string,
+    branch: string,
+    mode: WorktreeUpdateMode,
+  ): Promise<WorktreeUpdateResultDTO>
 
   /** Returns an unsubscribe fn. */
   onSessionData(cb: (id: string, data: string, seq: number) => void): () => void
@@ -810,6 +846,7 @@ export const IPC = {
   getSessionBuffer: 'session:buffer',
   worktreeStatus: 'worktree:status',
   worktreeDiff: 'worktree:diff',
+  worktreeUpdateFromBase: 'worktree:updateFromBase',
   getLinearKey: 'config:getLinearKey',
   setLinearKey: 'config:setLinearKey',
   getEditorConfig: 'config:getEditorConfig',

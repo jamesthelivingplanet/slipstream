@@ -20,6 +20,7 @@ import type {
   TicketSource,
   TicketSourceSettings,
   PromptTemplateDTO,
+  WorktreeUpdateMode,
 } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../shared/promptComposer.js'
@@ -525,6 +526,14 @@ export function createRpc(
         const branch = args[1] as string
         const repo = await requireOwnedRepo(repoId)
         return deps.worktrees.diff(repo, branch)
+      }
+
+      case IPC.worktreeUpdateFromBase: {
+        const repoId = args[0] as string
+        const branch = args[1] as string
+        const mode = args[2] as WorktreeUpdateMode
+        const repo = await requireOwnedRepo(repoId)
+        return deps.worktrees.updateFromBase(repo, branch, { mode })
       }
 
       case IPC.getLinearKey:

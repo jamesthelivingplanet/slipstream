@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createWorktreeManager } from './worktreeManager.js'
@@ -408,5 +408,189 @@ describe('worktreeManager.diff (real git)', () => {
     expect(dto.mergeBase).toBe('')
     expect(dto.branch).toBe('does-not-exist-branch')
     expect(dto.base).toBe('main')
+  })
+})
+
+describe('worktreeManager.updateFromBase (real git)', () => {
+  let uroot: string
+  let urepo: RepoDTO
+  let uwm: ReturnType<typeof createWorktreeManager>
+
+  beforeAll(() => {
+    uroot = mkdtempSync(join(tmpdir(), 'slipstream-wt-update-'))
+    const repoPath = join(uroot, 'source')
+    execFileSync('git', ['init', '-b', 'main', repoPath], { encoding: 'utf8' })
+    git(repoPath, 'config', 'user.email', 'test@slipstream.dev')
+    git(repoPath, 'config', 'user.name', 'Slipstream Test')
+    writeFileSync(join(repoPath, 'README.md'), 'line one\n')
+    git(repoPath, 'add', '-A')
+    git(repoPath, 'commit', '-m', 'init')
+
+    urepo = { id: 'acme-update', org: 'acme', name: 'update', base: 'main', path: repoPath }
+    uwm = createWorktreeManager(uroot)
+  })
+
+  afterAll(() => {
+    rmSync(uroot, { recursive: true, force: true })
+  })
+
+  it('clean rebase: worktree behind base ends up linear and not behind', async () => {
+    const info = await uwm.create(urepo, 'feat-rebase-clean')
+
+    // advance base
+    writeFileSync(join(urepo.path, 'base-advance-1.txt'), 'advance\n')
+    git(urepo.path, 'add', '-A')
+    git(urepo.path, 'commit', '-m', 'advance base')
+
+    const result = await uwm.updateFromBase(urepo, 'feat-rebase-clean', { mode: 'rebase' })
+    expect(result.updated).toBe(true)
+    expect(result.info?.behind).toBe(0)
+    expect(() =>
+      execFileSync('git', ['merge-base', '--is-ancestor', 'main', 'feat-rebase-clean'], {
+        cwd: info.path,
+      }),
+    ).not.toThrow()
+
+    await uwm.remove(urepo, 'feat-rebase-clean', { force: true })
+  })
+
+  it('rebase preserves branch commits on top of the advanced base', async () => {
+    const info = await uwm.create(urepo, 'feat-rebase-preserve')
+    writeFileSync(join(info.path, 'own-commit.txt'), 'mine\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'own work')
+
+    writeFileSync(join(urepo.path, 'base-advance-2.txt'), 'advance\n')
+    git(urepo.path, 'add', '-A')
+    git(urepo.path, 'commit', '-m', 'advance base again')
+
+    const result = await uwm.updateFromBase(urepo, 'feat-rebase-preserve', { mode: 'rebase' })
+    expect(result.updated).toBe(true)
+    expect(result.info?.ahead).toBeGreaterThanOrEqual(1)
+    expect(result.info?.behind).toBe(0)
+
+    await uwm.remove(urepo, 'feat-rebase-preserve', { force: true })
+  })
+
+  it('clean merge: creates a merge commit and is no longer behind', async () => {
+    const info = await uwm.create(urepo, 'feat-merge-clean')
+    // A branch-local commit is required so the merge can't fast-forward.
+    writeFileSync(join(info.path, 'own-merge-commit.txt'), 'mine\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'own work before merge')
+
+    writeFileSync(join(urepo.path, 'base-advance-3.txt'), 'advance\n')
+    git(urepo.path, 'add', '-A')
+    git(urepo.path, 'commit', '-m', 'advance base for merge')
+
+    const result = await uwm.updateFromBase(urepo, 'feat-merge-clean', { mode: 'merge' })
+    expect(result.updated).toBe(true)
+    expect(result.info?.behind).toBe(0)
+    expect(() =>
+      execFileSync('git', ['rev-parse', 'HEAD^2'], { cwd: info.path, encoding: 'utf8' }),
+    ).not.toThrow()
+
+    await uwm.remove(urepo, 'feat-merge-clean', { force: true })
+  })
+
+  it('rebase conflict aborts and restores the worktree untouched', async () => {
+    const info = await uwm.create(urepo, 'feat-rebase-conflict')
+    writeFileSync(join(info.path, 'README.md'), 'branch change\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'branch edits README')
+
+    writeFileSync(join(urepo.path, 'README.md'), 'base change\n')
+    git(urepo.path, 'add', '-A')
+    git(urepo.path, 'commit', '-m', 'base edits README')
+
+    const shaBefore = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: info.path,
+      encoding: 'utf8',
+    }).trim()
+    const porcelainBefore = execFileSync('git', ['status', '--porcelain'], {
+      cwd: info.path,
+      encoding: 'utf8',
+    })
+
+    const result = await uwm.updateFromBase(urepo, 'feat-rebase-conflict', { mode: 'rebase' })
+    expect(result.updated).toBe(false)
+    expect(result.conflicted).toBe(true)
+
+    const shaAfter = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: info.path,
+      encoding: 'utf8',
+    }).trim()
+    const porcelainAfter = execFileSync('git', ['status', '--porcelain'], {
+      cwd: info.path,
+      encoding: 'utf8',
+    })
+    expect(shaAfter).toBe(shaBefore)
+    expect(porcelainAfter).toBe(porcelainBefore)
+
+    // no rebase in progress
+    expect(() =>
+      execFileSync('git', ['rebase', '--abort'], { cwd: info.path, encoding: 'utf8' }),
+    ).toThrow()
+
+    await uwm.remove(urepo, 'feat-rebase-conflict', { force: true })
+  })
+
+  it('merge conflict aborts and leaves no MERGE_HEAD', async () => {
+    const info = await uwm.create(urepo, 'feat-merge-conflict')
+    writeFileSync(join(info.path, 'README.md'), 'branch change v2\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'branch edits README v2')
+
+    writeFileSync(join(urepo.path, 'README.md'), 'base change v2\n')
+    git(urepo.path, 'add', '-A')
+    git(urepo.path, 'commit', '-m', 'base edits README v2')
+
+    const result = await uwm.updateFromBase(urepo, 'feat-merge-conflict', { mode: 'merge' })
+    expect(result.updated).toBe(false)
+    expect(result.conflicted).toBe(true)
+
+    expect(() =>
+      execFileSync('git', ['rev-parse', '-q', '--verify', 'MERGE_HEAD'], {
+        cwd: info.path,
+        encoding: 'utf8',
+      }),
+    ).toThrow()
+
+    await uwm.remove(urepo, 'feat-merge-conflict', { force: true })
+  })
+
+  it('dirty worktree: uncommitted edit to an untouched file survives via autostash', async () => {
+    const info = await uwm.create(urepo, 'feat-rebase-dirty')
+
+    writeFileSync(join(urepo.path, 'base-advance-4.txt'), 'advance\n')
+    git(urepo.path, 'add', '-A')
+    git(urepo.path, 'commit', '-m', 'advance base for dirty test')
+
+    writeFileSync(join(info.path, 'untouched-by-base.txt'), 'my uncommitted work\n')
+
+    const result = await uwm.updateFromBase(urepo, 'feat-rebase-dirty', { mode: 'rebase' })
+    expect(result.updated).toBe(true)
+    expect(result.stashSaved).toBeFalsy()
+    expect(result.info?.dirty).toBe(true)
+
+    const content = readFileSync(join(info.path, 'untouched-by-base.txt'), 'utf8')
+    expect(content).toBe('my uncommitted work\n')
+
+    await uwm.remove(urepo, 'feat-rebase-dirty', { force: true })
+  })
+
+  it('missing worktree: returns updated false with a "missing" reason', async () => {
+    const result = await uwm.updateFromBase(urepo, 'feat-never-created', { mode: 'rebase' })
+    expect(result.updated).toBe(false)
+    expect(result.reason).toMatch(/missing/i)
+  })
+
+  it('already up to date: still succeeds as a no-op', async () => {
+    await uwm.create(urepo, 'feat-uptodate')
+    const result = await uwm.updateFromBase(urepo, 'feat-uptodate', { mode: 'rebase' })
+    expect(result.updated).toBe(true)
+    expect(result.info?.behind).toBe(0)
+
+    await uwm.remove(urepo, 'feat-uptodate', { force: true })
   })
 })

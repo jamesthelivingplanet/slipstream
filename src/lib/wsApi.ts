@@ -18,6 +18,8 @@ import type {
   WorkflowState,
   WorktreeInfo,
   WorktreeDiffDTO,
+  WorktreeUpdateMode,
+  WorktreeUpdateResultDTO,
   EditorConfig,
   NotifyPrefs,
   PushSubscriptionDTO,
@@ -478,6 +480,18 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
 
     worktreeDiff(repoId: string, branch: string): Promise<WorktreeDiffDTO> {
       return request(IPC.worktreeDiff, [repoId, branch]) as Promise<WorktreeDiffDTO>
+    },
+
+    worktreeUpdateFromBase(
+      repoId: string,
+      branch: string,
+      mode: WorktreeUpdateMode,
+    ): Promise<WorktreeUpdateResultDTO> {
+      return request(IPC.worktreeUpdateFromBase, [
+        repoId,
+        branch,
+        mode,
+      ]) as Promise<WorktreeUpdateResultDTO>
     },
 
     getEditorConfig(): Promise<EditorConfig> {

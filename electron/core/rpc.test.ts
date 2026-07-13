@@ -120,6 +120,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     remove: vi.fn().mockResolvedValue({ removed: true }),
     isMerged: vi.fn().mockResolvedValue({ merged: false, ahead: -1 }),
     status: vi.fn().mockResolvedValue(makeWorktreeInfo()),
+    updateFromBase: vi.fn(),
     diff: vi.fn().mockResolvedValue(makeWorktreeDiff()),
     list: vi.fn().mockResolvedValue([makeWorktreeInfo()]),
   }
@@ -919,6 +920,27 @@ describe('createRpc', () => {
     )
   })
 
+  it('routes worktreeUpdateFromBase to worktrees.updateFromBase with resolved repo, branch, and mode', async () => {
+    const updateResult = { updated: true, mode: 'merge' as const, info: makeWorktreeInfo() }
+    ;(deps.worktrees.updateFromBase as ReturnType<typeof vi.fn>).mockResolvedValueOnce(updateResult)
+
+    const result = await rpc.handle(IPC.worktreeUpdateFromBase, ['r1', 't-1-fix-bug', 'merge'])
+    expect(deps.repos.get).toHaveBeenCalledWith('r1')
+    expect(deps.worktrees.updateFromBase).toHaveBeenCalledWith(makeRepo(), 't-1-fix-bug', {
+      mode: 'merge',
+    })
+    expect(result).toEqual(updateResult)
+  })
+
+  it('worktreeUpdateFromBase throws for unknown repo', async () => {
+    ;(deps.repos as unknown as { get: ReturnType<typeof vi.fn> }).get.mockResolvedValueOnce(
+      undefined,
+    )
+    await expect(
+      rpc.handle(IPC.worktreeUpdateFromBase, ['unknown', 'branch', 'rebase']),
+    ).rejects.toThrow('Unknown repo: unknown')
+  })
+
   it('startSession passes systemPrompt containing the ticket id to sessions.start', async () => {
     await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
@@ -1290,6 +1312,16 @@ describe('createRpc', () => {
         makeRepo({ id: 'r1', ownerId: 'alice' }),
       )
       await expect(rpc.handle(IPC.worktreeDiff, ['r1', 'b'])).rejects.toThrow('Unknown repo: r1')
+    })
+
+    it("worktreeUpdateFromBase throws Unknown repo for another identity's repo", async () => {
+      ;(deps.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeRepo({ id: 'r1', ownerId: 'alice' }),
+      )
+      await expect(rpc.handle(IPC.worktreeUpdateFromBase, ['r1', 'b', 'rebase'])).rejects.toThrow(
+        'Unknown repo: r1',
+      )
+      expect(deps.worktrees.updateFromBase).not.toHaveBeenCalled()
     })
 
     it("openInEditor throws Unknown repo for another identity's repo", async () => {

@@ -114,6 +114,7 @@ function makeFakeDeps(): IpcDeps {
       added: 0,
       deleted: 0,
     }),
+    updateFromBase: vi.fn(),
     diff: vi.fn().mockResolvedValue({
       branch: 'b',
       base: 'main',
@@ -261,6 +262,7 @@ function makeSurvivalDeps(): {
       added: 0,
       deleted: 0,
     }),
+    updateFromBase: vi.fn(),
     diff: vi.fn().mockResolvedValue({
       branch: 'b',
       base: 'main',
