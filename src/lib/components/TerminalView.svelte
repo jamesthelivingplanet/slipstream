@@ -102,6 +102,12 @@
   let moreOpen = false
   let lastTid = ''
   let lastNonce = 0
+  // Svelte runs reactive statements once during init, BEFORE onMount creates
+  // `term` — and App.svelte keys this component by session id, so a fresh
+  // instance mounts with a live session already selected. Gate the reactive
+  // startLive/runSimulation triggers on `mounted` so they never touch the
+  // terminal before it exists (TASK-GFYDO).
+  let mounted = false
 
   $: r = repoById(session.repo)
   $: pendingCommentCount = ($reviewComments[session.id ?? ''] ?? []).length
@@ -163,6 +169,8 @@
       }
     })
 
+    mounted = true
+
     return () => {
       window.removeEventListener('resize', onResize)
       unsub()
@@ -223,8 +231,8 @@
     return badges
   }
 
-  $: if (liveMode && session.id && session.id !== liveId) startLive()
-  $: if (!liveMode && !simStarted) {
+  $: if (mounted && liveMode && session.id && session.id !== liveId) startLive()
+  $: if (mounted && !liveMode && !simStarted) {
     simStarted = true
     runSimulation()
   }
