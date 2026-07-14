@@ -28,7 +28,6 @@ import { OutputBuffer } from './outputBuffer.js'
 import { ScrollbackStore } from './scrollbackStore.js'
 import { ScreenState, serializeScrollback } from './screenState.js'
 import { trustDirectory } from './claudeTrust.js'
-import { hasTranscript } from './transcripts.js'
 import {
   selectBackend,
   type AgentBackend,
@@ -417,7 +416,12 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       user: input.session.prompt,
       opencodeSid: input.session.opencodeSid,
       opencodePort: input.opencodePort,
-      hasTranscript: hasTranscript(id),
+      hasPriorSession:
+        backend.hasPriorSession?.({
+          sessionId: id,
+          cwd: input.cwd,
+          opencodeSid: input.session.opencodeSid,
+        }) ?? false,
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
@@ -454,7 +458,12 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       user: input.session.prompt,
       opencodeSid: input.session.opencodeSid,
       opencodePort: input.opencodePort,
-      hasTranscript: hasTranscript(id),
+      hasPriorSession:
+        backend.hasPriorSession?.({
+          sessionId: id,
+          cwd: input.cwd,
+          opencodeSid: input.session.opencodeSid,
+        }) ?? false,
     })
 
     const dto: SessionDTO = { ...input.session, status: 'running' }
@@ -494,7 +503,12 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       system,
       user: input.handoffPrompt,
       opencodePort: input.opencodePort,
-      hasTranscript: hasTranscript(id),
+      hasPriorSession:
+        backend.hasPriorSession?.({
+          sessionId: id,
+          cwd: input.cwd,
+          opencodeSid: input.session.opencodeSid,
+        }) ?? false,
     })
 
     // The DTO switches to the new backend; opencodeSid is deliberately cleared —

@@ -961,13 +961,15 @@
         >{@html icons.play} <span class="btn-label">Run</span></button
       >
     {/if}
-    <button
-      class="btn btn-outline btn-sm"
-      title="Relaunch this agent with Claude Code Remote Control"
-      disabled={!hasBackend || !session.id}
-      on:click={handleRemoteControl}
-      >{@html icons.remote} <span class="btn-label">Remote control</span></button
-    >
+    {#if currentKind === 'claude-code'}
+      <button
+        class="btn btn-outline btn-sm"
+        title="Relaunch this agent with Claude Code Remote Control"
+        disabled={!hasBackend || !session.id}
+        on:click={handleRemoteControl}
+        >{@html icons.remote} <span class="btn-label">Remote control</span></button
+      >
+    {/if}
     <div class="sel-head" id="handoffSel">
       <button
         class="btn btn-outline btn-sm"
@@ -1211,17 +1213,19 @@
               <span>{@html icons.play} Run</span>
             </button>
           {/if}
-          <button
-            type="button"
-            class="opt"
-            disabled={!hasBackend || !session.id}
-            on:click={() => {
-              moreOpen = false
-              handleRemoteControl()
-            }}
-          >
-            <span>{@html icons.remote} Remote control</span>
-          </button>
+          {#if currentKind === 'claude-code'}
+            <button
+              type="button"
+              class="opt"
+              disabled={!hasBackend || !session.id}
+              on:click={() => {
+                moreOpen = false
+                handleRemoteControl()
+              }}
+            >
+              <span>{@html icons.remote} Remote control</span>
+            </button>
+          {/if}
           <button
             type="button"
             class="opt"

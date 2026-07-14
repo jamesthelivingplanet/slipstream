@@ -34,7 +34,7 @@ import { readSchedulerPolicy, writeSchedulerPolicy } from '../services/sessionSc
 import { checkSlipstreamCli, lastCliActivity } from '../services/cliHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
 import { findOnPath, binForKind } from '../services/cliProbe.js'
-import { readTranscriptUsage, buildUsageSummary } from '../services/usage.js'
+import { readSessionUsage, buildUsageSummary } from '../services/usage.js'
 import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
 
 function parseCsv(raw: string | undefined): string[] {
@@ -188,6 +188,25 @@ export function createRpc(
   if (coord) coord.on('change', onLockChange)
 
   async function handle(channel: string, args: unknown[]): Promise<unknown> {
+    // Resolves a session's worktree cwd (needed for pi's usage reader, which
+    // is keyed on cwd rather than a captured transcript/session id). Fresh
+    // per-call repo cache so a batch (usageSummary/listSessionHistory) only
+    // resolves each repo once. Never throws — usage reads must not fail a
+    // listing just because a repo/worktree can't be resolved right now.
+    const repoCache = new Map<string, RepoDTO>()
+    async function cwdForSession(s: SessionDTO): Promise<string | null> {
+      try {
+        let repo = repoCache.get(s.repoId)
+        if (!repo) {
+          repo = await deps.repos.resolvePath(s.repoId)
+          repoCache.set(s.repoId, repo)
+        }
+        return deps.worktrees.pathFor(repo, s.branch)
+      } catch {
+        return null
+      }
+    }
+
     switch (channel) {
       case IPC.listRepos:
         return (await deps.repos.list()).filter(ownedByCaller)
@@ -795,13 +814,23 @@ export function createRpc(
         const id = args[0] as string
         // Owner-scoped: a missing OR other-owner session surfaces the same
         // "not found" so usage can't leak across owners.
-        if (!ownedSession(id)) throw new Error(`Session not found: ${id}`)
-        return readTranscriptUsage(id)
+        const session = ownedSession(id)
+        if (!session) throw new Error(`Session not found: ${id}`)
+        const cwd = session.agentKind === 'pi' ? await cwdForSession(session) : null
+        return readSessionUsage(session, { cwd })
       }
 
       case IPC.usageSummary: {
         const list = deps.sessionStore.list().filter(ownedByCaller)
-        return buildUsageSummary(list)
+        const cwds = new Map<string, string | null>()
+        await Promise.all(
+          list
+            .filter((s) => s.agentKind === 'pi')
+            .map(async (s) => {
+              cwds.set(s.id, await cwdForSession(s))
+            }),
+        )
+        return buildUsageSummary(list, { cwdFor: (s) => cwds.get(s.id) ?? null })
       }
 
       case IPC.listPromptTemplates: {
@@ -867,10 +896,18 @@ export function createRpc(
       case IPC.listSessionHistory: {
         const sessions = deps.sessionStore.list().filter(ownedByCaller)
         sessions.sort((a, b) => b.createdAt - a.createdAt)
+        const piCwds = new Map<string, string | null>()
+        await Promise.all(
+          sessions
+            .filter((s) => s.agentKind === 'pi')
+            .map(async (s) => {
+              piCwds.set(s.id, await cwdForSession(s))
+            }),
+        )
         const entries: SessionHistoryEntry[] = []
         for (const session of sessions) {
           const outcome = await resolveOutcome(session.id)
-          const rawUsage = readTranscriptUsage(session.id)
+          const rawUsage = readSessionUsage(session, { cwd: piCwds.get(session.id) ?? null })
           const usage = !rawUsage.exists || rawUsage.turns === 0 ? null : rawUsage
           entries.push({ session, outcome, usage })
         }

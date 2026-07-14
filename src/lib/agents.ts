@@ -20,13 +20,14 @@ export const AGENTS: AgentOption[] = [
   {
     kind: 'opencode',
     label: 'OpenCode',
-    description: 'Uses opencode in a git worktree with auto-discovered AGENTS.md.',
+    description:
+      'Uses opencode in a git worktree with auto-discovered AGENTS.md and permissions set to allow.',
     icon: '/icons/agents/opencode.svg',
   },
   {
     kind: 'pi',
     label: 'Pi',
-    description: 'Uses pi --approve in a git worktree with auto-discovered AGENTS.md.',
+    description: 'Uses pi --approve in a git worktree with an appended system prompt.',
     icon: '/icons/agents/pi.svg',
   },
 ]

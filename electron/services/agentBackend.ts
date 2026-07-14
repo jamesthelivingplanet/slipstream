@@ -14,14 +14,17 @@ import * as path from 'node:path'
 
 import type { BackendKind, SessionStatus } from '../shared/contract.js'
 import { deliverPrompt, buildAgentsMdContent } from '../shared/promptComposer.js'
-import { writeAgentsMd } from './promptWriter.js'
+import { writeAgentsMd, writeOpencodeConfig } from './promptWriter.js'
+import { hasTranscript } from './transcripts.js'
 import {
   withOpencodePromptArg,
   fetchOpencodeMessages,
   opencodeStatusFromMessages,
+  queryOpencodeSessionIdFromCli,
 } from './opencodeSessions.js'
 import {
-  capturePiSessionFile,
+  findNewestPiSessionFile,
+  hasPiSessionFileSync,
   piSessionDirFor,
   readPiSessionFile,
   piStatusFromFileContent,
@@ -55,8 +58,9 @@ export interface ResumeArgsCtx {
   user: string
   opencodeSid?: string
   opencodePort?: number
-  /** Whether a Claude Code transcript already exists for this session id. */
-  hasTranscript: boolean
+  /** Whether the backend has prior resumable state for this session — Claude
+   *  transcript / captured opencode sid / pi session file. */
+  hasPriorSession: boolean
 }
 
 /**
@@ -94,6 +98,10 @@ export interface AgentBackend {
   buildHandoffArgs(ctx: ResumeArgsCtx): SpawnSpec
   /** Begin polling status after launch (poll backends only; PTY backends omit). */
   beginStatusTracking?(ctx: StatusTrackingCtx): void
+  /** Whether this backend has prior resumable state for a session (used by
+   *  sessionManager to decide resume/remote-control fallback to a fresh
+   *  start). Sync — implementations do cheap fs checks only. */
+  hasPriorSession?(ctx: { sessionId: string; cwd: string; opencodeSid?: string }): boolean
 }
 
 const OPENCODE_BIN = (() => {
@@ -110,17 +118,22 @@ const PI_STATUS_POLL_MS = 2000
 const PI_APPROVE_FLAG = '--approve'
 const PI_CONTINUE_FLAG = '--continue'
 
-/** Generic poll loop driven by a status `source`; manager owns timer + emit. */
+/**
+ * Generic poll loop driven by a status `source`; manager owns timer + emit.
+ * `source` returning null means "no signal this tick" (e.g. the underlying
+ * session file / id hasn't been discovered yet) — skipped rather than
+ * reported, so status never flips based on absence of data.
+ */
 function runPoll(
   handle: StatusHandle,
   intervalMs: number,
-  source: () => Promise<SessionStatus>,
+  source: () => Promise<SessionStatus | null>,
 ): void {
   if (handle.polling) return
   const tick = async () => {
     if (handle.disposed) return
     const s = await source()
-    if (handle.disposed) return
+    if (handle.disposed || s === null) return
     handle.setStatus(s)
   }
   void tick()
@@ -142,16 +155,16 @@ export const claudeCodeBackend: AgentBackend = {
     )
     return { cmd: CLAUDE_BIN, args }
   },
-  buildResumeArgs({ sessionId, system, user, hasTranscript }) {
+  buildResumeArgs({ sessionId, system, user, hasPriorSession }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
-    const args = hasTranscript
+    const args = hasPriorSession
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, sessionId]
       : [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
     return { cmd: CLAUDE_BIN, args }
   },
-  buildRemoteControlArgs({ sessionId, system, user, hasTranscript }) {
+  buildRemoteControlArgs({ sessionId, system, user, hasPriorSession }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
-    const args = hasTranscript
+    const args = hasPriorSession
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, CLAUDE_FLAGS.resume, sessionId]
       : [
           CLAUDE_FLAGS.skipPermissions,
@@ -163,12 +176,15 @@ export const claudeCodeBackend: AgentBackend = {
         ]
     return { cmd: CLAUDE_BIN, args }
   },
-  buildHandoffArgs({ sessionId, system, user, hasTranscript }) {
+  buildHandoffArgs({ sessionId, system, user, hasPriorSession }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
-    const args = hasTranscript
+    const args = hasPriorSession
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, sessionId, userPrompt]
       : [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
     return { cmd: CLAUDE_BIN, args }
+  },
+  hasPriorSession(ctx) {
+    return hasTranscript(ctx.sessionId)
   },
 }
 
@@ -176,7 +192,31 @@ function opencodePortArgs(port?: number): string[] {
   return port ? [OPENCODE_FLAGS.port, String(port)] : []
 }
 
-function buildOpencodeResume({ opencodeSid, opencodePort }: ResumeArgsCtx): SpawnSpec {
+/** Fresh-start-style opencode args (system prompt via AGENTS.md, prompt sent
+ *  via `--prompt`). Used both by buildStartArgs and by the resume/remote
+ *  fallback when there's no captured opencode sid to continue. */
+function buildOpencodeFreshStart({
+  system,
+  user,
+  opencodePort,
+}: {
+  system: string
+  user: string
+  opencodePort?: number
+}): SpawnSpec {
+  const { userPrompt } = deliverPrompt('opencode', { system, user })
+  return {
+    cmd: OPENCODE_BIN,
+    args: withOpencodePromptArg(opencodePortArgs(opencodePort), userPrompt),
+  }
+}
+
+function buildOpencodeResume(ctx: ResumeArgsCtx): SpawnSpec {
+  const { opencodeSid, opencodePort, hasPriorSession, system, user } = ctx
+  // No captured sid to continue (capture failed / crashed pre-first-message)
+  // — degrade to a fresh start instead of blindly passing --continue, which
+  // would misbehave with nothing to continue.
+  if (!hasPriorSession) return buildOpencodeFreshStart({ system, user, opencodePort })
   const resumeArgs = opencodeSid ? [OPENCODE_FLAGS.session, opencodeSid] : [OPENCODE_FLAGS.continue]
   return {
     cmd: OPENCODE_BIN,
@@ -190,13 +230,13 @@ export const opencodeBackend: AgentBackend = {
   prepareWorktree(cwd, system) {
     // OpenCode reads the system prompt from AGENTS.md (not a CLI arg).
     if (system) writeAgentsMd(cwd, buildAgentsMdContent(system))
+    // OpenCode has no CLI permission-bypass flag; config is the only
+    // supported mechanism (see writeOpencodeConfig). Written even when
+    // `system` is empty — runs should never stall on permission prompts.
+    writeOpencodeConfig(cwd)
   },
   buildStartArgs({ system, user, opencodePort }) {
-    const { userPrompt } = deliverPrompt('opencode', { system, user })
-    return {
-      cmd: OPENCODE_BIN,
-      args: withOpencodePromptArg(opencodePortArgs(opencodePort), userPrompt),
-    }
+    return buildOpencodeFreshStart({ system, user, opencodePort })
   },
   buildResumeArgs(ctx) {
     return buildOpencodeResume(ctx)
@@ -205,23 +245,30 @@ export const opencodeBackend: AgentBackend = {
     return buildOpencodeResume(ctx)
   },
   buildHandoffArgs({ system, user, opencodePort }) {
-    const { userPrompt } = deliverPrompt('opencode', { system, user })
-    return {
-      cmd: OPENCODE_BIN,
-      args: withOpencodePromptArg(opencodePortArgs(opencodePort), userPrompt),
-    }
+    return buildOpencodeFreshStart({ system, user, opencodePort })
   },
-  beginStatusTracking({ opencodePort, opencodeSid, isInitialStart, handle }) {
+  hasPriorSession(ctx) {
+    return !!ctx.opencodeSid
+  },
+  beginStatusTracking({ cwd, opencodePort, opencodeSid, isInitialStart, handle }) {
     // On initial start the opencode session id is captured asynchronously by the
     // caller (rpc -> setOpencodeSid), which re-invokes tracking with the sid. We
-    // only poll once port + sid are both known (resume/remote, or setOpencodeSid).
+    // only poll once the port is known (resume/remote, or setOpencodeSid).
     if (isInitialStart) return
-    if (!opencodePort || !opencodeSid) return
+    if (!opencodePort) return
     const port = opencodePort
-    const sid = opencodeSid
-    runPoll(handle, OPENCODE_STATUS_POLL_MS, async () =>
-      opencodeStatusFromMessages(await fetchOpencodeMessages(port, sid)),
-    )
+    // Lazy sid discovery: if resume/remote-control launched without a
+    // captured sid (e.g. a prior capture raced/failed), keep trying once per
+    // tick instead of never polling at all.
+    let sid = opencodeSid
+    runPoll(handle, OPENCODE_STATUS_POLL_MS, async () => {
+      if (!sid) {
+        const discovered = await queryOpencodeSessionIdFromCli(cwd)
+        if (!discovered) return null
+        sid = discovered
+      }
+      return opencodeStatusFromMessages(await fetchOpencodeMessages(port, sid))
+    })
   },
 }
 
@@ -229,31 +276,50 @@ function withPiPromptArg(args: string[], prompt: string | null | undefined): str
   return prompt ? [...args, prompt] : args
 }
 
+/** Fresh-start-style pi args (re-delivers system + user prompt). Used both by
+ *  buildStartArgs and by the resume/remote fallback when there's no prior
+ *  session file to continue. */
+function buildPiFreshStart({ system, user }: { system: string; user: string }): SpawnSpec {
+  const { systemArgs, userPrompt } = deliverPrompt('pi', { system, user })
+  return { cmd: PI_BIN, args: withPiPromptArg([PI_APPROVE_FLAG, ...systemArgs], userPrompt) }
+}
+
 export const piBackend: AgentBackend = {
   kind: 'pi',
   statusSource: 'poll',
-  buildStartArgs({ system, user }) {
-    const { systemArgs, userPrompt } = deliverPrompt('pi', { system, user })
-    return { cmd: PI_BIN, args: withPiPromptArg([PI_APPROVE_FLAG, ...systemArgs], userPrompt) }
+  buildStartArgs(ctx) {
+    return buildPiFreshStart(ctx)
   },
-  buildResumeArgs() {
+  buildResumeArgs(ctx) {
+    // No captured session file to continue (capture failed / crashed before
+    // the first message) — degrade to a fresh start instead of blindly
+    // passing --continue, which would misbehave with nothing to continue.
+    if (!ctx.hasPriorSession) return buildPiFreshStart(ctx)
     return { cmd: PI_BIN, args: [PI_APPROVE_FLAG, PI_CONTINUE_FLAG] }
   },
-  buildRemoteControlArgs() {
+  buildRemoteControlArgs(ctx) {
+    if (!ctx.hasPriorSession) return buildPiFreshStart(ctx)
     return { cmd: PI_BIN, args: [PI_APPROVE_FLAG, PI_CONTINUE_FLAG] }
   },
-  buildHandoffArgs({ system, user }) {
-    const { systemArgs, userPrompt } = deliverPrompt('pi', { system, user })
-    return { cmd: PI_BIN, args: withPiPromptArg([PI_APPROVE_FLAG, ...systemArgs], userPrompt) }
+  buildHandoffArgs(ctx) {
+    return buildPiFreshStart(ctx)
+  },
+  hasPriorSession(ctx) {
+    return hasPiSessionFileSync(ctx.cwd)
   },
   beginStatusTracking({ cwd, handle }) {
     // Pi writes its session as a JSONL file under ~/.pi/...; the file may not
-    // exist for a few hundred ms after spawn, so discover it (async) then poll.
-    void capturePiSessionFile(piSessionDirFor(cwd)).then((file) => {
-      if (handle.disposed || !file) return
-      runPoll(handle, PI_STATUS_POLL_MS, async () =>
-        piStatusFromFileContent(await readPiSessionFile(file)),
-      )
+    // exist for a few hundred ms after spawn (or capture may simply never
+    // have found it), so poll immediately with a lazy, per-tick one-shot
+    // discovery instead of a one-time bounded retry that can miss forever.
+    let file: string | null = null
+    runPoll(handle, PI_STATUS_POLL_MS, async () => {
+      if (!file) {
+        const discovered = await findNewestPiSessionFile(piSessionDirFor(cwd))
+        if (!discovered) return null
+        file = discovered
+      }
+      return piStatusFromFileContent(await readPiSessionFile(file))
     })
   },
 }

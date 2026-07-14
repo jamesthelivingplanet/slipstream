@@ -1,5 +1,33 @@
-import { describe, it, expect } from 'vitest'
-import { selectBackend, claudeCodeBackend, opencodeBackend, piBackend } from './agentBackend.js'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DONE_MARKER } from '../shared/promptComposer.js'
+import type { StatusHandle } from './agentBackend.js'
+
+vi.mock('./piSessions.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./piSessions.js')>()
+  return {
+    ...actual,
+    findNewestPiSessionFile: vi.fn(),
+    readPiSessionFile: vi.fn(),
+  }
+})
+
+vi.mock('./opencodeSessions.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./opencodeSessions.js')>()
+  return {
+    ...actual,
+    queryOpencodeSessionIdFromCli: vi.fn(),
+    fetchOpencodeMessages: vi.fn(),
+  }
+})
+
+const { selectBackend, claudeCodeBackend, opencodeBackend, piBackend } =
+  await import('./agentBackend.js')
+const { findNewestPiSessionFile, readPiSessionFile } = await import('./piSessions.js')
+const { queryOpencodeSessionIdFromCli, fetchOpencodeMessages } =
+  await import('./opencodeSessions.js')
 
 describe('selectBackend', () => {
   it('returns claudeCodeBackend for "claude-code"', () => {
@@ -89,23 +117,23 @@ describe('claudeCodeBackend.buildStartArgs', () => {
 })
 
 describe('claudeCodeBackend.buildResumeArgs', () => {
-  it('hasTranscript:true → args are [--dangerously-skip-permissions, --resume, id] only', () => {
+  it('hasPriorSession:true → args are [--dangerously-skip-permissions, --resume, id] only', () => {
     const { cmd, args } = claudeCodeBackend.buildResumeArgs({
       sessionId: 'myid',
       system: 'sys',
       user: 'task',
-      hasTranscript: true,
+      hasPriorSession: true,
     })
     expect(cmd).toBe('claude')
     expect(args).toEqual(['--dangerously-skip-permissions', '--resume', 'myid'])
   })
 
-  it('hasTranscript:false → uses --session-id + prompt', () => {
+  it('hasPriorSession:false → uses --session-id + prompt', () => {
     const { args } = claudeCodeBackend.buildResumeArgs({
       sessionId: 'myid2',
       system: '',
       user: 'my prompt',
-      hasTranscript: false,
+      hasPriorSession: false,
     })
     expect(args).toContain('--session-id')
     expect(args).toContain('myid2')
@@ -119,33 +147,44 @@ describe('claudeCodeBackend.buildRemoteControlArgs', () => {
       sessionId: 'rcid',
       system: '',
       user: 'task',
-      hasTranscript: false,
+      hasPriorSession: false,
     })
     expect(args).toContain('--remote-control')
   })
 
-  it('hasTranscript:true → uses --resume', () => {
+  it('hasPriorSession:true → uses --resume', () => {
     const { args } = claudeCodeBackend.buildRemoteControlArgs({
       sessionId: 'rcid2',
       system: '',
       user: 'task',
-      hasTranscript: true,
+      hasPriorSession: true,
     })
     expect(args).toContain('--remote-control')
     expect(args).toContain('--resume')
     expect(args).toContain('rcid2')
   })
 
-  it('hasTranscript:false → uses --session-id', () => {
+  it('hasPriorSession:false → uses --session-id', () => {
     const { args } = claudeCodeBackend.buildRemoteControlArgs({
       sessionId: 'rcid3',
       system: '',
       user: 'task',
-      hasTranscript: false,
+      hasPriorSession: false,
     })
     expect(args).toContain('--remote-control')
     expect(args).toContain('--session-id')
     expect(args).toContain('rcid3')
+  })
+})
+
+describe('claudeCodeBackend.hasPriorSession', () => {
+  it('returns false when no transcript exists for the session id', () => {
+    expect(
+      claudeCodeBackend.hasPriorSession?.({
+        sessionId: 'no-such-transcript-abc123',
+        cwd: '/tmp/whatever',
+      }),
+    ).toBe(false)
   })
 })
 
@@ -181,12 +220,12 @@ describe('opencodeBackend.buildStartArgs', () => {
 })
 
 describe('opencodeBackend.buildResumeArgs', () => {
-  it('with opencodeSid → includes ["--session", sid] and NO --prompt', () => {
+  it('hasPriorSession:true + opencodeSid → includes ["--session", sid] and NO --prompt', () => {
     const { args } = opencodeBackend.buildResumeArgs({
       sessionId: 'oc4',
       system: '',
       user: 'task',
-      hasTranscript: false,
+      hasPriorSession: true,
       opencodeSid: 'my-oc-sid',
     })
     expect(args).toContain('--session')
@@ -194,24 +233,38 @@ describe('opencodeBackend.buildResumeArgs', () => {
     expect(args).not.toContain('--prompt')
   })
 
-  it('without opencodeSid → includes --continue', () => {
+  it('hasPriorSession:true without opencodeSid → includes --continue', () => {
     const { args } = opencodeBackend.buildResumeArgs({
       sessionId: 'oc5',
       system: '',
       user: 'task',
-      hasTranscript: false,
+      hasPriorSession: true,
     })
     expect(args).toContain('--continue')
+  })
+
+  it('hasPriorSession:false → falls back to a fresh start (--prompt, no --continue/--session)', () => {
+    const { args } = opencodeBackend.buildResumeArgs({
+      sessionId: 'oc5b',
+      system: 'sys prompt',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    expect(args).not.toContain('--continue')
+    expect(args).not.toContain('--session')
+    const idx = args.indexOf('--prompt')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('task')
   })
 })
 
 describe('opencodeBackend.buildRemoteControlArgs', () => {
-  it('behaves identically to buildResumeArgs: with sid → --session; without → --continue', () => {
+  it('behaves identically to buildResumeArgs: with sid → --session; without sid but hasPriorSession → --continue', () => {
     const withSid = opencodeBackend.buildRemoteControlArgs({
       sessionId: 'oc6',
       system: '',
       user: 'task',
-      hasTranscript: false,
+      hasPriorSession: true,
       opencodeSid: 'some-sid',
     })
     expect(withSid.args).toContain('--session')
@@ -221,9 +274,33 @@ describe('opencodeBackend.buildRemoteControlArgs', () => {
       sessionId: 'oc7',
       system: '',
       user: 'task',
-      hasTranscript: false,
+      hasPriorSession: true,
     })
     expect(withoutSid.args).toContain('--continue')
+  })
+
+  it('hasPriorSession:false → falls back to a fresh start', () => {
+    const { args } = opencodeBackend.buildRemoteControlArgs({
+      sessionId: 'oc8',
+      system: '',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    expect(args).not.toContain('--continue')
+    const idx = args.indexOf('--prompt')
+    expect(idx).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('opencodeBackend.hasPriorSession', () => {
+  it('true when opencodeSid is set', () => {
+    expect(
+      opencodeBackend.hasPriorSession?.({ sessionId: 's', cwd: '/x', opencodeSid: 'ses_1' }),
+    ).toBe(true)
+  })
+
+  it('false when opencodeSid is absent', () => {
+    expect(opencodeBackend.hasPriorSession?.({ sessionId: 's', cwd: '/x' })).toBe(false)
   })
 })
 
@@ -256,34 +333,86 @@ describe('piBackend.buildStartArgs', () => {
 })
 
 describe('piBackend resume / remote-control', () => {
-  it('buildResumeArgs is [--approve, --continue]', () => {
+  it('hasPriorSession:true → buildResumeArgs is [--approve, --continue]', () => {
     const { args } = piBackend.buildResumeArgs({
       sessionId: 'p4',
       system: '',
       user: 'task',
-      hasTranscript: false,
+      hasPriorSession: true,
     })
     expect(args).toEqual(['--approve', '--continue'])
   })
 
-  it('buildRemoteControlArgs is [--approve, --continue]', () => {
+  it('hasPriorSession:true → buildRemoteControlArgs is [--approve, --continue]', () => {
     const { args } = piBackend.buildRemoteControlArgs({
       sessionId: 'p5',
       system: '',
       user: 'task',
-      hasTranscript: false,
+      hasPriorSession: true,
     })
     expect(args).toEqual(['--approve', '--continue'])
+  })
+
+  it('hasPriorSession:false → buildResumeArgs falls back to the same spec as buildStartArgs', () => {
+    const resumed = piBackend.buildResumeArgs({
+      sessionId: 'p6',
+      system: 'pi sys',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    const started = piBackend.buildStartArgs({ sessionId: 'p6', system: 'pi sys', user: 'task' })
+    expect(resumed).toEqual(started)
+  })
+
+  it('hasPriorSession:false → buildRemoteControlArgs falls back to the same spec as buildStartArgs', () => {
+    const remoted = piBackend.buildRemoteControlArgs({
+      sessionId: 'p7',
+      system: 'pi sys',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    const started = piBackend.buildStartArgs({ sessionId: 'p7', system: 'pi sys', user: 'task' })
+    expect(remoted).toEqual(started)
+  })
+})
+
+describe('piBackend.hasPriorSession', () => {
+  let root: string
+  let prevSessionDir: string | undefined
+  const cwd = '/tmp/some-worktree'
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'slipstream-pi-hasprior-'))
+    prevSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR
+    process.env.PI_CODING_AGENT_SESSION_DIR = root
+  })
+
+  afterEach(() => {
+    if (prevSessionDir === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR
+    else process.env.PI_CODING_AGENT_SESSION_DIR = prevSessionDir
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('false when the session dir does not exist', () => {
+    expect(piBackend.hasPriorSession?.({ sessionId: 's', cwd })).toBe(false)
+  })
+
+  it('true when the session dir has at least one .jsonl file', async () => {
+    const { piSessionDirFor } = await import('./piSessions.js')
+    const dir = piSessionDirFor(cwd)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'run1.jsonl'), '{}')
+    expect(piBackend.hasPriorSession?.({ sessionId: 's', cwd })).toBe(true)
   })
 })
 
 describe('claudeCodeBackend.buildHandoffArgs', () => {
-  it('hasTranscript:false → uses --session-id + id + prompt is present', () => {
+  it('hasPriorSession:false → uses --session-id + id + prompt is present', () => {
     const { cmd, args } = claudeCodeBackend.buildHandoffArgs({
       sessionId: 'hoid1',
       system: '',
       user: 'takeover prompt',
-      hasTranscript: false,
+      hasPriorSession: false,
     })
     expect(cmd).toBe('claude')
     expect(args).toContain('--session-id')
@@ -291,12 +420,12 @@ describe('claudeCodeBackend.buildHandoffArgs', () => {
     expect(args[args.length - 1]).toBe('takeover prompt')
   })
 
-  it('hasTranscript:true → uses --resume + id + the handoff prompt as the last arg; no --session-id', () => {
+  it('hasPriorSession:true → uses --resume + id + the handoff prompt as the last arg; no --session-id', () => {
     const { args } = claudeCodeBackend.buildHandoffArgs({
       sessionId: 'hoid3',
       system: '',
       user: 'takeover prompt',
-      hasTranscript: true,
+      hasPriorSession: true,
     })
     expect(args).toContain('--resume')
     expect(args).toContain('hoid3')
@@ -311,7 +440,7 @@ describe('opencodeBackend.buildHandoffArgs', () => {
       sessionId: 'ohid1',
       system: '',
       user: 'takeover prompt',
-      hasTranscript: false,
+      hasPriorSession: false,
     })
     const idx = args.indexOf('--prompt')
     expect(idx).toBeGreaterThanOrEqual(0)
@@ -323,7 +452,7 @@ describe('opencodeBackend.buildHandoffArgs', () => {
       sessionId: 'ohid2',
       system: '',
       user: 'takeover prompt',
-      hasTranscript: false,
+      hasPriorSession: false,
       opencodePort: 4444,
     })
     const idx = args.indexOf('--port')
@@ -338,7 +467,7 @@ describe('piBackend.buildHandoffArgs', () => {
       sessionId: 'phid1',
       system: '',
       user: 'takeover prompt',
-      hasTranscript: false,
+      hasPriorSession: false,
     })
     expect(cmd.endsWith('pi')).toBe(true)
   })
@@ -348,7 +477,7 @@ describe('piBackend.buildHandoffArgs', () => {
       sessionId: 'phid2',
       system: '',
       user: 'takeover prompt',
-      hasTranscript: false,
+      hasPriorSession: false,
     })
     expect(args).toContain('--approve')
     expect(args[args.length - 1]).toBe('takeover prompt')
@@ -359,7 +488,7 @@ describe('piBackend.buildHandoffArgs', () => {
       sessionId: 'phid3',
       system: 'pi sys',
       user: 'takeover prompt',
-      hasTranscript: false,
+      hasPriorSession: false,
     })
     const idx = args.indexOf('--append-system-prompt')
     expect(idx).toBeGreaterThanOrEqual(0)
@@ -392,5 +521,140 @@ describe('prepareWorktree presence', () => {
 
   it('piBackend.prepareWorktree is undefined', () => {
     expect(piBackend.prepareWorktree).toBeUndefined()
+  })
+})
+
+// ─── FLO-94-adjacent status-polling fallback (never freeze forever) ──────────
+
+/** Minimal fake StatusHandle: not disposed, captures setStatus calls, and
+ *  stores whatever timer runPoll registers (never advanced manually — tests
+ *  drive ticks via vi's fake timers). */
+function makeHandle(): StatusHandle & { setStatus: ReturnType<typeof vi.fn> } {
+  let pollTimer: ReturnType<typeof setInterval> | undefined
+  return {
+    disposed: false,
+    get polling() {
+      return pollTimer !== undefined
+    },
+    setStatus: vi.fn(),
+    setPollTimer(timer) {
+      pollTimer = timer
+    },
+  }
+}
+
+function assistantTextEntry(text: string): string {
+  return JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text }] } })
+}
+
+describe('poll fallback — null ticks are skipped, late discovery is retried', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(findNewestPiSessionFile).mockReset()
+    vi.mocked(readPiSessionFile).mockReset()
+    vi.mocked(queryOpencodeSessionIdFromCli).mockReset()
+    vi.mocked(fetchOpencodeMessages).mockReset()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('pi: a tick that resolves null status is skipped (setStatus not called)', async () => {
+    vi.mocked(findNewestPiSessionFile).mockResolvedValue(null)
+    const handle = makeHandle()
+
+    piBackend.beginStatusTracking?.({
+      cwd: '/tmp/wt-pi-null',
+      isInitialStart: true,
+      handle,
+    })
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(2000)
+
+    expect(handle.setStatus).not.toHaveBeenCalled()
+    expect(handle.polling).toBe(true)
+  })
+
+  it('pi: discovers the session file late, then reports status once found', async () => {
+    vi.mocked(findNewestPiSessionFile)
+      .mockResolvedValueOnce(null) // immediate tick: not found yet
+      .mockResolvedValueOnce('/tmp/wt-pi-late/run1.jsonl') // next tick: found
+    vi.mocked(readPiSessionFile).mockResolvedValue(assistantTextEntry(DONE_MARKER))
+    const handle = makeHandle()
+
+    piBackend.beginStatusTracking?.({
+      cwd: '/tmp/wt-pi-late',
+      isInitialStart: true,
+      handle,
+    })
+
+    // Immediate tick: no file yet — no status reported.
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(handle.setStatus).not.toHaveBeenCalled()
+
+    // Next tick: file discovered — status reported.
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(handle.setStatus).toHaveBeenCalledWith('done')
+
+    // File is now cached — subsequent ticks don't re-run discovery.
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(findNewestPiSessionFile).toHaveBeenCalledTimes(2)
+  })
+
+  it('opencode: a tick with no recoverable sid is skipped (setStatus not called)', async () => {
+    vi.mocked(queryOpencodeSessionIdFromCli).mockResolvedValue(null)
+    const handle = makeHandle()
+
+    opencodeBackend.beginStatusTracking?.({
+      cwd: '/tmp/wt-oc-null',
+      opencodePort: 4000,
+      isInitialStart: false,
+      handle,
+    })
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(2000)
+
+    expect(handle.setStatus).not.toHaveBeenCalled()
+    expect(fetchOpencodeMessages).not.toHaveBeenCalled()
+  })
+
+  it('opencode: recovers a sid late, then reports status once found', async () => {
+    vi.mocked(queryOpencodeSessionIdFromCli)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('ses_recovered')
+    vi.mocked(fetchOpencodeMessages).mockResolvedValue([
+      { info: { role: 'assistant' }, parts: [{ type: 'text', text: DONE_MARKER }] },
+    ])
+    const handle = makeHandle()
+
+    opencodeBackend.beginStatusTracking?.({
+      cwd: '/tmp/wt-oc-late',
+      opencodePort: 4001,
+      isInitialStart: false,
+      handle,
+    })
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(handle.setStatus).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(handle.setStatus).toHaveBeenCalledWith('done')
+    expect(fetchOpencodeMessages).toHaveBeenCalledWith(4001, 'ses_recovered')
+  })
+
+  it('opencode: isInitialStart still returns early without polling', () => {
+    const handle = makeHandle()
+    opencodeBackend.beginStatusTracking?.({
+      cwd: '/tmp/wt-oc-initial',
+      opencodePort: 4002,
+      isInitialStart: true,
+      handle,
+    })
+    expect(handle.polling).toBe(false)
   })
 })

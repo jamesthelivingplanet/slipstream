@@ -12,7 +12,12 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { writeAgentsMd, resolveInfoExclude, writeSlipstreamSkill } from './promptWriter.js'
+import {
+  writeAgentsMd,
+  resolveInfoExclude,
+  writeSlipstreamSkill,
+  writeOpencodeConfig,
+} from './promptWriter.js'
 
 /**
  * Exercises writeAgentsMd against a REAL temp git repo + linked worktree — the
@@ -136,6 +141,54 @@ describe('promptWriter (real git)', () => {
       expect(readFileSync(join(realDir, 'SKILL.md'), 'utf8')).toBe('repo-owned\n')
       // Canonical copy still written for pi/opencode.
       expect(existsSync(join(wt, '.agents', 'skills', 'slipstream', 'SKILL.md'))).toBe(true)
+    })
+  })
+
+  describe('writeOpencodeConfig', () => {
+    it('creates opencode.json with permission:allow and excludes it', () => {
+      const wt = join(root, 'wt-oc-config')
+      git(repoPath, 'worktree', 'add', wt, '-b', 'feat-oc-config', 'main')
+
+      writeOpencodeConfig(wt)
+
+      const content = readFileSync(join(wt, 'opencode.json'), 'utf8')
+      expect(content.endsWith('\n')).toBe(true)
+      expect(JSON.parse(content)).toEqual({
+        $schema: 'https://opencode.ai/config.json',
+        permission: 'allow',
+      })
+      expect(git(wt, 'status', '--porcelain').trim()).toBe('')
+      expect(git(wt, 'check-ignore', 'opencode.json').trim()).toBe('opencode.json')
+    })
+
+    it('skips and leaves a pre-existing opencode.json alone (no exclude entry added)', () => {
+      // A fresh, independent repo — info/exclude is shared across all worktrees
+      // of the SAME repo, so reusing repoPath here would see the previous
+      // test's "opencode.json" entry and give a false positive.
+      const repoOc = join(root, 'source-oc-existing')
+      execFileSync('git', ['init', '-b', 'main', repoOc], { encoding: 'utf8' })
+      git(repoOc, 'config', 'user.email', 'test@slipstream.dev')
+      git(repoOc, 'config', 'user.name', 'Slipstream Test')
+      writeFileSync(join(repoOc, 'README.md'), 'hi\n')
+      git(repoOc, 'add', '-A')
+      git(repoOc, 'commit', '-m', 'init')
+
+      const wt = join(root, 'wt-oc-existing')
+      git(repoOc, 'worktree', 'add', wt, '-b', 'feat-oc-existing', 'main')
+      const original = '{"tracked":true}'
+      writeFileSync(join(wt, 'opencode.json'), original)
+
+      writeOpencodeConfig(wt)
+
+      expect(readFileSync(join(wt, 'opencode.json'), 'utf8')).toBe(original)
+      const exclude = resolveInfoExclude(wt)
+      const excludeContent = exclude && existsSync(exclude) ? readFileSync(exclude, 'utf8') : ''
+      expect(
+        excludeContent
+          .split('\n')
+          .map((l) => l.trim())
+          .includes('opencode.json'),
+      ).toBe(false)
     })
   })
 
