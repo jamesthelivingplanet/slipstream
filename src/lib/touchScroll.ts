@@ -4,10 +4,20 @@
  * xterm.js's own touch-pan scrolling is gated on
  * `!coreMouseService.areMouseEventsActive` — once the running TUI enables
  * mouse reporting (Claude Code does), a finger drag over the terminal does
- * nothing by default. TerminalView drives `term.scrollLines()` from raw
- * touch events instead, but only while mouse tracking is active (checked via
- * the public `term.modes.mouseTrackingMode`), so xterm's built-in handling
- * and this one never both fire for the same gesture.
+ * nothing by default. Driving `term.scrollLines()` from raw touch events
+ * doesn't fix this either: Claude Code runs in the alternate screen buffer
+ * (`?1049h`), which has no scrollback, so `scrollLines()` is a no-op there
+ * regardless of mouse tracking (TASK-A2FY6).
+ *
+ * Instead, `TouchScrollTracker` converts a pan into whole terminal lines,
+ * and TerminalView dispatches one synthetic per-line `WheelEvent` on
+ * `term.element` for each line — the same path xterm uses for desktop wheel
+ * scrolling. xterm routes that wheel event exactly like real wheel input:
+ * a mouse-wheel report to the PTY when the TUI has mouse tracking on, arrow
+ * keys when in the alternate buffer without tracking, or a local viewport
+ * scroll otherwise. `touchScrollRoute()` below decides which of those cases
+ * applies so TerminalView knows whether to synthesize wheel events at all,
+ * or leave xterm's own (still-live) touch handling alone.
  *
  * No DOM/xterm imports here — kept pure so it's cheap to unit test.
  */
@@ -109,4 +119,19 @@ export function momentumStep(
     velocity: Math.abs(nextVelocity) < MOMENTUM_EPSILON ? 0 : nextVelocity,
     remainder: total - lines,
   }
+}
+
+/** Where a touch pan should be routed.
+ *  - 'wheel': synthesize per-line wheel events on xterm's root element —
+ *    xterm turns them into mouse-wheel reports (mouse tracking on) or
+ *    arrow keys (alternate buffer without tracking), same as desktop wheel.
+ *  - 'native': do nothing; xterm's built-in touch-pan scrolling is live
+ *    (normal buffer, no mouse tracking) and handles the gesture itself. */
+export type TouchScrollRoute = 'wheel' | 'native'
+
+export function touchScrollRoute(
+  mouseTrackingMode: 'none' | 'x10' | 'vt200' | 'drag' | 'any',
+  bufferType: 'normal' | 'alternate',
+): TouchScrollRoute {
+  return mouseTrackingMode !== 'none' || bufferType === 'alternate' ? 'wheel' : 'native'
 }
