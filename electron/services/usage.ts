@@ -14,6 +14,8 @@
 import fs from 'node:fs'
 import { claudeProjectsDir, transcriptPathFor } from './transcripts.js'
 import { dayKeyFromMs } from '../shared/usageFormat.js'
+import { readOpencodeUsage } from './opencodeUsage.js'
+import { readPiUsage } from './piUsage.js'
 import type {
   SessionDTO,
   SessionUsage,
@@ -66,7 +68,7 @@ function costForTurn(tokens: UsageTokens, model: string | undefined): number {
 }
 
 /** Round to 4 dp so serialized JSON doesn't carry float noise. */
-function round4(n: number): number {
+export function round4(n: number): number {
   return Math.round(n * 10000) / 10000
 }
 
@@ -172,15 +174,58 @@ export function readTranscriptUsage(
   }
 }
 
+/** Empty (no data yet) usage shape shared by any kind with no reader. */
+function emptyUsage(sessionId: string): SessionUsage {
+  return { sessionId, exists: false, tokens: { ...ZERO_TOKENS }, costUsd: 0, turns: 0 }
+}
+
+/**
+ * Dispatch to the right per-backend usage reader based on `session.agentKind`
+ * (defaults to 'claude-code' for legacy sessions with no recorded kind), so
+ * every backend produces the same SessionUsage contract shape (FLO-94 parity
+ * gap: opencode/pi sessions always showed usage:null).
+ */
+export function readSessionUsage(
+  session: SessionDTO,
+  opts: {
+    projectsDir?: string
+    opencodeRoot?: string
+    piRoot?: string
+    cwd?: string | null
+  } = {},
+): SessionUsage {
+  const kind = session.agentKind ?? 'claude-code'
+  switch (kind) {
+    case 'claude-code':
+      return readTranscriptUsage(session.id, opts.projectsDir)
+    case 'opencode':
+      return readOpencodeUsage(session.id, session.opencodeSid, opts.opencodeRoot)
+    case 'pi':
+      return readPiUsage(session.id, opts.cwd ?? null, opts.piRoot)
+    default:
+      // 'antigravity' / 'grok': no documented on-disk usage format yet.
+      // 'kilo': stores sessions in a SQLite `~/.local/share/kilo/kilo.db`
+      // (not opencode's file-per-message store), so `readOpencodeUsage` can't
+      // be reused as-is — a reader can be added later (e.g. via `kilo export
+      // <sessionID>` / `kilo stats`), same shape as the others once it exists.
+      return emptyUsage(session.id)
+  }
+}
+
 /**
  * Build a total + by-repo + by-day usage rollup across the given sessions.
- * Sessions without a transcript yet are skipped (they contribute nothing).
+ * Sessions without usage data yet are skipped (they contribute nothing).
  * Repo buckets are keyed by repoId; day buckets by 'YYYY-MM-DD' derived from
  * each session's createdAt (the day the run started).
  */
 export function buildUsageSummary(
   sessions: SessionDTO[],
-  projectsDir: string = claudeProjectsDir(),
+  opts: {
+    projectsDir?: string
+    opencodeRoot?: string
+    piRoot?: string
+    cwdFor?: (s: SessionDTO) => string | null
+  } = {},
 ): UsageSummary {
   const perSession: SessionUsage[] = []
   const byRepo = new Map<string, UsageBucket>()
@@ -189,7 +234,12 @@ export function buildUsageSummary(
   let totalCost = 0
 
   for (const s of sessions) {
-    const u = readTranscriptUsage(s.id, projectsDir)
+    const u = readSessionUsage(s, {
+      projectsDir: opts.projectsDir,
+      opencodeRoot: opts.opencodeRoot,
+      piRoot: opts.piRoot,
+      cwd: opts.cwdFor?.(s) ?? null,
+    })
     if (!u.exists) continue
     if (u.turns === 0) continue // transcript exists but no usage yet — nothing to count
 

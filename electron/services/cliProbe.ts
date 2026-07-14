@@ -6,8 +6,15 @@
  */
 
 import { existsSync, statSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { CLAUDE_BIN, OPENCODE_BIN_NAME } from '../shared/agentCli.js'
+import {
+  CLAUDE_BIN,
+  OPENCODE_BIN_NAME,
+  ANTIGRAVITY_BIN,
+  GROK_BIN_NAME,
+  KILO_BIN_NAME,
+} from '../shared/agentCli.js'
 import type { BackendKind } from '../shared/contract.js'
 
 /** Binary name for pi. Mirrors the fallback in agentBackend.ts's PI_BIN
@@ -24,7 +31,46 @@ export function binForKind(kind: BackendKind): string {
       return OPENCODE_BIN_NAME
     case 'pi':
       return PI_BIN_NAME
+    case 'antigravity':
+      return ANTIGRAVITY_BIN
+    case 'grok':
+      return GROK_BIN_NAME
+    case 'kilo':
+      return KILO_BIN_NAME
   }
+}
+
+/**
+ * Absolute-path candidates to check in addition to a plain PATH scan, keyed
+ * by kind. Today only kilo needs this: it installs to `~/.kilo/bin/kilo`, a
+ * directory that is NOT on the daemon's PATH (see agentBackend.ts's KILO_BIN),
+ * so a bare `findOnPath('kilo')` would report "not found" even when it's
+ * installed and working. Empty for every other kind.
+ */
+function extraCandidatesForKind(kind: BackendKind): string[] {
+  if (kind === 'kilo') return [path.join(os.homedir(), '.kilo', 'bin', 'kilo')]
+  return []
+}
+
+/**
+ * Preflight check for the New Agent dialog: is `kind`'s CLI on this machine,
+ * either on PATH or at one of its known absolute install locations? Returns
+ * the resolved path, or null when neither check found it.
+ */
+export function findAgentCli(
+  kind: BackendKind,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const onPath = findOnPath(binForKind(kind), env)
+  if (onPath) return onPath
+  for (const candidate of extraCandidatesForKind(kind)) {
+    try {
+      if (existsSync(candidate) && statSync(candidate).isFile()) return candidate
+    } catch {
+      // Unreadable/broken path — skip it.
+    }
+  }
+  return null
 }
 
 /**

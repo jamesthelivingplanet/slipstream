@@ -10,18 +10,22 @@
  * Pure (no node-pty): unit-testable without Electron's native ABI.
  */
 import { existsSync } from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 
 import type { BackendKind, SessionStatus } from '../shared/contract.js'
 import { deliverPrompt, buildAgentsMdContent } from '../shared/promptComposer.js'
-import { writeAgentsMd } from './promptWriter.js'
+import { writeAgentsMd, writeOpencodeConfig, writeKiloConfig } from './promptWriter.js'
+import { hasTranscript } from './transcripts.js'
 import {
   withOpencodePromptArg,
   fetchOpencodeMessages,
   opencodeStatusFromMessages,
+  queryOpencodeSessionIdFromCli,
 } from './opencodeSessions.js'
 import {
-  capturePiSessionFile,
+  findNewestPiSessionFile,
+  hasPiSessionFileSync,
   piSessionDirFor,
   readPiSessionFile,
   piStatusFromFileContent,
@@ -29,8 +33,14 @@ import {
 import {
   CLAUDE_BIN,
   OPENCODE_BIN_NAME,
+  ANTIGRAVITY_BIN,
+  GROK_BIN_NAME,
+  KILO_BIN_NAME,
   CLAUDE_FLAGS,
   OPENCODE_FLAGS,
+  ANTIGRAVITY_FLAGS,
+  GROK_FLAGS,
+  KILO_FLAGS,
   OPENCODE_STATUS_POLL_MS,
 } from '../shared/agentCli.js'
 
@@ -46,6 +56,10 @@ export interface StartArgsCtx {
   sessionId: string
   system: string
   user: string
+  /** Embedded-server port. Named for opencode (its first consumer), but the
+   *  concept is generic ("this backend's launched embedded HTTP server port")
+   *  — kiloBackend deliberately reuses this field rather than the contract
+   *  growing a parallel kiloPort. */
   opencodePort?: number
 }
 
@@ -53,10 +67,14 @@ export interface ResumeArgsCtx {
   sessionId: string
   system: string
   user: string
+  /** Captured embedded-server session id. Named for opencode; kiloBackend
+   *  reuses this field the same way it reuses opencodePort (see above) — Kilo
+   *  is an opencode fork with an opencode-compatible session store/API. */
   opencodeSid?: string
   opencodePort?: number
-  /** Whether a Claude Code transcript already exists for this session id. */
-  hasTranscript: boolean
+  /** Whether the backend has prior resumable state for this session — Claude
+   *  transcript / captured opencode sid / pi session file. */
+  hasPriorSession: boolean
 }
 
 /**
@@ -84,6 +102,13 @@ export interface StatusTrackingCtx {
 export interface AgentBackend {
   readonly kind: BackendKind
   readonly statusSource: StatusSource
+  /** True iff this backend is launched with an embedded HTTP server (a
+   *  `--port` claim) whose session id is captured via a CLI `session list`
+   *  shell-out (opencode, and kilo which reuses opencode's plumbing — see
+   *  StartArgsCtx.opencodePort). Callers that need to claim a port / capture a
+   *  sid for a session (sessionLauncher.ts, rpc.ts) branch on this instead of
+   *  a hardcoded `agentKind === 'opencode'` check, via usesEmbeddedServer(). */
+  readonly embeddedServer?: true
   /** Optional pre-spawn worktree setup (e.g. write AGENTS.md). */
   prepareWorktree?(cwd: string, system: string): void
   buildStartArgs(ctx: StartArgsCtx): SpawnSpec
@@ -94,6 +119,10 @@ export interface AgentBackend {
   buildHandoffArgs(ctx: ResumeArgsCtx): SpawnSpec
   /** Begin polling status after launch (poll backends only; PTY backends omit). */
   beginStatusTracking?(ctx: StatusTrackingCtx): void
+  /** Whether this backend has prior resumable state for a session (used by
+   *  sessionManager to decide resume/remote-control fallback to a fresh
+   *  start). Sync — implementations do cheap fs checks only. */
+  hasPriorSession?(ctx: { sessionId: string; cwd: string; opencodeSid?: string }): boolean
 }
 
 const OPENCODE_BIN = (() => {
@@ -106,21 +135,40 @@ const PI_BIN = (() => {
   return existsSync(local) ? local : 'pi'
 })()
 
+const GROK_BIN = (() => {
+  const local = path.join(process.cwd(), 'node_modules', '.bin', 'grok')
+  return existsSync(local) ? local : GROK_BIN_NAME
+})()
+
+/** Kilo Code is installed to `~/.kilo/bin/kilo`, a directory that is NOT on
+ *  the daemon's PATH (unlike opencode/pi/grok it's never an npm dependency
+ *  either, so there is no node_modules/.bin candidate) — prefer that absolute
+ *  path when present, falling back to the bare name for a PATH-based install. */
+export const KILO_BIN = (() => {
+  const installed = path.join(os.homedir(), '.kilo', 'bin', 'kilo')
+  return existsSync(installed) ? installed : KILO_BIN_NAME
+})()
+
 const PI_STATUS_POLL_MS = 2000
 const PI_APPROVE_FLAG = '--approve'
 const PI_CONTINUE_FLAG = '--continue'
 
-/** Generic poll loop driven by a status `source`; manager owns timer + emit. */
+/**
+ * Generic poll loop driven by a status `source`; manager owns timer + emit.
+ * `source` returning null means "no signal this tick" (e.g. the underlying
+ * session file / id hasn't been discovered yet) — skipped rather than
+ * reported, so status never flips based on absence of data.
+ */
 function runPoll(
   handle: StatusHandle,
   intervalMs: number,
-  source: () => Promise<SessionStatus>,
+  source: () => Promise<SessionStatus | null>,
 ): void {
   if (handle.polling) return
   const tick = async () => {
     if (handle.disposed) return
     const s = await source()
-    if (handle.disposed) return
+    if (handle.disposed || s === null) return
     handle.setStatus(s)
   }
   void tick()
@@ -142,16 +190,16 @@ export const claudeCodeBackend: AgentBackend = {
     )
     return { cmd: CLAUDE_BIN, args }
   },
-  buildResumeArgs({ sessionId, system, user, hasTranscript }) {
+  buildResumeArgs({ sessionId, system, user, hasPriorSession }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
-    const args = hasTranscript
+    const args = hasPriorSession
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, sessionId]
       : [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
     return { cmd: CLAUDE_BIN, args }
   },
-  buildRemoteControlArgs({ sessionId, system, user, hasTranscript }) {
+  buildRemoteControlArgs({ sessionId, system, user, hasPriorSession }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
-    const args = hasTranscript
+    const args = hasPriorSession
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.remoteControl, CLAUDE_FLAGS.resume, sessionId]
       : [
           CLAUDE_FLAGS.skipPermissions,
@@ -163,12 +211,15 @@ export const claudeCodeBackend: AgentBackend = {
         ]
     return { cmd: CLAUDE_BIN, args }
   },
-  buildHandoffArgs({ sessionId, system, user, hasTranscript }) {
+  buildHandoffArgs({ sessionId, system, user, hasPriorSession }) {
     const { systemArgs, userPrompt } = deliverPrompt('claude-code', { system, user })
-    const args = hasTranscript
+    const args = hasPriorSession
       ? [CLAUDE_FLAGS.skipPermissions, CLAUDE_FLAGS.resume, sessionId, userPrompt]
       : [CLAUDE_FLAGS.skipPermissions, ...systemArgs, CLAUDE_FLAGS.sessionId, sessionId, userPrompt]
     return { cmd: CLAUDE_BIN, args }
+  },
+  hasPriorSession(ctx) {
+    return hasTranscript(ctx.sessionId)
   },
 }
 
@@ -176,7 +227,31 @@ function opencodePortArgs(port?: number): string[] {
   return port ? [OPENCODE_FLAGS.port, String(port)] : []
 }
 
-function buildOpencodeResume({ opencodeSid, opencodePort }: ResumeArgsCtx): SpawnSpec {
+/** Fresh-start-style opencode args (system prompt via AGENTS.md, prompt sent
+ *  via `--prompt`). Used both by buildStartArgs and by the resume/remote
+ *  fallback when there's no captured opencode sid to continue. */
+function buildOpencodeFreshStart({
+  system,
+  user,
+  opencodePort,
+}: {
+  system: string
+  user: string
+  opencodePort?: number
+}): SpawnSpec {
+  const { userPrompt } = deliverPrompt('opencode', { system, user })
+  return {
+    cmd: OPENCODE_BIN,
+    args: withOpencodePromptArg(opencodePortArgs(opencodePort), userPrompt),
+  }
+}
+
+function buildOpencodeResume(ctx: ResumeArgsCtx): SpawnSpec {
+  const { opencodeSid, opencodePort, hasPriorSession, system, user } = ctx
+  // No captured sid to continue (capture failed / crashed pre-first-message)
+  // — degrade to a fresh start instead of blindly passing --continue, which
+  // would misbehave with nothing to continue.
+  if (!hasPriorSession) return buildOpencodeFreshStart({ system, user, opencodePort })
   const resumeArgs = opencodeSid ? [OPENCODE_FLAGS.session, opencodeSid] : [OPENCODE_FLAGS.continue]
   return {
     cmd: OPENCODE_BIN,
@@ -184,19 +259,56 @@ function buildOpencodeResume({ opencodeSid, opencodePort }: ResumeArgsCtx): Spaw
   }
 }
 
+/**
+ * Shared `beginStatusTracking` factory for opencode-compatible embedded-server
+ * backends (opencode, and kilo — an opencode fork exposing the same session
+ * HTTP API and CLI `session list` shape). Only the sid-recovery shell-out's
+ * binary differs between them, so this is parameterized on `bin` rather than
+ * duplicated. On initial start the session id is captured asynchronously by
+ * the caller (rpc/sessionLauncher -> setOpencodeSid), which re-invokes
+ * tracking with the sid — we only poll once the port is known (resume/remote,
+ * or setOpencodeSid).
+ */
+function embeddedServerStatusTracking(bin: string) {
+  return function beginStatusTracking({
+    cwd,
+    opencodePort,
+    opencodeSid,
+    isInitialStart,
+    handle,
+  }: StatusTrackingCtx): void {
+    if (isInitialStart) return
+    if (!opencodePort) return
+    const port = opencodePort
+    // Lazy sid discovery: if resume/remote-control launched without a
+    // captured sid (e.g. a prior capture raced/failed), keep trying once per
+    // tick instead of never polling at all.
+    let sid = opencodeSid
+    runPoll(handle, OPENCODE_STATUS_POLL_MS, async () => {
+      if (!sid) {
+        const discovered = await queryOpencodeSessionIdFromCli(cwd, bin)
+        if (!discovered) return null
+        sid = discovered
+      }
+      return opencodeStatusFromMessages(await fetchOpencodeMessages(port, sid))
+    })
+  }
+}
+
 export const opencodeBackend: AgentBackend = {
   kind: 'opencode',
   statusSource: 'poll',
+  embeddedServer: true,
   prepareWorktree(cwd, system) {
     // OpenCode reads the system prompt from AGENTS.md (not a CLI arg).
     if (system) writeAgentsMd(cwd, buildAgentsMdContent(system))
+    // OpenCode has no CLI permission-bypass flag; config is the only
+    // supported mechanism (see writeOpencodeConfig). Written even when
+    // `system` is empty — runs should never stall on permission prompts.
+    writeOpencodeConfig(cwd)
   },
   buildStartArgs({ system, user, opencodePort }) {
-    const { userPrompt } = deliverPrompt('opencode', { system, user })
-    return {
-      cmd: OPENCODE_BIN,
-      args: withOpencodePromptArg(opencodePortArgs(opencodePort), userPrompt),
-    }
+    return buildOpencodeFreshStart({ system, user, opencodePort })
   },
   buildResumeArgs(ctx) {
     return buildOpencodeResume(ctx)
@@ -205,66 +317,261 @@ export const opencodeBackend: AgentBackend = {
     return buildOpencodeResume(ctx)
   },
   buildHandoffArgs({ system, user, opencodePort }) {
-    const { userPrompt } = deliverPrompt('opencode', { system, user })
-    return {
-      cmd: OPENCODE_BIN,
-      args: withOpencodePromptArg(opencodePortArgs(opencodePort), userPrompt),
-    }
+    return buildOpencodeFreshStart({ system, user, opencodePort })
   },
-  beginStatusTracking({ opencodePort, opencodeSid, isInitialStart, handle }) {
-    // On initial start the opencode session id is captured asynchronously by the
-    // caller (rpc -> setOpencodeSid), which re-invokes tracking with the sid. We
-    // only poll once port + sid are both known (resume/remote, or setOpencodeSid).
-    if (isInitialStart) return
-    if (!opencodePort || !opencodeSid) return
-    const port = opencodePort
-    const sid = opencodeSid
-    runPoll(handle, OPENCODE_STATUS_POLL_MS, async () =>
-      opencodeStatusFromMessages(await fetchOpencodeMessages(port, sid)),
-    )
+  hasPriorSession(ctx) {
+    return !!ctx.opencodeSid
   },
+  beginStatusTracking: embeddedServerStatusTracking(OPENCODE_BIN),
+}
+
+function kiloPortArgs(port?: number): string[] {
+  return port ? [KILO_FLAGS.port, String(port)] : []
+}
+
+function withKiloPromptArg(args: string[], prompt: string | null | undefined): string[] {
+  return prompt ? [...args, KILO_FLAGS.prompt, prompt] : args
+}
+
+/** Fresh-start-style Kilo args (system prompt via AGENTS.md, prompt sent via
+ *  `--prompt`) — identical shape to opencode's since Kilo is an opencode
+ *  fork. Used both by buildStartArgs and by the resume/remote fallback when
+ *  there's no captured sid to continue. */
+function buildKiloFreshStart({
+  system,
+  user,
+  opencodePort,
+}: {
+  system: string
+  user: string
+  opencodePort?: number
+}): SpawnSpec {
+  const { userPrompt } = deliverPrompt('kilo', { system, user })
+  return {
+    cmd: KILO_BIN,
+    args: withKiloPromptArg(kiloPortArgs(opencodePort), userPrompt),
+  }
+}
+
+function buildKiloResume(ctx: ResumeArgsCtx): SpawnSpec {
+  const { opencodeSid, opencodePort, hasPriorSession, system, user } = ctx
+  // No captured sid to continue (capture failed / crashed pre-first-message)
+  // — degrade to a fresh start instead of blindly passing --continue, which
+  // would misbehave with nothing to continue.
+  if (!hasPriorSession) return buildKiloFreshStart({ system, user, opencodePort })
+  const resumeArgs = opencodeSid ? [KILO_FLAGS.session, opencodeSid] : [KILO_FLAGS.continue]
+  return {
+    cmd: KILO_BIN,
+    args: withKiloPromptArg([...kiloPortArgs(opencodePort), ...resumeArgs], null),
+  }
+}
+
+export const kiloBackend: AgentBackend = {
+  kind: 'kilo',
+  statusSource: 'poll',
+  embeddedServer: true,
+  prepareWorktree(cwd, system) {
+    // Kilo (an opencode fork) reads the system prompt from AGENTS.md (not a
+    // CLI arg), same as opencode.
+    if (system) writeAgentsMd(cwd, buildAgentsMdContent(system))
+    // Kilo's TUI has no permission-bypass flag (--dangerously-skip-
+    // permissions/--auto exist only on the headless `kilo run`); config is
+    // the only supported mechanism (see writeKiloConfig). Written even when
+    // `system` is empty — runs should never stall on permission prompts.
+    writeKiloConfig(cwd)
+  },
+  buildStartArgs({ system, user, opencodePort }) {
+    return buildKiloFreshStart({ system, user, opencodePort })
+  },
+  buildResumeArgs(ctx) {
+    return buildKiloResume(ctx)
+  },
+  buildRemoteControlArgs(ctx) {
+    return buildKiloResume(ctx)
+  },
+  buildHandoffArgs({ system, user, opencodePort }) {
+    return buildKiloFreshStart({ system, user, opencodePort })
+  },
+  hasPriorSession(ctx) {
+    return !!ctx.opencodeSid
+  },
+  beginStatusTracking: embeddedServerStatusTracking(KILO_BIN),
 }
 
 function withPiPromptArg(args: string[], prompt: string | null | undefined): string[] {
   return prompt ? [...args, prompt] : args
 }
 
+/** Fresh-start-style pi args (re-delivers system + user prompt). Used both by
+ *  buildStartArgs and by the resume/remote fallback when there's no prior
+ *  session file to continue. */
+function buildPiFreshStart({ system, user }: { system: string; user: string }): SpawnSpec {
+  const { systemArgs, userPrompt } = deliverPrompt('pi', { system, user })
+  return { cmd: PI_BIN, args: withPiPromptArg([PI_APPROVE_FLAG, ...systemArgs], userPrompt) }
+}
+
 export const piBackend: AgentBackend = {
   kind: 'pi',
   statusSource: 'poll',
-  buildStartArgs({ system, user }) {
-    const { systemArgs, userPrompt } = deliverPrompt('pi', { system, user })
-    return { cmd: PI_BIN, args: withPiPromptArg([PI_APPROVE_FLAG, ...systemArgs], userPrompt) }
+  buildStartArgs(ctx) {
+    return buildPiFreshStart(ctx)
   },
-  buildResumeArgs() {
+  buildResumeArgs(ctx) {
+    // No captured session file to continue (capture failed / crashed before
+    // the first message) — degrade to a fresh start instead of blindly
+    // passing --continue, which would misbehave with nothing to continue.
+    if (!ctx.hasPriorSession) return buildPiFreshStart(ctx)
     return { cmd: PI_BIN, args: [PI_APPROVE_FLAG, PI_CONTINUE_FLAG] }
   },
-  buildRemoteControlArgs() {
+  buildRemoteControlArgs(ctx) {
+    if (!ctx.hasPriorSession) return buildPiFreshStart(ctx)
     return { cmd: PI_BIN, args: [PI_APPROVE_FLAG, PI_CONTINUE_FLAG] }
   },
-  buildHandoffArgs({ system, user }) {
-    const { systemArgs, userPrompt } = deliverPrompt('pi', { system, user })
-    return { cmd: PI_BIN, args: withPiPromptArg([PI_APPROVE_FLAG, ...systemArgs], userPrompt) }
+  buildHandoffArgs(ctx) {
+    return buildPiFreshStart(ctx)
+  },
+  hasPriorSession(ctx) {
+    return hasPiSessionFileSync(ctx.cwd)
   },
   beginStatusTracking({ cwd, handle }) {
     // Pi writes its session as a JSONL file under ~/.pi/...; the file may not
-    // exist for a few hundred ms after spawn, so discover it (async) then poll.
-    void capturePiSessionFile(piSessionDirFor(cwd)).then((file) => {
-      if (handle.disposed || !file) return
-      runPoll(handle, PI_STATUS_POLL_MS, async () =>
-        piStatusFromFileContent(await readPiSessionFile(file)),
-      )
+    // exist for a few hundred ms after spawn (or capture may simply never
+    // have found it), so poll immediately with a lazy, per-tick one-shot
+    // discovery instead of a one-time bounded retry that can miss forever.
+    let file: string | null = null
+    runPoll(handle, PI_STATUS_POLL_MS, async () => {
+      if (!file) {
+        const discovered = await findNewestPiSessionFile(piSessionDirFor(cwd))
+        if (!discovered) return null
+        file = discovered
+      }
+      return piStatusFromFileContent(await readPiSessionFile(file))
     })
   },
+}
+
+function withAntigravityPromptArg(args: string[], prompt: string | null | undefined): string[] {
+  // agy's -i/--prompt-interactive takes the prompt as its argument; omit the
+  // pair entirely rather than pass an empty prompt.
+  return prompt ? [...args, ANTIGRAVITY_FLAGS.promptInteractive, prompt] : args
+}
+
+/** Fresh-start-style antigravity args. System prompt is delivered via
+ *  AGENTS.md (prepareWorktree), so this only ever carries the skip-permissions
+ *  flag plus, when present, the -i/prompt pair. Used both by buildStartArgs
+ *  and by the resume/remote fallback when there's no prior session to continue. */
+function buildAntigravityFreshStart({ system, user }: { system: string; user: string }): SpawnSpec {
+  const { userPrompt } = deliverPrompt('antigravity', { system, user })
+  return {
+    cmd: ANTIGRAVITY_BIN,
+    args: withAntigravityPromptArg([ANTIGRAVITY_FLAGS.skipPermissions], userPrompt),
+  }
+}
+
+export const antigravityBackend: AgentBackend = {
+  kind: 'antigravity',
+  statusSource: 'pty', // a Gemini-CLI-derived scrolling terminal, like Claude Code — not an alternate-screen TUI.
+  prepareWorktree(cwd, system) {
+    // agy auto-discovers AGENTS.md (and GEMINI.md) in the worktree as context;
+    // there is no CLI flag to deliver a system prompt.
+    if (system) writeAgentsMd(cwd, buildAgentsMdContent(system))
+  },
+  buildStartArgs(ctx) {
+    return buildAntigravityFreshStart(ctx)
+  },
+  buildResumeArgs(ctx) {
+    // Remote control is a Claude-only concept (the UI hides the Remote
+    // Control button for non-claude kinds) — this is a plain resume.
+    if (!ctx.hasPriorSession) return buildAntigravityFreshStart(ctx)
+    return {
+      cmd: ANTIGRAVITY_BIN,
+      args: [ANTIGRAVITY_FLAGS.skipPermissions, ANTIGRAVITY_FLAGS.continue],
+    }
+  },
+  buildRemoteControlArgs(ctx) {
+    if (!ctx.hasPriorSession) return buildAntigravityFreshStart(ctx)
+    return {
+      cmd: ANTIGRAVITY_BIN,
+      args: [ANTIGRAVITY_FLAGS.skipPermissions, ANTIGRAVITY_FLAGS.continue],
+    }
+  },
+  buildHandoffArgs(ctx) {
+    return buildAntigravityFreshStart(ctx)
+  },
+  hasPriorSession() {
+    // agy conversations are cwd-scoped and its on-disk store is undocumented,
+    // so there is no cheap disk check available. --continue on an empty
+    // worktree degrades to opening the TUI fresh, which is benign (unlike
+    // claude's --resume, which errors outright on a missing transcript).
+    return true
+  },
+}
+
+/** Fresh-start-style grok args: the user prompt is a bare positional arg in
+ *  interactive mode; the system prompt is delivered via AGENTS.md
+ *  (prepareWorktree), and grok has no permission-bypass flag to pass. Used
+ *  both by buildStartArgs and by the resume/remote fallback when there's no
+ *  prior session to continue. */
+function buildGrokFreshStart({ system, user }: { system: string; user: string }): SpawnSpec {
+  const { userPrompt } = deliverPrompt('grok', { system, user })
+  return { cmd: GROK_BIN, args: userPrompt ? [userPrompt] : [] }
+}
+
+export const grokBackend: AgentBackend = {
+  kind: 'grok',
+  statusSource: 'poll', // a full-screen OpenTUI app — PTY scraping is unreliable.
+  prepareWorktree(cwd, system) {
+    // grok merges AGENTS.md from the git root into its system prompt; there
+    // is no permission config (grok has no bypass flag or documented
+    // permission file — tool execution is trust-based).
+    if (system) writeAgentsMd(cwd, buildAgentsMdContent(system))
+  },
+  buildStartArgs(ctx) {
+    return buildGrokFreshStart(ctx)
+  },
+  buildResumeArgs(ctx) {
+    if (!ctx.hasPriorSession) return buildGrokFreshStart(ctx)
+    return { cmd: GROK_BIN, args: [GROK_FLAGS.session, 'latest'] }
+  },
+  buildRemoteControlArgs(ctx) {
+    if (!ctx.hasPriorSession) return buildGrokFreshStart(ctx)
+    return { cmd: GROK_BIN, args: [GROK_FLAGS.session, 'latest'] }
+  },
+  buildHandoffArgs(ctx) {
+    return buildGrokFreshStart(ctx)
+  },
+  hasPriorSession() {
+    // Same rationale as antigravity: grok's session-store format is
+    // undocumented, so there's no cheap disk check. 'latest' scoping is per
+    // grok's own store, so a degrade-to-fresh-start on an empty worktree is
+    // benign.
+    return true
+  },
+  // No beginStatusTracking: grok's session-store format is undocumented, so
+  // there is no data source to poll. Status is driven exclusively by the
+  // slipstream CLI status.json sentinel, which sessionManager already applies
+  // directly for poll backends that report no signal of their own.
 }
 
 const BACKENDS: Record<BackendKind, AgentBackend> = {
   'claude-code': claudeCodeBackend,
   opencode: opencodeBackend,
   pi: piBackend,
+  antigravity: antigravityBackend,
+  grok: grokBackend,
+  kilo: kiloBackend,
 }
 
 /** Select the backend for a session's agentKind; defaults to claude-code. */
 export function selectBackend(kind?: BackendKind): AgentBackend {
   return BACKENDS[kind ?? 'claude-code'] ?? claudeCodeBackend
+}
+
+/** Whether `kind`'s backend is launched with an embedded HTTP server (a
+ *  `--port` claim + CLI-based sid capture) — today opencode and kilo. Callers
+ *  that need to claim a port or capture a session id (sessionLauncher.ts,
+ *  rpc.ts) use this instead of a hardcoded `agentKind === 'opencode'` check,
+ *  so kilo (and any future embedded-server backend) is covered automatically. */
+export function usesEmbeddedServer(kind?: BackendKind): boolean {
+  return selectBackend(kind).embeddedServer === true
 }

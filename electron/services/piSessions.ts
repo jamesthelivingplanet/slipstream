@@ -1,4 +1,5 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdirSync } from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import type { SessionStatus } from '../shared/contract.js'
@@ -132,6 +133,17 @@ export async function listPiSessionFiles(sessionDir: string): Promise<PiFileMtim
 }
 
 /**
+ * One-shot: the newest `.jsonl` session file in `sessionDir` right now, or
+ * null if the dir doesn't exist / has none yet. Used both by
+ * capturePiSessionFile's retry loop and by the poll-fallback's lazy,
+ * per-tick discovery (agentBackend.ts) — no built-in retry of its own.
+ */
+export async function findNewestPiSessionFile(sessionDir: string): Promise<string | null> {
+  const files = await listPiSessionFiles(sessionDir)
+  return selectNewestPiSessionFile(files)
+}
+
+/**
  * Poll `sessionDir` until a .jsonl session file appears, then return the newest
  * one by mtime. Used at spawn (waits for pi to create its session file) and at
  * resume (the file already exists, so the first attempt resolves immediately).
@@ -143,12 +155,27 @@ export async function capturePiSessionFile(
   const attempts = opts.attempts ?? 30
   const intervalMs = opts.intervalMs ?? 500
   for (let i = 0; i < attempts; i++) {
-    const files = await listPiSessionFiles(sessionDir)
-    const newest = selectNewestPiSessionFile(files)
+    const newest = await findNewestPiSessionFile(sessionDir)
     if (newest) return newest
     await new Promise((r) => setTimeout(r, intervalMs))
   }
   return null
+}
+
+/**
+ * Sync, best-effort check: does `piSessionDirFor(cwd)` contain at least one
+ * `.jsonl` session file? Used by piBackend.hasPriorSession (AgentBackend is a
+ * sync interface) to decide whether a resume/remote-control has real prior
+ * state to continue, vs. falling back to a fresh start. Any error (dir
+ * missing, unreadable) is treated as "no prior session".
+ */
+export function hasPiSessionFileSync(cwd: string, root?: string): boolean {
+  try {
+    const dir = piSessionDirFor(cwd, root)
+    return readdirSync(dir).some((name) => name.endsWith('.jsonl'))
+  } catch {
+    return false
+  }
 }
 
 /** Read a pi session JSONL file. Returns '' on any error (missing, unreadable). */
