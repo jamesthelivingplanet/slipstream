@@ -304,10 +304,13 @@ export function createWorktreeManager(root: string): IWorktreeManager {
       }
 
       // 1) A merge commit on base since the fork point whose subject names the
-      //    branch. Covers GitLab ("Merge branch '<branch>' into 'master'") and
-      //    GitHub ("Merge pull request #N from <org>/<branch>") for both plain
-      //    and squash merges. Fixed-string, and bounded to merges after the
-      //    fork point so an old branch-name collision can't false-positive.
+      //    branch. Covers GitLab ("Merge branch '<branch>' into 'master'"),
+      //    GitHub ("Merge pull request #N from <org>/<branch>"), Gitea/Forgejo
+      //    ("Merge pull request 'title' (#N) from <branch>"), and Bitbucket
+      //    ("Merged in <branch> (pull request #N)") for both plain and squash
+      //    merges. Fixed-string (multiple --grep flags are OR'd), and bounded
+      //    to merges after the fork point so an old branch-name collision
+      //    can't false-positive.
       try {
         const mergeBase = (await git(['-C', repo.path, 'merge-base', baseRef, branch])).trim()
         if (mergeBase) {
@@ -321,6 +324,10 @@ export function createWorktreeManager(root: string): IWorktreeManager {
             `'${branch}'`,
             '--grep',
             `/${branch}`,
+            '--grep',
+            ` from ${branch}`,
+            '--grep',
+            `in ${branch} (pull request`,
             '--format=%H',
             '-1',
             `${mergeBase}..${baseRef}`,

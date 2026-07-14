@@ -15,6 +15,7 @@ function makeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
     writeOutcome: vi.fn().mockResolvedValue(undefined),
     appendEvent: vi.fn().mockResolvedValue(undefined),
     copyArtifact: vi.fn().mockResolvedValue('/data/sessions/sess-1/artifacts/1-report.md'),
+    resolveRemote: vi.fn().mockResolvedValue({ host: 'github', org: 'org', name: 'repo' }),
     getToken: vi.fn().mockResolvedValue('tok'),
     push: vi.fn().mockResolvedValue(undefined),
     openMergeRequest: vi.fn().mockResolvedValue({ url: 'https://example.com/mr/1', isNew: true }),
@@ -261,9 +262,29 @@ describe('runCli', () => {
     })
 
     it('exits 3 on an unparseable remote', async () => {
-      const deps = makeDeps({ getRemoteUrl: vi.fn().mockResolvedValue('not-a-remote') })
+      const deps = makeDeps({
+        getRemoteUrl: vi.fn().mockResolvedValue('not-a-remote'),
+        resolveRemote: vi.fn().mockResolvedValue(null),
+      })
       expect(await runCli(['open-mr', '--title', 'T'], deps)).toBe(EXIT_FAILED)
       expect(stderrText(deps)).toContain('not-a-remote')
+      expect(deps.getToken).not.toHaveBeenCalled()
+    })
+
+    it('resolves a baseUrl-configured host (gitea) via the config-aware resolver and reads its token', async () => {
+      // A Gitea remote has no fixed domain — only deps.resolveRemote (which
+      // consults the stored gitea.baseUrl) can claim it. The config-less
+      // parseRemote would return null and fail before reading the token.
+      const deps = makeDeps({
+        getRemoteUrl: vi.fn().mockResolvedValue('https://git.example.com/org/repo.git'),
+        resolveRemote: vi.fn().mockResolvedValue({ host: 'gitea', org: 'org', name: 'repo' }),
+      })
+      expect(await runCli(['open-mr', '--title', 'My PR'], deps)).toBe(EXIT_OK)
+      expect(deps.resolveRemote).toHaveBeenCalledWith('https://git.example.com/org/repo.git')
+      expect(deps.getToken).toHaveBeenCalledWith('gitea')
+      expect(deps.openMergeRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ remoteUrl: 'https://git.example.com/org/repo.git' }),
+      )
     })
 
     it('exits 3 when openMergeRequest throws', async () => {
