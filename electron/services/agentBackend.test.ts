@@ -25,11 +25,14 @@ vi.mock('./opencodeSessions.js', async (importOriginal) => {
 
 const {
   selectBackend,
+  usesEmbeddedServer,
   claudeCodeBackend,
   opencodeBackend,
   piBackend,
   antigravityBackend,
   grokBackend,
+  kiloBackend,
+  KILO_BIN,
 } = await import('./agentBackend.js')
 const { findNewestPiSessionFile, readPiSessionFile } = await import('./piSessions.js')
 const { queryOpencodeSessionIdFromCli, fetchOpencodeMessages } =
@@ -511,6 +514,10 @@ describe('beginStatusTracking presence', () => {
     expect(typeof piBackend.beginStatusTracking).toBe('function')
   })
 
+  it('kiloBackend.beginStatusTracking is a function', () => {
+    expect(typeof kiloBackend.beginStatusTracking).toBe('function')
+  })
+
   it('claudeCodeBackend.beginStatusTracking is undefined (PTY-driven)', () => {
     expect(claudeCodeBackend.beginStatusTracking).toBeUndefined()
   })
@@ -535,6 +542,10 @@ describe('prepareWorktree presence', () => {
 
   it('grokBackend.prepareWorktree is a function', () => {
     expect(typeof grokBackend.prepareWorktree).toBe('function')
+  })
+
+  it('kiloBackend.prepareWorktree is a function', () => {
+    expect(typeof kiloBackend.prepareWorktree).toBe('function')
   })
 })
 
@@ -796,6 +807,211 @@ describe('antigravityBackend has no beginStatusTracking (PTY-driven)', () => {
   })
 })
 
+// ─── kilo (an opencode fork — mirrors opencodeBackend's tests) ───────────────
+
+describe('selectBackend for "kilo"', () => {
+  it('returns kiloBackend for "kilo"', () => {
+    expect(selectBackend('kilo')).toBe(kiloBackend)
+  })
+})
+
+describe('statusSource for kilo', () => {
+  it('kilo uses poll (an opencode-fork TUI polled via its embedded server)', () => {
+    expect(kiloBackend.statusSource).toBe('poll')
+  })
+})
+
+describe('usesEmbeddedServer', () => {
+  it('true for opencode and kilo', () => {
+    expect(usesEmbeddedServer('opencode')).toBe(true)
+    expect(usesEmbeddedServer('kilo')).toBe(true)
+  })
+
+  it('false for claude-code, pi, antigravity, grok, and undefined', () => {
+    expect(usesEmbeddedServer('claude-code')).toBe(false)
+    expect(usesEmbeddedServer('pi')).toBe(false)
+    expect(usesEmbeddedServer('antigravity')).toBe(false)
+    expect(usesEmbeddedServer('grok')).toBe(false)
+    expect(usesEmbeddedServer(undefined)).toBe(false)
+  })
+})
+
+describe('kiloBackend.prepareWorktree', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'slipstream-kilo-worktree-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('writes AGENTS.md with the system prompt when system is non-empty', () => {
+    kiloBackend.prepareWorktree?.(dir, 'be a great agent')
+    const agentsMd = join(dir, 'AGENTS.md')
+    expect(existsSync(agentsMd)).toBe(true)
+    expect(readFileSync(agentsMd, 'utf8')).toBe('be a great agent')
+  })
+
+  it('does not write AGENTS.md when system is empty', () => {
+    kiloBackend.prepareWorktree?.(dir, '')
+    expect(existsSync(join(dir, 'AGENTS.md'))).toBe(false)
+  })
+})
+
+describe('kiloBackend.buildStartArgs', () => {
+  it('cmd is KILO_BIN', () => {
+    const { cmd } = kiloBackend.buildStartArgs({
+      sessionId: 'k1',
+      system: '',
+      user: 'hello task',
+    })
+    expect(cmd).toBe(KILO_BIN)
+  })
+
+  it('includes --prompt with user text', () => {
+    const { args } = kiloBackend.buildStartArgs({
+      sessionId: 'k1',
+      system: '',
+      user: 'hello task',
+      opencodePort: undefined,
+    })
+    const idx = args.indexOf('--prompt')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('hello task')
+  })
+
+  it('includes --port with port string when opencodePort given (reused for kilo)', () => {
+    const { args } = kiloBackend.buildStartArgs({
+      sessionId: 'k2',
+      system: '',
+      user: 'task',
+      opencodePort: 3333,
+    })
+    const idx = args.indexOf('--port')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('3333')
+  })
+
+  it('omits --port when opencodePort not given', () => {
+    const { args } = kiloBackend.buildStartArgs({ sessionId: 'k3', system: '', user: 'task' })
+    expect(args).not.toContain('--port')
+  })
+})
+
+describe('kiloBackend.buildResumeArgs', () => {
+  it('hasPriorSession:true + opencodeSid → includes ["--session", sid] and NO --prompt', () => {
+    const { args } = kiloBackend.buildResumeArgs({
+      sessionId: 'k4',
+      system: '',
+      user: 'task',
+      hasPriorSession: true,
+      opencodeSid: 'my-kilo-sid',
+    })
+    expect(args).toContain('--session')
+    expect(args).toContain('my-kilo-sid')
+    expect(args).not.toContain('--prompt')
+  })
+
+  it('hasPriorSession:true without opencodeSid → includes --continue', () => {
+    const { args } = kiloBackend.buildResumeArgs({
+      sessionId: 'k5',
+      system: '',
+      user: 'task',
+      hasPriorSession: true,
+    })
+    expect(args).toContain('--continue')
+  })
+
+  it('hasPriorSession:false → falls back to a fresh start (--prompt, no --continue/--session)', () => {
+    const { args } = kiloBackend.buildResumeArgs({
+      sessionId: 'k5b',
+      system: 'sys prompt',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    expect(args).not.toContain('--continue')
+    expect(args).not.toContain('--session')
+    const idx = args.indexOf('--prompt')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('task')
+  })
+})
+
+describe('kiloBackend.buildRemoteControlArgs', () => {
+  it('behaves identically to buildResumeArgs: with sid → --session; without sid but hasPriorSession → --continue', () => {
+    const withSid = kiloBackend.buildRemoteControlArgs({
+      sessionId: 'k6',
+      system: '',
+      user: 'task',
+      hasPriorSession: true,
+      opencodeSid: 'some-sid',
+    })
+    expect(withSid.args).toContain('--session')
+    expect(withSid.args).toContain('some-sid')
+
+    const withoutSid = kiloBackend.buildRemoteControlArgs({
+      sessionId: 'k7',
+      system: '',
+      user: 'task',
+      hasPriorSession: true,
+    })
+    expect(withoutSid.args).toContain('--continue')
+  })
+
+  it('hasPriorSession:false → falls back to a fresh start', () => {
+    const { args } = kiloBackend.buildRemoteControlArgs({
+      sessionId: 'k8',
+      system: '',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    expect(args).not.toContain('--continue')
+    const idx = args.indexOf('--prompt')
+    expect(idx).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('kiloBackend.buildHandoffArgs', () => {
+  it('includes --prompt with the handoff text', () => {
+    const { args } = kiloBackend.buildHandoffArgs({
+      sessionId: 'khid1',
+      system: '',
+      user: 'takeover prompt',
+      hasPriorSession: false,
+    })
+    const idx = args.indexOf('--prompt')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('takeover prompt')
+  })
+
+  it('includes --port with port string when opencodePort given', () => {
+    const { args } = kiloBackend.buildHandoffArgs({
+      sessionId: 'khid2',
+      system: '',
+      user: 'takeover prompt',
+      hasPriorSession: false,
+      opencodePort: 4444,
+    })
+    const idx = args.indexOf('--port')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('4444')
+  })
+})
+
+describe('kiloBackend.hasPriorSession', () => {
+  it('true when opencodeSid is set (kilo reuses the opencodeSid context field)', () => {
+    expect(kiloBackend.hasPriorSession?.({ sessionId: 's', cwd: '/x', opencodeSid: 'ses_1' })).toBe(
+      true,
+    )
+  })
+
+  it('false when opencodeSid is absent', () => {
+    expect(kiloBackend.hasPriorSession?.({ sessionId: 's', cwd: '/x' })).toBe(false)
+  })
+})
+
 // ─── FLO-94-adjacent status-polling fallback (never freeze forever) ──────────
 
 /** Minimal fake StatusHandle: not disposed, captures setStatus calls, and
@@ -924,6 +1140,63 @@ describe('poll fallback — null ticks are skipped, late discovery is retried', 
     opencodeBackend.beginStatusTracking?.({
       cwd: '/tmp/wt-oc-initial',
       opencodePort: 4002,
+      isInitialStart: true,
+      handle,
+    })
+    expect(handle.polling).toBe(false)
+  })
+
+  it('kilo: a tick with no recoverable sid is skipped (setStatus not called)', async () => {
+    vi.mocked(queryOpencodeSessionIdFromCli).mockResolvedValue(null)
+    const handle = makeHandle()
+
+    kiloBackend.beginStatusTracking?.({
+      cwd: '/tmp/wt-kilo-null',
+      opencodePort: 5000,
+      isInitialStart: false,
+      handle,
+    })
+
+    await vi.advanceTimersByTimeAsync(2000)
+    await vi.advanceTimersByTimeAsync(2000)
+
+    expect(handle.setStatus).not.toHaveBeenCalled()
+    expect(fetchOpencodeMessages).not.toHaveBeenCalled()
+  })
+
+  it('kilo: recovers a sid late using the kilo bin, then reports status once found', async () => {
+    vi.mocked(queryOpencodeSessionIdFromCli)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('ses_kilo_recovered')
+    vi.mocked(fetchOpencodeMessages).mockResolvedValue([
+      { info: { role: 'assistant' }, parts: [{ type: 'text', text: DONE_MARKER }] },
+    ])
+    const handle = makeHandle()
+
+    kiloBackend.beginStatusTracking?.({
+      cwd: '/tmp/wt-kilo-late',
+      opencodePort: 5001,
+      isInitialStart: false,
+      handle,
+    })
+
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(handle.setStatus).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(handle.setStatus).toHaveBeenCalledWith('done')
+    expect(fetchOpencodeMessages).toHaveBeenCalledWith(5001, 'ses_kilo_recovered')
+    // The lazy sid-recovery shell-out ran against kilo's resolved binary, not
+    // opencode's — the whole point of parameterizing queryOpencodeSessionIdFromCli.
+    expect(queryOpencodeSessionIdFromCli).toHaveBeenCalledWith('/tmp/wt-kilo-late', KILO_BIN)
+  })
+
+  it('kilo: isInitialStart still returns early without polling', () => {
+    const handle = makeHandle()
+    kiloBackend.beginStatusTracking?.({
+      cwd: '/tmp/wt-kilo-initial',
+      opencodePort: 5002,
       isInitialStart: true,
       handle,
     })

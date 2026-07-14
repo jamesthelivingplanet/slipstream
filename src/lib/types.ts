@@ -9,7 +9,7 @@ export type Status =
   | 'reaped'
   | 'queued'
 export type Source = 'jira' | 'linear'
-export type BackendKind = 'claude-code' | 'opencode' | 'pi' | 'antigravity' | 'grok'
+export type BackendKind = 'claude-code' | 'opencode' | 'pi' | 'antigravity' | 'grok' | 'kilo'
 export type Filter = 'all' | 'needs' | 'running' | 'done'
 
 export interface Repo {

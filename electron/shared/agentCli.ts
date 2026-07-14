@@ -15,6 +15,10 @@ export const ANTIGRAVITY_BIN = 'agy'
 /** grok-cli (grokcli.io / superagent-ai). The npm package is `grok-dev`, but
  *  the installed binary name on PATH is `grok`. */
 export const GROK_BIN_NAME = 'grok'
+/** Kilo Code CLI (an opencode fork). Typically installed to `~/.kilo/bin/kilo`,
+ *  a directory that is NOT on the daemon's PATH — agentBackend.ts's KILO_BIN
+ *  prefers that absolute path when present, falling back to this bare name. */
+export const KILO_BIN_NAME = 'kilo'
 
 /** Claude Code CLI flags. */
 export const CLAUDE_FLAGS = {
@@ -46,6 +50,18 @@ export const ANTIGRAVITY_FLAGS = {
  *  (scoping within grok's store is undocumented). */
 export const GROK_FLAGS = {
   session: '--session',
+} as const
+
+/** Kilo Code CLI flags — same shape as opencode's (Kilo is an opencode fork
+ *  with an opencode-compatible embedded server API). The TUI has NO
+ *  permission-bypass flag (`--dangerously-skip-permissions`/`--auto` exist
+ *  only on the headless `kilo run`); the only bypass mechanism for the TUI is
+ *  the `kilo.jsonc` config written by writeKiloConfig (promptWriter.ts). */
+export const KILO_FLAGS = {
+  port: '--port',
+  session: '--session',
+  continue: '--continue',
+  prompt: '--prompt',
 } as const
 
 /** Interval (ms) for polling an opencode session's status from its server. */

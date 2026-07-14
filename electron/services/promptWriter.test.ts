@@ -17,6 +17,7 @@ import {
   resolveInfoExclude,
   writeSlipstreamSkill,
   writeOpencodeConfig,
+  writeKiloConfig,
 } from './promptWriter.js'
 
 /**
@@ -188,6 +189,83 @@ describe('promptWriter (real git)', () => {
           .split('\n')
           .map((l) => l.trim())
           .includes('opencode.json'),
+      ).toBe(false)
+    })
+  })
+
+  describe('writeKiloConfig', () => {
+    it('creates kilo.jsonc with permission {"*": "allow"} and excludes it', () => {
+      const wt = join(root, 'wt-kilo-config')
+      git(repoPath, 'worktree', 'add', wt, '-b', 'feat-kilo-config', 'main')
+
+      writeKiloConfig(wt)
+
+      const content = readFileSync(join(wt, 'kilo.jsonc'), 'utf8')
+      expect(content.endsWith('\n')).toBe(true)
+      expect(JSON.parse(content)).toEqual({
+        $schema: 'https://app.kilo.ai/config.json',
+        permission: { '*': 'allow' },
+      })
+      expect(git(wt, 'status', '--porcelain').trim()).toBe('')
+      expect(git(wt, 'check-ignore', 'kilo.jsonc').trim()).toBe('kilo.jsonc')
+    })
+
+    it('skips and leaves a pre-existing kilo.jsonc alone (no exclude entry added)', () => {
+      // A fresh, independent repo — info/exclude is shared across all worktrees
+      // of the SAME repo, so reusing repoPath here would see a previous
+      // test's "kilo.jsonc" entry and give a false positive.
+      const repoKilo = join(root, 'source-kilo-existing')
+      execFileSync('git', ['init', '-b', 'main', repoKilo], { encoding: 'utf8' })
+      git(repoKilo, 'config', 'user.email', 'test@slipstream.dev')
+      git(repoKilo, 'config', 'user.name', 'Slipstream Test')
+      writeFileSync(join(repoKilo, 'README.md'), 'hi\n')
+      git(repoKilo, 'add', '-A')
+      git(repoKilo, 'commit', '-m', 'init')
+
+      const wt = join(root, 'wt-kilo-existing')
+      git(repoKilo, 'worktree', 'add', wt, '-b', 'feat-kilo-existing', 'main')
+      const original = '{"tracked":true}'
+      writeFileSync(join(wt, 'kilo.jsonc'), original)
+
+      writeKiloConfig(wt)
+
+      expect(readFileSync(join(wt, 'kilo.jsonc'), 'utf8')).toBe(original)
+      const exclude = resolveInfoExclude(wt)
+      const excludeContent = exclude && existsSync(exclude) ? readFileSync(exclude, 'utf8') : ''
+      expect(
+        excludeContent
+          .split('\n')
+          .map((l) => l.trim())
+          .includes('kilo.jsonc'),
+      ).toBe(false)
+    })
+
+    it('skips when only .kilo/kilo.jsonc exists (nested config takes priority, no exclude entry)', () => {
+      const repoKiloNested = join(root, 'source-kilo-nested')
+      execFileSync('git', ['init', '-b', 'main', repoKiloNested], { encoding: 'utf8' })
+      git(repoKiloNested, 'config', 'user.email', 'test@slipstream.dev')
+      git(repoKiloNested, 'config', 'user.name', 'Slipstream Test')
+      writeFileSync(join(repoKiloNested, 'README.md'), 'hi\n')
+      git(repoKiloNested, 'add', '-A')
+      git(repoKiloNested, 'commit', '-m', 'init')
+
+      const wt = join(root, 'wt-kilo-nested')
+      git(repoKiloNested, 'worktree', 'add', wt, '-b', 'feat-kilo-nested', 'main')
+      mkdirSync(join(wt, '.kilo'), { recursive: true })
+      const original = '{"nested":true}'
+      writeFileSync(join(wt, '.kilo', 'kilo.jsonc'), original)
+
+      writeKiloConfig(wt)
+
+      expect(existsSync(join(wt, 'kilo.jsonc'))).toBe(false)
+      expect(readFileSync(join(wt, '.kilo', 'kilo.jsonc'), 'utf8')).toBe(original)
+      const exclude = resolveInfoExclude(wt)
+      const excludeContent = exclude && existsSync(exclude) ? readFileSync(exclude, 'utf8') : ''
+      expect(
+        excludeContent
+          .split('\n')
+          .map((l) => l.trim())
+          .includes('kilo.jsonc'),
       ).toBe(false)
     })
   })

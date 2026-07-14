@@ -203,8 +203,11 @@ export function readSessionUsage(
     case 'pi':
       return readPiUsage(session.id, opts.cwd ?? null, opts.piRoot)
     default:
-      // 'antigravity' / 'grok': no documented on-disk usage format yet — a
-      // reader can be added later, same shape as the others once it exists.
+      // 'antigravity' / 'grok': no documented on-disk usage format yet.
+      // 'kilo': stores sessions in a SQLite `~/.local/share/kilo/kilo.db`
+      // (not opencode's file-per-message store), so `readOpencodeUsage` can't
+      // be reused as-is — a reader can be added later (e.g. via `kilo export
+      // <sessionID>` / `kilo stats`), same shape as the others once it exists.
       return emptyUsage(session.id)
   }
 }

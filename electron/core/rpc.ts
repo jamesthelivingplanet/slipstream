@@ -27,13 +27,14 @@ import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../shared/p
 import { LOCAL_IDENTITY } from './auth.js'
 import { agentSessionEnv } from '../services/agentCliProvision.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
+import { usesEmbeddedServer, KILO_BIN } from '../services/agentBackend.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 import { launchSession } from '../services/sessionLauncher.js'
 import type { LaunchRequest } from '../services/sessionLauncher.js'
 import { readSchedulerPolicy, writeSchedulerPolicy } from '../services/sessionScheduler.js'
 import { checkSlipstreamCli, lastCliActivity } from '../services/cliHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
-import { findOnPath, binForKind } from '../services/cliProbe.js'
+import { findAgentCli, binForKind } from '../services/cliProbe.js'
 import { readSessionUsage, buildUsageSummary } from '../services/usage.js'
 import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
 
@@ -398,9 +399,9 @@ export function createRpc(
           port = undefined
         }
         let opencodePort: number | undefined
-        if (persisted.agentKind === 'opencode') {
+        if (usesEmbeddedServer(persisted.agentKind)) {
           try {
-            opencodePort = await deps.ports.claim(cwd, 'opencode')
+            opencodePort = await deps.ports.claim(cwd, persisted.agentKind ?? 'claude-code')
           } catch {
             opencodePort = undefined
           }
@@ -437,9 +438,9 @@ export function createRpc(
           port = undefined
         }
         let opencodePort: number | undefined
-        if (persisted.agentKind === 'opencode') {
+        if (usesEmbeddedServer(persisted.agentKind)) {
           try {
-            opencodePort = await deps.ports.claim(cwd, 'opencode')
+            opencodePort = await deps.ports.claim(cwd, persisted.agentKind ?? 'claude-code')
           } catch {
             opencodePort = undefined
           }
@@ -482,9 +483,9 @@ export function createRpc(
           port = undefined
         }
         let opencodePort: number | undefined
-        if (agentKind === 'opencode') {
+        if (usesEmbeddedServer(agentKind)) {
           try {
-            opencodePort = await deps.ports.claim(cwd, 'opencode')
+            opencodePort = await deps.ports.claim(cwd, agentKind)
           } catch {
             opencodePort = undefined
           }
@@ -512,10 +513,14 @@ export function createRpc(
           agentKind,
           handoffPrompt,
         })
-        // Same async sid capture as sessionLauncher.ts: opencode's session id only
-        // exists after the TUI boots; status polling starts once it's known.
-        if (agentKind === 'opencode') {
-          void captureOpencodeSessionId({ cwd }).then((sid) => {
+        // Same async sid capture as sessionLauncher.ts: the embedded-server
+        // session id only exists after the TUI boots; status polling starts
+        // once it's known.
+        if (usesEmbeddedServer(agentKind)) {
+          void captureOpencodeSessionId({
+            cwd,
+            bin: agentKind === 'kilo' ? KILO_BIN : undefined,
+          }).then((sid) => {
             if (!sid) return
             deps.sessions.setOpencodeSid(id, sid)
             const cur = deps.sessionStore.get(id)
@@ -806,7 +811,7 @@ export function createRpc(
       case IPC.checkAgentCli: {
         const kind = args[0] as BackendKind
         const bin = binForKind(kind)
-        const found = findOnPath(bin)
+        const found = findAgentCli(kind)
         return { kind, bin, found: found !== null, path: found ?? undefined }
       }
 

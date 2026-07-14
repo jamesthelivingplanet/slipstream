@@ -43,6 +43,13 @@ export const AGENTS: AgentOption[] = [
     description: 'Uses grok in a git worktree with auto-discovered AGENTS.md.',
     icon: '/icons/agents/grok.svg',
   },
+  {
+    kind: 'kilo',
+    label: 'Kilo Code',
+    description:
+      'Uses kilo in a git worktree with auto-discovered AGENTS.md and permissions set to allow.',
+    icon: '/icons/agents/kilo.svg',
+  },
 ]
 
 /** Look up the option for a kind, falling back to the first agent. */

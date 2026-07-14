@@ -972,6 +972,31 @@ describe('createRpc', () => {
         expect.objectContaining({ agentKind: 'grok' }),
       )
     })
+
+    it('accepts "kilo" as a handoff target and claims a "kilo"-named embedded-server port', async () => {
+      expect(BACKEND_KINDS).toContain('kilo')
+
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      await rpc.handle(IPC.handoffSession, ['s1', 'kilo'])
+
+      expect(deps.sessions.handoff).toHaveBeenCalledWith(
+        expect.objectContaining({ agentKind: 'kilo' }),
+      )
+      // opencode/kilo are the only backends that claim an embedded-server
+      // port (usesEmbeddedServer) — the port broker sees a 'kilo'-named claim
+      // in addition to the always-present 'web' claim.
+      expect(deps.ports.claim).toHaveBeenCalledWith(expect.any(String), 'kilo')
+    })
+
+    it('does not claim an embedded-server port when handing off to a non-embedded-server backend', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      vi.mocked(deps.ports.claim).mockClear()
+
+      await rpc.handle(IPC.handoffSession, ['s1', 'pi'])
+
+      expect(deps.ports.claim).not.toHaveBeenCalledWith(expect.any(String), 'kilo')
+      expect(deps.ports.claim).not.toHaveBeenCalledWith(expect.any(String), 'opencode')
+    })
   })
 
   it('routes worktreeStatus to worktrees.status with resolved repo and branch', async () => {

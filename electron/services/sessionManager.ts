@@ -71,7 +71,8 @@ interface SessionRecord {
   backend: AgentBackend
   disposed?: boolean
   lastActivityAt: number
-  // opencode-only: embedded server port + session id used for status polling
+  // embedded-server backends only (opencode, kilo): server port + session id
+  // used for status polling
   opencodePort?: number
   opencodeSid?: string
   pollTimer?: ReturnType<typeof setInterval>
@@ -96,7 +97,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
 
   function wire(id: string, rec: SessionRecord) {
     const { pty: proc, detector, buffer, scrollback, screen } = rec
-    // Poll-driven backends (opencode's embedded server, pi's session file) are
+    // Poll-driven backends (opencode/kilo's embedded server, pi's session file) are
     // full-screen TUIs whose redraws make PTY-scraped markers unreliable, so
     // their status comes from beginStatusTracking instead of the StatusDetector.
     const ptyDrivenStatus = rec.backend.statusSource === 'pty'
@@ -513,7 +514,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
 
     // The DTO switches to the new backend; opencodeSid is deliberately cleared —
     // it referred to the previous backend's session (a fresh sid is captured by
-    // rpc.ts when the new kind is opencode).
+    // rpc.ts when the new kind is an embedded-server backend — opencode or kilo).
     const dto: SessionDTO = {
       ...input.session,
       agentKind: input.agentKind,
@@ -642,8 +643,10 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     const rec = sessions.get(sessionId)
     if (!rec || !rec.opencodePort) return
     rec.opencodeSid = sid
-    // Now that the sid is known, ask the backend to begin polling. cwd is unused
-    // by opencode tracking (the only backend with an opencodePort), so '' is safe.
+    // Now that the sid is known, ask the backend to begin polling. cwd is only
+    // used for lazy sid *recovery* (embeddedServerStatusTracking's `if (!sid)`
+    // branch), which never runs here since sid is already known — so '' is safe
+    // for both embedded-server backends (opencode, kilo).
     rec.backend.beginStatusTracking?.({
       cwd: '',
       opencodePort: rec.opencodePort,

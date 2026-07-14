@@ -203,6 +203,20 @@ describe('deliverPrompt with grok', () => {
   })
 })
 
+describe('deliverPrompt with kilo', () => {
+  it('returns empty systemArgs when system is present (system goes via AGENTS.md)', () => {
+    const result = deliverPrompt('kilo', { system: 'sys content', user: 'usr content' })
+    expect(result.systemArgs).toEqual([])
+    expect(result.userPrompt).toBe('usr content')
+  })
+
+  it('returns empty systemArgs when system is empty', () => {
+    const result = deliverPrompt('kilo', { system: '', user: 'usr content' })
+    expect(result.systemArgs).toEqual([])
+    expect(result.userPrompt).toBe('usr content')
+  })
+})
+
 describe('AGENT_LABELS', () => {
   it('includes a label for every backend kind', () => {
     expect(AGENT_LABELS['claude-code']).toBe('Claude Code')
@@ -210,6 +224,7 @@ describe('AGENT_LABELS', () => {
     expect(AGENT_LABELS.pi).toBe('Pi')
     expect(AGENT_LABELS.antigravity).toBe('Antigravity')
     expect(AGENT_LABELS.grok).toBe('Grok')
+    expect(AGENT_LABELS.kilo).toBe('Kilo Code')
   })
 })
 

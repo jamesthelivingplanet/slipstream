@@ -3,6 +3,7 @@ import {
   selectNewestSessionSince,
   parseOpencodeSessionIdFromStdout,
   captureOpencodeSessionId,
+  queryOpencodeSessionIdFromCli,
   opencodeStatusFromText,
   opencodeStatusFromMessages,
   withOpencodePromptArg,
@@ -58,6 +59,29 @@ describe('captureOpencodeSessionId', () => {
       intervalMs: 0,
     })
     expect(result === null || typeof result === 'string').toBe(true)
+  })
+
+  it('accepts a "bin" override (smoke test — a bogus bin resolves to null, never throws)', async () => {
+    // Kilo Code reuses this helper with its own resolved binary; a bin that
+    // doesn't exist must degrade to null (same as opencode missing) rather
+    // than reject.
+    const result = await captureOpencodeSessionId({
+      cwd: process.cwd(),
+      attempts: 1,
+      intervalMs: 0,
+      bin: 'definitely-not-a-real-cli-binary',
+    })
+    expect(result).toBeNull()
+  })
+})
+
+describe('queryOpencodeSessionIdFromCli with a "bin" override', () => {
+  it('resolves null for a nonexistent binary instead of throwing', async () => {
+    const result = await queryOpencodeSessionIdFromCli(
+      process.cwd(),
+      'definitely-not-a-real-cli-binary',
+    )
+    expect(result).toBeNull()
   })
 })
 

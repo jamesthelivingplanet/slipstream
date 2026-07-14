@@ -99,17 +99,23 @@ export function parseOpencodeSessionIdFromStdout(stdout: string): string | null 
 }
 
 /**
- * Shell out to `opencode session list --format json -n 1` to read the newest
- * session id from opencode's on-disk session store. Returns null on any error
+ * Shell out to `<bin> session list --format json -n 1` to read the newest
+ * session id from the CLI's on-disk session store. Returns null on any error
  * (binary missing, no sessions yet, parse failure).
  *
- * Must run in the worktree directory so opencode scopes to the correct
- * project — opencode sessions are per-directory, not global.
+ * Must run in the worktree directory so the CLI scopes to the correct
+ * project — sessions are per-directory, not global. `bin` defaults to
+ * opencode's resolved binary; Kilo Code (an opencode fork) reuses this
+ * unchanged with its own resolved binary — same subcommand, same flags, same
+ * stdout shape.
  */
-export async function queryOpencodeSessionIdFromCli(cwd: string): Promise<string | null> {
+export async function queryOpencodeSessionIdFromCli(
+  cwd: string,
+  bin: string = OPENCODE_BIN,
+): Promise<string | null> {
   return new Promise((resolve) => {
     const child = execFile(
-      OPENCODE_BIN,
+      bin,
       ['session', 'list', '--format', 'json', '-n', '1'],
       { timeout: 10_000, cwd },
       (err, stdout) => {
@@ -122,22 +128,24 @@ export async function queryOpencodeSessionIdFromCli(cwd: string): Promise<string
 }
 
 /**
- * Poll `opencode session list` until a session appears. The TUI creates its
+ * Poll `<bin> session list` until a session appears. The TUI creates its
  * session shortly after launch (and on first message), so this retries until
  * the on-disk session store has an entry, or attempts run out.
  *
  * Uses the CLI instead of the HTTP server, so it works even when the embedded
- * server is slow to start.
+ * server is slow to start. `bin` defaults to opencode's resolved binary; Kilo
+ * Code passes its own resolved binary (see agentBackend.ts's KILO_BIN).
  */
 export async function captureOpencodeSessionId(opts: {
   cwd: string
   attempts?: number
   intervalMs?: number
+  bin?: string
 }): Promise<string | null> {
   const attempts = opts.attempts ?? OPENCODE_SESSION_CAPTURE_ATTEMPTS
   const intervalMs = opts.intervalMs ?? OPENCODE_SESSION_CAPTURE_INTERVAL_MS
   for (let i = 0; i < attempts; i++) {
-    const id = await queryOpencodeSessionIdFromCli(opts.cwd)
+    const id = await queryOpencodeSessionIdFromCli(opts.cwd, opts.bin)
     if (id) return id
     await new Promise((r) => setTimeout(r, intervalMs))
   }

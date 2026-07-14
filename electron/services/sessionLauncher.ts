@@ -22,6 +22,7 @@ import type {
   TicketSource,
 } from '../shared/contract.js'
 import { captureOpencodeSessionId } from './opencodeSessions.js'
+import { usesEmbeddedServer, KILO_BIN } from './agentBackend.js'
 import { agentSessionEnv, type AgentCliDep } from './agentCliProvision.js'
 
 export interface LaunchRequest {
@@ -66,9 +67,9 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
   }
 
   let opencodePort: number | undefined
-  if (agentKind === 'opencode') {
+  if (usesEmbeddedServer(agentKind)) {
     try {
-      opencodePort = await deps.ports.claim(cwd, 'opencode')
+      opencodePort = await deps.ports.claim(cwd, agentKind ?? 'claude-code')
     } catch {
       opencodePort = undefined
     }
@@ -98,13 +99,15 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     ownerId,
   })
 
-  if (agentKind === 'opencode') {
-    void captureOpencodeSessionId({ cwd }).then((sid) => {
-      if (!sid) return
-      deps.sessions.setOpencodeSid(session.id, sid)
-      const cur = deps.sessionStore.get(session.id)
-      if (cur) deps.sessionStore.upsert({ ...cur, opencodeSid: sid })
-    })
+  if (usesEmbeddedServer(agentKind)) {
+    void captureOpencodeSessionId({ cwd, bin: agentKind === 'kilo' ? KILO_BIN : undefined }).then(
+      (sid) => {
+        if (!sid) return
+        deps.sessions.setOpencodeSid(session.id, sid)
+        const cur = deps.sessionStore.get(session.id)
+        if (cur) deps.sessionStore.upsert({ ...cur, opencodeSid: sid })
+      },
+    )
   }
 
   // FLO-26: move the linked ticket to the provider's "In Progress" state
