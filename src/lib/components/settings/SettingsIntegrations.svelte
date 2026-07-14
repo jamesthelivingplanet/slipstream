@@ -3,15 +3,21 @@
   import { cliStatus, cliChecking, refreshCliStatus } from '../../stores'
   import {
     hasBackend,
-    getGitToken,
-    setGitToken,
+    listGitProviders,
+    getGitHostConfig,
+    setGitHostConfig,
     getTicketSettings,
     setTicketSettings,
     listTicketScopes,
   } from '../../ipc'
   import { pushToast } from '../../toast'
   import SettingsSection from './SettingsSection.svelte'
-  import type { ScopeOption, TicketSourceSettings } from '../../../../electron/shared/contract.js'
+  import type {
+    ScopeOption,
+    TicketSourceSettings,
+    GitHost,
+    GitProviderInfoDTO,
+  } from '../../../../electron/shared/contract.js'
 
   function emptySettings(): TicketSourceSettings {
     return {
@@ -126,54 +132,71 @@
   }
 
   // ── Git hosts ──────────────────────────────────────────────────────────
-  let githubToken = ''
-  let githubPending = false
-  let gitlabToken = ''
-  let gitlabPending = false
+  interface GitHostFormState {
+    token: string
+    username: string
+    baseUrl: string
+    pending: boolean
+  }
 
-  async function loadGithubToken() {
+  let gitProviders: GitProviderInfoDTO[] = []
+  let gitHostState: Record<string, GitHostFormState> = {}
+
+  function emptyGitHostState(): GitHostFormState {
+    return { token: '', username: '', baseUrl: '', pending: false }
+  }
+
+  async function loadGitProviders() {
     if (!hasBackend) return
     try {
-      const stored = await getGitToken('github')
-      if (stored) githubToken = stored
+      const providers = await listGitProviders()
+      // Seed defaults synchronously so the {#each} below never indexes a
+      // missing gitHostState entry while the per-host config loads below.
+      for (const p of providers) {
+        if (!gitHostState[p.id]) gitHostState[p.id] = emptyGitHostState()
+      }
+      gitProviders = providers
+      gitHostState = { ...gitHostState }
+
+      await Promise.all(
+        providers.map(async (p) => {
+          try {
+            const cfg = await getGitHostConfig(p.id)
+            gitHostState[p.id] = {
+              token: cfg.token ?? '',
+              username: cfg.username ?? '',
+              baseUrl: cfg.baseUrl ?? '',
+              pending: false,
+            }
+            gitHostState = { ...gitHostState }
+          } catch {
+            // ignore — leave the empty default for this host
+          }
+        }),
+      )
     } catch {
       // ignore
     }
   }
 
-  async function saveGithubToken() {
+  async function saveGitHost(provider: GitProviderInfoDTO) {
     if (!hasBackend) return
-    githubPending = true
+    const state = gitHostState[provider.id]
+    if (!state) return
+    state.pending = true
+    gitHostState = { ...gitHostState }
     try {
-      await setGitToken('github', githubToken.trim())
-      pushToast('success', 'GitHub token saved')
+      await setGitHostConfig(provider.id as GitHost, {
+        token: state.token.trim(),
+        username: state.username.trim(),
+        baseUrl: state.baseUrl.trim(),
+      })
+      pushToast('success', `${provider.displayName} settings saved`)
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Failed to save token')
     } finally {
-      githubPending = false
-    }
-  }
-
-  async function loadGitlabToken() {
-    if (!hasBackend) return
-    try {
-      const stored = await getGitToken('gitlab')
-      if (stored) gitlabToken = stored
-    } catch {
-      // ignore
-    }
-  }
-
-  async function saveGitlabToken() {
-    if (!hasBackend) return
-    gitlabPending = true
-    try {
-      await setGitToken('gitlab', gitlabToken.trim())
-      pushToast('success', 'GitLab token saved')
-    } catch (e) {
-      pushToast('error', e instanceof Error ? e.message : 'Failed to save token')
-    } finally {
-      gitlabPending = false
+      state.pending = false
+      gitHostState = { ...gitHostState }
     }
   }
 
@@ -193,8 +216,7 @@
   onMount(() => {
     loadLinearSettings()
     loadJiraSettings()
-    loadGithubToken()
-    loadGitlabToken()
+    loadGitProviders()
     refreshCliStatus()
   })
 </script>
@@ -412,50 +434,54 @@
   {/if}
 </SettingsSection>
 
-<SettingsSection title="GitHub Token">
-  <p class="integration-hint">Personal access token with repo scope.</p>
-  <div class="path-add">
-    <input
-      type="password"
-      class="path-input"
-      placeholder="ghp_••••••••••••••••••••••••••••••••"
-      bind:value={githubToken}
-      disabled={githubPending || !hasBackend}
-    />
-    <button
-      class="btn btn-outline btn-sm"
-      on:click={saveGithubToken}
-      disabled={!githubToken.trim() || githubPending || !hasBackend}
-    >
-      Save
-    </button>
-  </div>
-  {#if !hasBackend}
-    <p class="integration-hint muted">Backend not available in browser-only mode.</p>
-  {/if}
-</SettingsSection>
-<SettingsSection title="GitLab Token">
-  <p class="integration-hint">Personal access token with repo scope.</p>
-  <div class="path-add">
-    <input
-      type="password"
-      class="path-input"
-      placeholder="glpat-••••••••••••••••••••••••••••••••"
-      bind:value={gitlabToken}
-      disabled={gitlabPending || !hasBackend}
-    />
-    <button
-      class="btn btn-outline btn-sm"
-      on:click={saveGitlabToken}
-      disabled={!gitlabToken.trim() || gitlabPending || !hasBackend}
-    >
-      Save
-    </button>
-  </div>
-  {#if !hasBackend}
-    <p class="integration-hint muted">Backend not available in browser-only mode.</p>
-  {/if}
-</SettingsSection>
+{#each gitProviders as provider (provider.id)}
+  <SettingsSection title="{provider.displayName} Token">
+    <p class="integration-hint">{provider.tokenHint}</p>
+    {#if provider.needsUsername}
+      <div class="repo-settings-field">
+        <input
+          type="text"
+          class="path-input"
+          placeholder="Username"
+          bind:value={gitHostState[provider.id].username}
+          disabled={gitHostState[provider.id].pending || !hasBackend}
+        />
+      </div>
+    {/if}
+    {#if provider.needsBaseUrl}
+      <div class="repo-settings-field">
+        <input
+          type="text"
+          class="path-input"
+          placeholder="https://git.example.com"
+          bind:value={gitHostState[provider.id].baseUrl}
+          disabled={gitHostState[provider.id].pending || !hasBackend}
+        />
+      </div>
+    {/if}
+    <div class="path-add">
+      <input
+        type="password"
+        class="path-input"
+        placeholder="Token"
+        bind:value={gitHostState[provider.id].token}
+        disabled={gitHostState[provider.id].pending || !hasBackend}
+      />
+      <button
+        class="btn btn-outline btn-sm"
+        on:click={() => saveGitHost(provider)}
+        disabled={!gitHostState[provider.id].token.trim() ||
+          gitHostState[provider.id].pending ||
+          !hasBackend}
+      >
+        Save
+      </button>
+    </div>
+    {#if !hasBackend}
+      <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+    {/if}
+  </SettingsSection>
+{/each}
 
 <style>
   .mcp-settings-row {

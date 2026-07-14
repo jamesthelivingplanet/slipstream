@@ -163,6 +163,43 @@ describe('worktreeManager (real git)', () => {
     await wm.remove(repo, 'feat-m-merge', { force: true })
   })
 
+  it('isMerged: detects a Gitea/Forgejo-style merge commit ("... from <branch>")', async () => {
+    const info = await wm.create(repo, 'feat-m-gitea')
+    writeFileSync(join(info.path, 'gitea.txt'), 'work\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'gitea work')
+
+    // Gitea/Forgejo subject shape: names the branch only after " from ",
+    // without the GitLab quotes or the GitHub "<org>/" prefix.
+    git(
+      repo.path,
+      'merge',
+      '--no-ff',
+      '-m',
+      "Merge pull request 'add the gitea thing' (#12) from feat-m-gitea",
+      'feat-m-gitea',
+    )
+
+    const res = await wm.isMerged(repo, 'feat-m-gitea')
+    expect(res.merged).toBe(true)
+    expect(res.via).toBe('merge-commit')
+    await wm.remove(repo, 'feat-m-gitea', { force: true })
+  })
+
+  it('isMerged: detects a Bitbucket-style merge commit ("Merged in <branch> (pull request #N)")', async () => {
+    const info = await wm.create(repo, 'feat-m-bb')
+    writeFileSync(join(info.path, 'bb.txt'), 'work\n')
+    git(info.path, 'add', '-A')
+    git(info.path, 'commit', '-m', 'bitbucket work')
+
+    git(repo.path, 'merge', '--no-ff', '-m', 'Merged in feat-m-bb (pull request #7)', 'feat-m-bb')
+
+    const res = await wm.isMerged(repo, 'feat-m-bb')
+    expect(res.merged).toBe(true)
+    expect(res.via).toBe('merge-commit')
+    await wm.remove(repo, 'feat-m-bb', { force: true })
+  })
+
   it('isMerged: detects a squash merge whose commit does not name the branch', async () => {
     const info = await wm.create(repo, 'feat-m-squash')
     writeFileSync(join(info.path, 'sq-a.txt'), 'a\n')

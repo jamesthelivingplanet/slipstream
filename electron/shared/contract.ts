@@ -25,7 +25,7 @@ export const BACKEND_KINDS: readonly BackendKind[] = [
   'grok',
   'kilo',
 ]
-export type GitHost = 'github' | 'gitlab'
+export type GitHost = 'github' | 'gitlab' | 'bitbucket' | 'gitea'
 
 /** Resolved caller identity. Single-user today ({ id: 'local' }); the seam
  *  exists so a future multi-user tier can map tokens → distinct owners. */
@@ -407,6 +407,28 @@ export interface PrStatusDTO {
   error?: string
 }
 
+/** One entry per supported git host (TASK-7LGAO), driving the Settings →
+ *  Integrations git-host cards: which extra fields to show alongside the
+ *  token input. */
+export interface GitProviderInfoDTO {
+  id: GitHost
+  displayName: string
+  tokenHint: string
+  /** Bitbucket Cloud: app passwords authenticate as username + app password. */
+  needsUsername: boolean
+  /** Self-hosted providers (Gitea/Forgejo): need the instance base URL. */
+  needsBaseUrl: boolean
+}
+
+/** Per-host config as currently stored (token intentionally never round-trips
+ *  in cleartext beyond what getGitHostConfig already exposed via
+ *  getGitToken — same secret-at-rest handling, see configStore.ts). */
+export interface GitHostConfigDTO {
+  token: string | null
+  username: string | null
+  baseUrl: string | null
+}
+
 /* ───────── main-process service interfaces ───────── */
 
 export interface IRepoRegistry {
@@ -753,6 +775,18 @@ export interface SlipstreamApi {
   getPushPrefs(endpoint: string): Promise<NotifyPrefs | null>
   getGitToken(host: GitHost): Promise<string | null>
   setGitToken(host: GitHost, token: string): Promise<void>
+  /** All registered git providers (TASK-7LGAO) — drives the Settings →
+   *  Integrations git-host cards, including the Phase-1 Bitbucket/Gitea
+   *  stubs (listed, but their action methods reject until Phase 2). */
+  listGitProviders(): Promise<GitProviderInfoDTO[]>
+  /** Full per-host config (token/username/baseUrl). Superset of getGitToken —
+   *  kept alongside it since getGitToken/setGitToken remain the CLI/slipstream
+   *  worktree's read path. */
+  getGitHostConfig(host: GitHost): Promise<GitHostConfigDTO>
+  setGitHostConfig(
+    host: GitHost,
+    cfg: { token?: string; username?: string; baseUrl?: string },
+  ): Promise<void>
   onSessionPr(cb: (id: string, prUrl: string) => void): () => void
 
   /** Register this client as viewing a session. Grants the write lock if free,
@@ -873,6 +907,9 @@ export const IPC = {
   getPushPrefs: 'push:prefs',
   getGitToken: 'config:getGitToken',
   setGitToken: 'config:setGitToken',
+  listGitProviders: 'config:listGitProviders',
+  getGitHostConfig: 'config:getGitHostConfig',
+  setGitHostConfig: 'config:setGitHostConfig',
   sessionPr: 'session:pr', // main → renderer push
   attachSession: 'session:attach',
   detachSession: 'session:detach',

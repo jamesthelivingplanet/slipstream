@@ -39,7 +39,9 @@ describe('parseRemote', () => {
     })
   })
   it('returns null for unknown host', () => {
-    expect(parseRemote('https://bitbucket.org/org/name')).toBeNull()
+    // bitbucket.org matches since TASK-7LGAO; use a domain no provider claims
+    // (gitea needs a configured baseUrl, which config-less parseRemote never has).
+    expect(parseRemote('https://git.example.com/org/name')).toBeNull()
   })
   it('returns null for bad url', () => {
     expect(parseRemote('not-a-url')).toBeNull()

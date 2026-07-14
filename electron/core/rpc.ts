@@ -21,7 +21,9 @@ import type {
   TicketSourceSettings,
   PromptTemplateDTO,
   WorktreeUpdateMode,
+  GitHost,
 } from '../shared/contract.js'
+import { GIT_PROVIDERS } from '../services/gitProviders/registry.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../shared/promptComposer.js'
 import { LOCAL_IDENTITY } from './auth.js'
@@ -43,6 +45,12 @@ function parseCsv(raw: string | undefined): string[] {
     .split(',')
     .map((k) => k.trim())
     .filter((k) => k.length > 0)
+}
+
+const GIT_HOST_IDS = new Set(GIT_PROVIDERS.map((p) => p.meta.id))
+
+function isGitHost(host: unknown): host is GitHost {
+  return typeof host === 'string' && GIT_HOST_IDS.has(host as GitHost)
 }
 
 export interface Rpc {
@@ -744,15 +752,38 @@ export function createRpc(
         return deps.push.getPushPrefs(args[0] as string)
 
       case IPC.getGitToken: {
-        const host = args[0] as string
-        if (host !== 'github' && host !== 'gitlab') throw new Error(`Invalid host: ${host}`)
+        const host = args[0]
+        if (!isGitHost(host)) throw new Error(`Invalid host: ${String(host)}`)
         return deps.config.get(`${host}.token`) ?? null
       }
 
       case IPC.setGitToken: {
-        const host = args[0] as string
-        if (host !== 'github' && host !== 'gitlab') throw new Error(`Invalid host: ${host}`)
+        const host = args[0]
+        if (!isGitHost(host)) throw new Error(`Invalid host: ${String(host)}`)
         deps.config.set(`${host}.token`, args[1] as string)
+        return undefined
+      }
+
+      case IPC.listGitProviders:
+        return GIT_PROVIDERS.map((p) => ({ ...p.meta }))
+
+      case IPC.getGitHostConfig: {
+        const host = args[0]
+        if (!isGitHost(host)) throw new Error(`Invalid host: ${String(host)}`)
+        return {
+          token: deps.config.get(`${host}.token`) ?? null,
+          username: deps.config.get(`${host}.username`) ?? null,
+          baseUrl: deps.config.get(`${host}.baseUrl`) ?? null,
+        }
+      }
+
+      case IPC.setGitHostConfig: {
+        const host = args[0]
+        if (!isGitHost(host)) throw new Error(`Invalid host: ${String(host)}`)
+        const cfg = (args[1] ?? {}) as { token?: string; username?: string; baseUrl?: string }
+        if (cfg.token !== undefined) deps.config.set(`${host}.token`, cfg.token)
+        if (cfg.username !== undefined) deps.config.set(`${host}.username`, cfg.username)
+        if (cfg.baseUrl !== undefined) deps.config.set(`${host}.baseUrl`, cfg.baseUrl)
         return undefined
       }
 

@@ -41,6 +41,8 @@ import type {
   SessionHistoryEntry,
   SessionAgentEventDTO,
   PrStatusDTO,
+  GitProviderInfoDTO,
+  GitHostConfigDTO,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -576,6 +578,18 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     },
     setGitToken(host: GitHost, token: string): Promise<void> {
       return request(IPC.setGitToken, [host, token]) as Promise<void>
+    },
+    listGitProviders(): Promise<GitProviderInfoDTO[]> {
+      return request(IPC.listGitProviders, []) as Promise<GitProviderInfoDTO[]>
+    },
+    getGitHostConfig(host: GitHost): Promise<GitHostConfigDTO> {
+      return request(IPC.getGitHostConfig, [host]) as Promise<GitHostConfigDTO>
+    },
+    setGitHostConfig(
+      host: GitHost,
+      cfg: { token?: string; username?: string; baseUrl?: string },
+    ): Promise<void> {
+      return request(IPC.setGitHostConfig, [host, cfg]) as Promise<void>
     },
     onSessionPr(cb: (id: string, prUrl: string) => void): () => void {
       prListeners.add(cb)

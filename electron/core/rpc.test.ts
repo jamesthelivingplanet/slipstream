@@ -1252,6 +1252,58 @@ describe('createRpc', () => {
     })
   })
 
+  describe('git hosts (TASK-7LGAO)', () => {
+    it('getGitToken/setGitToken keep working for github and gitlab', async () => {
+      await rpc.handle(IPC.setGitToken, ['github', 'ghp_tok'])
+      expect(deps.config.set).toHaveBeenCalledWith('github.token', 'ghp_tok')
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockReturnValueOnce('ghp_tok')
+      expect(await rpc.handle(IPC.getGitToken, ['github'])).toBe('ghp_tok')
+    })
+
+    it('getGitToken/setGitToken reject an unknown host', async () => {
+      await expect(rpc.handle(IPC.getGitToken, ['notahost'])).rejects.toThrow('Invalid host')
+      await expect(rpc.handle(IPC.setGitToken, ['notahost', 'x'])).rejects.toThrow('Invalid host')
+    })
+
+    it('listGitProviders returns all four registered providers', async () => {
+      const result = (await rpc.handle(IPC.listGitProviders, [])) as Array<{
+        id: string
+        displayName: string
+        needsUsername: boolean
+        needsBaseUrl: boolean
+      }>
+      expect(result.map((p) => p.id)).toEqual(['github', 'gitlab', 'bitbucket', 'gitea'])
+      const bitbucket = result.find((p) => p.id === 'bitbucket')
+      expect(bitbucket).toMatchObject({ displayName: 'Bitbucket', needsUsername: true })
+      const gitea = result.find((p) => p.id === 'gitea')
+      expect(gitea).toMatchObject({ displayName: 'Gitea / Forgejo', needsBaseUrl: true })
+    })
+
+    it('getGitHostConfig reads token/username/baseUrl for a host, defaulting missing fields to null', async () => {
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
+        if (key === 'bitbucket.token') return 'app-pw'
+        if (key === 'bitbucket.username') return 'alice'
+        return undefined
+      })
+      const result = await rpc.handle(IPC.getGitHostConfig, ['bitbucket'])
+      expect(result).toEqual({ token: 'app-pw', username: 'alice', baseUrl: null })
+    })
+
+    it('setGitHostConfig writes only the provided fields', async () => {
+      await rpc.handle(IPC.setGitHostConfig, ['gitea', { token: 'tok', baseUrl: 'https://git.x' }])
+      expect(deps.config.set).toHaveBeenCalledWith('gitea.token', 'tok')
+      expect(deps.config.set).toHaveBeenCalledWith('gitea.baseUrl', 'https://git.x')
+      expect(deps.config.set).not.toHaveBeenCalledWith('gitea.username', expect.anything())
+    })
+
+    it('getGitHostConfig/setGitHostConfig reject an unknown host', async () => {
+      await expect(rpc.handle(IPC.getGitHostConfig, ['notahost'])).rejects.toThrow('Invalid host')
+      await expect(rpc.handle(IPC.setGitHostConfig, ['notahost', {}])).rejects.toThrow(
+        'Invalid host',
+      )
+    })
+  })
+
   it('getRepoSettings routes to repos.getSettings', async () => {
     const result = await rpc.handle(IPC.getRepoSettings, ['r1'])
     expect(deps.repos.getSettings).toHaveBeenCalledWith('r1')
