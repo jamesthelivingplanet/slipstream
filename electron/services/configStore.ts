@@ -12,6 +12,8 @@ export const SECRET_KEYS = new Set([
   'linear.apiKey',
   'github.token',
   'gitlab.token',
+  'bitbucket.token',
+  'gitea.token',
   'jira.apiToken',
 ])
 

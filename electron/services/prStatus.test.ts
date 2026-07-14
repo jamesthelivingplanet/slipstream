@@ -75,7 +75,9 @@ describe('parsePrUrl', () => {
   })
 
   it('returns null for an unknown host', () => {
-    expect(parsePrUrl('https://bitbucket.org/acme/api/pull-requests/1')).toBeNull()
+    // bitbucket.org matches since TASK-7LGAO; use a domain no provider claims
+    // (gitea needs a configured baseUrl, which config-less parsePrUrl never has).
+    expect(parsePrUrl('https://git.example.com/acme/api/pulls/1')).toBeNull()
   })
 
   it('returns null for garbage input', () => {
@@ -253,6 +255,22 @@ describe('createPrStatusService', () => {
     const svc = createPrStatusService({ config: makeConfig({ 'github.token': 'tok' }) })
     const dto = await svc.get({ id: 's1', prUrl: 'not-a-url' })
     expect(dto).toMatchObject({ host: 'github', state: 'unknown' })
+    expect(dto?.error).toMatch(/Cannot parse PR URL/)
+  })
+
+  it('guesses bitbucket for an unparseable bitbucket.org url in the error DTO', async () => {
+    const svc = createPrStatusService({ config: makeConfig() })
+    const dto = await svc.get({ id: 's1', prUrl: 'https://bitbucket.org/acme' })
+    expect(dto).toMatchObject({ host: 'bitbucket', state: 'unknown' })
+    expect(dto?.error).toMatch(/Cannot parse PR URL/)
+  })
+
+  it('guesses gitea for an unparseable url on the configured gitea baseUrl host', async () => {
+    const svc = createPrStatusService({
+      config: makeConfig({ 'gitea.baseUrl': 'https://git.example.com' }),
+    })
+    const dto = await svc.get({ id: 's1', prUrl: 'https://git.example.com/acme' })
+    expect(dto).toMatchObject({ host: 'gitea', state: 'unknown' })
     expect(dto?.error).toMatch(/Cannot parse PR URL/)
   })
 

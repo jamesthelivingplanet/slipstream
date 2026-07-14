@@ -40,6 +40,8 @@ import type {
   SessionHistoryEntry,
   SessionAgentEventDTO,
   PrStatusDTO,
+  GitProviderInfoDTO,
+  GitHostConfigDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY, DEFAULT_SCHEDULER_POLICY } from '../../electron/shared/contract.js'
 
@@ -318,6 +320,24 @@ export function getGitToken(host: GitHost): Promise<string | null> {
 export function setGitToken(host: GitHost, token: string): Promise<void> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.setGitToken(host, token)
+}
+
+export function listGitProviders(): Promise<GitProviderInfoDTO[]> {
+  return hasBackend ? window.slipstream.listGitProviders() : Promise.resolve([])
+}
+
+export function getGitHostConfig(host: GitHost): Promise<GitHostConfigDTO> {
+  return hasBackend
+    ? window.slipstream.getGitHostConfig(host)
+    : Promise.resolve({ token: null, username: null, baseUrl: null })
+}
+
+export function setGitHostConfig(
+  host: GitHost,
+  cfg: { token?: string; username?: string; baseUrl?: string },
+): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.setGitHostConfig(host, cfg)
 }
 
 /** Subscribe to session PR/MR-opened events. Returns an unsubscribe fn. */

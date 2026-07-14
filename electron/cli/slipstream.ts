@@ -19,7 +19,9 @@ import type { GitHost, OutcomeResult, NeedsReason, AgentEventKind } from '../sha
 import { STATUS_SENTINEL_FILE } from '../services/statusSentinel.js'
 import { OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
 import { AGENT_EVENTS_FILE } from '../services/agentEventsSentinel.js'
-import { parseRemote, createGitDriver } from '../services/gitDriver.js'
+import { resolveRemote, createGitDriver } from '../services/gitDriver.js'
+import type { GitHostConfig } from '../services/gitDriver.js'
+import type { IConfigStore } from '../services/configStore.js'
 
 const execFile = promisify(_execFile)
 
@@ -49,6 +51,11 @@ export interface CliDeps {
   appendEvent(kind: AgentEventKind, message?: string, artifactPath?: string): Promise<void>
   /** Copy `file` into the session's artifact store; resolves the destination path. */
   copyArtifact(file: string): Promise<string>
+  /** open-mr only — config-aware remote resolution. Self-hosted providers
+   *  (Gitea/Forgejo) match by their stored baseUrl, not a fixed domain, so
+   *  the resolver must consult the config DB (loaded lazily in main()) —
+   *  a bare parseRemote() with empty config would miss them. */
+  resolveRemote(remoteUrl: string): Promise<{ host: GitHost; org: string; name: string } | null>
   /** open-mr only — loads the config DB lazily in main(). */
   getToken(host: GitHost): Promise<string | null>
   push(branch: string, token?: string, remoteUrl?: string): Promise<void>
@@ -230,7 +237,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         if (!title) return usageError(deps, '--title is required for open-mr')
         const description = flags['description'] ?? ''
         const remoteUrl = await deps.getRemoteUrl(deps.cwd)
-        const remote = parseRemote(remoteUrl)
+        const remote = await deps.resolveRemote(remoteUrl)
         if (!remote) {
           deps.stderr(`Cannot parse remote URL: ${remoteUrl}`)
           return EXIT_FAILED
@@ -310,7 +317,32 @@ export async function main(): Promise<void> {
     await fs.promises.writeFile(path.join(sentinelDir, file), content)
   }
 
-  const driver = createGitDriver()
+  // Lazily-loaded, cached config store (better-sqlite3/safeStorage) — only
+  // 'open-mr' needs it, so every other command stays dependency-light. The
+  // synchronous getHostConfig reads the cache; it's only ever invoked (via
+  // deps.resolveRemote and driver.push/driver.openMergeRequest below) after
+  // open-mr's first await of loadConfigStore() (deps.resolveRemote is the
+  // command's first config touch), so the cache is guaranteed populated by
+  // the time it's read.
+  let cachedConfigStore: IConfigStore | undefined
+  async function loadConfigStore(): Promise<IConfigStore> {
+    if (!cachedConfigStore) {
+      const { openDb } = await import('../db/db.js')
+      const { createConfigStore, createSafeStorageEncryptor } =
+        await import('../services/configStore.js')
+      const db = openDb(path.join(dataDir, 'slipstream.db'))
+      cachedConfigStore = createConfigStore(db, { encryptor: createSafeStorageEncryptor() })
+    }
+    return cachedConfigStore
+  }
+
+  const getHostConfig = (host: GitHost): GitHostConfig => ({
+    token: cachedConfigStore?.get(`${host}.token`),
+    username: cachedConfigStore?.get(`${host}.username`),
+    baseUrl: cachedConfigStore?.get(`${host}.baseUrl`),
+  })
+
+  const driver = createGitDriver({ getHostConfig })
 
   const deps: CliDeps = {
     cwd,
@@ -356,14 +388,14 @@ export async function main(): Promise<void> {
       await fs.promises.copyFile(src, dest)
       return dest
     },
+    async resolveRemote(remoteUrl) {
+      // Config-aware: a Gitea/Forgejo remote only matches via the stored
+      // gitea.baseUrl, so the config DB must be loaded before resolving.
+      await loadConfigStore()
+      return resolveRemote(remoteUrl, getHostConfig)
+    },
     async getToken(host) {
-      // Dynamic import: the DB/config layer (better-sqlite3, safeStorage) is
-      // only needed for open-mr — every other command stays dependency-light.
-      const { openDb } = await import('../db/db.js')
-      const { createConfigStore, createSafeStorageEncryptor } =
-        await import('../services/configStore.js')
-      const db = openDb(path.join(dataDir, 'slipstream.db'))
-      const configStore = createConfigStore(db, { encryptor: createSafeStorageEncryptor() })
+      const configStore = await loadConfigStore()
       return configStore.get(`${host}.token`) ?? null
     },
     async push(br, token, remoteUrl) {
