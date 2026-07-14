@@ -30,6 +30,19 @@ export const AGENTS: AgentOption[] = [
     description: 'Uses pi --approve in a git worktree with an appended system prompt.',
     icon: '/icons/agents/pi.svg',
   },
+  {
+    kind: 'antigravity',
+    label: 'Antigravity',
+    description:
+      'Uses agy --dangerously-skip-permissions in a git worktree with auto-discovered AGENTS.md.',
+    icon: '/icons/agents/antigravity.svg',
+  },
+  {
+    kind: 'grok',
+    label: 'Grok',
+    description: 'Uses grok in a git worktree with auto-discovered AGENTS.md.',
+    icon: '/icons/agents/grok.svg',
+  },
 ]
 
 /** Look up the option for a kind, falling back to the first agent. */

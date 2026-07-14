@@ -7,7 +7,12 @@
 
 import { existsSync, statSync } from 'node:fs'
 import path from 'node:path'
-import { CLAUDE_BIN, OPENCODE_BIN_NAME } from '../shared/agentCli.js'
+import {
+  CLAUDE_BIN,
+  OPENCODE_BIN_NAME,
+  ANTIGRAVITY_BIN,
+  GROK_BIN_NAME,
+} from '../shared/agentCli.js'
 import type { BackendKind } from '../shared/contract.js'
 
 /** Binary name for pi. Mirrors the fallback in agentBackend.ts's PI_BIN
@@ -24,6 +29,10 @@ export function binForKind(kind: BackendKind): string {
       return OPENCODE_BIN_NAME
     case 'pi':
       return PI_BIN_NAME
+    case 'antigravity':
+      return ANTIGRAVITY_BIN
+    case 'grok':
+      return GROK_BIN_NAME
   }
 }
 

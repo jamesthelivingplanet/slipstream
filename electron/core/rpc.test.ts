@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRpc } from './rpc.js'
 import type { IpcDeps } from '../ipc.js'
-import { IPC } from '../shared/contract.js'
+import { IPC, BACKEND_KINDS } from '../shared/contract.js'
 import type {
   RepoDTO,
   SessionDTO,
@@ -954,6 +954,23 @@ describe('createRpc', () => {
         'Unknown agent kind: bogus',
       )
       expect(deps.sessions.handoff).not.toHaveBeenCalled()
+    })
+
+    it('accepts "antigravity" and "grok" as handoff targets (BACKEND_KINDS parity)', async () => {
+      expect(BACKEND_KINDS).toContain('antigravity')
+      expect(BACKEND_KINDS).toContain('grok')
+
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      await rpc.handle(IPC.handoffSession, ['s1', 'antigravity'])
+      expect(deps.sessions.handoff).toHaveBeenCalledWith(
+        expect.objectContaining({ agentKind: 'antigravity' }),
+      )
+
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      await rpc.handle(IPC.handoffSession, ['s1', 'grok'])
+      expect(deps.sessions.handoff).toHaveBeenCalledWith(
+        expect.objectContaining({ agentKind: 'grok' }),
+      )
     })
   })
 

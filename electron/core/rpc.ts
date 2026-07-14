@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IpcDeps } from '../ipc.js'
-import { IPC } from '../shared/contract.js'
+import { IPC, BACKEND_KINDS } from '../shared/contract.js'
 import type {
   BackendKind,
   RepoDTO,
@@ -463,7 +463,7 @@ export function createRpc(
       case IPC.handoffSession: {
         const id = args[0] as string
         const agentKind = args[1] as BackendKind
-        if (agentKind !== 'claude-code' && agentKind !== 'opencode' && agentKind !== 'pi')
+        if (!BACKEND_KINDS.includes(agentKind))
           throw new Error(`Unknown agent kind: ${String(agentKind)}`)
         const persisted = ownedSession(id)
         if (!persisted) throw new Error(`Session not found: ${id}`)

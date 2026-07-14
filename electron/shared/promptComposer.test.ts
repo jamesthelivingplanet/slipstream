@@ -5,6 +5,7 @@ import {
   buildAgentsMdContent,
   deliverPrompt,
   buildHandoffPrompt,
+  AGENT_LABELS,
 } from './promptComposer.js'
 
 describe('defaultUserPrompt', () => {
@@ -171,6 +172,44 @@ describe('deliverPrompt with pi', () => {
     const result = deliverPrompt('pi', { system: '', user: 'usr content' })
     expect(result.systemArgs).toEqual([])
     expect(result.userPrompt).toBe('usr content')
+  })
+})
+
+describe('deliverPrompt with antigravity', () => {
+  it('returns empty systemArgs when system is present (system goes via AGENTS.md)', () => {
+    const result = deliverPrompt('antigravity', { system: 'sys content', user: 'usr content' })
+    expect(result.systemArgs).toEqual([])
+    expect(result.userPrompt).toBe('usr content')
+  })
+
+  it('returns empty systemArgs when system is empty', () => {
+    const result = deliverPrompt('antigravity', { system: '', user: 'usr content' })
+    expect(result.systemArgs).toEqual([])
+    expect(result.userPrompt).toBe('usr content')
+  })
+})
+
+describe('deliverPrompt with grok', () => {
+  it('returns empty systemArgs when system is present (system goes via AGENTS.md)', () => {
+    const result = deliverPrompt('grok', { system: 'sys content', user: 'usr content' })
+    expect(result.systemArgs).toEqual([])
+    expect(result.userPrompt).toBe('usr content')
+  })
+
+  it('returns empty systemArgs when system is empty', () => {
+    const result = deliverPrompt('grok', { system: '', user: 'usr content' })
+    expect(result.systemArgs).toEqual([])
+    expect(result.userPrompt).toBe('usr content')
+  })
+})
+
+describe('AGENT_LABELS', () => {
+  it('includes a label for every backend kind', () => {
+    expect(AGENT_LABELS['claude-code']).toBe('Claude Code')
+    expect(AGENT_LABELS.opencode).toBe('OpenCode')
+    expect(AGENT_LABELS.pi).toBe('Pi')
+    expect(AGENT_LABELS.antigravity).toBe('Antigravity')
+    expect(AGENT_LABELS.grok).toBe('Grok')
   })
 })
 

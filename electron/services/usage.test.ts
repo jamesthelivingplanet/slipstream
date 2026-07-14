@@ -301,4 +301,31 @@ describe('readSessionUsage', () => {
     expect(usage.exists).toBe(false)
     expect(usage.sessionId).toBe('sess-dispatch-pi')
   })
+
+  it('antigravity/grok sessions return exists:false with zeroed usage — even when a Claude transcript exists for the same id (no reader yet, no fallthrough)', () => {
+    const idAgy = 'sess-dispatch-antigravity'
+    writeTranscript('proj-a', idAgy, [assistantTurn({ input: 99, output: 99 })])
+    const agyUsage = readSessionUsage(
+      { ...dto(idAgy, 'repo-1', 0), agentKind: 'antigravity' },
+      {
+        projectsDir,
+      },
+    )
+    expect(agyUsage.exists).toBe(false)
+    expect(agyUsage.tokens).toEqual({ input: 0, output: 0, cacheCreation: 0, cacheRead: 0 })
+    expect(agyUsage.costUsd).toBe(0)
+    expect(agyUsage.turns).toBe(0)
+    expect(agyUsage.sessionId).toBe(idAgy)
+
+    const idGrok = 'sess-dispatch-grok'
+    writeTranscript('proj-a', idGrok, [assistantTurn({ input: 99, output: 99 })])
+    const grokUsage = readSessionUsage(
+      { ...dto(idGrok, 'repo-1', 0), agentKind: 'grok' },
+      {
+        projectsDir,
+      },
+    )
+    expect(grokUsage.exists).toBe(false)
+    expect(grokUsage.sessionId).toBe(idGrok)
+  })
 })

@@ -9,6 +9,12 @@
 /** Binary names. */
 export const CLAUDE_BIN = 'claude'
 export const OPENCODE_BIN_NAME = 'opencode'
+/** Google Antigravity CLI — never an npm dependency, so agentBackend.ts uses
+ *  this bare name directly (no node_modules/.bin preference). */
+export const ANTIGRAVITY_BIN = 'agy'
+/** grok-cli (grokcli.io / superagent-ai). The npm package is `grok-dev`, but
+ *  the installed binary name on PATH is `grok`. */
+export const GROK_BIN_NAME = 'grok'
 
 /** Claude Code CLI flags. */
 export const CLAUDE_FLAGS = {
@@ -24,6 +30,22 @@ export const OPENCODE_FLAGS = {
   session: '--session',
   continue: '--continue',
   prompt: '--prompt',
+} as const
+
+/** Antigravity (`agy`) CLI flags. `-i`/`--prompt-interactive` runs the given
+ *  prompt then stays interactive; `--continue` resumes the conversation
+ *  scoped to the current cwd. */
+export const ANTIGRAVITY_FLAGS = {
+  skipPermissions: '--dangerously-skip-permissions',
+  promptInteractive: '-i',
+  continue: '--continue',
+} as const
+
+/** grok-cli flags. No permission-bypass flag exists (tool execution is
+ *  trust-based); `--session latest` resumes the most recent saved session
+ *  (scoping within grok's store is undocumented). */
+export const GROK_FLAGS = {
+  session: '--session',
 } as const
 
 /** Interval (ms) for polling an opencode session's status from its server. */

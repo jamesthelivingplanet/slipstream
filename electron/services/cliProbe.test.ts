@@ -69,4 +69,12 @@ describe('binForKind', () => {
     expect(binForKind('pi')).toBe(PI_BIN_NAME)
     expect(PI_BIN_NAME).toBe('pi')
   })
+
+  it('maps antigravity to the agy binary', () => {
+    expect(binForKind('antigravity')).toBe('agy')
+  })
+
+  it('maps grok to the grok binary', () => {
+    expect(binForKind('grok')).toBe('grok')
+  })
 })

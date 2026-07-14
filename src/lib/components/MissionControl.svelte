@@ -520,7 +520,11 @@
     letter-spacing: normal;
   }
   .quick-agent :global(.agent-grid) {
-    grid-template-columns: repeat(3, auto);
+    /* Flex + wrap (rather than a fixed column count) so a growing agent list
+     * (now 5) stays on one row when there's room and wraps cleanly when there
+     * isn't, instead of overflowing or leaving ragged empty grid cells. */
+    display: flex;
+    flex-wrap: wrap;
     gap: 4px;
   }
   .quick-agent :global(.agent-card) {

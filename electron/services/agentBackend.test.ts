@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DONE_MARKER } from '../shared/promptComposer.js'
@@ -23,8 +23,14 @@ vi.mock('./opencodeSessions.js', async (importOriginal) => {
   }
 })
 
-const { selectBackend, claudeCodeBackend, opencodeBackend, piBackend } =
-  await import('./agentBackend.js')
+const {
+  selectBackend,
+  claudeCodeBackend,
+  opencodeBackend,
+  piBackend,
+  antigravityBackend,
+  grokBackend,
+} = await import('./agentBackend.js')
 const { findNewestPiSessionFile, readPiSessionFile } = await import('./piSessions.js')
 const { queryOpencodeSessionIdFromCli, fetchOpencodeMessages } =
   await import('./opencodeSessions.js')
@@ -521,6 +527,272 @@ describe('prepareWorktree presence', () => {
 
   it('piBackend.prepareWorktree is undefined', () => {
     expect(piBackend.prepareWorktree).toBeUndefined()
+  })
+
+  it('antigravityBackend.prepareWorktree is a function', () => {
+    expect(typeof antigravityBackend.prepareWorktree).toBe('function')
+  })
+
+  it('grokBackend.prepareWorktree is a function', () => {
+    expect(typeof grokBackend.prepareWorktree).toBe('function')
+  })
+})
+
+describe('selectBackend for the new kinds', () => {
+  it('returns antigravityBackend for "antigravity"', () => {
+    expect(selectBackend('antigravity')).toBe(antigravityBackend)
+  })
+
+  it('returns grokBackend for "grok"', () => {
+    expect(selectBackend('grok')).toBe(grokBackend)
+  })
+})
+
+describe('statusSource for the new kinds', () => {
+  it('antigravity uses pty (scrolling terminal UI, like Claude Code)', () => {
+    expect(antigravityBackend.statusSource).toBe('pty')
+  })
+
+  it('grok uses poll (full-screen OpenTUI app)', () => {
+    expect(grokBackend.statusSource).toBe('poll')
+  })
+})
+
+describe('antigravityBackend.prepareWorktree', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'slipstream-agy-worktree-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('writes AGENTS.md with the system prompt when system is non-empty', () => {
+    antigravityBackend.prepareWorktree?.(dir, 'be a great agent')
+    const agentsMd = join(dir, 'AGENTS.md')
+    expect(existsSync(agentsMd)).toBe(true)
+    expect(readFileSync(agentsMd, 'utf8')).toBe('be a great agent')
+  })
+
+  it('does not write AGENTS.md when system is empty', () => {
+    antigravityBackend.prepareWorktree?.(dir, '')
+    expect(existsSync(join(dir, 'AGENTS.md'))).toBe(false)
+  })
+})
+
+describe('antigravityBackend.buildStartArgs', () => {
+  it('cmd is "agy"', () => {
+    const { cmd } = antigravityBackend.buildStartArgs({ sessionId: 'a1', system: '', user: 'task' })
+    expect(cmd).toBe('agy')
+  })
+
+  it('args are [--dangerously-skip-permissions, -i, userPrompt] when user prompt is present', () => {
+    const { args } = antigravityBackend.buildStartArgs({
+      sessionId: 'a2',
+      system: '',
+      user: 'do the thing',
+    })
+    expect(args).toEqual(['--dangerously-skip-permissions', '-i', 'do the thing'])
+  })
+
+  it('omits the -i pair entirely when user prompt is empty', () => {
+    const { args } = antigravityBackend.buildStartArgs({ sessionId: 'a3', system: '', user: '' })
+    expect(args).toEqual(['--dangerously-skip-permissions'])
+    expect(args).not.toContain('-i')
+  })
+
+  it('system prompt does not appear in the CLI args (delivered via AGENTS.md)', () => {
+    const { args } = antigravityBackend.buildStartArgs({
+      sessionId: 'a4',
+      system: 'sys prompt text',
+      user: 'task',
+    })
+    expect(args).not.toContain('sys prompt text')
+  })
+})
+
+describe('antigravityBackend resume / remote-control / handoff', () => {
+  it('buildResumeArgs: hasPriorSession:true → [--dangerously-skip-permissions, --continue]', () => {
+    const { cmd, args } = antigravityBackend.buildResumeArgs({
+      sessionId: 'a5',
+      system: '',
+      user: 'task',
+      hasPriorSession: true,
+    })
+    expect(cmd).toBe('agy')
+    expect(args).toEqual(['--dangerously-skip-permissions', '--continue'])
+  })
+
+  it('buildRemoteControlArgs: hasPriorSession:true → [--dangerously-skip-permissions, --continue]', () => {
+    const { args } = antigravityBackend.buildRemoteControlArgs({
+      sessionId: 'a6',
+      system: '',
+      user: 'task',
+      hasPriorSession: true,
+    })
+    expect(args).toEqual(['--dangerously-skip-permissions', '--continue'])
+  })
+
+  it('buildResumeArgs: hasPriorSession:false → falls back to the fresh-start shape', () => {
+    const resumed = antigravityBackend.buildResumeArgs({
+      sessionId: 'a7',
+      system: '',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    const started = antigravityBackend.buildStartArgs({ sessionId: 'a7', system: '', user: 'task' })
+    expect(resumed).toEqual(started)
+  })
+
+  it('buildRemoteControlArgs: hasPriorSession:false → falls back to the fresh-start shape', () => {
+    const remoted = antigravityBackend.buildRemoteControlArgs({
+      sessionId: 'a8',
+      system: '',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    const started = antigravityBackend.buildStartArgs({ sessionId: 'a8', system: '', user: 'task' })
+    expect(remoted).toEqual(started)
+  })
+
+  it('buildHandoffArgs uses the fresh-start shape with the handoff prompt', () => {
+    const { cmd, args } = antigravityBackend.buildHandoffArgs({
+      sessionId: 'a9',
+      system: '',
+      user: 'takeover prompt',
+      hasPriorSession: true,
+    })
+    expect(cmd).toBe('agy')
+    expect(args).toEqual(['--dangerously-skip-permissions', '-i', 'takeover prompt'])
+  })
+})
+
+describe('antigravityBackend.hasPriorSession', () => {
+  it('always returns true (cwd-scoped conversations; no documented on-disk store to check)', () => {
+    expect(antigravityBackend.hasPriorSession?.({ sessionId: 's', cwd: '/tmp/whatever' })).toBe(
+      true,
+    )
+  })
+})
+
+describe('grokBackend.prepareWorktree', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'slipstream-grok-worktree-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('writes AGENTS.md with the system prompt when system is non-empty', () => {
+    grokBackend.prepareWorktree?.(dir, 'be a great agent')
+    const agentsMd = join(dir, 'AGENTS.md')
+    expect(existsSync(agentsMd)).toBe(true)
+    expect(readFileSync(agentsMd, 'utf8')).toBe('be a great agent')
+  })
+
+  it('does not write AGENTS.md when system is empty', () => {
+    grokBackend.prepareWorktree?.(dir, '')
+    expect(existsSync(join(dir, 'AGENTS.md'))).toBe(false)
+  })
+})
+
+describe('grokBackend.buildStartArgs', () => {
+  it('cmd ends with "grok"', () => {
+    const { cmd } = grokBackend.buildStartArgs({ sessionId: 'g1', system: '', user: 'task' })
+    expect(cmd.endsWith('grok')).toBe(true)
+  })
+
+  it('args are [userPrompt] — a bare positional prompt', () => {
+    const { args } = grokBackend.buildStartArgs({ sessionId: 'g2', system: '', user: 'do it' })
+    expect(args).toEqual(['do it'])
+  })
+
+  it('args are empty when user prompt is empty', () => {
+    const { args } = grokBackend.buildStartArgs({ sessionId: 'g3', system: '', user: '' })
+    expect(args).toEqual([])
+  })
+
+  it('never emits a permission-bypass flag (grok has none)', () => {
+    const { args } = grokBackend.buildStartArgs({ sessionId: 'g4', system: '', user: 'task' })
+    expect(args.join(' ')).not.toMatch(/skip|dangerously|yolo|bypass/i)
+  })
+})
+
+describe('grokBackend resume / remote-control / handoff', () => {
+  it('buildResumeArgs: hasPriorSession:true → [--session, latest]', () => {
+    const { cmd, args } = grokBackend.buildResumeArgs({
+      sessionId: 'g5',
+      system: '',
+      user: 'task',
+      hasPriorSession: true,
+    })
+    expect(cmd.endsWith('grok')).toBe(true)
+    expect(args).toEqual(['--session', 'latest'])
+  })
+
+  it('buildRemoteControlArgs: hasPriorSession:true → [--session, latest]', () => {
+    const { args } = grokBackend.buildRemoteControlArgs({
+      sessionId: 'g6',
+      system: '',
+      user: 'task',
+      hasPriorSession: true,
+    })
+    expect(args).toEqual(['--session', 'latest'])
+  })
+
+  it('buildResumeArgs: hasPriorSession:false → falls back to the fresh-start shape', () => {
+    const resumed = grokBackend.buildResumeArgs({
+      sessionId: 'g7',
+      system: '',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    const started = grokBackend.buildStartArgs({ sessionId: 'g7', system: '', user: 'task' })
+    expect(resumed).toEqual(started)
+  })
+
+  it('buildRemoteControlArgs: hasPriorSession:false → falls back to the fresh-start shape', () => {
+    const remoted = grokBackend.buildRemoteControlArgs({
+      sessionId: 'g8',
+      system: '',
+      user: 'task',
+      hasPriorSession: false,
+    })
+    const started = grokBackend.buildStartArgs({ sessionId: 'g8', system: '', user: 'task' })
+    expect(remoted).toEqual(started)
+  })
+
+  it('buildHandoffArgs uses the fresh-start shape with the handoff prompt', () => {
+    const { args } = grokBackend.buildHandoffArgs({
+      sessionId: 'g9',
+      system: '',
+      user: 'takeover prompt',
+      hasPriorSession: true,
+    })
+    expect(args).toEqual(['takeover prompt'])
+  })
+})
+
+describe('grokBackend.hasPriorSession', () => {
+  it('always returns true (undocumented session-store format; no cheap disk check)', () => {
+    expect(grokBackend.hasPriorSession?.({ sessionId: 's', cwd: '/tmp/whatever' })).toBe(true)
+  })
+})
+
+describe('grokBackend has no beginStatusTracking', () => {
+  it('beginStatusTracking is undefined — status comes solely from the CLI sentinel', () => {
+    expect(grokBackend.beginStatusTracking).toBeUndefined()
+  })
+})
+
+describe('antigravityBackend has no beginStatusTracking (PTY-driven)', () => {
+  it('beginStatusTracking is undefined', () => {
+    expect(antigravityBackend.beginStatusTracking).toBeUndefined()
   })
 })
 

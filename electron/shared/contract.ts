@@ -14,7 +14,16 @@
 export type SessionStatus =
   'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted' | 'reaped' | 'queued'
 export type TicketSource = 'jira' | 'linear'
-export type BackendKind = 'claude-code' | 'opencode' | 'pi'
+export type BackendKind = 'claude-code' | 'opencode' | 'pi' | 'antigravity' | 'grok'
+/** Runtime-enumerable list mirroring BackendKind — reused for validation
+ *  (e.g. rpc.ts's handoffSession) instead of a hardcoded string check. */
+export const BACKEND_KINDS: readonly BackendKind[] = [
+  'claude-code',
+  'opencode',
+  'pi',
+  'antigravity',
+  'grok',
+]
 export type GitHost = 'github' | 'gitlab'
 
 /** Resolved caller identity. Single-user today ({ id: 'local' }); the seam

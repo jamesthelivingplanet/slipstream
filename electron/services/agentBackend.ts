@@ -32,8 +32,12 @@ import {
 import {
   CLAUDE_BIN,
   OPENCODE_BIN_NAME,
+  ANTIGRAVITY_BIN,
+  GROK_BIN_NAME,
   CLAUDE_FLAGS,
   OPENCODE_FLAGS,
+  ANTIGRAVITY_FLAGS,
+  GROK_FLAGS,
   OPENCODE_STATUS_POLL_MS,
 } from '../shared/agentCli.js'
 
@@ -112,6 +116,11 @@ const OPENCODE_BIN = (() => {
 const PI_BIN = (() => {
   const local = path.join(process.cwd(), 'node_modules', '.bin', 'pi')
   return existsSync(local) ? local : 'pi'
+})()
+
+const GROK_BIN = (() => {
+  const local = path.join(process.cwd(), 'node_modules', '.bin', 'grok')
+  return existsSync(local) ? local : GROK_BIN_NAME
 })()
 
 const PI_STATUS_POLL_MS = 2000
@@ -324,10 +333,115 @@ export const piBackend: AgentBackend = {
   },
 }
 
+function withAntigravityPromptArg(args: string[], prompt: string | null | undefined): string[] {
+  // agy's -i/--prompt-interactive takes the prompt as its argument; omit the
+  // pair entirely rather than pass an empty prompt.
+  return prompt ? [...args, ANTIGRAVITY_FLAGS.promptInteractive, prompt] : args
+}
+
+/** Fresh-start-style antigravity args. System prompt is delivered via
+ *  AGENTS.md (prepareWorktree), so this only ever carries the skip-permissions
+ *  flag plus, when present, the -i/prompt pair. Used both by buildStartArgs
+ *  and by the resume/remote fallback when there's no prior session to continue. */
+function buildAntigravityFreshStart({ system, user }: { system: string; user: string }): SpawnSpec {
+  const { userPrompt } = deliverPrompt('antigravity', { system, user })
+  return {
+    cmd: ANTIGRAVITY_BIN,
+    args: withAntigravityPromptArg([ANTIGRAVITY_FLAGS.skipPermissions], userPrompt),
+  }
+}
+
+export const antigravityBackend: AgentBackend = {
+  kind: 'antigravity',
+  statusSource: 'pty', // a Gemini-CLI-derived scrolling terminal, like Claude Code — not an alternate-screen TUI.
+  prepareWorktree(cwd, system) {
+    // agy auto-discovers AGENTS.md (and GEMINI.md) in the worktree as context;
+    // there is no CLI flag to deliver a system prompt.
+    if (system) writeAgentsMd(cwd, buildAgentsMdContent(system))
+  },
+  buildStartArgs(ctx) {
+    return buildAntigravityFreshStart(ctx)
+  },
+  buildResumeArgs(ctx) {
+    // Remote control is a Claude-only concept (the UI hides the Remote
+    // Control button for non-claude kinds) — this is a plain resume.
+    if (!ctx.hasPriorSession) return buildAntigravityFreshStart(ctx)
+    return {
+      cmd: ANTIGRAVITY_BIN,
+      args: [ANTIGRAVITY_FLAGS.skipPermissions, ANTIGRAVITY_FLAGS.continue],
+    }
+  },
+  buildRemoteControlArgs(ctx) {
+    if (!ctx.hasPriorSession) return buildAntigravityFreshStart(ctx)
+    return {
+      cmd: ANTIGRAVITY_BIN,
+      args: [ANTIGRAVITY_FLAGS.skipPermissions, ANTIGRAVITY_FLAGS.continue],
+    }
+  },
+  buildHandoffArgs(ctx) {
+    return buildAntigravityFreshStart(ctx)
+  },
+  hasPriorSession() {
+    // agy conversations are cwd-scoped and its on-disk store is undocumented,
+    // so there is no cheap disk check available. --continue on an empty
+    // worktree degrades to opening the TUI fresh, which is benign (unlike
+    // claude's --resume, which errors outright on a missing transcript).
+    return true
+  },
+}
+
+/** Fresh-start-style grok args: the user prompt is a bare positional arg in
+ *  interactive mode; the system prompt is delivered via AGENTS.md
+ *  (prepareWorktree), and grok has no permission-bypass flag to pass. Used
+ *  both by buildStartArgs and by the resume/remote fallback when there's no
+ *  prior session to continue. */
+function buildGrokFreshStart({ system, user }: { system: string; user: string }): SpawnSpec {
+  const { userPrompt } = deliverPrompt('grok', { system, user })
+  return { cmd: GROK_BIN, args: userPrompt ? [userPrompt] : [] }
+}
+
+export const grokBackend: AgentBackend = {
+  kind: 'grok',
+  statusSource: 'poll', // a full-screen OpenTUI app — PTY scraping is unreliable.
+  prepareWorktree(cwd, system) {
+    // grok merges AGENTS.md from the git root into its system prompt; there
+    // is no permission config (grok has no bypass flag or documented
+    // permission file — tool execution is trust-based).
+    if (system) writeAgentsMd(cwd, buildAgentsMdContent(system))
+  },
+  buildStartArgs(ctx) {
+    return buildGrokFreshStart(ctx)
+  },
+  buildResumeArgs(ctx) {
+    if (!ctx.hasPriorSession) return buildGrokFreshStart(ctx)
+    return { cmd: GROK_BIN, args: [GROK_FLAGS.session, 'latest'] }
+  },
+  buildRemoteControlArgs(ctx) {
+    if (!ctx.hasPriorSession) return buildGrokFreshStart(ctx)
+    return { cmd: GROK_BIN, args: [GROK_FLAGS.session, 'latest'] }
+  },
+  buildHandoffArgs(ctx) {
+    return buildGrokFreshStart(ctx)
+  },
+  hasPriorSession() {
+    // Same rationale as antigravity: grok's session-store format is
+    // undocumented, so there's no cheap disk check. 'latest' scoping is per
+    // grok's own store, so a degrade-to-fresh-start on an empty worktree is
+    // benign.
+    return true
+  },
+  // No beginStatusTracking: grok's session-store format is undocumented, so
+  // there is no data source to poll. Status is driven exclusively by the
+  // slipstream CLI status.json sentinel, which sessionManager already applies
+  // directly for poll backends that report no signal of their own.
+}
+
 const BACKENDS: Record<BackendKind, AgentBackend> = {
   'claude-code': claudeCodeBackend,
   opencode: opencodeBackend,
   pi: piBackend,
+  antigravity: antigravityBackend,
+  grok: grokBackend,
 }
 
 /** Select the backend for a session's agentKind; defaults to claude-code. */

@@ -174,6 +174,11 @@ export function readTranscriptUsage(
   }
 }
 
+/** Empty (no data yet) usage shape shared by any kind with no reader. */
+function emptyUsage(sessionId: string): SessionUsage {
+  return { sessionId, exists: false, tokens: { ...ZERO_TOKENS }, costUsd: 0, turns: 0 }
+}
+
 /**
  * Dispatch to the right per-backend usage reader based on `session.agentKind`
  * (defaults to 'claude-code' for legacy sessions with no recorded kind), so
@@ -190,13 +195,18 @@ export function readSessionUsage(
   } = {},
 ): SessionUsage {
   const kind = session.agentKind ?? 'claude-code'
-  if (kind === 'opencode') {
-    return readOpencodeUsage(session.id, session.opencodeSid, opts.opencodeRoot)
+  switch (kind) {
+    case 'claude-code':
+      return readTranscriptUsage(session.id, opts.projectsDir)
+    case 'opencode':
+      return readOpencodeUsage(session.id, session.opencodeSid, opts.opencodeRoot)
+    case 'pi':
+      return readPiUsage(session.id, opts.cwd ?? null, opts.piRoot)
+    default:
+      // 'antigravity' / 'grok': no documented on-disk usage format yet — a
+      // reader can be added later, same shape as the others once it exists.
+      return emptyUsage(session.id)
   }
-  if (kind === 'pi') {
-    return readPiUsage(session.id, opts.cwd ?? null, opts.piRoot)
-  }
-  return readTranscriptUsage(session.id, opts.projectsDir)
 }
 
 /**

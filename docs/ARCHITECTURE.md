@@ -82,9 +82,19 @@ A session's `status` has **three producers**, merged in `sessionManager.ts`:
    except presentation (push titles). The same watcher tails `events.ndjson` for
    checkpoint/artifact/approval events (`agentEvent` event, persisted via migration 5's
    `session_agent_events`; replay after a daemon restart is deduped by INSERT OR IGNORE).
-3. **Poll-driven backends** (opencode/pi, `statusSource !== 'pty'`) — `beginStatusTracking`
+3. **Poll-driven backends** (opencode/pi/grok, `statusSource !== 'pty'`) — `beginStatusTracking`
    sets status from the backend's own API/session file; the detector is bypassed because
-   full-screen TUI redraws make PTY scraping unreliable.
+   full-screen TUI redraws make PTY scraping unreliable. grok has no documented on-disk
+   session-store format to poll, so it omits `beginStatusTracking` entirely and relies solely
+   on producer #2 (the CLI sentinel, applied directly for non-pty backends regardless of
+   whether they poll). antigravity (`agy`) is a Gemini-CLI-derived scrolling terminal like
+   Claude Code, not an alternate-screen TUI, so it uses PTY heuristics (`statusSource: 'pty'`,
+   producer #1) instead.
+
+Both antigravity and grok deliver the system prompt via a worktree `AGENTS.md` (same mechanism
+as opencode — `prepareWorktree` writes it, the CLI auto-discovers it), and neither has a
+documented on-disk usage/cost format, so `usage.ts`'s `readSessionUsage` returns
+`exists: false` for them (a reader can be added later, same as `opencodeUsage.ts`/`piUsage.ts`).
 
 Two properties every **consumer** of the `status` event must respect:
 
