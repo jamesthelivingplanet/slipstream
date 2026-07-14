@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { TouchScrollTracker, momentumStep } from './touchScroll.js'
+import { TouchScrollTracker, momentumStep, touchScrollRoute } from './touchScroll.js'
 
 const CELL = 16 // px per row used across these tests
 
@@ -140,5 +140,26 @@ describe('momentumStep', () => {
   it('preserves the sign of velocity while decaying', () => {
     const result = momentumStep(-0.05, 16, 0)
     expect(result.velocity).toBeLessThan(0)
+  })
+})
+
+describe('touchScrollRoute', () => {
+  it('routes to native scrolling with no mouse tracking on the normal buffer', () => {
+    expect(touchScrollRoute('none', 'normal')).toBe('native')
+  })
+
+  it('routes to wheel with no mouse tracking on the alternate buffer', () => {
+    expect(touchScrollRoute('none', 'alternate')).toBe('wheel')
+  })
+
+  it.each(['x10', 'vt200', 'drag', 'any'] as const)(
+    'routes to wheel on the normal buffer when mouse tracking mode is %s',
+    (mode) => {
+      expect(touchScrollRoute(mode, 'normal')).toBe('wheel')
+    },
+  )
+
+  it('routes to wheel when both mouse tracking and the alternate buffer are active', () => {
+    expect(touchScrollRoute('any', 'alternate')).toBe('wheel')
   })
 })
