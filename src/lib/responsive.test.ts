@@ -7,6 +7,7 @@ import {
   shouldDismissDrawer,
   keyboardInset,
   KEYBOARD_MIN_INSET,
+  KEYBOARD_MAX_INSET_RATIO,
 } from './responsive.js'
 
 describe('responsive', () => {
@@ -71,40 +72,48 @@ describe('drawer dismiss', () => {
 })
 
 describe('keyboardInset', () => {
+  it('returns 0 when no editable element is focused, regardless of shortfall', () => {
+    expect(keyboardInset(800, 450, 0, false)).toBe(0)
+    expect(keyboardInset(800, 400, 100, false)).toBe(0)
+  })
+
   it('returns 0 when the visual viewport matches the window', () => {
-    expect(keyboardInset(800, 800, 0)).toBe(0)
+    expect(keyboardInset(800, 800, 0, true)).toBe(0)
   })
 
   it('returns 0 for a shortfall below the threshold (URL-bar chrome)', () => {
-    expect(keyboardInset(800, 740, 0)).toBe(0)
+    expect(keyboardInset(800, 740, 0, true)).toBe(0)
   })
 
   it('returns 0 right at one below the threshold', () => {
-    expect(keyboardInset(800, 800 - (KEYBOARD_MIN_INSET - 1), 0)).toBe(0)
+    expect(keyboardInset(800, 800 - (KEYBOARD_MIN_INSET - 1), 0, true)).toBe(0)
   })
 
   it('returns the inset for a keyboard-sized shortfall', () => {
-    expect(keyboardInset(800, 450, 0)).toBe(350)
+    expect(keyboardInset(800, 450, 0, true)).toBe(350)
   })
 
   it('returns the inset right at the threshold', () => {
-    expect(keyboardInset(800, 800 - KEYBOARD_MIN_INSET, 0)).toBe(KEYBOARD_MIN_INSET)
+    expect(keyboardInset(800, 800 - KEYBOARD_MIN_INSET, 0, true)).toBe(KEYBOARD_MIN_INSET)
   })
 
-  it('accounts for offsetTop (iOS scrolls the visual viewport)', () => {
-    expect(keyboardInset(800, 450, 350)).toBe(0)
+  it('accounts for offsetTop (the browser panned the visual viewport)', () => {
+    expect(keyboardInset(800, 450, 350, true)).toBe(0)
   })
 
   it('is never negative', () => {
-    expect(keyboardInset(800, 900, 0)).toBe(0)
-    expect(keyboardInset(800, 800, 100)).toBe(0)
+    expect(keyboardInset(800, 900, 0, true)).toBe(0)
+    expect(keyboardInset(800, 800, 100, true)).toBe(0)
   })
 
-  it('reports 0 while pinch-zoomed', () => {
-    expect(keyboardInset(800, 400, 0, 2)).toBe(0)
+  it('honors the shortfall while pinch-zoomed when an editable is focused', () => {
+    // scale 2 halves vv.height; the padding still lands the bars at the
+    // visual bottom, so the inset is honored (clamped below).
+    expect(keyboardInset(800, 400, 0, true)).toBe(400)
   })
 
-  it('still reports an inset at explicit scale 1', () => {
-    expect(keyboardInset(800, 450, 0, 1)).toBe(350)
+  it('clamps extreme shortfalls to KEYBOARD_MAX_INSET_RATIO of the viewport', () => {
+    expect(keyboardInset(800, 100, 0, true)).toBe(Math.round(800 * KEYBOARD_MAX_INSET_RATIO))
+    expect(KEYBOARD_MAX_INSET_RATIO).toBe(0.6)
   })
 })
