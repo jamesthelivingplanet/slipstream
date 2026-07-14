@@ -491,14 +491,17 @@ export async function startAgent(
 /** FLO-95 batch flow: launch agents for every ticket whose repo hint matches a
  *  registered repo, without stealing selection/closing dialogs per ticket. The
  *  backend scheduler queues starts beyond the concurrency cap and drains them. */
-export async function startAgentsFromTickets(ts: Ticket[]): Promise<number> {
+export async function startAgentsFromTickets(
+  ts: Ticket[],
+  agentKind: BackendKind = 'claude-code',
+): Promise<number> {
   let started = 0
   for (const t of ts) {
     const repo = repoById(t.repo)
     if (!repo) continue
     const prompt = `Begin implementing ${t.tid}.`
-    const id = createAgentFromTicket(t, prompt, 'claude-code', { select: false })
-    await startAgent(id, repo.id, prompt, 'claude-code')
+    const id = createAgentFromTicket(t, prompt, agentKind, { select: false })
+    await startAgent(id, repo.id, prompt, agentKind)
     started++
   }
   return started

@@ -77,6 +77,9 @@ export const AGENT_LABELS: Record<BackendKind, string> = {
   'claude-code': 'Claude Code',
   opencode: 'OpenCode',
   pi: 'Pi',
+  antigravity: 'Antigravity',
+  grok: 'Grok',
+  kilo: 'Kilo Code',
 }
 
 export interface HandoffContext {
@@ -129,6 +132,11 @@ export function deliverPrompt(kind: BackendKind, layers: PromptLayers): SpawnPro
       return { systemArgs: [], userPrompt: user }
 
     case 'opencode':
+    case 'antigravity':
+    case 'grok':
+    case 'kilo':
+      // All four deliver the system prompt via AGENTS.md (auto-discovered by
+      // the CLI itself), so the CLI invocation only ever carries the user prompt.
       return { systemArgs: [], userPrompt: user }
 
     default:

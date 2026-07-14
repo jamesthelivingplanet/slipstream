@@ -20,14 +20,35 @@ export const AGENTS: AgentOption[] = [
   {
     kind: 'opencode',
     label: 'OpenCode',
-    description: 'Uses opencode in a git worktree with auto-discovered AGENTS.md.',
+    description:
+      'Uses opencode in a git worktree with auto-discovered AGENTS.md and permissions set to allow.',
     icon: '/icons/agents/opencode.svg',
   },
   {
     kind: 'pi',
     label: 'Pi',
-    description: 'Uses pi --approve in a git worktree with auto-discovered AGENTS.md.',
+    description: 'Uses pi --approve in a git worktree with an appended system prompt.',
     icon: '/icons/agents/pi.svg',
+  },
+  {
+    kind: 'antigravity',
+    label: 'Antigravity',
+    description:
+      'Uses agy --dangerously-skip-permissions in a git worktree with auto-discovered AGENTS.md.',
+    icon: '/icons/agents/antigravity.svg',
+  },
+  {
+    kind: 'grok',
+    label: 'Grok',
+    description: 'Uses grok in a git worktree with auto-discovered AGENTS.md.',
+    icon: '/icons/agents/grok.svg',
+  },
+  {
+    kind: 'kilo',
+    label: 'Kilo Code',
+    description:
+      'Uses kilo in a git worktree with auto-discovered AGENTS.md and permissions set to allow.',
+    icon: '/icons/agents/kilo.svg',
   },
 ]
 

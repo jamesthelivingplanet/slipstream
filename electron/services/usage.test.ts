@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readTranscriptUsage, buildUsageSummary, familyForModel } from './usage.js'
+import {
+  readTranscriptUsage,
+  readSessionUsage,
+  buildUsageSummary,
+  familyForModel,
+} from './usage.js'
 import type { SessionDTO } from '../shared/contract.js'
 
 let projectsDir: string
@@ -204,7 +209,7 @@ function dto(id: string, repoId: string, createdAt: number): SessionDTO {
 
 describe('buildUsageSummary', () => {
   it('skips sessions whose transcript does not exist', () => {
-    const summary = buildUsageSummary([dto('no-file', 'repo-1', 0)], projectsDir)
+    const summary = buildUsageSummary([dto('no-file', 'repo-1', 0)], { projectsDir })
     expect(summary.sessions).toHaveLength(0)
     expect(summary.byRepo).toHaveLength(0)
     expect(summary.costUsd).toBe(0)
@@ -227,7 +232,7 @@ describe('buildUsageSummary', () => {
 
     const summary = buildUsageSummary(
       [dto('s1', 'repo-1', day1), dto('s2', 'repo-1', day1), dto('s3', 'repo-2', day2)],
-      projectsDir,
+      { projectsDir },
     )
 
     // totals
@@ -254,8 +259,73 @@ describe('buildUsageSummary', () => {
       JSON.stringify({ type: 'last-prompt', sessionId: 's-empty' }),
       JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }),
     ])
-    const summary = buildUsageSummary([dto('s-empty', 'repo-1', 0)], projectsDir)
+    const summary = buildUsageSummary([dto('s-empty', 'repo-1', 0)], { projectsDir })
     expect(summary.sessions).toHaveLength(0)
     expect(summary.costUsd).toBe(0)
+  })
+})
+
+// ─── readSessionUsage dispatch ──────────────────────────────────────────────
+
+describe('readSessionUsage', () => {
+  it('dispatches claude-code (and undefined agentKind) sessions to readTranscriptUsage', () => {
+    const id = 'sess-dispatch-claude'
+    writeTranscript('proj-a', id, [assistantTurn({ input: 5, output: 2 })])
+    const s = dto(id, 'repo-1', 0)
+
+    const withKind = readSessionUsage({ ...s, agentKind: 'claude-code' }, { projectsDir })
+    expect(withKind.exists).toBe(true)
+    expect(withKind.tokens.input).toBe(5)
+
+    const withoutKind = readSessionUsage(s, { projectsDir })
+    expect(withoutKind.exists).toBe(true)
+    expect(withoutKind.tokens.input).toBe(5)
+  })
+
+  it('dispatches opencode sessions without hitting the claude-code transcript reader', () => {
+    const s = dto('sess-dispatch-oc', 'repo-1', 0)
+    const usage = readSessionUsage(
+      { ...s, agentKind: 'opencode', opencodeSid: 'ses_missing' },
+      { projectsDir, opencodeRoot: join(projectsDir, 'oc-storage') },
+    )
+    expect(usage.exists).toBe(false)
+    expect(usage.sessionId).toBe('sess-dispatch-oc')
+  })
+
+  it('dispatches pi sessions without hitting the claude-code transcript reader', () => {
+    const s = dto('sess-dispatch-pi', 'repo-1', 0)
+    const usage = readSessionUsage(
+      { ...s, agentKind: 'pi' },
+      { projectsDir, cwd: '/nonexistent/cwd', piRoot: join(projectsDir, 'pi-storage') },
+    )
+    expect(usage.exists).toBe(false)
+    expect(usage.sessionId).toBe('sess-dispatch-pi')
+  })
+
+  it('antigravity/grok sessions return exists:false with zeroed usage — even when a Claude transcript exists for the same id (no reader yet, no fallthrough)', () => {
+    const idAgy = 'sess-dispatch-antigravity'
+    writeTranscript('proj-a', idAgy, [assistantTurn({ input: 99, output: 99 })])
+    const agyUsage = readSessionUsage(
+      { ...dto(idAgy, 'repo-1', 0), agentKind: 'antigravity' },
+      {
+        projectsDir,
+      },
+    )
+    expect(agyUsage.exists).toBe(false)
+    expect(agyUsage.tokens).toEqual({ input: 0, output: 0, cacheCreation: 0, cacheRead: 0 })
+    expect(agyUsage.costUsd).toBe(0)
+    expect(agyUsage.turns).toBe(0)
+    expect(agyUsage.sessionId).toBe(idAgy)
+
+    const idGrok = 'sess-dispatch-grok'
+    writeTranscript('proj-a', idGrok, [assistantTurn({ input: 99, output: 99 })])
+    const grokUsage = readSessionUsage(
+      { ...dto(idGrok, 'repo-1', 0), agentKind: 'grok' },
+      {
+        projectsDir,
+      },
+    )
+    expect(grokUsage.exists).toBe(false)
+    expect(grokUsage.sessionId).toBe(idGrok)
   })
 })

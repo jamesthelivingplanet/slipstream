@@ -21,13 +21,14 @@
   import { extractAsk, formatWait } from '../missionControl'
   import { formatCost, formatTokens, dayKeyFromMs } from '../../../electron/shared/usageFormat.js'
   import { pushToast } from '../toast'
-  import type { Session, Ticket } from '../types'
+  import type { Session, Ticket, BackendKind } from '../types'
   import type {
     UsageSummary,
     SessionUsage,
     PrStatusDTO,
   } from '../../../electron/shared/contract.js'
   import Streamlines from './Streamlines.svelte'
+  import AgentSelector from './AgentSelector.svelte'
 
   // Ticks every 30s so "waiting Xm" labels stay fresh without a full re-render trigger.
   let now = Date.now()
@@ -194,10 +195,12 @@
   }
 
   /** Mirrors NewAgentDialog's ticket → prompt convention so launching from here
-   *  is equivalent to picking the ticket in the New Agent dialog. */
+   *  is equivalent to picking the ticket in the New Agent dialog. The agent
+   *  used is whatever's selected in the quick-launch picker (launchAgent). */
+  let launchAgent: BackendKind = 'claude-code'
   function launch(t: Ticket) {
     const prompt = `Begin implementing ${t.tid}.`
-    createAgentFromTicket(t, prompt, 'claude-code')
+    createAgentFromTicket(t, prompt, launchAgent)
   }
 
   // FLO-95: batch-launch every ticket whose repo hint resolves to a registered
@@ -209,7 +212,7 @@
     if (launchingAll) return
     launchingAll = true
     try {
-      const n = await startAgentsFromTickets(launchableTickets)
+      const n = await startAgentsFromTickets(launchableTickets, launchAgent)
       if (n > 0) {
         pushToast('success', `Launched ${n} agents — excess starts queue`)
       }
@@ -340,6 +343,13 @@
         <section>
           <div class="eyebrow">
             Ready to launch <span class="cnt">{$tickets.length}</span>
+            <div class="quick-agent">
+              <AgentSelector
+                value={launchAgent}
+                label="Quick-launch agent"
+                on:select={(e) => (launchAgent = e.detail)}
+              />
+            </div>
             {#if launchableTickets.length >= 2}
               <button
                 type="button"
@@ -501,6 +511,39 @@
     text-transform: none;
     letter-spacing: normal;
     font-weight: 550;
+  }
+
+  /* Quick-launch agent picker — reuses AgentSelector but compressed to fit
+   * inline in the eyebrow header row instead of its usual card-grid size. */
+  .quick-agent {
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  .quick-agent :global(.agent-grid) {
+    /* Flex + wrap (rather than a fixed column count) so a growing agent list
+     * (now 5) stays on one row when there's room and wraps cleanly when there
+     * isn't, instead of overflowing or leaving ragged empty grid cells. */
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .quick-agent :global(.agent-card) {
+    flex-direction: row;
+    padding: 3px 8px;
+    gap: 5px;
+    font-size: 11px;
+  }
+  .quick-agent :global(.agent-card-icon) {
+    width: 15px;
+    height: 15px;
+  }
+  .quick-agent :global(.agent-card-check) {
+    display: none;
+  }
+  .quick-agent :global(.agent-select select) {
+    height: 28px;
+    font-size: 11.5px;
+    padding: 0 26px 0 8px;
   }
 
   /* needs-you cards */

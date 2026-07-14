@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { IpcDeps } from '../ipc.js'
-import { IPC } from '../shared/contract.js'
+import { IPC, BACKEND_KINDS } from '../shared/contract.js'
 import type {
   BackendKind,
   RepoDTO,
@@ -27,14 +27,15 @@ import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../shared/p
 import { LOCAL_IDENTITY } from './auth.js'
 import { agentSessionEnv } from '../services/agentCliProvision.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
+import { usesEmbeddedServer, KILO_BIN } from '../services/agentBackend.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
 import { launchSession } from '../services/sessionLauncher.js'
 import type { LaunchRequest } from '../services/sessionLauncher.js'
 import { readSchedulerPolicy, writeSchedulerPolicy } from '../services/sessionScheduler.js'
 import { checkSlipstreamCli, lastCliActivity } from '../services/cliHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
-import { findOnPath, binForKind } from '../services/cliProbe.js'
-import { readTranscriptUsage, buildUsageSummary } from '../services/usage.js'
+import { findAgentCli, binForKind } from '../services/cliProbe.js'
+import { readSessionUsage, buildUsageSummary } from '../services/usage.js'
 import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
 
 function parseCsv(raw: string | undefined): string[] {
@@ -188,6 +189,25 @@ export function createRpc(
   if (coord) coord.on('change', onLockChange)
 
   async function handle(channel: string, args: unknown[]): Promise<unknown> {
+    // Resolves a session's worktree cwd (needed for pi's usage reader, which
+    // is keyed on cwd rather than a captured transcript/session id). Fresh
+    // per-call repo cache so a batch (usageSummary/listSessionHistory) only
+    // resolves each repo once. Never throws — usage reads must not fail a
+    // listing just because a repo/worktree can't be resolved right now.
+    const repoCache = new Map<string, RepoDTO>()
+    async function cwdForSession(s: SessionDTO): Promise<string | null> {
+      try {
+        let repo = repoCache.get(s.repoId)
+        if (!repo) {
+          repo = await deps.repos.resolvePath(s.repoId)
+          repoCache.set(s.repoId, repo)
+        }
+        return deps.worktrees.pathFor(repo, s.branch)
+      } catch {
+        return null
+      }
+    }
+
     switch (channel) {
       case IPC.listRepos:
         return (await deps.repos.list()).filter(ownedByCaller)
@@ -379,9 +399,9 @@ export function createRpc(
           port = undefined
         }
         let opencodePort: number | undefined
-        if (persisted.agentKind === 'opencode') {
+        if (usesEmbeddedServer(persisted.agentKind)) {
           try {
-            opencodePort = await deps.ports.claim(cwd, 'opencode')
+            opencodePort = await deps.ports.claim(cwd, persisted.agentKind ?? 'claude-code')
           } catch {
             opencodePort = undefined
           }
@@ -418,9 +438,9 @@ export function createRpc(
           port = undefined
         }
         let opencodePort: number | undefined
-        if (persisted.agentKind === 'opencode') {
+        if (usesEmbeddedServer(persisted.agentKind)) {
           try {
-            opencodePort = await deps.ports.claim(cwd, 'opencode')
+            opencodePort = await deps.ports.claim(cwd, persisted.agentKind ?? 'claude-code')
           } catch {
             opencodePort = undefined
           }
@@ -444,7 +464,7 @@ export function createRpc(
       case IPC.handoffSession: {
         const id = args[0] as string
         const agentKind = args[1] as BackendKind
-        if (agentKind !== 'claude-code' && agentKind !== 'opencode' && agentKind !== 'pi')
+        if (!BACKEND_KINDS.includes(agentKind))
           throw new Error(`Unknown agent kind: ${String(agentKind)}`)
         const persisted = ownedSession(id)
         if (!persisted) throw new Error(`Session not found: ${id}`)
@@ -463,9 +483,9 @@ export function createRpc(
           port = undefined
         }
         let opencodePort: number | undefined
-        if (agentKind === 'opencode') {
+        if (usesEmbeddedServer(agentKind)) {
           try {
-            opencodePort = await deps.ports.claim(cwd, 'opencode')
+            opencodePort = await deps.ports.claim(cwd, agentKind)
           } catch {
             opencodePort = undefined
           }
@@ -493,10 +513,14 @@ export function createRpc(
           agentKind,
           handoffPrompt,
         })
-        // Same async sid capture as sessionLauncher.ts: opencode's session id only
-        // exists after the TUI boots; status polling starts once it's known.
-        if (agentKind === 'opencode') {
-          void captureOpencodeSessionId({ cwd }).then((sid) => {
+        // Same async sid capture as sessionLauncher.ts: the embedded-server
+        // session id only exists after the TUI boots; status polling starts
+        // once it's known.
+        if (usesEmbeddedServer(agentKind)) {
+          void captureOpencodeSessionId({
+            cwd,
+            bin: agentKind === 'kilo' ? KILO_BIN : undefined,
+          }).then((sid) => {
             if (!sid) return
             deps.sessions.setOpencodeSid(id, sid)
             const cur = deps.sessionStore.get(id)
@@ -787,7 +811,7 @@ export function createRpc(
       case IPC.checkAgentCli: {
         const kind = args[0] as BackendKind
         const bin = binForKind(kind)
-        const found = findOnPath(bin)
+        const found = findAgentCli(kind)
         return { kind, bin, found: found !== null, path: found ?? undefined }
       }
 
@@ -795,13 +819,23 @@ export function createRpc(
         const id = args[0] as string
         // Owner-scoped: a missing OR other-owner session surfaces the same
         // "not found" so usage can't leak across owners.
-        if (!ownedSession(id)) throw new Error(`Session not found: ${id}`)
-        return readTranscriptUsage(id)
+        const session = ownedSession(id)
+        if (!session) throw new Error(`Session not found: ${id}`)
+        const cwd = session.agentKind === 'pi' ? await cwdForSession(session) : null
+        return readSessionUsage(session, { cwd })
       }
 
       case IPC.usageSummary: {
         const list = deps.sessionStore.list().filter(ownedByCaller)
-        return buildUsageSummary(list)
+        const cwds = new Map<string, string | null>()
+        await Promise.all(
+          list
+            .filter((s) => s.agentKind === 'pi')
+            .map(async (s) => {
+              cwds.set(s.id, await cwdForSession(s))
+            }),
+        )
+        return buildUsageSummary(list, { cwdFor: (s) => cwds.get(s.id) ?? null })
       }
 
       case IPC.listPromptTemplates: {
@@ -867,10 +901,18 @@ export function createRpc(
       case IPC.listSessionHistory: {
         const sessions = deps.sessionStore.list().filter(ownedByCaller)
         sessions.sort((a, b) => b.createdAt - a.createdAt)
+        const piCwds = new Map<string, string | null>()
+        await Promise.all(
+          sessions
+            .filter((s) => s.agentKind === 'pi')
+            .map(async (s) => {
+              piCwds.set(s.id, await cwdForSession(s))
+            }),
+        )
         const entries: SessionHistoryEntry[] = []
         for (const session of sessions) {
           const outcome = await resolveOutcome(session.id)
-          const rawUsage = readTranscriptUsage(session.id)
+          const rawUsage = readSessionUsage(session, { cwd: piCwds.get(session.id) ?? null })
           const usage = !rawUsage.exists || rawUsage.turns === 0 ? null : rawUsage
           entries.push({ session, outcome, usage })
         }

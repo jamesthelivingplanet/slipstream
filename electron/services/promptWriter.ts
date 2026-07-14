@@ -66,6 +66,68 @@ export function writeSlipstreamSkill(worktreePath: string): void {
 }
 
 /**
+ * Write `opencode.json` at the worktree root with `permission: "allow"` so
+ * OpenCode runs don't stall on interactive permission prompts (OpenCode has
+ * no `--yolo`-style CLI flag; config is the only supported bypass mechanism —
+ * unlike Claude's `--dangerously-skip-permissions` / pi's `--approve`).
+ *
+ * Only writes when no `opencode.json` already exists at the worktree root — a
+ * repo may track its own config, and overwriting it would dirty the worktree
+ * and block cleanup, the same worktree-cleanliness hazard as writeAgentsMd's
+ * FLO-36 note. When (and only when) we create the file, it's added to
+ * `.git/info/exclude` so the worktree stays clean. Best-effort: any failure
+ * is swallowed so a config-write problem never breaks agent launch.
+ */
+export function writeOpencodeConfig(worktreePath: string): void {
+  try {
+    const configPath = path.join(worktreePath, 'opencode.json')
+    if (fs.existsSync(configPath)) return
+    const content = `${JSON.stringify(
+      { $schema: 'https://opencode.ai/config.json', permission: 'allow' },
+      null,
+      2,
+    )}\n`
+    fs.writeFileSync(configPath, content, 'utf8')
+    ensureIgnored(worktreePath, 'opencode.json')
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Write `kilo.jsonc` at the worktree root with `permission: { "*": "allow" }`
+ * so Kilo Code TUI runs don't stall on interactive permission prompts — Kilo
+ * (an opencode fork) has no CLI bypass flag for the TUI (`--dangerously-skip-
+ * permissions`/`--auto` are `kilo run`-only, i.e. headless); config is the
+ * only supported mechanism, mirroring writeOpencodeConfig.
+ *
+ * Only writes when NEITHER `kilo.jsonc` NOR `.kilo/kilo.jsonc` already exists
+ * at the worktree root — a repo may track its own config, and `.kilo/
+ * kilo.jsonc` takes priority over the root file per Kilo's own docs, so its
+ * mere presence also means skip. Overwriting either would dirty the worktree
+ * and block cleanup, the same worktree-cleanliness hazard as writeAgentsMd's
+ * FLO-36 note. When (and only when) we create the file, it's added to
+ * `.git/info/exclude` so the worktree stays clean. Best-effort: any failure
+ * is swallowed so a config-write problem never breaks agent launch.
+ */
+export function writeKiloConfig(worktreePath: string): void {
+  try {
+    const configPath = path.join(worktreePath, 'kilo.jsonc')
+    const nestedConfigPath = path.join(worktreePath, '.kilo', 'kilo.jsonc')
+    if (fs.existsSync(configPath) || fs.existsSync(nestedConfigPath)) return
+    const content = `${JSON.stringify(
+      { $schema: 'https://app.kilo.ai/config.json', permission: { '*': 'allow' } },
+      null,
+      2,
+    )}\n`
+    fs.writeFileSync(configPath, content, 'utf8')
+    ensureIgnored(worktreePath, 'kilo.jsonc')
+  } catch {
+    // best-effort
+  }
+}
+
+/**
  * Resolve the path to a working tree's `.git/info/exclude`. Uses
  * `git rev-parse --git-path` so it's correct for both a plain checkout and a
  * linked worktree (where the exclude file lives in the shared common dir).

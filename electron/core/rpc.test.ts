@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRpc } from './rpc.js'
 import type { IpcDeps } from '../ipc.js'
-import { IPC } from '../shared/contract.js'
+import { IPC, BACKEND_KINDS } from '../shared/contract.js'
 import type {
   RepoDTO,
   SessionDTO,
@@ -29,6 +29,7 @@ import type { IPushService } from '../services/pushService.js'
 import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import type { IWriteCoordinator } from '../services/writeCoordinator.js'
 import type { ISessionScheduler } from '../services/sessionScheduler.js'
+import { piSessionDirFor } from '../services/piSessions.js'
 
 // ── Fake deps ─────────────────────────────────────────────────────────────────
 
@@ -446,6 +447,74 @@ describe('createRpc', () => {
       expect(result.byRepo.map((b) => b.key)).toEqual(['r2', 'r1'])
       expect(result.byDay.map((b) => b.key)).toEqual(['2026-07-02', '2026-07-01'])
       expect(result.sessions).toHaveLength(2)
+    })
+  })
+
+  describe('usage (pi backend, cwd-based, FLO-94 parity)', () => {
+    let piRoot: string
+    let prevPiSessionDir: string | undefined
+
+    function writePiTurn(cwd: string, opts: { input?: number; output?: number } = {}): void {
+      const dir = piSessionDirFor(cwd, piRoot)
+      fs.mkdirSync(dir, { recursive: true })
+      const line = JSON.stringify({
+        message: {
+          role: 'assistant',
+          model: 'claude-sonnet-5',
+          usage: {
+            input: opts.input ?? 0,
+            output: opts.output ?? 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            reasoning: 0,
+            cost: { total: 0.01 },
+          },
+        },
+      })
+      fs.writeFileSync(path.join(dir, 'run1.jsonl'), line)
+    }
+
+    beforeEach(() => {
+      piRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-rpc-pi-usage-'))
+      prevPiSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR
+      process.env.PI_CODING_AGENT_SESSION_DIR = piRoot
+    })
+
+    afterEach(() => {
+      if (prevPiSessionDir === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR
+      else process.env.PI_CODING_AGENT_SESSION_DIR = prevPiSessionDir
+      fs.rmSync(piRoot, { recursive: true, force: true })
+    })
+
+    it('sessionUsage resolves cwd via repos/worktrees and reads pi usage', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'pi-1', repoId: 'r1', agentKind: 'pi' }))
+      const cwd = deps.worktrees.pathFor(makeRepo(), 't-1-fix-bug') // matches the mocked pathFor return
+      writePiTurn(cwd, { input: 10, output: 5 })
+
+      const result = (await rpc.handle(IPC.sessionUsage, ['pi-1'])) as {
+        exists: boolean
+        turns: number
+      }
+      expect(deps.repos.resolvePath).toHaveBeenCalledWith('r1')
+      expect(result.exists).toBe(true)
+      expect(result.turns).toBe(1)
+    })
+
+    it('sessionUsage for a claude-code session never resolves a cwd', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', repoId: 'r1', agentKind: 'claude-code' }))
+      await rpc.handle(IPC.sessionUsage, ['s1'])
+      expect(deps.repos.resolvePath).not.toHaveBeenCalled()
+    })
+
+    it('usageSummary includes pi sessions using their resolved cwd', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'pi-1', repoId: 'r1', agentKind: 'pi' }))
+      const cwd = deps.worktrees.pathFor(makeRepo(), 't-1-fix-bug')
+      writePiTurn(cwd, { input: 10, output: 5 })
+
+      const result = (await rpc.handle(IPC.usageSummary, [])) as {
+        sessions: { sessionId: string }[]
+      }
+      expect(result.sessions.map((s) => s.sessionId)).toContain('pi-1')
     })
   })
 
@@ -885,6 +954,48 @@ describe('createRpc', () => {
         'Unknown agent kind: bogus',
       )
       expect(deps.sessions.handoff).not.toHaveBeenCalled()
+    })
+
+    it('accepts "antigravity" and "grok" as handoff targets (BACKEND_KINDS parity)', async () => {
+      expect(BACKEND_KINDS).toContain('antigravity')
+      expect(BACKEND_KINDS).toContain('grok')
+
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      await rpc.handle(IPC.handoffSession, ['s1', 'antigravity'])
+      expect(deps.sessions.handoff).toHaveBeenCalledWith(
+        expect.objectContaining({ agentKind: 'antigravity' }),
+      )
+
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      await rpc.handle(IPC.handoffSession, ['s1', 'grok'])
+      expect(deps.sessions.handoff).toHaveBeenCalledWith(
+        expect.objectContaining({ agentKind: 'grok' }),
+      )
+    })
+
+    it('accepts "kilo" as a handoff target and claims a "kilo"-named embedded-server port', async () => {
+      expect(BACKEND_KINDS).toContain('kilo')
+
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      await rpc.handle(IPC.handoffSession, ['s1', 'kilo'])
+
+      expect(deps.sessions.handoff).toHaveBeenCalledWith(
+        expect.objectContaining({ agentKind: 'kilo' }),
+      )
+      // opencode/kilo are the only backends that claim an embedded-server
+      // port (usesEmbeddedServer) — the port broker sees a 'kilo'-named claim
+      // in addition to the always-present 'web' claim.
+      expect(deps.ports.claim).toHaveBeenCalledWith(expect.any(String), 'kilo')
+    })
+
+    it('does not claim an embedded-server port when handing off to a non-embedded-server backend', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      vi.mocked(deps.ports.claim).mockClear()
+
+      await rpc.handle(IPC.handoffSession, ['s1', 'pi'])
+
+      expect(deps.ports.claim).not.toHaveBeenCalledWith(expect.any(String), 'kilo')
+      expect(deps.ports.claim).not.toHaveBeenCalledWith(expect.any(String), 'opencode')
     })
   })
 
