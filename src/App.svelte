@@ -109,17 +109,50 @@
     window.addEventListener('resize', checkViewport)
     window.addEventListener('orientationchange', checkViewport)
 
-    // Track the on-screen keyboard via visualViewport so the bottom bars
-    // (mobile composer + .term-actions) can shift up above it.
+    // Track the on-screen keyboard so the bottom bars (mobile composer +
+    // .term-actions) can shift up above it. The keyboard only exists while an
+    // editable element is focused, so focus is the gate (see keyboardInset);
+    // the visualViewport numbers size the inset. Recompute on a settle delay
+    // after focus changes too: the keyboard animates for ~250ms, iOS fires
+    // focus before the viewport settles, standalone PWAs sometimes drop the
+    // visualViewport events outright — and on focusout the delay also keeps
+    // the bars in place long enough for a tap that dismisses the keyboard to
+    // land on the button it aimed at.
     const vv = window.visualViewport
-    const onVv = () => {
+    let editableFocused = false
+    let settleTimer: ReturnType<typeof setTimeout> | undefined
+    const recomputeInset = () => {
       if (!vv) return
-      keyboardInset.set(computeKeyboardInset(window.innerHeight, vv.height, vv.offsetTop, vv.scale))
+      keyboardInset.set(
+        computeKeyboardInset(window.innerHeight, vv.height, vv.offsetTop, editableFocused),
+      )
     }
+    const settleInset = () => {
+      clearTimeout(settleTimer)
+      settleTimer = setTimeout(recomputeInset, 300)
+    }
+    const isEditable = (t: EventTarget | null) =>
+      t instanceof HTMLElement &&
+      (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+    const onFocusIn = (e: FocusEvent) => {
+      if (!isEditable(e.target)) return
+      editableFocused = true
+      recomputeInset()
+      settleInset()
+    }
+    const onFocusOut = (e: FocusEvent) => {
+      if (!isEditable(e.target)) return
+      editableFocused = false
+      settleInset()
+    }
+    window.addEventListener('focusin', onFocusIn)
+    window.addEventListener('focusout', onFocusOut)
+    window.addEventListener('resize', recomputeInset)
     if (vv) {
-      vv.addEventListener('resize', onVv)
-      vv.addEventListener('scroll', onVv)
-      onVv()
+      vv.addEventListener('resize', recomputeInset)
+      vv.addEventListener('scroll', recomputeInset)
+      editableFocused = isEditable(document.activeElement)
+      recomputeInset()
     }
 
     return () => {
@@ -128,9 +161,13 @@
       offConnection()
       window.removeEventListener('resize', checkViewport)
       window.removeEventListener('orientationchange', checkViewport)
+      window.removeEventListener('focusin', onFocusIn)
+      window.removeEventListener('focusout', onFocusOut)
+      window.removeEventListener('resize', recomputeInset)
+      clearTimeout(settleTimer)
       if (vv) {
-        vv.removeEventListener('resize', onVv)
-        vv.removeEventListener('scroll', onVv)
+        vv.removeEventListener('resize', recomputeInset)
+        vv.removeEventListener('scroll', recomputeInset)
       }
     }
   })
