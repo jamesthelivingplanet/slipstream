@@ -100,4 +100,43 @@ describe('ScreenState', () => {
       screen.dispose()
     })
   })
+
+  describe('mouse-encoding suffix (TASK-A2FY6)', () => {
+    // addon-serialize restores mouse *tracking* mode but not the *encoding*
+    // mode — a client restoring the snapshot without the encoding DECSET
+    // falls back to legacy X10, whose reports xterm.js emits via onBinary
+    // instead of onData, silently dropping every mouse/wheel report.
+    it('SGR encoding + tracking mode: snapshot data contains both DECSETs', async () => {
+      const screen = new ScreenState(80, 24)
+      screen.write('\x1b[?1003h\x1b[?1006hsome text', 9)
+      const snap = await screen.snapshot()
+      expect(snap.data).toContain('[?1003h')
+      expect(snap.data).toContain('[?1006h')
+      screen.dispose()
+    })
+
+    it('tracking mode without an extended encoding: no ?1006h appended', async () => {
+      const screen = new ScreenState(80, 24)
+      screen.write('\x1b[?1002h', 0)
+      const snap = await screen.snapshot()
+      expect(snap.data).toContain('[?1002h')
+      expect(snap.data).not.toContain('[?1006h')
+      screen.dispose()
+    })
+
+    it('no mouse modes set: neither tracking nor encoding DECSET present', async () => {
+      const screen = new ScreenState(80, 24)
+      screen.write('plain text, no mouse modes', 0)
+      const snap = await screen.snapshot()
+      expect(snap.data).not.toContain('[?1003h')
+      expect(snap.data).not.toContain('[?1006h')
+      screen.dispose()
+    })
+
+    it('serializeScrollback recovers the SGR encoding for a healed cold scrollback', async () => {
+      const raw = '\x1b[?1000h\x1b[?1006hsome output'
+      const serialized = await serializeScrollback(raw, 80, 24)
+      expect(serialized).toContain('[?1006h')
+    })
+  })
 })

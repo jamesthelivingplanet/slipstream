@@ -52,7 +52,7 @@
   import { floatingAnchor } from '../floating'
   import { AGENTS, agentOption } from '../agents'
   import { ReplayGate } from '../replayGate.js'
-  import { TouchScrollTracker, momentumStep } from '../touchScroll.js'
+  import { TouchScrollTracker, momentumStep, touchScrollRoute } from '../touchScroll.js'
   import DiffView from './DiffView.svelte'
   import MobileTermInput from './MobileTermInput.svelte'
 
@@ -71,6 +71,7 @@
   let offWriteLock: (() => void) | null = null
   let offExit: (() => void) | null = null
   let onDataSub: IDisposable | null = null
+  let onBinarySub: IDisposable | null = null
   // Current gate for the live session — reassigned on every resync() so the
   // long-lived onSessionData subscription (wired once in startLive) always
   // routes to the gate for the LATEST attach/snapshot round, not a stale one.
@@ -133,15 +134,20 @@
   }
 
   // ── Touch scroll (mobile) ────────────────────────────────────────────────
-  // xterm's built-in touch-pan scrolling only engages while the running TUI
-  // has NOT enabled mouse reporting (coreMouseService gates it on
-  // `!areMouseEventsActive`); Claude Code and friends turn mouse tracking on,
-  // which silently disables xterm's native touch scroll. These handlers
-  // manually drive term.scrollLines() from raw touch events, but only while
-  // `term.modes.mouseTrackingMode !== 'none'` — otherwise xterm's own
-  // handling is live and driving it here too would double-scroll.
+  // xterm ignores touch while mouse reporting is on (coreMouseService gates
+  // its own touch handling on `!areMouseEventsActive`), and driving
+  // term.scrollLines() was a no-op against Claude Code anyway — it runs in
+  // the alternate screen buffer, which has no scrollback (TASK-A2FY6). So
+  // instead we convert pans into whole lines and dispatch one synthetic
+  // per-line wheel event each, on term.element, which xterm routes exactly
+  // like desktop wheel (mouse reports / arrow keys / local scroll). The
+  // 'native' route (touchScrollRoute) is left alone — xterm's own touch
+  // scrolling is live there, and dispatching wheel events too would
+  // double-scroll.
   let touchTracker: TouchScrollTracker | null = null
   let momentumRaf: number | null = null
+  let lastTouchX = 0
+  let lastTouchY = 0
 
   function stopMomentum() {
     if (momentumRaf !== null) {
@@ -154,6 +160,34 @@
     const screen = mountEl?.querySelector<HTMLElement>('.xterm-screen')
     const rows = term?.rows ?? 0
     return screen && rows > 0 && screen.clientHeight > 0 ? screen.clientHeight / rows : 16
+  }
+
+  function dispatchWheelLines(lines: number) {
+    const el = term.element
+    if (!el || lines === 0) return
+    // Clamp to the terminal's box — a captured touch can wander outside it,
+    // and xterm drops reports whose coordinates fall off the screen.
+    const r = el.getBoundingClientRect()
+    const x = Math.min(Math.max(lastTouchX, r.left + 1), r.right - 1)
+    const y = Math.min(Math.max(lastTouchY, r.top + 1), r.bottom - 1)
+    const deltaY = lines > 0 ? 1 : -1
+    const count = Math.min(Math.abs(lines), term.rows)
+    for (let i = 0; i < count; i++) {
+      el.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          clientX: x,
+          clientY: y,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    }
+  }
+
+  function touchRoutesToWheel(): boolean {
+    return touchScrollRoute(term.modes.mouseTrackingMode, term.buffer.active.type) === 'wheel'
   }
 
   function runMomentum(velocity: number) {
@@ -173,7 +207,7 @@
       const step = momentumStep(v, dt, remainder)
       v = step.velocity
       remainder = step.remainder
-      if (step.lines !== 0) term.scrollLines(step.lines)
+      dispatchWheelLines(step.lines)
       if (v === 0) {
         momentumRaf = null
         return
@@ -186,6 +220,8 @@
   function onTouchStart(e: TouchEvent) {
     stopMomentum()
     if (e.touches.length > 1 || !touchTracker) return
+    lastTouchX = e.touches[0].clientX
+    lastTouchY = e.touches[0].clientY
     touchTracker.start(e.touches[0].clientY, e.timeStamp)
   }
 
@@ -194,14 +230,16 @@
       onTouchEnd(e)
       return
     }
-    if (!touchTracker || term.modes.mouseTrackingMode === 'none') return
+    if (!touchTracker || !touchRoutesToWheel()) return
+    lastTouchX = e.touches[0].clientX
+    lastTouchY = e.touches[0].clientY
     const lines = touchTracker.move(e.touches[0].clientY, e.timeStamp)
-    if (lines !== 0) term.scrollLines(lines)
+    dispatchWheelLines(lines)
     e.preventDefault()
   }
 
   function onTouchEnd(e: TouchEvent) {
-    if (!touchTracker || term.modes.mouseTrackingMode === 'none') return
+    if (!touchTracker || !touchRoutesToWheel()) return
     const velocity = touchTracker.end(e.timeStamp)
     if (velocity !== 0) runMomentum(velocity)
   }
@@ -484,6 +522,14 @@
     onDataSub = term.onData((d) => {
       if (session.id && canWrite) writeSession(session.id, d)
     })
+    // Mouse reports from a TUI that never enabled an extended encoding
+    // (?1006h etc.) are emitted X10-encoded through onBinary, not onData —
+    // without this they'd be dropped (TASK-A2FY6). Bytes ≥ 0x80 (coords past
+    // column ~95) get UTF-8 mangled by the utf8 PTY write path; acceptable,
+    // since snapshots restore SGR encoding and this is the legacy fallback.
+    onBinarySub = term.onBinary((d) => {
+      if (session.id && canWrite) writeSession(session.id, d)
+    })
 
     const sendResize = () => {
       try {
@@ -525,6 +571,10 @@
     if (onDataSub) {
       onDataSub.dispose()
       onDataSub = null
+    }
+    if (onBinarySub) {
+      onBinarySub.dispose()
+      onBinarySub = null
     }
     gate = null
     liveId = null

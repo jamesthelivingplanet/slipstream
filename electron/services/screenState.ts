@@ -76,7 +76,36 @@ export class ScreenState {
    */
   async snapshot(): Promise<{ data: string; seq: number }> {
     await this.lastWrite
-    return { data: this.serializeAddon.serialize(), seq: this.parsedSeq }
+    return {
+      data: this.serializeAddon.serialize() + this.mouseEncodingSuffix(),
+      seq: this.parsedSeq,
+    }
+  }
+
+  /** addon-serialize's mode restoration covers the mouse *tracking* mode
+   *  (?1000/1002/1003h) but not the mouse *encoding* (?1005/1006/1015/1016h).
+   *  A client restoring such a snapshot falls back to legacy X10 encoding —
+   *  and xterm.js emits X10-encoded reports via onBinary instead of onData,
+   *  so late-attaching clients silently drop every mouse/wheel report
+   *  (TASK-A2FY6). Recover the encoding from xterm's private mouse service
+   *  and append the DECSET the serializer left out. */
+  private mouseEncodingSuffix(): string {
+    if (this.term.modes.mouseTrackingMode === 'none') return ''
+    const core = (
+      this.term as unknown as { _core?: { coreMouseService?: { activeEncoding?: string } } }
+    )._core
+    switch (core?.coreMouseService?.activeEncoding) {
+      case 'SGR':
+        return '\x1b[?1006h'
+      case 'SGR_PIXELS':
+        return '\x1b[?1016h'
+      case 'UTF8':
+        return '\x1b[?1005h'
+      case 'URXVT':
+        return '\x1b[?1015h'
+      default:
+        return ''
+    }
   }
 
   dispose(): void {
