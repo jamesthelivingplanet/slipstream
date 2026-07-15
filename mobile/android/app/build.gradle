@@ -44,6 +44,11 @@ dependencies {
 
 apply from: 'capacitor.build.gradle'
 
+// google-services.json is intentionally untracked (.gitignore) because it contains
+// real Firebase project credentials for app.slipstream.mobile. Download it from the
+// Firebase console (console.firebase.google.com -> Project settings -> your Android
+// app) and drop it in this directory to enable FCM push notifications locally; the
+// plugin is applied conditionally so the project still builds without it.
 try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.text) {

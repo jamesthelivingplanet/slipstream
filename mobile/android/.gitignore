@@ -62,7 +62,9 @@ captures/
 .cxx/
 
 # Google Services (e.g. APIs or Firebase)
-# google-services.json
+# Contains real Firebase project credentials for app.slipstream.mobile; download from
+# the Firebase console (console.firebase.google.com) if you need to build FCM locally.
+google-services.json
 
 # Freeline
 freeline.py
