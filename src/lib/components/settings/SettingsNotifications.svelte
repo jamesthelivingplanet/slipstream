@@ -2,7 +2,17 @@
   import { onMount } from 'svelte'
   import { hasBackend } from '../../ipc'
   import { pushToast } from '../../toast'
-  import { pushSupported, enablePush, updatePrefs, disablePush, loadPrefs } from '../../push'
+  import {
+    pushSupported,
+    enablePush,
+    updatePrefs,
+    disablePush,
+    loadPrefs,
+    nativePushAvailable,
+    nativePushEnabled,
+    enableNativePush,
+    disableNativePush,
+  } from '../../push'
   import type { NotifyPrefs } from '../../../../electron/shared/contract.js'
 
   let pushEnabled = false
@@ -16,7 +26,17 @@
   const isWeb =
     hasBackend && (window as unknown as { __slipstreamWeb?: boolean }).__slipstreamWeb === true
 
+  // TASK-I9S44: the Capacitor mobile shell loads this SAME SPA in a WebView,
+  // so isWeb is also true there — nativePushAvailable() is what distinguishes
+  // "real browser/PWA, use Web Push" from "inside the mobile app, use FCM via
+  // the injected Capacitor bridge". A plain browser never sets window.Capacitor.
+  const isNative = nativePushAvailable()
+
   async function initNotifications() {
+    if (isNative) {
+      pushEnabled = nativePushEnabled()
+      return
+    }
     if (!isWeb || !pushSupported()) return
     try {
       const loaded = await loadPrefs()
@@ -35,6 +55,20 @@
   async function handleEnablePush() {
     pushLoading = true
     try {
+      if (isNative) {
+        const result = await enableNativePush()
+        if (result.ok) {
+          pushEnabled = true
+          pushToast('success', 'Notifications enabled')
+        } else {
+          const msg =
+            result.reason === 'denied'
+              ? 'Notification permission was denied.'
+              : (result.reason ?? 'Could not enable notifications.')
+          pushToast('error', msg)
+        }
+        return
+      }
       const result = await enablePush(prefs)
       if (result.ok) {
         pushEnabled = true
@@ -56,6 +90,12 @@
   async function handleDisablePush() {
     pushLoading = true
     try {
+      if (isNative) {
+        await disableNativePush()
+        pushEnabled = false
+        pushToast('success', 'Notifications disabled')
+        return
+      }
       await disablePush()
       pushEnabled = false
       pushToast('success', 'Notifications disabled')
@@ -80,7 +120,20 @@
 <div class="tab-header">
   <span class="tab-title">Notifications</span>
 </div>
-{#if !isWeb}
+{#if isNative}
+  <div class="notify-row">
+    <span class="lbl-f" style="margin-bottom:0">Enable notifications</span>
+    {#if pushEnabled}
+      <button class="btn btn-outline btn-sm" on:click={handleDisablePush} disabled={pushLoading}>
+        Disable
+      </button>
+    {:else}
+      <button class="btn btn-primary btn-sm" on:click={handleEnablePush} disabled={pushLoading}>
+        Enable
+      </button>
+    {/if}
+  </div>
+{:else if !isWeb}
   <p class="integration-hint muted">
     Push notifications are available in the installed web app (PWA). Open Slipstream in your
     mobile/desktop browser to enable them.

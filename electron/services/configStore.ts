@@ -15,6 +15,9 @@ export const SECRET_KEYS = new Set([
   'bitbucket.token',
   'gitea.token',
   'jira.apiToken',
+  // TASK-I9S44: raw Firebase service-account JSON (RSA private key inside) —
+  // see pushService.ts's FCM_SERVICE_ACCOUNT_CONFIG_KEY.
+  'push.fcmServiceAccount',
 ])
 
 /** Marker prefix identifying a safeStorage-encrypted, base64-encoded value, so

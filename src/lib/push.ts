@@ -4,7 +4,163 @@ import {
   savePushSubscription,
   deletePushSubscription,
   getPushPrefs,
+  saveFcmToken,
+  deleteFcmToken,
 } from './ipc'
+import { pushToast } from './toast'
+
+// ── Native push bridge (TASK-I9S44) ─────────────────────────────────────────
+//
+// The mobile app is a Capacitor shell whose WebView loads this SAME SPA over
+// the tailnet — there is no separate mobile build. When running inside that
+// shell, window.Capacitor and window.Capacitor.Plugins.PushNotifications are
+// injected into the page at runtime; a plain browser or the Electron webview
+// never sets window.Capacitor at all. So this module feature-detects the
+// bridge rather than importing @capacitor/* — src/ must stay free of any
+// @capacitor/* npm dependency (a browser tab loading this same bundle must
+// never even attempt to resolve it).
+
+interface CapacitorPushToken {
+  value: string
+}
+
+interface CapacitorPushPermissionStatus {
+  receive: 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale'
+}
+
+interface CapacitorPluginListenerHandle {
+  remove(): void | Promise<void>
+}
+
+interface CapacitorPushNotificationsPlugin {
+  requestPermissions(): Promise<CapacitorPushPermissionStatus>
+  register(): Promise<void>
+  addListener(
+    eventName: 'registration',
+    listenerFunc: (token: CapacitorPushToken) => void,
+  ): Promise<CapacitorPluginListenerHandle>
+  addListener(
+    eventName: 'registrationError',
+    listenerFunc: (error: { error: string }) => void,
+  ): Promise<CapacitorPluginListenerHandle>
+}
+
+interface CapacitorGlobal {
+  isPluginAvailable?(name: string): boolean
+  getPlatform?(): string
+  Plugins?: {
+    PushNotifications?: CapacitorPushNotificationsPlugin
+  }
+}
+
+declare global {
+  interface Window {
+    Capacitor?: CapacitorGlobal
+  }
+}
+
+const NATIVE_TOKEN_STORAGE_KEY = 'slipstream.fcmToken'
+
+function readStoredNativeToken(): string | null {
+  try {
+    return localStorage.getItem(NATIVE_TOKEN_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function rememberNativeToken(token: string): void {
+  try {
+    localStorage.setItem(NATIVE_TOKEN_STORAGE_KEY, token)
+  } catch {
+    // ignore — private browsing / storage disabled; disablePush just won't
+    // be able to target the exact token, the daemon still prunes dead tokens
+  }
+}
+
+function forgetNativeToken(): void {
+  try {
+    localStorage.removeItem(NATIVE_TOKEN_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+function nativePushPlugin(): CapacitorPushNotificationsPlugin | undefined {
+  return window.Capacitor?.Plugins?.PushNotifications
+}
+
+/** True only inside the Capacitor mobile shell — a plain browser or the
+ *  Electron renderer never sets window.Capacitor, so this is false there and
+ *  the rest of this module's web-push path is unaffected. */
+export function nativePushAvailable(): boolean {
+  return (
+    typeof window !== 'undefined' && !!window.Capacitor?.isPluginAvailable?.('PushNotifications')
+  )
+}
+
+/** Best-effort persisted state: true once we've saved a token this device
+ *  and haven't since disabled it. Survives reload (localStorage), so the
+ *  Settings toggle reflects reality without an extra round-trip. */
+export function nativePushEnabled(): boolean {
+  return !!readStoredNativeToken()
+}
+
+function nativePlatform(): 'android' | 'ios' {
+  return window.Capacitor?.getPlatform?.() === 'ios' ? 'ios' : 'android'
+}
+
+// Tracks the plugin instance we've already bound listeners on (rather than a
+// plain boolean) so repeated enableNativePush() calls against the SAME bridge
+// don't double-register, while a different instance rebinds correctly.
+// window.Capacitor is a stable singleton for the app's lifetime in practice,
+// but tracking the instance keeps this correct rather than assuming that.
+let listenersBoundFor: CapacitorPushNotificationsPlugin | null = null
+
+/** Request permission, register with FCM/APNs via the Capacitor bridge, and
+ *  persist the resulting device token via the saveFcmToken RPC. Token
+ *  rotation is handled the same way: the 'registration' listener fires again
+ *  with the new value and we just re-save (upsert, deduped by token). */
+export async function enableNativePush(): Promise<{ ok: boolean; reason?: string }> {
+  const plugin = nativePushPlugin()
+  if (!plugin) return { ok: false, reason: 'unsupported' }
+
+  try {
+    const perm = await plugin.requestPermissions()
+    if (perm.receive !== 'granted') return { ok: false, reason: 'denied' }
+
+    if (listenersBoundFor !== plugin) {
+      listenersBoundFor = plugin
+      await plugin.addListener('registration', (token) => {
+        rememberNativeToken(token.value)
+        saveFcmToken({ token: token.value, platform: nativePlatform() }).catch(() => {
+          pushToast('error', 'Could not save the push token.')
+        })
+      })
+      await plugin.addListener('registrationError', (error) => {
+        pushToast('error', `Push registration failed: ${error?.error ?? 'unknown error'}`)
+      })
+    }
+
+    await plugin.register()
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : 'Unknown error' }
+  }
+}
+
+/** Delete the last-registered device token, if any. Best-effort: the
+ *  Capacitor plugin has no "current token" getter, so this relies on the
+ *  value captured by the 'registration' listener (persisted across reloads
+ *  in localStorage). A token that outlives this — e.g. the app was
+ *  uninstalled without disabling first — is still pruned server-side on its
+ *  next FCM 404/UNREGISTERED response. */
+export async function disableNativePush(): Promise<void> {
+  const token = readStoredNativeToken()
+  if (!token) return
+  await deleteFcmToken(token)
+  forgetNativeToken()
+}
 
 export function pushSupported(): boolean {
   return (

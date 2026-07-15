@@ -195,6 +195,8 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     savePushSubscription: vi.fn().mockResolvedValue(undefined),
     deletePushSubscription: vi.fn().mockResolvedValue(undefined),
     getPushPrefs: vi.fn().mockResolvedValue(null),
+    saveFcmToken: vi.fn().mockResolvedValue(undefined),
+    deleteFcmToken: vi.fn().mockResolvedValue(undefined),
   }
 
   const outcomeMap = new Map<string, SessionOutcomeDTO>()
@@ -1418,6 +1420,29 @@ describe('createRpc', () => {
       ])
       const result = (await rpc.handle(IPC.listRepos, [])) as RepoDTO[]
       expect(result.map((r) => r.id).sort()).toEqual(['legacy', 'mine'])
+    })
+
+    it('saveFcmToken stamps the caller identity as ownerId (TASK-I9S44)', async () => {
+      await rpc.handle(IPC.saveFcmToken, [{ token: 'device-tok-1', platform: 'android' }])
+      expect(deps.push.saveFcmToken).toHaveBeenCalledWith('local', {
+        token: 'device-tok-1',
+        platform: 'android',
+      })
+    })
+
+    it('saveFcmToken stamps a non-default caller identity too', async () => {
+      const aliceRpc = createRpc(deps, () => {}, { coalesceMs: 0, identity: { id: 'alice' } })
+      await aliceRpc.handle(IPC.saveFcmToken, [{ token: 'device-tok-2', platform: 'ios' }])
+      expect(deps.push.saveFcmToken).toHaveBeenCalledWith('alice', {
+        token: 'device-tok-2',
+        platform: 'ios',
+      })
+      aliceRpc.dispose()
+    })
+
+    it('deleteFcmToken scopes the delete to the caller identity', async () => {
+      await rpc.handle(IPC.deleteFcmToken, ['device-tok-1'])
+      expect(deps.push.deleteFcmToken).toHaveBeenCalledWith('local', 'device-tok-1')
     })
   })
 

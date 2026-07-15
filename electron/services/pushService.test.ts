@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { transitionKind, createPushService } from './pushService.js'
-import type { PushStore, PushSender } from './pushService.js'
+import { transitionKind, createPushService, FCM_SERVICE_ACCOUNT_CONFIG_KEY } from './pushService.js'
+import type { PushStore, PushSender, FcmStore, FcmSender, FcmTokenMinter } from './pushService.js'
 import type {
   NotifyPrefs,
   PushSubscriptionDTO,
@@ -10,6 +10,7 @@ import type {
   SessionDTO,
 } from '../shared/contract.js'
 import type { IConfigStore } from './configStore.js'
+import type { FcmServiceAccount } from './fcm.js'
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,40 @@ function makeSub(endpoint = 'https://push.example.com/sub1'): PushSubscriptionDT
   return { endpoint, keys: { p256dh: 'p256dh_key', auth: 'auth_key' } }
 }
 
+// ── FCM (TASK-I9S44) test helpers ───────────────────────────────────────────
+
+interface FcmRow {
+  token: string
+  ownerId: string
+  platform: string
+  createdAt: number
+}
+
+function makeFcmStore(rows: FcmRow[] = []): FcmStore & { rows: FcmRow[] } {
+  const state = { rows: [...rows] }
+  return {
+    get rows() {
+      return state.rows
+    },
+    all: () => state.rows,
+    upsert(token, ownerId, platform, now) {
+      const existing = state.rows.findIndex((r) => r.token === token)
+      const row = { token, ownerId, platform, createdAt: now }
+      if (existing >= 0) state.rows[existing] = row
+      else state.rows.push(row)
+    },
+    delete(token, ownerId) {
+      state.rows = state.rows.filter((r) => !(r.token === token && r.ownerId === ownerId))
+    },
+  } as FcmStore & { rows: FcmRow[] }
+}
+
+const RAW_FCM_ACCOUNT = JSON.stringify({
+  project_id: 'test-project',
+  client_email: 'svc@test-project.iam.gserviceaccount.com',
+  private_key: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n',
+})
+
 // ── transitionKind tests ──────────────────────────────────────────────────────
 
 describe('transitionKind', () => {
@@ -166,7 +201,14 @@ describe('createPushService', () => {
   })
 
   function makeService(
-    overrides: { store?: PushStore; send?: PushSender; now?: () => number } = {},
+    overrides: {
+      store?: PushStore
+      send?: PushSender
+      now?: () => number
+      fcmStore?: FcmStore
+      fcmMint?: FcmTokenMinter
+      fcmSend?: FcmSender
+    } = {},
   ) {
     return createPushService({
       config,
@@ -175,6 +217,9 @@ describe('createPushService', () => {
       sessionStore,
       send: overrides.send ?? (send as PushSender),
       now: overrides.now ?? (() => nowMs),
+      fcmStore: overrides.fcmStore,
+      fcmMint: overrides.fcmMint,
+      fcmSend: overrides.fcmSend,
     })
   }
 
@@ -494,5 +539,199 @@ describe('createPushService', () => {
     sessions._emit('status', 's2', 'needs' satisfies SessionStatus)
     await new Promise((r) => setTimeout(r, 10))
     expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  describe('FCM native push (TASK-I9S44)', () => {
+    let fcmMint: ReturnType<typeof vi.fn>
+    let fcmSend: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      fcmMint = vi.fn().mockResolvedValue({ accessToken: 'tok-1', expiresAt: nowMs + 3600_000 })
+      fcmSend = vi.fn().mockResolvedValue({ ok: true, status: 200, unregistered: false })
+    })
+
+    it('saveFcmToken persists a row stamped with the given ownerId', async () => {
+      const fcmStore = makeFcmStore()
+      const svc = makeService({ fcmStore })
+      await svc.saveFcmToken('local', { token: 'dev-1', platform: 'android' })
+      expect(fcmStore.rows).toEqual([
+        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: nowMs },
+      ])
+    })
+
+    it('deleteFcmToken only removes a row owned by the caller', async () => {
+      const fcmStore = makeFcmStore([
+        { token: 'dev-1', ownerId: 'alice', platform: 'android', createdAt: 0 },
+      ])
+      const svc = makeService({ fcmStore })
+      await svc.deleteFcmToken('local', 'dev-1')
+      expect(fcmStore.rows).toHaveLength(1) // not alice's caller — no-op
+
+      await svc.deleteFcmToken('alice', 'dev-1')
+      expect(fcmStore.rows).toHaveLength(0)
+    })
+
+    it('does not mint or send when no service account is configured', async () => {
+      const fcmStore = makeFcmStore([
+        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      makeService({ fcmStore, fcmMint, fcmSend })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmMint).not.toHaveBeenCalled()
+      expect(fcmSend).not.toHaveBeenCalled()
+    })
+
+    it('does not mint or send when a service account is configured but no tokens exist', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore()
+      makeService({ fcmStore, fcmMint, fcmSend })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmMint).not.toHaveBeenCalled()
+      expect(fcmSend).not.toHaveBeenCalled()
+    })
+
+    it('sends to the transitioning session owner devices once configured', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      makeService({ fcmStore, fcmMint, fcmSend })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+
+      expect(fcmMint).toHaveBeenCalledOnce()
+      const account = fcmMint.mock.calls[0][0] as FcmServiceAccount
+      expect(account.project_id).toBe('test-project')
+
+      expect(fcmSend).toHaveBeenCalledOnce()
+      const [sentAccount, accessToken, deviceToken, notification] = fcmSend.mock.calls[0] as [
+        FcmServiceAccount,
+        string,
+        string,
+        { title: string; body: string },
+      ]
+      expect(sentAccount.project_id).toBe('test-project')
+      expect(accessToken).toBe('tok-1')
+      expect(deviceToken).toBe('dev-1')
+      expect(notification.title).toContain('needs your input')
+    })
+
+    it('does not deliver to a device token owned by a different identity', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'hers', ownerId: 'alice', platform: 'ios', createdAt: 0 },
+      ])
+      const sessionStoreWithOwner = makeSessionStore([
+        {
+          id: 's1',
+          tid: 'T-1',
+          title: 'x',
+          prompt: 'x',
+          repoId: 'r1',
+          branch: 'b',
+          status: 'running',
+          createdAt: 0,
+          ownerId: 'local',
+        },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStoreWithOwner,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmSend).not.toHaveBeenCalled()
+    })
+
+    it('reuses a cached access token across sends within the same episode window', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      makeService({ fcmStore, fcmMint, fcmSend })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      sessions._emit('input', 's1')
+      sessions._emit('status', 's1', 'running' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+
+      expect(fcmMint).toHaveBeenCalledOnce()
+      expect(fcmSend).toHaveBeenCalledTimes(2)
+    })
+
+    it('mints a fresh access token once the cached one is near expiry', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      let t = nowMs
+      // Token "expires" almost immediately, well inside the 5-minute refresh skew.
+      fcmMint = vi.fn().mockResolvedValue({ accessToken: 'short-lived', expiresAt: t + 1000 })
+      makeService({ fcmStore, fcmMint, fcmSend, now: () => t })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      t += 10 * 60_000 // advance well past the cached token's refresh skew
+      sessions._emit('input', 's1')
+      sessions._emit('status', 's1', 'done' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+
+      expect(fcmMint).toHaveBeenCalledTimes(2)
+    })
+
+    it('prunes the device token on an unregistered FCM response', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'dead-token', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      const goneFcmSend = vi.fn().mockResolvedValue({ ok: false, status: 404, unregistered: true })
+      makeService({ fcmStore, fcmMint, fcmSend: goneFcmSend })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmStore.rows).toHaveLength(0)
+    })
+
+    it('keeps the device token on a non-unregistered FCM failure', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'flaky-token', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      const failFcmSend = vi.fn().mockResolvedValue({ ok: false, status: 500, unregistered: false })
+      makeService({ fcmStore, fcmMint, fcmSend: failFcmSend })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmStore.rows).toHaveLength(1)
+    })
+
+    it('does not throw when the token mint rejects (bad credentials / network)', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      const failingMint = vi.fn().mockRejectedValue(new Error('network down'))
+      makeService({ fcmStore, fcmMint: failingMint, fcmSend })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmSend).not.toHaveBeenCalled()
+    })
+
+    it('ignores a malformed service-account JSON the same as unset (no throw)', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, 'not valid json')
+      const fcmStore = makeFcmStore([
+        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      makeService({ fcmStore, fcmMint, fcmSend })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmMint).not.toHaveBeenCalled()
+      expect(fcmSend).not.toHaveBeenCalled()
+    })
   })
 })

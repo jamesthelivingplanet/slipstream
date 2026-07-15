@@ -6,16 +6,26 @@ import type {
   SessionStatus,
   StatusMeta,
 } from '../shared/contract.js'
-import type { NotifyPrefs, PushSubscriptionDTO } from '../shared/contract.js'
+import type { NotifyPrefs, PushSubscriptionDTO, FcmTokenDTO } from '../shared/contract.js'
 import {
   allPushSubscriptions,
   deletePushSubscription,
   getPushSubscription,
   upsertPushSubscription,
   type PushSubscriptionRow,
+  allFcmTokens,
+  deleteFcmToken as dbDeleteFcmToken,
+  upsertFcmToken,
+  type FcmTokenRow,
 } from '../db/db.js'
+import {
+  parseServiceAccount,
+  mintAccessToken,
+  sendFcmMessage,
+  type FcmServiceAccount,
+} from './fcm.js'
 
-export type { PushSubscriptionRow }
+export type { PushSubscriptionRow, FcmTokenRow }
 
 export interface PushStore {
   all(): PushSubscriptionRow[]
@@ -29,11 +39,42 @@ export type PushSender = (
   payload: string,
 ) => Promise<{ statusCode: number }>
 
+/** Storage seam for native FCM device tokens (TASK-I9S44) — mirrors PushStore. */
+export interface FcmStore {
+  all(): FcmTokenRow[]
+  upsert(token: string, ownerId: string, platform: string, now: number): void
+  delete(token: string, ownerId: string): void
+}
+
+/** Config key holding the raw Firebase service-account JSON. Follows the
+ *  existing config-store secret pattern (see configStore.ts's SECRET_KEYS) —
+ *  encrypted at rest on desktop, plaintext behind the 0700 data dir on the
+ *  headless daemon (docs/SECURITY.md §6). Unset ⇒ the FCM transport is
+ *  entirely inert: no token minting, no send attempts, no error logging. */
+export const FCM_SERVICE_ACCOUNT_CONFIG_KEY = 'push.fcmServiceAccount'
+
+export type FcmSender = (
+  account: FcmServiceAccount,
+  accessToken: string,
+  deviceToken: string,
+  notification: { title: string; body: string },
+) => Promise<{ ok: boolean; status: number; unregistered: boolean }>
+
+export type FcmTokenMinter = (
+  account: FcmServiceAccount,
+) => Promise<{ accessToken: string; expiresAt: number }>
+
 export interface IPushService {
   getVapidPublicKey(): Promise<string>
   savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void>
   deletePushSubscription(endpoint: string): Promise<void>
   getPushPrefs(endpoint: string): Promise<NotifyPrefs | null>
+  /** Owner-scoped: stamps ownerId on the row (rpc.ts passes the caller's
+   *  resolved identity). */
+  saveFcmToken(ownerId: string, dto: FcmTokenDTO): Promise<void>
+  /** Owner-scoped: a token id belonging to another owner (or unknown) silently
+   *  no-ops, matching the no-existence-leak convention (IDENTITY-SEAM.md). */
+  deleteFcmToken(ownerId: string, token: string): Promise<void>
 }
 
 export function transitionKind(
@@ -59,6 +100,32 @@ export function createDbPushStore(db: Database): PushStore {
   }
 }
 
+export function createDbFcmStore(db: Database): FcmStore {
+  return {
+    all: () => allFcmTokens(db),
+    upsert: (token, ownerId, platform, now) => upsertFcmToken(db, token, ownerId, platform, now),
+    delete: (token, ownerId) => dbDeleteFcmToken(db, token, ownerId),
+  }
+}
+
+/** In-memory no-op store used when the caller doesn't wire a real one (tests
+ *  predating TASK-I9S44) — keeps createPushService's fcmStore param optional
+ *  without silently losing writes in production (services.ts always passes a
+ *  real createDbFcmStore). */
+function createInMemoryFcmStore(): FcmStore {
+  const rows = new Map<string, FcmTokenRow>()
+  return {
+    all: () => Array.from(rows.values()),
+    upsert: (token, ownerId, platform, now) => {
+      rows.set(token, { token, ownerId, platform, createdAt: now })
+    },
+    delete: (token, ownerId) => {
+      const row = rows.get(token)
+      if (row && row.ownerId === ownerId) rows.delete(token)
+    },
+  }
+}
+
 export function createPushService(deps: {
   config: IConfigStore
   store: PushStore
@@ -66,9 +133,22 @@ export function createPushService(deps: {
   sessionStore: ISessionStore
   now?: () => number
   send?: PushSender
+  fcmStore?: FcmStore
+  /** Injected for tests — bypasses real RSA signing + network. Defaults to
+   *  fcm.ts's mintAccessToken over the global fetch. */
+  fcmMint?: FcmTokenMinter
+  /** Injected for tests — bypasses real network. Defaults to fcm.ts's
+   *  sendFcmMessage over the global fetch. */
+  fcmSend?: FcmSender
 }): IPushService {
   const { config, store, sessions, sessionStore } = deps
   const now = deps.now ?? (() => Date.now())
+  const fcmStore = deps.fcmStore ?? createInMemoryFcmStore()
+  const fcmMint: FcmTokenMinter = deps.fcmMint ?? ((account) => mintAccessToken(account, { now }))
+  const fcmSend: FcmSender =
+    deps.fcmSend ??
+    ((account, accessToken, deviceToken, notification) =>
+      sendFcmMessage(account, accessToken, deviceToken, notification))
 
   const lastStatus = new Map<string, SessionStatus>()
   // Kinds already notified during the session's current "episode". The status
@@ -122,6 +202,86 @@ export function createPushService(deps: {
       return { statusCode: result.statusCode }
     }
     return _send
+  }
+
+  // ── FCM (native push, TASK-I9S44) ─────────────────────────────────────────
+  // Inert by construction: getFcmAccount() returns null (no throw, no log)
+  // whenever push.fcmServiceAccount is unset or fails to parse, and every
+  // caller below short-circuits on null before touching the network.
+
+  let _fcmAccountRaw: string | undefined
+  let _fcmAccount: FcmServiceAccount | null = null
+
+  function getFcmAccount(): FcmServiceAccount | null {
+    const raw = config.get(FCM_SERVICE_ACCOUNT_CONFIG_KEY)
+    if (raw === _fcmAccountRaw) return _fcmAccount
+    _fcmAccountRaw = raw
+    _fcmAccount = raw ? parseServiceAccount(raw) : null
+    return _fcmAccount
+  }
+
+  // Refresh a bit before actual expiry so a send never races token expiry.
+  const FCM_TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000
+  let _fcmTokenCache: { accountKey: string; accessToken: string; expiresAt: number } | null = null
+  // Two status transitions can fire in the same tick (e.g. needs → running
+  // back to back), each kicking off its own notifyTransition IIFE; without
+  // this, both would see the cache as empty and mint concurrently. Coalesce
+  // concurrent misses onto one in-flight mint.
+  let _fcmMintInFlight: Promise<string> | null = null
+
+  async function ensureFcmAccessToken(account: FcmServiceAccount): Promise<string> {
+    const accountKey = `${account.project_id}:${account.client_email}`
+    const cached = _fcmTokenCache
+    if (
+      cached &&
+      cached.accountKey === accountKey &&
+      cached.expiresAt - FCM_TOKEN_REFRESH_SKEW_MS > now()
+    ) {
+      return cached.accessToken
+    }
+    if (_fcmMintInFlight) return _fcmMintInFlight
+
+    _fcmMintInFlight = (async () => {
+      try {
+        const { accessToken, expiresAt } = await fcmMint(account)
+        _fcmTokenCache = { accountKey, accessToken, expiresAt }
+        return accessToken
+      } finally {
+        _fcmMintInFlight = null
+      }
+    })()
+    return _fcmMintInFlight
+  }
+
+  /** Fan out one notification to every FCM token owned by `ownerId`. Never
+   *  throws — a mint/network failure is swallowed the same way the web-push
+   *  loop swallows per-subscription failures. */
+  async function sendFcmForOwner(
+    ownerId: string,
+    notification: { title: string; body: string },
+  ): Promise<void> {
+    const account = getFcmAccount()
+    if (!account) return
+
+    const tokens = fcmStore.all().filter((row) => (row.ownerId || 'local') === ownerId)
+    if (tokens.length === 0) return
+
+    let accessToken: string
+    try {
+      accessToken = await ensureFcmAccessToken(account)
+    } catch {
+      // bad credentials / network — best-effort, swallow (matches web-push)
+      return
+    }
+
+    for (const row of tokens) {
+      try {
+        const result = await fcmSend(account, accessToken, row.token, notification)
+        if (result.unregistered) fcmStore.delete(row.token, row.ownerId)
+      } catch {
+        // best-effort per-token; swallow and continue with the rest
+      }
+    }
   }
 
   /** Drop all per-session tracking state so the long-lived daemon's maps don't
@@ -193,6 +353,12 @@ export function createPushService(deps: {
     })
 
     const subs = store.all()
+    // Native push is delivery-only: the per-episode dedupe above already
+    // decided WHEN to notify; FCM just gets fanned the same decision, scoped
+    // to the transitioning session's own owner (defaults to 'local', same
+    // fallback as every other ownerId read — see IDENTITY-SEAM.md).
+    const ownerId = session?.ownerId || 'local'
+    const fcmNotification = { title: texts[kind], body: meta?.message ?? session?.title ?? '' }
 
     ;(async () => {
       const sendFn = await getSend()
@@ -217,6 +383,8 @@ export function createPushService(deps: {
           }
         }
       }
+
+      await sendFcmForOwner(ownerId, fcmNotification)
     })().catch(() => {
       // best-effort push; swallow errors
     })
@@ -234,6 +402,12 @@ export function createPushService(deps: {
     },
     async getPushPrefs(endpoint) {
       return store.getPrefs(endpoint)
+    },
+    async saveFcmToken(ownerId, dto) {
+      fcmStore.upsert(dto.token, ownerId, dto.platform, now())
+    },
+    async deleteFcmToken(ownerId, token) {
+      fcmStore.delete(token, ownerId)
     },
   }
 }
