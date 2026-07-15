@@ -8,6 +8,7 @@ import {
   deleteFcmToken,
 } from './ipc'
 import { pushToast } from './toast'
+import { nativeStorage, FCM_KEY } from './nativeStorage'
 
 // ── Native push bridge (TASK-I9S44) ─────────────────────────────────────────
 //
@@ -59,28 +60,58 @@ declare global {
   }
 }
 
-const NATIVE_TOKEN_STORAGE_KEY = 'slipstream.fcmToken'
+// Pre-TASK-I9S44, this record lived as a bare token string under this
+// localStorage key (the WebView had no native storage, so it went through
+// the same plain-localStorage path a browser tab would). Now the record
+// moves to the nativeStorage facade's FCM_KEY ('slipstream.fcm', a JSON
+// `{token, enabled}` string) — see nativeStorage.ts. migrateFcmRecord() below
+// copies a pre-existing legacy token forward once, wrapping it in the new
+// JSON shape; the legacy key is left in place (harmless).
+const LEGACY_FCM_TOKEN_KEY = 'slipstream.fcmToken'
 
-function readStoredNativeToken(): string | null {
+interface FcmRecord {
+  token: string
+  enabled: boolean
+}
+
+// migrateLegacy() itself is idempotent (it checks the new key first and
+// no-ops once populated), so this is safe to call on every read.
+async function migrateFcmRecord(): Promise<void> {
+  await nativeStorage.migrateLegacy(FCM_KEY, LEGACY_FCM_TOKEN_KEY, (legacyToken) =>
+    JSON.stringify({ token: legacyToken, enabled: true }),
+  )
+}
+
+async function readFcmRecord(): Promise<FcmRecord | null> {
+  await migrateFcmRecord()
+  let raw: string | null
   try {
-    return localStorage.getItem(NATIVE_TOKEN_STORAGE_KEY)
+    raw = await nativeStorage.get(FCM_KEY)
+  } catch {
+    return null
+  }
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<FcmRecord>
+    if (typeof parsed.token !== 'string') return null
+    return { token: parsed.token, enabled: parsed.enabled !== false }
   } catch {
     return null
   }
 }
 
-function rememberNativeToken(token: string): void {
+async function rememberNativeToken(token: string): Promise<void> {
   try {
-    localStorage.setItem(NATIVE_TOKEN_STORAGE_KEY, token)
+    await nativeStorage.set(FCM_KEY, JSON.stringify({ token, enabled: true } satisfies FcmRecord))
   } catch {
     // ignore — private browsing / storage disabled; disablePush just won't
     // be able to target the exact token, the daemon still prunes dead tokens
   }
 }
 
-function forgetNativeToken(): void {
+async function forgetNativeToken(): Promise<void> {
   try {
-    localStorage.removeItem(NATIVE_TOKEN_STORAGE_KEY)
+    await nativeStorage.remove(FCM_KEY, LEGACY_FCM_TOKEN_KEY)
   } catch {
     // ignore
   }
@@ -100,10 +131,12 @@ export function nativePushAvailable(): boolean {
 }
 
 /** Best-effort persisted state: true once we've saved a token this device
- *  and haven't since disabled it. Survives reload (localStorage), so the
+ *  and haven't since disabled it. Survives reload (nativeStorage facade —
+ *  Preferences on the mobile shell, localStorage on the web), so the
  *  Settings toggle reflects reality without an extra round-trip. */
-export function nativePushEnabled(): boolean {
-  return !!readStoredNativeToken()
+export async function nativePushEnabled(): Promise<boolean> {
+  const record = await readFcmRecord()
+  return !!record?.enabled
 }
 
 function nativePlatform(): 'android' | 'ios' {
@@ -132,7 +165,10 @@ export async function enableNativePush(): Promise<{ ok: boolean; reason?: string
     if (listenersBoundFor !== plugin) {
       listenersBoundFor = plugin
       await plugin.addListener('registration', (token) => {
-        rememberNativeToken(token.value)
+        rememberNativeToken(token.value).catch(() => {
+          // best-effort persistence; saveFcmToken below is the source of
+          // truth server-side, this is just the local "am I enabled" flag
+        })
         saveFcmToken({ token: token.value, platform: nativePlatform() }).catch(() => {
           pushToast('error', 'Could not save the push token.')
         })
@@ -152,14 +188,14 @@ export async function enableNativePush(): Promise<{ ok: boolean; reason?: string
 /** Delete the last-registered device token, if any. Best-effort: the
  *  Capacitor plugin has no "current token" getter, so this relies on the
  *  value captured by the 'registration' listener (persisted across reloads
- *  in localStorage). A token that outlives this — e.g. the app was
- *  uninstalled without disabling first — is still pruned server-side on its
- *  next FCM 404/UNREGISTERED response. */
+ *  via the nativeStorage facade). A token that outlives this — e.g. the app
+ *  was uninstalled without disabling first — is still pruned server-side on
+ *  its next FCM 404/UNREGISTERED response. */
 export async function disableNativePush(): Promise<void> {
-  const token = readStoredNativeToken()
-  if (!token) return
-  await deleteFcmToken(token)
-  forgetNativeToken()
+  const record = await readFcmRecord()
+  if (!record) return
+  await deleteFcmToken(record.token)
+  await forgetNativeToken()
 }
 
 export function pushSupported(): boolean {

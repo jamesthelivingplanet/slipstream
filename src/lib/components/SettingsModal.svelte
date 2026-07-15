@@ -1,12 +1,19 @@
 <script lang="ts">
   import { settingsOpen, settingsRepoId, mobile } from '../stores'
+  import { nativeStorage } from '../nativeStorage'
   import ResponsivePanel from './ResponsivePanel.svelte'
   import SettingsRepositories from './settings/SettingsRepositories.svelte'
   import SettingsIntegrations from './settings/SettingsIntegrations.svelte'
   import SettingsBehavior from './settings/SettingsBehavior.svelte'
   import SettingsNotifications from './settings/SettingsNotifications.svelte'
+  import SettingsServer from './settings/SettingsServer.svelte'
   import SettingsDiagnostics from './settings/SettingsDiagnostics.svelte'
   import SettingsAbout from './settings/SettingsAbout.svelte'
+
+  // TASK-I9S44: the "Server" tab (runtime daemon URL) only makes sense
+  // inside the Capacitor mobile shell — nativeStorage.isAvailable() is false
+  // on web/Electron, where it stays hidden entirely.
+  const isNative = nativeStorage.isAvailable()
 
   let activeTab = 'repositories'
 
@@ -61,6 +68,16 @@
         >
           Notifications
         </button>
+        {#if isNative}
+          <button
+            type="button"
+            class="tab-item"
+            class:active={activeTab === 'server'}
+            on:click={() => (activeTab = 'server')}
+          >
+            Server
+          </button>
+        {/if}
         <button
           type="button"
           class="tab-item"
@@ -94,6 +111,10 @@
 
         {#if activeTab === 'notifications'}
           <SettingsNotifications />
+        {/if}
+
+        {#if activeTab === 'server' && isNative}
+          <SettingsServer />
         {/if}
 
         {#if activeTab === 'diagnostics'}

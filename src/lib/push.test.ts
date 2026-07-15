@@ -105,18 +105,18 @@ describe('nativePushAvailable', () => {
 })
 
 describe('nativePushEnabled', () => {
-  it('is false with no stored token', () => {
+  it('is false with no stored token', async () => {
     stubBrowserGlobals(makeFakeCapacitor())
-    expect(nativePushEnabled()).toBe(false)
+    expect(await nativePushEnabled()).toBe(false)
   })
 
-  it('is true once a token has been stored', () => {
+  it('is true once a token has been stored (via the legacy-key migration)', async () => {
     stubBrowserGlobals(makeFakeCapacitor())
     ;(globalThis as unknown as { localStorage: Storage }).localStorage.setItem(
       'slipstream.fcmToken',
       'dev-1',
     )
-    expect(nativePushEnabled()).toBe(true)
+    expect(await nativePushEnabled()).toBe(true)
   })
 })
 
@@ -149,14 +149,15 @@ describe('enableNativePush', () => {
     expect(cap._plugin.register).toHaveBeenCalledOnce()
 
     cap._fire('registration', { value: 'device-token-abc' })
-    // saveFcmToken is called fire-and-forget inside the listener.
+    // saveFcmToken and the native-storage write are both fire-and-forget
+    // inside the listener.
     await new Promise((r) => setTimeout(r, 0))
 
     expect(ipcMocks.saveFcmToken).toHaveBeenCalledWith({
       token: 'device-token-abc',
       platform: 'android',
     })
-    expect(nativePushEnabled()).toBe(true)
+    expect(await nativePushEnabled()).toBe(true)
   })
 
   it('tags the token with platform ios when Capacitor reports ios', async () => {
@@ -189,7 +190,14 @@ describe('disableNativePush', () => {
     await disableNativePush()
 
     expect(ipcMocks.deleteFcmToken).toHaveBeenCalledWith('dev-to-remove')
-    expect(nativePushEnabled()).toBe(false)
+    expect(await nativePushEnabled()).toBe(false)
+    // The legacy key must be cleared too, or the next read would resurrect
+    // the disabled token via the migration path.
+    expect(
+      (globalThis as unknown as { localStorage: Storage }).localStorage.getItem(
+        'slipstream.fcmToken',
+      ),
+    ).toBeNull()
   })
 
   it('is a no-op when no token was ever stored', async () => {

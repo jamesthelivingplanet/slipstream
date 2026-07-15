@@ -34,7 +34,7 @@
 
   async function initNotifications() {
     if (isNative) {
-      pushEnabled = nativePushEnabled()
+      pushEnabled = await nativePushEnabled()
       return
     }
     if (!isWeb || !pushSupported()) return

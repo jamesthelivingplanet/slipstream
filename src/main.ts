@@ -40,15 +40,20 @@ async function mountApp(shouldAbort?: () => boolean) {
 
 async function bootWeb() {
   const { createWsApi } = await import('./lib/wsApi.js')
+  const { nativeStorage, TOKEN_KEY } = await import('./lib/nativeStorage.js')
 
   const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/rpc`
 
   // -- Token resolution --
-  // Priority: ?token= query param > localStorage
+  // Priority: ?token= query param > nativeStorage facade (secure storage /
+  // Preferences inside the Capacitor mobile shell, localStorage elsewhere —
+  // see nativeStorage.ts). A pre-existing legacy localStorage token (the
+  // WebView had no native storage before TASK-I9S44) is migrated forward
+  // the first time nothing is found under the new key.
   const params = new URLSearchParams(location.search)
   const paramToken = params.get('token')
   if (paramToken) {
-    localStorage.setItem('slipstream_token', paramToken)
+    await nativeStorage.set(TOKEN_KEY, paramToken)
     // Strip the token from the URL bar (cosmetic + security)
     params.delete('token')
     const clean = params.toString()
@@ -56,7 +61,8 @@ async function bootWeb() {
     history.replaceState(null, '', newUrl)
   }
 
-  const storedToken = localStorage.getItem('slipstream_token')
+  await nativeStorage.migrateLegacy(TOKEN_KEY, 'slipstream_token')
+  const storedToken = await nativeStorage.get(TOKEN_KEY)
 
   if (!storedToken) {
     // No token at all — show gate immediately
@@ -82,7 +88,8 @@ async function connectWithToken(
       onAuthError: async () => {
         if (authFailed) return
         authFailed = true
-        localStorage.removeItem('slipstream_token')
+        const { nativeStorage, TOKEN_KEY } = await import('./lib/nativeStorage.js')
+        await nativeStorage.remove(TOKEN_KEY, 'slipstream_token')
         await showTokenGate(wsUrl, 'Token rejected. Please enter a valid token.')
         resolve()
       },
@@ -114,7 +121,8 @@ async function showTokenGate(wsUrl: string, errorMsg: string): Promise<void> {
       props: {
         error: errorMsg,
         onSubmit: async (token: string) => {
-          localStorage.setItem('slipstream_token', token)
+          const { nativeStorage, TOKEN_KEY } = await import('./lib/nativeStorage.js')
+          await nativeStorage.set(TOKEN_KEY, token)
           const { createWsApi } = await import('./lib/wsApi.js')
           await connectWithToken(wsUrl, token, createWsApi)
           resolve()
