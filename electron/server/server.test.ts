@@ -165,6 +165,8 @@ function makeFakeDeps(): IpcDeps {
     savePushSubscription: vi.fn().mockResolvedValue(undefined),
     deletePushSubscription: vi.fn().mockResolvedValue(undefined),
     getPushPrefs: vi.fn().mockResolvedValue(null),
+    saveFcmToken: vi.fn().mockResolvedValue(undefined),
+    deleteFcmToken: vi.fn().mockResolvedValue(undefined),
   }
 
   return {
@@ -313,6 +315,8 @@ function makeSurvivalDeps(): {
     savePushSubscription: vi.fn().mockResolvedValue(undefined),
     deletePushSubscription: vi.fn().mockResolvedValue(undefined),
     getPushPrefs: vi.fn().mockResolvedValue(null),
+    saveFcmToken: vi.fn().mockResolvedValue(undefined),
+    deleteFcmToken: vi.fn().mockResolvedValue(undefined),
   }
 
   const deps: IpcDeps = {

@@ -15,6 +15,10 @@ export default tseslint.config(
       'coverage/**',
       'prototype.html',
       'public/**',
+      // Capacitor-generated native Android project (Java/Gradle/XML plus
+      // Gradle-intermediate JS bundles like native-bridge.js) — not
+      // hand-written code, not ours to lint.
+      'mobile/android/**',
     ],
   },
   js.configs.recommended,

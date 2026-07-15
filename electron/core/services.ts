@@ -20,7 +20,7 @@ import { provisionCliWrapper } from '../services/agentCliProvision.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createTailscaleExposer } from '../services/tailscale.js'
-import { createPushService, createDbPushStore } from '../services/pushService.js'
+import { createPushService, createDbPushStore, createDbFcmStore } from '../services/pushService.js'
 import { createRunLogger } from '../services/runLogger.js'
 import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import { createSessionReaper } from '../services/sessionReaper.js'
@@ -96,6 +96,7 @@ export function createServices(root: string): IpcDeps {
   const push = createPushService({
     config: configStore,
     store: createDbPushStore(db),
+    fcmStore: createDbFcmStore(db),
     sessions,
     sessionStore,
   })

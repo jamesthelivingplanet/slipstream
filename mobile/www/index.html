@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Slipstream</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b0e14;
+        color: #d7dae0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      main {
+        text-align: center;
+        max-width: 28rem;
+        width: 100%;
+      }
+      h1 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0 0 0.5rem;
+      }
+      p {
+        margin: 0.25rem 0 1rem;
+        color: #8b93a1;
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        text-align: left;
+      }
+      label {
+        font-size: 0.8rem;
+        color: #8b93a1;
+      }
+      input[type='url'] {
+        width: 100%;
+        height: 40px;
+        box-sizing: border-box;
+        background: #12161f;
+        border: 1px solid #262c3a;
+        border-radius: 8px;
+        color: #d7dae0;
+        font-family: inherit;
+        font-size: 0.95rem;
+        padding: 0 12px;
+      }
+      input[type='url']:focus {
+        outline: none;
+        border-color: #4c7cf0;
+      }
+      button {
+        height: 40px;
+        border-radius: 8px;
+        border: none;
+        background: #4c7cf0;
+        color: #fff;
+        font-family: inherit;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 4px;
+      }
+      button:disabled {
+        background: #2a3550;
+        color: #6b7488;
+        cursor: not-allowed;
+      }
+      .status {
+        min-height: 1.2em;
+        font-size: 0.8rem;
+        margin-top: 8px;
+      }
+      .status.error {
+        color: #f0796c;
+      }
+      .status.ok {
+        color: #7fd39a;
+      }
+      code {
+        color: #d7dae0;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Slipstream</h1>
+      <p id="intro">
+        No daemon URL is configured yet. Enter the address of your Slipstream server (e.g.
+        <code>https://your-host.example.com</code>) to connect.
+      </p>
+
+      <form id="gate-form">
+        <label for="gate-url">Daemon URL</label>
+        <input
+          type="url"
+          id="gate-url"
+          name="url"
+          placeholder="https://your-host.example.com"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          required
+        />
+        <button type="submit" id="gate-submit">Connect</button>
+        <div class="status" id="gate-status" role="status"></div>
+      </form>
+    </main>
+
+    <script>
+      // Self-contained ServerGate for future builds that ship with NO
+      // server.url baked into capacitor.config.ts — Capacitor then loads
+      // this bundled www/index.html as the entry instead of a remote URL.
+      // Today's kiosk build always bakes server.url, so the WebView loads
+      // the remote SPA directly and this page is never shown. It talks to
+      // the injected Capacitor Preferences plugin (same
+      // 'slipstream.daemonUrl' key as src/lib/nativeStorage.ts /
+      // MainActivity's runtime override) and the tiny AppControl plugin to
+      // apply the change without a manual force-close.
+      ;(function () {
+        'use strict'
+
+        var form = document.getElementById('gate-form')
+        var input = document.getElementById('gate-url')
+        var submitBtn = document.getElementById('gate-submit')
+        var status = document.getElementById('gate-status')
+        var DAEMON_URL_KEY = 'slipstream.daemonUrl'
+
+        function setStatus(msg, kind) {
+          status.textContent = msg || ''
+          status.className = 'status' + (kind ? ' ' + kind : '')
+        }
+
+        function getCapacitor() {
+          return window.Capacitor
+        }
+
+        function getPreferences() {
+          var cap = getCapacitor()
+          return cap && cap.Plugins && cap.Plugins.Preferences
+        }
+
+        function getAppControl() {
+          var cap = getCapacitor()
+          return cap && cap.Plugins && cap.Plugins.AppControl
+        }
+
+        function isValidHttpUrl(value) {
+          try {
+            var u = new URL(value)
+            return u.protocol === 'http:' || u.protocol === 'https:'
+          } catch (e) {
+            return false
+          }
+        }
+
+        function loadExisting() {
+          var prefs = getPreferences()
+          if (!prefs) {
+            setStatus(
+              'Native storage is unavailable in this build — enter the URL each launch.',
+              'error',
+            )
+            return
+          }
+          prefs
+            .get({ key: DAEMON_URL_KEY })
+            .then(function (res) {
+              if (res && res.value) input.value = res.value
+            })
+            .catch(function () {
+              // ignore — form still works for a fresh entry
+            })
+        }
+
+        form.addEventListener('submit', function (evt) {
+          evt.preventDefault()
+          var value = input.value.trim()
+          if (!isValidHttpUrl(value)) {
+            setStatus('Enter a valid http(s) URL.', 'error')
+            return
+          }
+
+          var prefs = getPreferences()
+          if (!prefs) {
+            setStatus('Native storage plugin unavailable — cannot save.', 'error')
+            return
+          }
+
+          submitBtn.disabled = true
+          setStatus('Saving…', '')
+
+          prefs
+            .set({ key: DAEMON_URL_KEY, value: value })
+            .then(function () {
+              var appControl = getAppControl()
+              if (appControl && appControl.restart) {
+                setStatus('Restarting…', 'ok')
+                return appControl.restart()
+              }
+              setStatus('Saved. Please close and reopen the app.', 'ok')
+              return undefined
+            })
+            .catch(function () {
+              setStatus('Could not save the URL. Please try again.', 'error')
+            })
+            .then(function () {
+              submitBtn.disabled = false
+            })
+        })
+
+        loadExisting()
+      })()
+    </script>
+  </body>
+</html>

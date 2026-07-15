@@ -22,6 +22,7 @@ import type {
   EditorConfig,
   NotifyPrefs,
   PushSubscriptionDTO,
+  FcmTokenDTO,
   GitHost,
   WriteLockState,
   GcPolicy,
@@ -309,6 +310,14 @@ export function deletePushSubscription(endpoint: string): Promise<void> {
 
 export function getPushPrefs(endpoint: string): Promise<NotifyPrefs | null> {
   return hasBackend ? window.slipstream.getPushPrefs(endpoint) : Promise.resolve(null)
+}
+
+export function saveFcmToken(token: FcmTokenDTO): Promise<void> {
+  return hasBackend ? window.slipstream.saveFcmToken(token) : Promise.resolve()
+}
+
+export function deleteFcmToken(token: string): Promise<void> {
+  return hasBackend ? window.slipstream.deleteFcmToken(token) : Promise.resolve()
 }
 
 // ── Git host tokens / PR push ───────────────────────────────────────────────

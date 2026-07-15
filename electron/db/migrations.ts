@@ -116,6 +116,19 @@ CREATE TABLE session_agent_events (
 CREATE UNIQUE INDEX idx_session_agent_events_dedupe
   ON session_agent_events (sessionId, kind, ts)
 `),
+  // 6 — TASK-I9S44: native push (FCM HTTP v1) device tokens. Deduped by
+  // token (PRIMARY KEY); owner-scoped like every other per-user table (see
+  // IDENTITY-SEAM.md) so the daemon fans out a notification only to the
+  // owning session's own devices.
+  (db) =>
+    db.exec(`
+CREATE TABLE push_fcm_tokens (
+  token     TEXT PRIMARY KEY,
+  ownerId   TEXT NOT NULL DEFAULT 'local',
+  platform  TEXT NOT NULL,
+  createdAt INTEGER NOT NULL
+)
+`),
 ]
 
 /** Apply any migrations newer than the DB's current user_version, atomically. */

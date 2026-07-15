@@ -116,6 +116,15 @@ export interface PushSubscriptionDTO {
   keys: { p256dh: string; auth: string }
 }
 
+/** A registered native FCM device token (TASK-I9S44) — the Capacitor mobile
+ *  shell's counterpart to PushSubscriptionDTO's Web Push subscription. Inert
+ *  until a Firebase service-account credential is configured server-side
+ *  (see docs/SECURITY.md §6); saving a token before then just persists it. */
+export interface FcmTokenDTO {
+  token: string
+  platform: 'android' | 'ios'
+}
+
 export interface RepoDTO {
   id: string // slug, e.g. "acme-api"
   org: string
@@ -773,6 +782,11 @@ export interface SlipstreamApi {
   savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void>
   deletePushSubscription(endpoint: string): Promise<void>
   getPushPrefs(endpoint: string): Promise<NotifyPrefs | null>
+  /** Register (or refresh) a native FCM device token for push delivery
+   *  (TASK-I9S44) — used when the Capacitor bridge is present. Dedupes by
+   *  token; owner-scoped like every other per-caller write. */
+  saveFcmToken(token: FcmTokenDTO): Promise<void>
+  deleteFcmToken(token: string): Promise<void>
   getGitToken(host: GitHost): Promise<string | null>
   setGitToken(host: GitHost, token: string): Promise<void>
   /** All registered git providers (TASK-7LGAO) — drives the Settings →
@@ -905,6 +919,8 @@ export const IPC = {
   savePushSubscription: 'push:save',
   deletePushSubscription: 'push:delete',
   getPushPrefs: 'push:prefs',
+  saveFcmToken: 'push:saveFcmToken',
+  deleteFcmToken: 'push:deleteFcmToken',
   getGitToken: 'config:getGitToken',
   setGitToken: 'config:setGitToken',
   listGitProviders: 'config:listGitProviders',
