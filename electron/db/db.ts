@@ -281,3 +281,44 @@ export function getPushSubscription(
 export function deletePushSubscription(db: Database.Database, endpoint: string): void {
   db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint)
 }
+
+// ── Native push (FCM) device tokens (TASK-I9S44) ─────────────────────────────
+
+export interface FcmTokenRow {
+  token: string
+  ownerId: string
+  platform: string
+  createdAt: number
+}
+
+/** Dedupe by token (PRIMARY KEY): re-registering the same physical device
+ *  token just refreshes ownerId/platform/createdAt in place. */
+export function upsertFcmToken(
+  db: Database.Database,
+  token: string,
+  ownerId: string,
+  platform: string,
+  now: number,
+): void {
+  db.prepare(
+    `
+    INSERT INTO push_fcm_tokens (token, ownerId, platform, createdAt)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(token) DO UPDATE SET
+      ownerId  = excluded.ownerId,
+      platform = excluded.platform
+  `,
+  ).run(token, ownerId, platform, now)
+}
+
+export function allFcmTokens(db: Database.Database): FcmTokenRow[] {
+  return db.prepare('SELECT * FROM push_fcm_tokens').all() as FcmTokenRow[]
+}
+
+/** Owner-scoped delete: a cross-owner token id silently deletes nothing
+ *  (0 rows affected) rather than throwing — same no-existence-leak posture as
+ *  the other fire-and-forget, unguessable-id-addressed ops (see
+ *  IDENTITY-SEAM.md). */
+export function deleteFcmToken(db: Database.Database, token: string, ownerId: string): void {
+  db.prepare('DELETE FROM push_fcm_tokens WHERE token = ? AND ownerId = ?').run(token, ownerId)
+}

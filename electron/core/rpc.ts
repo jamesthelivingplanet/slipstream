@@ -14,6 +14,7 @@ import type {
   RepoSettings,
   NotifyPrefs,
   PushSubscriptionDTO,
+  FcmTokenDTO,
   WriteLockState,
   GcPolicy,
   SchedulerPolicy,
@@ -750,6 +751,12 @@ export function createRpc(
 
       case IPC.getPushPrefs:
         return deps.push.getPushPrefs(args[0] as string)
+
+      case IPC.saveFcmToken:
+        return deps.push.saveFcmToken(identity.id, args[0] as FcmTokenDTO)
+
+      case IPC.deleteFcmToken:
+        return deps.push.deleteFcmToken(identity.id, args[0] as string)
 
       case IPC.getGitToken: {
         const host = args[0]

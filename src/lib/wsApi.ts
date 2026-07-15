@@ -23,6 +23,7 @@ import type {
   EditorConfig,
   NotifyPrefs,
   PushSubscriptionDTO,
+  FcmTokenDTO,
   BackendKind,
   GitHost,
   WriteLockState,
@@ -572,6 +573,12 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.getPushPrefs, [endpoint]) as Promise<
         import('../../electron/shared/contract.js').NotifyPrefs | null
       >
+    },
+    saveFcmToken(token: FcmTokenDTO): Promise<void> {
+      return request(IPC.saveFcmToken, [token]) as Promise<void>
+    },
+    deleteFcmToken(token: string): Promise<void> {
+      return request(IPC.deleteFcmToken, [token]) as Promise<void>
     },
     getGitToken(host: GitHost): Promise<string | null> {
       return request(IPC.getGitToken, [host]) as Promise<string | null>
