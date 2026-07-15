@@ -8,3 +8,5 @@ prototype.html
 public
 *.md
 .pnpm-store
+# Capacitor-generated native Android project — not hand-written, not ours to format.
+mobile/android

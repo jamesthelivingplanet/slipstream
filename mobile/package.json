@@ -1,0 +1,16 @@
+{
+  "name": "slipstream-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Sideloadable Android/iOS kiosk shell whose WebView loads the Slipstream daemon-served SPA",
+  "scripts": {
+    "sync": "cap sync"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.6.8",
+    "@capacitor/core": "^7.6.8"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.6.8"
+  }
+}
