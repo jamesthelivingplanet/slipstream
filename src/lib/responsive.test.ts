@@ -8,6 +8,7 @@ import {
   keyboardInset,
   KEYBOARD_MIN_INSET,
   KEYBOARD_MAX_INSET_RATIO,
+  shouldShowFab,
 } from './responsive.js'
 
 describe('responsive', () => {
@@ -115,5 +116,31 @@ describe('keyboardInset', () => {
   it('clamps extreme shortfalls to KEYBOARD_MAX_INSET_RATIO of the viewport', () => {
     expect(keyboardInset(800, 100, 0, true)).toBe(Math.round(800 * KEYBOARD_MAX_INSET_RATIO))
     expect(KEYBOARD_MAX_INSET_RATIO).toBe(0.6)
+  })
+})
+
+describe('shouldShowFab', () => {
+  it('is visible on mobile with everything clear', () => {
+    expect(shouldShowFab(true, false, false, 0)).toBe(true)
+  })
+
+  it('is hidden when not mobile', () => {
+    expect(shouldShowFab(false, false, false, 0)).toBe(false)
+  })
+
+  it('is hidden while the new agent dialog is open', () => {
+    expect(shouldShowFab(true, true, false, 0)).toBe(false)
+  })
+
+  it('is hidden while settings is open', () => {
+    expect(shouldShowFab(true, false, true, 0)).toBe(false)
+  })
+
+  it('is hidden while the on-screen keyboard covers the bottom of the screen', () => {
+    expect(shouldShowFab(true, false, false, 120)).toBe(false)
+  })
+
+  it('is visible right at the keyboard inset boundary (0 exactly)', () => {
+    expect(shouldShowFab(true, false, false, 0)).toBe(true)
   })
 })

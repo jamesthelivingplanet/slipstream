@@ -65,3 +65,16 @@ export function keyboardInset(
   if (inset < KEYBOARD_MIN_INSET) return 0
   return Math.min(inset, Math.round(innerHeight * KEYBOARD_MAX_INSET_RATIO))
 }
+
+/** Whether the mobile "New agent" FAB should be visible: only on mobile, and
+ *  never while the New Agent dialog or Settings panel are open, or while the
+ *  on-screen keyboard is covering the bottom of the screen — otherwise it
+ *  would sit on top of dialog content or MobileTermInput. */
+export function shouldShowFab(
+  mobile: boolean,
+  dialogOpen: boolean,
+  settingsOpen: boolean,
+  keyboardInsetPx: number,
+): boolean {
+  return mobile && !dialogOpen && !settingsOpen && keyboardInsetPx <= 0
+}

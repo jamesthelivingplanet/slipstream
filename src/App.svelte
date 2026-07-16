@@ -30,6 +30,7 @@
   import Toasts from './lib/components/Toasts.svelte'
   import ConfirmDialog from './lib/components/ConfirmDialog.svelte'
   import InstallNudge from './lib/components/InstallNudge.svelte'
+  import NewAgentFab from './lib/components/NewAgentFab.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
   import CliStatus from './lib/components/CliStatus.svelte'
   import {
@@ -249,10 +250,12 @@
     >
       {@html icons.settings}
     </button>
-    <button class="btn btn-primary btn-sm" on:click={() => dialogOpen.set(true)}>
-      {@html icons.plus}
-      {$mobile ? '' : 'New agent'}
-    </button>
+    {#if !$mobile}
+      <button class="btn btn-primary btn-sm" on:click={() => dialogOpen.set(true)}>
+        {@html icons.plus}
+        New agent
+      </button>
+    {/if}
   </header>
 
   <!-- Drawer overlay backdrop: tap outside drawer to close (mobile + medium) -->
@@ -288,6 +291,7 @@
   <Toasts />
   <ConfirmDialog />
   <InstallNudge />
+  <NewAgentFab />
 </div>
 
 <style>
