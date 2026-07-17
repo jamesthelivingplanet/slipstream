@@ -144,6 +144,18 @@ describe('shouldShowFab', () => {
   it('is visible right at the keyboard inset boundary (0 exactly)', () => {
     expect(shouldShowFab(true, false, false, 0)).toBe(true)
   })
+
+  it('defaults to visible (onboarding param omitted) — every prior call site is unaffected', () => {
+    expect(shouldShowFab(true, false, false, 0)).toBe(true)
+  })
+
+  it('is hidden while first-boot onboarding is showing', () => {
+    expect(shouldShowFab(true, false, false, 0, true)).toBe(false)
+  })
+
+  it('is visible once onboarding is explicitly false', () => {
+    expect(shouldShowFab(true, false, false, 0, false)).toBe(true)
+  })
 })
 
 describe('shouldShowDesktopCompanion', () => {
