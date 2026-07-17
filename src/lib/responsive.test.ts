@@ -8,6 +8,8 @@ import {
   keyboardInset,
   KEYBOARD_MIN_INSET,
   KEYBOARD_MAX_INSET_RATIO,
+  shouldShowFab,
+  shouldShowDesktopCompanion,
 } from './responsive.js'
 
 describe('responsive', () => {
@@ -115,5 +117,57 @@ describe('keyboardInset', () => {
   it('clamps extreme shortfalls to KEYBOARD_MAX_INSET_RATIO of the viewport', () => {
     expect(keyboardInset(800, 100, 0, true)).toBe(Math.round(800 * KEYBOARD_MAX_INSET_RATIO))
     expect(KEYBOARD_MAX_INSET_RATIO).toBe(0.6)
+  })
+})
+
+describe('shouldShowFab', () => {
+  it('is visible on mobile with everything clear', () => {
+    expect(shouldShowFab(true, false, false, 0)).toBe(true)
+  })
+
+  it('is hidden when not mobile', () => {
+    expect(shouldShowFab(false, false, false, 0)).toBe(false)
+  })
+
+  it('is hidden while the new agent dialog is open', () => {
+    expect(shouldShowFab(true, true, false, 0)).toBe(false)
+  })
+
+  it('is hidden while settings is open', () => {
+    expect(shouldShowFab(true, false, true, 0)).toBe(false)
+  })
+
+  it('is hidden while the on-screen keyboard covers the bottom of the screen', () => {
+    expect(shouldShowFab(true, false, false, 120)).toBe(false)
+  })
+
+  it('is visible right at the keyboard inset boundary (0 exactly)', () => {
+    expect(shouldShowFab(true, false, false, 0)).toBe(true)
+  })
+})
+
+describe('shouldShowDesktopCompanion', () => {
+  it('is visible on desktop with angel mode on and everything clear', () => {
+    expect(shouldShowDesktopCompanion(false, true, false, false)).toBe(true)
+  })
+
+  it('is hidden on mobile regardless of other flags (mobile uses shouldShowFab instead)', () => {
+    expect(shouldShowDesktopCompanion(true, true, false, false)).toBe(false)
+  })
+
+  it('is hidden when angel mode is off — desktop keeps the header button, no fallback disc', () => {
+    expect(shouldShowDesktopCompanion(false, false, false, false)).toBe(false)
+  })
+
+  it('is hidden while the new agent dialog is open', () => {
+    expect(shouldShowDesktopCompanion(false, true, true, false)).toBe(false)
+  })
+
+  it('is hidden while settings is open', () => {
+    expect(shouldShowDesktopCompanion(false, true, false, true)).toBe(false)
+  })
+
+  it('has no keyboard-inset parameter — desktop has no on-screen keyboard concern', () => {
+    expect(shouldShowDesktopCompanion.length).toBe(4)
   })
 })

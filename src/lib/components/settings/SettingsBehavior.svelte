@@ -10,6 +10,14 @@
     setSchedulerPolicy,
   } from '../../ipc'
   import { pushToast } from '../../toast'
+  import { mobile } from '../../stores'
+  import {
+    fabAngelEnabled,
+    fabTipsEnabled,
+    initFabPrefs,
+    setFabAngelEnabled,
+    setFabTipsEnabled,
+  } from '../../fabPrefs'
   import SettingsSection from './SettingsSection.svelte'
   import type { GcPolicy, SchedulerPolicy } from '../../../../electron/shared/contract.js'
   import {
@@ -111,10 +119,19 @@
     }
   }
 
+  function onFabAngelChange(e: Event) {
+    setFabAngelEnabled((e.currentTarget as HTMLInputElement).checked)
+  }
+
+  function onFabTipsChange(e: Event) {
+    setFabTipsEnabled((e.currentTarget as HTMLInputElement).checked)
+  }
+
   onMount(() => {
     loadEditorConfig()
     loadGcPolicy()
     loadSchedulerPolicy()
+    initFabPrefs()
   })
 </script>
 
@@ -250,6 +267,24 @@
     <p class="integration-hint muted">Backend not available in browser-only mode.</p>
   {/if}
 </SettingsSection>
+
+{#if $mobile}
+  <!-- Mobile-only concern, so hidden entirely on desktop/web the same way
+       SettingsServer.svelte only appears inside the Capacitor shell. -->
+  <SettingsSection title="Mobile FAB">
+    <p class="integration-hint">
+      Settings for the floating "New agent" button that replaces the header button on mobile.
+    </p>
+    <label class="notify-check">
+      <input type="checkbox" checked={$fabAngelEnabled} on:change={onFabAngelChange} />
+      Angel mode (pixel-art glyph instead of a plain button)
+    </label>
+    <label class="notify-check">
+      <input type="checkbox" checked={$fabTipsEnabled} on:change={onFabTipsChange} />
+      Occasional tips
+    </label>
+  </SettingsSection>
+{/if}
 
 <style>
   .editor-fields {
