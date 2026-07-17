@@ -1,6 +1,8 @@
 // Facade for persisting a few pieces of client state — the auth token, the
-// FCM push record, and (mobile-only) the daemon URL — outside origin-bound
+// FCM push record, and the server URL override — outside origin-bound
 // localStorage when running inside the Capacitor mobile shell (TASK-I9S44).
+// The server URL override is also read/written on plain web (TASK-0HDEW):
+// nativeStorage falls back to localStorage there, same as every other key.
 //
 // Same rationale as push.ts: the mobile app's WebView loads this SAME SPA
 // over the tailnet — there is no separate mobile build. window.Capacitor
@@ -22,7 +24,9 @@
 
 /** Secure-storage key for the auth token (Keystore-backed on Android). */
 export const TOKEN_KEY = 'slipstream.token'
-/** Preferences key for the runtime daemon URL override. */
+/** Preferences key for the server URL override — set by the token gate (web)
+ *  and the mobile Server settings tab; web boot derives the RPC WS URL from
+ *  it. */
 export const DAEMON_URL_KEY = 'slipstream.daemonUrl'
 /** Preferences key for the last-registered FCM record, JSON `{token, enabled}`. */
 export const FCM_KEY = 'slipstream.fcm'

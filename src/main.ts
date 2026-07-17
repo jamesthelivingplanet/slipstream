@@ -7,9 +7,14 @@ import '@xterm/xterm/css/xterm.css'
  * Electron: window.slipstream is already set by the preload. We just mount App.
  *
  * Web/browser: window.slipstream is absent. We must:
- *   1. Determine the WS URL + token.
- *   2. If no token → show TokenGate; wait for user to supply one.
- *   3. Create the WS-backed SlipstreamApi and assign window.slipstream BEFORE
+ *   1. Resolve the server origin — a stored override (DAEMON_URL_KEY) if the
+ *      user previously pointed the gate at a different host, else
+ *      location.origin (the SPA's own host, the historical default) — and
+ *      derive the RPC WS URL from it.
+ *   2. Determine the token.
+ *   3. If no token → show TokenGate (collects both server URL + token; wait
+ *      for user to submit).
+ *   4. Create the WS-backed SlipstreamApi and assign window.slipstream BEFORE
  *      importing App (and therefore ipc.ts), so `hasBackend` evaluates true.
  *
  * The dynamic import() approach guarantees that ipc.ts runs its module-level
@@ -40,9 +45,8 @@ async function mountApp(shouldAbort?: () => boolean) {
 
 async function bootWeb() {
   const { createWsApi } = await import('./lib/wsApi.js')
-  const { nativeStorage, TOKEN_KEY } = await import('./lib/nativeStorage.js')
-
-  const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/rpc`
+  const { nativeStorage, TOKEN_KEY, DAEMON_URL_KEY } = await import('./lib/nativeStorage.js')
+  const { rpcWsUrl } = await import('./lib/serverUrl.js')
 
   // -- Token resolution --
   // Priority: ?token= query param > nativeStorage facade (secure storage /
@@ -64,20 +68,29 @@ async function bootWeb() {
   await nativeStorage.migrateLegacy(TOKEN_KEY, 'slipstream_token')
   const storedToken = await nativeStorage.get(TOKEN_KEY)
 
+  // -- Server origin resolution --
+  // A stored override (set by the token gate, or the mobile Server settings
+  // tab) wins; otherwise default to the SPA's own origin — the historical
+  // behavior, and the common case when the server serves its own SPA.
+  const storedServer = await nativeStorage.get(DAEMON_URL_KEY)
+  const serverOrigin = storedServer || location.origin
+  const wsUrl = rpcWsUrl(serverOrigin)
+
   if (!storedToken) {
     // No token at all — show gate immediately
-    await showTokenGate(wsUrl, '')
+    await showTokenGate(serverOrigin, '')
     return
   }
 
   // We have a token — try to connect.
-  await connectWithToken(wsUrl, storedToken, createWsApi)
+  await connectWithToken(wsUrl, storedToken, createWsApi, serverOrigin)
 }
 
 async function connectWithToken(
   wsUrl: string,
   token: string,
   createWsApi: typeof import('./lib/wsApi.js').createWsApi,
+  serverOrigin: string,
 ): Promise<void> {
   return new Promise<void>((resolve) => {
     let authFailed = false
@@ -89,8 +102,10 @@ async function connectWithToken(
         if (authFailed) return
         authFailed = true
         const { nativeStorage, TOKEN_KEY } = await import('./lib/nativeStorage.js')
+        // Only the token is removed — keep the stored server override (if
+        // any) so the gate comes back prefilled with the same server.
         await nativeStorage.remove(TOKEN_KEY, 'slipstream_token')
-        await showTokenGate(wsUrl, 'Token rejected. Please enter a valid token.')
+        await showTokenGate(serverOrigin, 'Token rejected. Please enter a valid token.')
         resolve()
       },
     })
@@ -110,7 +125,7 @@ async function connectWithToken(
   })
 }
 
-async function showTokenGate(wsUrl: string, errorMsg: string): Promise<void> {
+async function showTokenGate(serverOrigin: string, errorMsg: string): Promise<void> {
   const { default: TokenGate } = await import('./lib/components/TokenGate.svelte')
   clearMount()
 
@@ -120,11 +135,34 @@ async function showTokenGate(wsUrl: string, errorMsg: string): Promise<void> {
       target,
       props: {
         error: errorMsg,
-        onSubmit: async (token: string) => {
-          const { nativeStorage, TOKEN_KEY } = await import('./lib/nativeStorage.js')
+        server: serverOrigin,
+        onSubmit: async (server: string, token: string) => {
+          const { nativeStorage, TOKEN_KEY, DAEMON_URL_KEY } =
+            await import('./lib/nativeStorage.js')
           await nativeStorage.set(TOKEN_KEY, token)
+
+          // Persist the server choice: no override needed when it matches
+          // the SPA's own origin (the historical default) — anything else
+          // is stored so subsequent boots (and the gate, on re-prompt) pick
+          // it up.
+          if (server === location.origin) {
+            await nativeStorage.remove(DAEMON_URL_KEY)
+          } else {
+            await nativeStorage.set(DAEMON_URL_KEY, server)
+          }
+
+          // Native shell special case: the Capacitor WebView must reload the
+          // SPA itself from the new daemon — same pattern as
+          // SettingsServer.svelte. Restart re-enters boot with the new
+          // stored server origin.
+          if (nativeStorage.isAvailable() && server !== location.origin) {
+            await nativeStorage.restart()
+            return
+          }
+
           const { createWsApi } = await import('./lib/wsApi.js')
-          await connectWithToken(wsUrl, token, createWsApi)
+          const { rpcWsUrl } = await import('./lib/serverUrl.js')
+          await connectWithToken(rpcWsUrl(server), token, createWsApi, server)
           resolve()
         },
       },
