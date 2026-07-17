@@ -118,8 +118,13 @@
 {/if}
 
 <style>
-  /* Fixed bottom-right, respecting safe areas, sized well above the 44px
-     touch-target minimum. z-index kept below ResponsivePanel's dialog
+  /* Fixed bottom-right, respecting safe areas. The button itself is a fully
+     transparent 56px hit area (well above the 44px touch-target minimum) —
+     no disc, no border, no shadow. The pixel angel is the only visible
+     thing; it floats directly over whatever's behind it (including
+     terminal content). border-radius is kept purely so the focus-visible
+     outline below renders as a rounded ring around the invisible hit area
+     rather than a square one. z-index kept below ResponsivePanel's dialog
      overlay (50) and panel (51) so it never fights a modal for taps. */
   .new-agent-fab {
     position: fixed;
@@ -130,39 +135,51 @@
     min-width: 44px;
     min-height: 44px;
     border-radius: 50%;
-    background: hsl(var(--primary));
+    background: transparent;
     border: none;
-    box-shadow: var(--shadow);
+    box-shadow: none;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0;
     cursor: pointer;
+    touch-action: manipulation;
     z-index: 40;
   }
 
-  .new-agent-fab:hover {
-    opacity: 0.92;
+  .new-agent-fab:hover .glyph {
+    opacity: 0.85;
   }
 
+  /* Face is gone, so the focus ring is the only affordance that the hit
+     area exists — draw it deliberately, keyboard-focus only. */
   .new-agent-fab:focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 3px;
   }
 
+  /* A touch larger than before (32px) now that nothing constrains it to a
+     disc's interior — judged for legibility against the wider hit area. */
   .new-agent-fab .glyph {
-    width: 32px;
-    height: 32px;
+    width: 40px;
+    height: 40px;
     shape-rendering: crispEdges;
     position: relative;
+    /* Background-colored (opposite luminance from the body fill) halo so
+       the glyph separates from busy terminal content in both themes: two
+       tight passes for a crisp edge, one wider soft pass for a glow. */
+    filter: drop-shadow(0 0 1px hsl(var(--background))) drop-shadow(0 0 1px hsl(var(--background)))
+      drop-shadow(0 0 3px hsl(var(--background) / 0.75));
   }
 
-  /* AT-field-style hexagonal ripple, expands from the button on press. */
+  /* AT-field-style hexagonal ripple, now emanating from the glyph itself
+     (there's no disc to expand from). Centered the same as the glyph since
+     the hit area and glyph share a center. */
   .new-agent-fab .ripple {
     position: absolute;
-    inset: -16px;
+    inset: -12px;
     clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
-    background: hsl(var(--primary) / 0.45);
+    background: hsl(var(--foreground) / 0.35);
     opacity: 0;
     transform: scale(0.3);
     pointer-events: none;
@@ -178,27 +195,33 @@
     transform-origin: 7.5px 7.5px;
   }
 
+  /* Body fill: hsl(var(--foreground)) rather than --primary-foreground. The
+     old fill was chosen for contrast against the --primary disc, which is
+     now gone — --foreground is dark-on-light / light-on-dark by
+     construction (see src/app.css), so it stays legible over arbitrary
+     content in both themes on its own; the drop-shadow halo on .glyph
+     above (background-colored) does the rest of the separation work. */
   .px-core {
-    fill: hsl(var(--primary-foreground) / 0.9);
+    fill: hsl(var(--foreground) / 0.9);
   }
   .px-halo {
-    fill: hsl(var(--primary-foreground) / 0.7);
+    fill: hsl(var(--foreground) / 0.7);
     animation: fab-shimmer 6s ease-in-out infinite;
   }
   /* The fragment that sheared off the halo — same family, drifts on its own
      out-of-phase timing so it reads as loose rather than orbiting in sync. */
   .px-halo-frag {
-    fill: hsl(var(--primary-foreground) / 0.55);
+    fill: hsl(var(--foreground) / 0.55);
     animation: fab-shimmer 4.1s ease-in-out infinite;
   }
   .px-limb {
-    fill: hsl(var(--primary-foreground) / 0.4);
+    fill: hsl(var(--foreground) / 0.4);
   }
   .px-tip {
-    fill: hsl(var(--primary-foreground) / 0.2);
+    fill: hsl(var(--foreground) / 0.2);
   }
   .px-tendril {
-    fill: hsl(var(--primary-foreground) / 0.25);
+    fill: hsl(var(--foreground) / 0.25);
   }
 
   /* Eyes: a fixed deep red rather than hsl(var(--primary-foreground)) — this
