@@ -67,16 +67,20 @@ export function keyboardInset(
 }
 
 /** Whether the mobile "New agent" FAB should be visible: only on mobile, and
- *  never while the New Agent dialog or Settings panel are open, or while the
- *  on-screen keyboard is covering the bottom of the screen — otherwise it
- *  would sit on top of dialog content or MobileTermInput. */
+ *  never while the New Agent dialog or Settings panel are open, while the
+ *  on-screen keyboard is covering the bottom of the screen, or while
+ *  first-boot onboarding (TASK-EQOP4) is showing its full-screen pager —
+ *  otherwise it would sit on top of dialog content, MobileTermInput, or the
+ *  onboarding overlay. Defaults `onboarding` to false so every pre-existing
+ *  call site (and test) keeps its exact prior behavior. */
 export function shouldShowFab(
   mobile: boolean,
   dialogOpen: boolean,
   settingsOpen: boolean,
   keyboardInsetPx: number,
+  onboarding: boolean = false,
 ): boolean {
-  return mobile && !dialogOpen && !settingsOpen && keyboardInsetPx <= 0
+  return mobile && !dialogOpen && !settingsOpen && keyboardInsetPx <= 0 && !onboarding
 }
 
 /** Whether the desktop angel companion should be visible (TASK-I9S44): the

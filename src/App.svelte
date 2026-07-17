@@ -33,11 +33,21 @@
   import NewAgentFab from './lib/components/NewAgentFab.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
   import CliStatus from './lib/components/CliStatus.svelte'
+  import OnboardingPager from './lib/components/OnboardingPager.svelte'
+  import OnboardingModal from './lib/components/OnboardingModal.svelte'
+  import { nativeStorage } from './lib/nativeStorage'
+  import { initOnboarding, onboardingMode } from './lib/onboarding'
   import {
     MOBILE_MEDIA_QUERY,
     DRAWER_MEDIA_QUERY,
     keyboardInset as computeKeyboardInset,
   } from './lib/responsive'
+
+  // TASK-EQOP4: Capacitor-vs-web presentation is a fixed runtime fact (the
+  // shell doesn't change mid-session), so this is computed once rather than
+  // as a reactive statement — same isAvailable() seam nativeStorage.ts and
+  // push.ts already use to detect the mobile shell.
+  const onboardingUiMode = onboardingMode(nativeStorage.isAvailable())
 
   // Mobile drawer state — the sidebar is an overlay on narrow viewports.
   let listOpen = false
@@ -78,6 +88,11 @@
     const offStatus = subscribeSessionStatus()
     const offPr = subscribeSessionPr()
     const offConnection = subscribeConnectionChange()
+
+    // First-boot onboarding: independent of the backend/ticket bootstrap
+    // below (it only reads its own nativeStorage flag), started alongside it
+    // rather than chained after — see initOnboarding() in ./lib/onboarding.ts.
+    initOnboarding()
 
     initFromBackend().then(() => {
       return refreshAndReconcile().then(() => {
@@ -292,6 +307,11 @@
   <ConfirmDialog />
   <InstallNudge />
   <NewAgentFab />
+  {#if onboardingUiMode === 'pager'}
+    <OnboardingPager />
+  {:else}
+    <OnboardingModal />
+  {/if}
 </div>
 
 <style>
