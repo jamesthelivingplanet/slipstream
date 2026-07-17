@@ -1,10 +1,73 @@
 <script lang="ts">
-  import { dialogOpen, settingsOpen, mobile, keyboardInset } from '../stores'
+  import { onMount, onDestroy } from 'svelte'
+  import { fade } from 'svelte/transition'
+  import { dialogOpen, settingsOpen, mobile, keyboardInset, selected } from '../stores'
   import { shouldShowFab } from '../responsive'
+  import { icons } from '../icons'
+  import { nativeStorage } from '../nativeStorage'
+  import { fabAngelEnabled, fabTipsEnabled, initFabPrefs } from '../fabPrefs'
+  import { FAB_TIPS } from '../fabTipsContent'
+  import {
+    FAB_TIP_INDEX_KEY,
+    firstTipDueAtMs,
+    isTipDue,
+    tipAutoHideAtMs,
+    nextTipDueAtMs,
+    nextTipIndex,
+    clampTipIndex,
+  } from '../fabTips'
 
   let btn: HTMLButtonElement
+  let reducedMotion = false
 
   $: visible = shouldShowFab($mobile, $dialogOpen, $settingsOpen, $keyboardInset)
+
+  // ── Clippy-mode tip bubble (TASK-I9S44) ──────────────────────────────────
+  // Scheduling math lives in fabTips.ts (pure, unit-tested); this component
+  // just polls it once a second and owns the nativeStorage read/writes.
+  //
+  // Tips are only eligible while the FAB itself is visible AND no session is
+  // selected (mission control / agent list). A selected session can pin
+  // MobileTermInput to the bottom of the screen, and the bubble must never
+  // overlap it — gating on "no session selected" guarantees that by
+  // construction rather than trying to measure the composer at runtime.
+  let tipIndex = 0
+  let currentTip: string | null = null
+  let tipDueAtMs = Infinity
+  let tipShownAtMs = 0
+  let tickHandle: ReturnType<typeof setInterval> | undefined
+
+  $: tipsEligible = visible && $fabTipsEnabled && !$selected && FAB_TIPS.length > 0
+
+  // A tip that's currently up but whose eligibility just dropped (dialog
+  // opened, settings opened, a session got selected) is cleared immediately
+  // rather than left floating with nothing to anchor to.
+  $: if (!tipsEligible && currentTip !== null) hideTip()
+
+  function showTip(nowMs: number) {
+    currentTip = FAB_TIPS[tipIndex] ?? null
+    tipShownAtMs = nowMs
+  }
+
+  function hideTip() {
+    currentTip = null
+    tipIndex = nextTipIndex(tipIndex, FAB_TIPS.length)
+    void nativeStorage.set(FAB_TIP_INDEX_KEY, String(tipIndex))
+    tipDueAtMs = nextTipDueAtMs(Date.now())
+  }
+
+  function dismissTip() {
+    hideTip()
+  }
+
+  function tick() {
+    const now = Date.now()
+    if (currentTip !== null) {
+      if (now >= tipAutoHideAtMs(tipShownAtMs)) hideTip()
+      return
+    }
+    if (tipsEligible && isTipDue(now, tipDueAtMs)) showTip(now)
+  }
 
   // Imperative classList (not a Svelte `class:` binding) so a rapid second tap
   // restarts the CSS press animation via a forced reflow — a reactive
@@ -20,6 +83,27 @@
   function clearPressed() {
     btn?.classList.remove('pressed')
   }
+
+  onMount(async () => {
+    reducedMotion =
+      typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    await initFabPrefs()
+    let storedIndex = 0
+    try {
+      const raw = await nativeStorage.get(FAB_TIP_INDEX_KEY)
+      storedIndex = raw ? parseInt(raw, 10) : 0
+    } catch {
+      storedIndex = 0
+    }
+    tipIndex = clampTipIndex(storedIndex, FAB_TIPS.length)
+    tipDueAtMs = firstTipDueAtMs(Date.now())
+    tickHandle = setInterval(tick, 1000)
+  })
+
+  onDestroy(() => {
+    if (tickHandle) clearInterval(tickHandle)
+  })
 </script>
 
 {#if visible}
@@ -27,83 +111,106 @@
     bind:this={btn}
     type="button"
     class="new-agent-fab"
+    class:regular={!$fabAngelEnabled}
     aria-label="New agent"
     title="New agent"
     on:click={handleClick}
     on:animationend={clearPressed}
   >
-    <span class="ripple"></span>
-    <!-- "The geometer": a hollow diamond lattice built from two arcs (upper-left,
+    {#if !$fabAngelEnabled}
+      <!-- Angel mode off: the pre-angel look — a plain primary-colored disc
+           with the header's old plus glyph. No sprite, no idle animation. -->
+      <span class="regular-icon" aria-hidden="true">{@html icons.plus}</span>
+    {:else}
+      <span class="ripple"></span>
+      <!-- "The geometer": a hollow diamond lattice built from two arcs (upper-left,
          lower-right) that shimmer on offset cycles like a slow sweep. The arcs
          don't quite meet — the seam on the upper-right edge is torn open, and a
          dark shard shows through the gap where the lattice should continue,
          plus a loose fleck sheared off near the lower rim. A red core sits off
          from the shape's true center, with a dim echo pixel riding beside it. -->
-    <svg viewBox="0 0 13 13" class="glyph" aria-hidden="true" focusable="false">
-      <g class="glyph-spin">
-        <g class="glyph-body">
-          <!-- ring, arc 1: top vertex down through the left flank -->
-          <rect x="6" y="0" width="1" height="1" class="px px-ring-1" />
-          <rect x="5" y="1" width="1" height="1" class="px px-ring-1" />
-          <rect x="6" y="1" width="1" height="1" class="px px-ring-1" />
-          <rect x="7" y="1" width="1" height="1" class="px px-ring-1" />
-          <rect x="4" y="2" width="1" height="1" class="px px-ring-1" />
-          <rect x="5" y="2" width="1" height="1" class="px px-ring-1" />
-          <rect x="7" y="2" width="1" height="1" class="px px-ring-1" />
-          <rect x="3" y="3" width="1" height="1" class="px px-ring-1" />
-          <rect x="4" y="3" width="1" height="1" class="px px-ring-1" />
-          <rect x="2" y="4" width="1" height="1" class="px px-ring-1" />
-          <rect x="3" y="4" width="1" height="1" class="px px-ring-1" />
-          <rect x="1" y="5" width="1" height="1" class="px px-ring-1" />
-          <rect x="2" y="5" width="1" height="1" class="px px-ring-1" />
-          <rect x="0" y="6" width="1" height="1" class="px px-ring-1" />
-          <rect x="1" y="6" width="1" height="1" class="px px-ring-1" />
-          <rect x="1" y="7" width="1" height="1" class="px px-ring-1" />
-          <rect x="2" y="7" width="1" height="1" class="px px-ring-1" />
-          <rect x="2" y="8" width="1" height="1" class="px px-ring-1" />
-          <rect x="3" y="8" width="1" height="1" class="px px-ring-1" />
-          <rect x="3" y="9" width="1" height="1" class="px px-ring-1" />
+      <svg viewBox="0 0 13 13" class="glyph" aria-hidden="true" focusable="false">
+        <g class="glyph-spin">
+          <g class="glyph-body">
+            <!-- ring, arc 1: top vertex down through the left flank -->
+            <rect x="6" y="0" width="1" height="1" class="px px-ring-1" />
+            <rect x="5" y="1" width="1" height="1" class="px px-ring-1" />
+            <rect x="6" y="1" width="1" height="1" class="px px-ring-1" />
+            <rect x="7" y="1" width="1" height="1" class="px px-ring-1" />
+            <rect x="4" y="2" width="1" height="1" class="px px-ring-1" />
+            <rect x="5" y="2" width="1" height="1" class="px px-ring-1" />
+            <rect x="7" y="2" width="1" height="1" class="px px-ring-1" />
+            <rect x="3" y="3" width="1" height="1" class="px px-ring-1" />
+            <rect x="4" y="3" width="1" height="1" class="px px-ring-1" />
+            <rect x="2" y="4" width="1" height="1" class="px px-ring-1" />
+            <rect x="3" y="4" width="1" height="1" class="px px-ring-1" />
+            <rect x="1" y="5" width="1" height="1" class="px px-ring-1" />
+            <rect x="2" y="5" width="1" height="1" class="px px-ring-1" />
+            <rect x="0" y="6" width="1" height="1" class="px px-ring-1" />
+            <rect x="1" y="6" width="1" height="1" class="px px-ring-1" />
+            <rect x="1" y="7" width="1" height="1" class="px px-ring-1" />
+            <rect x="2" y="7" width="1" height="1" class="px px-ring-1" />
+            <rect x="2" y="8" width="1" height="1" class="px px-ring-1" />
+            <rect x="3" y="8" width="1" height="1" class="px px-ring-1" />
+            <rect x="3" y="9" width="1" height="1" class="px px-ring-1" />
 
-          <!-- ring, arc 2: bottom vertex up through the right flank — shimmers
+            <!-- ring, arc 2: bottom vertex up through the right flank — shimmers
                on its own offset cycle so the lattice reads as a slow sweep
                rather than a uniform pulse -->
-          <rect x="6" y="12" width="1" height="1" class="px px-ring-2" />
-          <rect x="5" y="11" width="1" height="1" class="px px-ring-2" />
-          <rect x="6" y="11" width="1" height="1" class="px px-ring-2" />
-          <rect x="7" y="11" width="1" height="1" class="px px-ring-2" />
-          <rect x="4" y="10" width="1" height="1" class="px px-ring-2" />
-          <rect x="5" y="10" width="1" height="1" class="px px-ring-2" />
-          <rect x="7" y="10" width="1" height="1" class="px px-ring-2" />
-          <rect x="4" y="9" width="1" height="1" class="px px-ring-2" />
-          <rect x="8" y="9" width="1" height="1" class="px px-ring-2" />
-          <rect x="8" y="10" width="1" height="1" class="px px-ring-2" />
-          <rect x="9" y="8" width="1" height="1" class="px px-ring-2" />
-          <rect x="9" y="9" width="1" height="1" class="px px-ring-2" />
-          <rect x="10" y="7" width="1" height="1" class="px px-ring-2" />
-          <rect x="10" y="8" width="1" height="1" class="px px-ring-2" />
-          <rect x="11" y="5" width="1" height="1" class="px px-ring-2" />
-          <rect x="11" y="6" width="1" height="1" class="px px-ring-2" />
-          <rect x="11" y="7" width="1" height="1" class="px px-ring-2" />
-          <rect x="12" y="6" width="1" height="1" class="px px-ring-2" />
-          <rect x="9" y="4" width="1" height="1" class="px px-ring-2" />
-          <rect x="10" y="4" width="1" height="1" class="px px-ring-2" />
-          <rect x="10" y="5" width="1" height="1" class="px px-ring-2" />
+            <rect x="6" y="12" width="1" height="1" class="px px-ring-2" />
+            <rect x="5" y="11" width="1" height="1" class="px px-ring-2" />
+            <rect x="6" y="11" width="1" height="1" class="px px-ring-2" />
+            <rect x="7" y="11" width="1" height="1" class="px px-ring-2" />
+            <rect x="4" y="10" width="1" height="1" class="px px-ring-2" />
+            <rect x="5" y="10" width="1" height="1" class="px px-ring-2" />
+            <rect x="7" y="10" width="1" height="1" class="px px-ring-2" />
+            <rect x="4" y="9" width="1" height="1" class="px px-ring-2" />
+            <rect x="8" y="9" width="1" height="1" class="px px-ring-2" />
+            <rect x="8" y="10" width="1" height="1" class="px px-ring-2" />
+            <rect x="9" y="8" width="1" height="1" class="px px-ring-2" />
+            <rect x="9" y="9" width="1" height="1" class="px px-ring-2" />
+            <rect x="10" y="7" width="1" height="1" class="px px-ring-2" />
+            <rect x="10" y="8" width="1" height="1" class="px px-ring-2" />
+            <rect x="11" y="5" width="1" height="1" class="px px-ring-2" />
+            <rect x="11" y="6" width="1" height="1" class="px px-ring-2" />
+            <rect x="11" y="7" width="1" height="1" class="px px-ring-2" />
+            <rect x="12" y="6" width="1" height="1" class="px px-ring-2" />
+            <rect x="9" y="4" width="1" height="1" class="px px-ring-2" />
+            <rect x="10" y="4" width="1" height="1" class="px px-ring-2" />
+            <rect x="10" y="5" width="1" height="1" class="px px-ring-2" />
 
-          <!-- the torn seam: where the ring should close on the upper-right
+            <!-- the torn seam: where the ring should close on the upper-right
                edge it doesn't — a dark shard shows through the gap instead -->
-          <rect x="7" y="3" width="1" height="1" class="px px-shard" />
-          <rect x="7" y="4" width="1" height="1" class="px px-shard" />
+            <rect x="7" y="3" width="1" height="1" class="px px-shard" />
+            <rect x="7" y="4" width="1" height="1" class="px px-shard" />
 
-          <!-- a loose fleck, sheared off the lattice near the lower rim -->
-          <rect x="5" y="9" width="1" height="1" class="px px-debris" />
+            <!-- a loose fleck, sheared off the lattice near the lower rim -->
+            <rect x="5" y="9" width="1" height="1" class="px px-debris" />
 
-          <!-- off-center core, with a dim echo pixel riding beside it -->
-          <rect x="8" y="7" width="1" height="1" class="px px-eye-core" />
-          <rect x="9" y="7" width="1" height="1" class="px px-eye-echo" />
+            <!-- off-center core, with a dim echo pixel riding beside it -->
+            <rect x="8" y="7" width="1" height="1" class="px px-eye-core" />
+            <rect x="9" y="7" width="1" height="1" class="px px-eye-echo" />
+          </g>
         </g>
-      </g>
-    </svg>
+      </svg>
+    {/if}
   </button>
+{/if}
+
+{#if currentTip}
+  <!-- Clippy-mode tip bubble: anchored above the FAB (never over its 56px hit
+       area, so it can never intercept a tap meant for the FAB) and gated on
+       "no session selected" (see tipsEligible above) so it can never overlap
+       MobileTermInput either. aria-live="polite" per the brief so a screen
+       reader announces it without interrupting. -->
+  <div class="fab-tip" aria-live="polite" transition:fade={{ duration: reducedMotion ? 0 : 140 }}>
+    <span class="fab-tip-label">the angel observes</span>
+    <p class="fab-tip-text">{currentTip}</p>
+    <button type="button" class="fab-tip-dismiss" aria-label="Dismiss tip" on:click={dismissTip}>
+      ×
+    </button>
+    <span class="fab-tip-pointer" aria-hidden="true"></span>
+  </div>
 {/if}
 
 <style>
@@ -145,6 +252,29 @@
   .new-agent-fab:focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 3px;
+  }
+
+  /* Angel mode off (TASK-I9S44 settings toggle): the pre-angel look — a
+     regular material-style disc, matching .btn-primary's tokens (see
+     app.css) rather than the transparent hit area above. No sprite, no idle
+     animation; press feedback is a plain scale instead of squash+ripple. */
+  .new-agent-fab.regular {
+    background: hsl(var(--primary));
+    box-shadow: var(--shadow);
+  }
+  .new-agent-fab.regular:hover {
+    opacity: 0.92;
+  }
+  .new-agent-fab.regular:focus-visible {
+    outline-offset: 2px;
+  }
+  .regular-icon {
+    display: inline-flex;
+    color: hsl(var(--primary-foreground));
+  }
+  .regular-icon :global(svg) {
+    width: 26px;
+    height: 26px;
   }
 
   /* A touch larger than before (32px) now that nothing constrains it to a
@@ -332,12 +462,31 @@
     }
   }
 
-  /* Press: squash-and-stretch on the button + the hex ripple firing once. */
+  /* Press: squash-and-stretch on the button + the hex ripple firing once.
+     Angel mode only — .regular.pressed below has one more class so it wins
+     on specificity and overrides this with a plain scale instead. */
   .new-agent-fab.pressed {
     animation: fab-squash 0.32s cubic-bezier(0.36, 1.9, 0.4, 1) 1;
   }
   .new-agent-fab.pressed .ripple {
     animation: fab-ripple 0.5s ease-out 1;
+  }
+
+  /* Regular-mode press feedback: simple scale-down, no squash/ripple. */
+  .new-agent-fab.regular.pressed {
+    animation: fab-regular-press 0.18s ease-out 1;
+  }
+
+  @keyframes fab-regular-press {
+    0% {
+      transform: scale(1);
+    }
+    45% {
+      transform: scale(0.9);
+    }
+    100% {
+      transform: scale(1);
+    }
   }
 
   @keyframes fab-squash {
@@ -390,5 +539,86 @@
     100% {
       opacity: 1;
     }
+  }
+
+  /* ── Clippy-mode tip bubble ────────────────────────────────────────────
+     Anchored above the FAB using the exact same right/bottom formula so it
+     tracks the FAB's own safe-area offset, with enough clearance (FAB height
+     + gap) that its box never overlaps the FAB's 56px hit area — so it can
+     never steal a tap meant for the FAB. Crisp corners (no border-radius)
+     and a hard offset shadow instead of a blurred one, echoing the glyph's
+     own crispEdges pixel language rather than the app's usual rounded
+     cards. */
+  .fab-tip {
+    position: fixed;
+    right: max(20px, calc(env(safe-area-inset-right) + 16px));
+    bottom: calc(max(20px, calc(env(safe-area-inset-bottom) + 16px)) + 56px + 14px);
+    max-width: min(272px, calc(100vw - 40px));
+    z-index: 39;
+    background: hsl(var(--popover));
+    color: hsl(var(--foreground));
+    border: 2px solid hsl(var(--border));
+    box-shadow: 4px 4px 0 0 hsl(var(--foreground) / 0.16);
+    padding: 9px 24px 11px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .fab-tip-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .fab-tip-text {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: hsl(var(--foreground));
+  }
+
+  .fab-tip-dismiss {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: hsl(var(--muted-foreground));
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .fab-tip-dismiss:hover {
+    color: hsl(var(--foreground));
+  }
+
+  .fab-tip-dismiss:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 1px;
+  }
+
+  /* Pixel-diamond pointer echoing the glyph's own diamond-lattice shape —
+     a rotated square with only two borders shown, the classic CSS
+     speech-bubble-tail trick, kept crisp/unrounded to match. Positioned
+     toward the FAB's right edge (roughly under its glyph). */
+  .fab-tip-pointer {
+    position: absolute;
+    bottom: -8px;
+    right: 22px;
+    width: 12px;
+    height: 12px;
+    background: hsl(var(--popover));
+    border-right: 2px solid hsl(var(--border));
+    border-bottom: 2px solid hsl(var(--border));
+    transform: rotate(45deg);
   }
 </style>
