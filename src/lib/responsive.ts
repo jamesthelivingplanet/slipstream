@@ -78,3 +78,21 @@ export function shouldShowFab(
 ): boolean {
   return mobile && !dialogOpen && !settingsOpen && keyboardInsetPx <= 0
 }
+
+/** Whether the desktop angel companion should be visible (TASK-I9S44): the
+ *  desktop counterpart to shouldShowFab, deliberately kept as a separate
+ *  function rather than widening shouldShowFab so mobile's behavior stays
+ *  byte-identical. Desktop only (mobile has its own FAB path above), only
+ *  when the "Angel mode" setting is on — off means desktop keeps the plain
+ *  header "New agent" button and shows no companion at all, unlike mobile's
+ *  regular-disc fallback — and never while the New Agent dialog or Settings
+ *  panel are open. No keyboard-inset check: desktop has no on-screen
+ *  keyboard to cover the companion. */
+export function shouldShowDesktopCompanion(
+  mobile: boolean,
+  angelEnabled: boolean,
+  dialogOpen: boolean,
+  settingsOpen: boolean,
+): boolean {
+  return !mobile && angelEnabled && !dialogOpen && !settingsOpen
+}

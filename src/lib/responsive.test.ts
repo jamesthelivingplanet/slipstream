@@ -9,6 +9,7 @@ import {
   KEYBOARD_MIN_INSET,
   KEYBOARD_MAX_INSET_RATIO,
   shouldShowFab,
+  shouldShowDesktopCompanion,
 } from './responsive.js'
 
 describe('responsive', () => {
@@ -142,5 +143,31 @@ describe('shouldShowFab', () => {
 
   it('is visible right at the keyboard inset boundary (0 exactly)', () => {
     expect(shouldShowFab(true, false, false, 0)).toBe(true)
+  })
+})
+
+describe('shouldShowDesktopCompanion', () => {
+  it('is visible on desktop with angel mode on and everything clear', () => {
+    expect(shouldShowDesktopCompanion(false, true, false, false)).toBe(true)
+  })
+
+  it('is hidden on mobile regardless of other flags (mobile uses shouldShowFab instead)', () => {
+    expect(shouldShowDesktopCompanion(true, true, false, false)).toBe(false)
+  })
+
+  it('is hidden when angel mode is off — desktop keeps the header button, no fallback disc', () => {
+    expect(shouldShowDesktopCompanion(false, false, false, false)).toBe(false)
+  })
+
+  it('is hidden while the new agent dialog is open', () => {
+    expect(shouldShowDesktopCompanion(false, true, true, false)).toBe(false)
+  })
+
+  it('is hidden while settings is open', () => {
+    expect(shouldShowDesktopCompanion(false, true, false, true)).toBe(false)
+  })
+
+  it('has no keyboard-inset parameter — desktop has no on-screen keyboard concern', () => {
+    expect(shouldShowDesktopCompanion.length).toBe(4)
   })
 })

@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { fade } from 'svelte/transition'
   import { dialogOpen, settingsOpen, mobile, keyboardInset, selected } from '../stores'
-  import { shouldShowFab } from '../responsive'
+  import { shouldShowFab, shouldShowDesktopCompanion } from '../responsive'
   import { icons } from '../icons'
   import { nativeStorage } from '../nativeStorage'
   import { fabAngelEnabled, fabTipsEnabled, initFabPrefs } from '../fabPrefs'
@@ -16,33 +16,169 @@
     nextTipIndex,
     clampTipIndex,
   } from '../fabTips'
+  import {
+    type FabCorner,
+    type FabTipAnchor,
+    FAB_CORNER_KEY,
+    DEFAULT_FAB_CORNER,
+    FAB_SIZE_PX,
+    FAB_DRAG_THRESHOLD_PX,
+    nearestCorner,
+    resolveCornerPosition,
+    bubbleAnchorFor,
+    pointerDirectionForCorner,
+    isFabCorner,
+  } from '../fabCorner'
 
   let btn: HTMLButtonElement
   let reducedMotion = false
 
-  $: visible = shouldShowFab($mobile, $dialogOpen, $settingsOpen, $keyboardInset)
+  $: mobileVisible = shouldShowFab($mobile, $dialogOpen, $settingsOpen, $keyboardInset)
+  $: desktopVisible = shouldShowDesktopCompanion(
+    $mobile,
+    $fabAngelEnabled,
+    $dialogOpen,
+    $settingsOpen,
+  )
+  $: visible = $mobile ? mobileVisible : desktopVisible
+
+  // ── Desktop companion: draggable with corner snapping (TASK-I9S44) ───────
+  // Geometry lives in fabCorner.ts (pure, unit-tested); this component owns
+  // the pointer-event drag loop and the nativeStorage read/write. Mobile
+  // never runs any of this — it keeps its fixed bottom-right CSS position,
+  // untouched below.
+  let corner: FabCorner = DEFAULT_FAB_CORNER
+  let posLeft = 0
+  let posTop = 0
+  let dragging = false
+  let dragPointerId: number | null = null
+  let dragStartClientX = 0
+  let dragStartClientY = 0
+  let dragGrabOffsetX = 0
+  let dragGrabOffsetY = 0
+  let suppressNextClick = false
+
+  if (typeof window !== 'undefined') {
+    const initial = resolveCornerPosition(corner, window.innerWidth, window.innerHeight)
+    posLeft = initial.left
+    posTop = initial.top
+  }
+
+  function repositionForCorner() {
+    if (typeof window === 'undefined') return
+    const p = resolveCornerPosition(corner, window.innerWidth, window.innerHeight)
+    posLeft = p.left
+    posTop = p.top
+  }
+
+  function handleWindowResize() {
+    if (!$mobile && !dragging) repositionForCorner()
+  }
+
+  function handlePointerDown(e: PointerEvent) {
+    if ($mobile || !btn) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    dragPointerId = e.pointerId
+    const rect = btn.getBoundingClientRect()
+    dragGrabOffsetX = e.clientX - rect.left
+    dragGrabOffsetY = e.clientY - rect.top
+    dragStartClientX = e.clientX
+    dragStartClientY = e.clientY
+    btn.setPointerCapture(e.pointerId)
+  }
+
+  function handlePointerMove(e: PointerEvent) {
+    if (dragPointerId === null || e.pointerId !== dragPointerId) return
+    const dx = e.clientX - dragStartClientX
+    const dy = e.clientY - dragStartClientY
+    if (!dragging && Math.hypot(dx, dy) >= FAB_DRAG_THRESHOLD_PX) {
+      dragging = true
+    }
+    if (dragging) {
+      posLeft = e.clientX - dragGrabOffsetX
+      posTop = e.clientY - dragGrabOffsetY
+    }
+  }
+
+  function endDrag() {
+    dragPointerId = null
+    if (!dragging) return
+    dragging = false
+    suppressNextClick = true
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const centerX = posLeft + FAB_SIZE_PX / 2
+    const centerY = posTop + FAB_SIZE_PX / 2
+    corner = nearestCorner(centerX, centerY, vw, vh)
+    void nativeStorage.set(FAB_CORNER_KEY, corner)
+    const target = resolveCornerPosition(corner, vw, vh)
+    posLeft = target.left
+    posTop = target.top
+  }
+
+  function handlePointerUp(e: PointerEvent) {
+    if (dragPointerId === null || e.pointerId !== dragPointerId) return
+    if (btn?.hasPointerCapture(e.pointerId)) btn.releasePointerCapture(e.pointerId)
+    endDrag()
+  }
+
+  function handlePointerCancel(e: PointerEvent) {
+    if (dragPointerId === null || e.pointerId !== dragPointerId) return
+    endDrag()
+  }
 
   // ── Clippy-mode tip bubble (TASK-I9S44) ──────────────────────────────────
   // Scheduling math lives in fabTips.ts (pure, unit-tested); this component
   // just polls it once a second and owns the nativeStorage read/writes.
   //
-  // Tips are only eligible while the FAB itself is visible AND no session is
-  // selected (mission control / agent list). A selected session can pin
-  // MobileTermInput to the bottom of the screen, and the bubble must never
-  // overlap it — gating on "no session selected" guarantees that by
+  // On mobile, tips are only eligible while the FAB itself is visible AND no
+  // session is selected (mission control / agent list) — a selected session
+  // can pin MobileTermInput to the bottom of the screen, and the bubble must
+  // never overlap it, which gating on "no session selected" guarantees by
   // construction rather than trying to measure the composer at runtime.
+  // Desktop has no such composer, so it skips that gate; it does gate on
+  // "not currently being dragged" instead.
   let tipIndex = 0
   let currentTip: string | null = null
   let tipDueAtMs = Infinity
   let tipShownAtMs = 0
   let tickHandle: ReturnType<typeof setInterval> | undefined
 
-  $: tipsEligible = visible && $fabTipsEnabled && !$selected && FAB_TIPS.length > 0
+  $: tipsEligible =
+    visible && $fabTipsEnabled && !dragging && ($mobile ? !$selected : true) && FAB_TIPS.length > 0
 
   // A tip that's currently up but whose eligibility just dropped (dialog
-  // opened, settings opened, a session got selected) is cleared immediately
-  // rather than left floating with nothing to anchor to.
+  // opened, settings opened, a session got selected, a drag started) is
+  // cleared immediately rather than left floating with nothing to anchor to.
   $: if (!tipsEligible && currentTip !== null) hideTip()
+
+  $: desktopBubbleAnchor = bubbleAnchorFor(
+    corner,
+    { left: posLeft, top: posTop },
+    typeof window !== 'undefined' ? window.innerWidth : 0,
+    typeof window !== 'undefined' ? window.innerHeight : 0,
+  )
+  $: pointerDir = $mobile
+    ? ({ vertical: 'down', horizontal: 'right' } as const)
+    : pointerDirectionForCorner(corner)
+
+  // Desktop-only inline position. Mobile keeps .new-agent-fab's CSS
+  // right/bottom (safe-area aware); desktop overrides with the tracked
+  // left/top and resets right/bottom to auto so the two models never fight.
+  $: buttonStyle = $mobile ? '' : `left:${posLeft}px; top:${posTop}px; right:auto; bottom:auto`
+
+  function anchorStyle(a: FabTipAnchor): string {
+    // All four edges emitted explicitly (auto for the unset ones) so a desktop
+    // bubble fully overrides .fab-tip's mobile right/bottom CSS instead of
+    // conflicting with it — a sparse style would leave the CSS right set and
+    // stretch the box when only left was meant.
+    return [
+      `left:${a.left !== undefined ? a.left + 'px' : 'auto'}`,
+      `right:${a.right !== undefined ? a.right + 'px' : 'auto'}`,
+      `top:${a.top !== undefined ? a.top + 'px' : 'auto'}`,
+      `bottom:${a.bottom !== undefined ? a.bottom + 'px' : 'auto'}`,
+    ].join(';')
+  }
 
   function showTip(nowMs: number) {
     currentTip = FAB_TIPS[tipIndex] ?? null
@@ -73,6 +209,14 @@
   // restarts the CSS press animation via a forced reflow — a reactive
   // class:pressed binding wouldn't remove-then-add synchronously enough to retrigger it.
   function handleClick() {
+    if (suppressNextClick) {
+      // A drag just ended (see endDrag) — the browser still fires a
+      // synthetic click right after pointerup even though the pointer
+      // moved, and a drag-release must snap to a corner, not open the
+      // dialog. Swallow exactly this one click.
+      suppressNextClick = false
+      return
+    }
     dialogOpen.set(true)
     if (!btn) return
     btn.classList.remove('pressed')
@@ -88,21 +232,39 @@
     reducedMotion =
       typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
+    window.addEventListener('resize', handleWindowResize)
+
     await initFabPrefs()
-    let storedIndex = 0
+
+    let storedTipIndexRaw: string | null = null
+    let storedCorner: string | null = null
     try {
-      const raw = await nativeStorage.get(FAB_TIP_INDEX_KEY)
-      storedIndex = raw ? parseInt(raw, 10) : 0
+      storedTipIndexRaw = await nativeStorage.get(FAB_TIP_INDEX_KEY)
     } catch {
-      storedIndex = 0
+      // best-effort; default (0) already set
     }
-    tipIndex = clampTipIndex(storedIndex, FAB_TIPS.length)
+    try {
+      storedCorner = await nativeStorage.get(FAB_CORNER_KEY)
+    } catch {
+      // best-effort; default (DEFAULT_FAB_CORNER) already set
+    }
+
+    tipIndex = clampTipIndex(
+      storedTipIndexRaw ? parseInt(storedTipIndexRaw, 10) : 0,
+      FAB_TIPS.length,
+    )
     tipDueAtMs = firstTipDueAtMs(Date.now())
     tickHandle = setInterval(tick, 1000)
+
+    if (isFabCorner(storedCorner)) {
+      corner = storedCorner
+      repositionForCorner()
+    }
   })
 
   onDestroy(() => {
     if (tickHandle) clearInterval(tickHandle)
+    if (typeof window !== 'undefined') window.removeEventListener('resize', handleWindowResize)
   })
 </script>
 
@@ -112,10 +274,17 @@
     type="button"
     class="new-agent-fab"
     class:regular={!$fabAngelEnabled}
+    class:desktop={!$mobile}
+    class:dragging
+    style={buttonStyle}
     aria-label="New agent"
     title="New agent"
     on:click={handleClick}
     on:animationend={clearPressed}
+    on:pointerdown={handlePointerDown}
+    on:pointermove={handlePointerMove}
+    on:pointerup={handlePointerUp}
+    on:pointercancel={handlePointerCancel}
   >
     {#if !$fabAngelEnabled}
       <!-- Angel mode off: the pre-angel look — a plain primary-colored disc
@@ -203,13 +372,25 @@
        "no session selected" (see tipsEligible above) so it can never overlap
        MobileTermInput either. aria-live="polite" per the brief so a screen
        reader announces it without interrupting. -->
-  <div class="fab-tip" aria-live="polite" transition:fade={{ duration: reducedMotion ? 0 : 140 }}>
+  <div
+    class="fab-tip"
+    style={$mobile ? '' : anchorStyle(desktopBubbleAnchor)}
+    aria-live="polite"
+    transition:fade={{ duration: reducedMotion ? 0 : 140 }}
+  >
     <span class="fab-tip-label">the angel observes</span>
     <p class="fab-tip-text">{currentTip}</p>
     <button type="button" class="fab-tip-dismiss" aria-label="Dismiss tip" on:click={dismissTip}>
       ×
     </button>
-    <span class="fab-tip-pointer" aria-hidden="true"></span>
+    <span
+      class="fab-tip-pointer"
+      class:ptr-down={pointerDir.vertical === 'down'}
+      class:ptr-up={pointerDir.vertical === 'up'}
+      class:ptr-left={pointerDir.horizontal === 'left'}
+      class:ptr-right={pointerDir.horizontal === 'right'}
+      aria-hidden="true"
+    ></span>
   </div>
 {/if}
 
@@ -241,6 +422,22 @@
     cursor: pointer;
     touch-action: manipulation;
     z-index: 40;
+  }
+
+  /* Desktop companion: draggable, so grab/grabbing cursors and a left/top
+     transition for the corner-snap (disabled while actively dragging so the
+     glyph tracks the pointer 1:1). touch-action:none lets a touch drag
+     capture the gesture instead of scrolling the page underneath. */
+  .new-agent-fab.desktop {
+    cursor: grab;
+    touch-action: none;
+    transition:
+      left 0.18s ease-out,
+      top 0.18s ease-out;
+  }
+  .new-agent-fab.desktop.dragging {
+    cursor: grabbing;
+    transition: none;
   }
 
   .new-agent-fab:hover .glyph {
@@ -608,17 +805,37 @@
 
   /* Pixel-diamond pointer echoing the glyph's own diamond-lattice shape —
      a rotated square with only two borders shown, the classic CSS
-     speech-bubble-tail trick, kept crisp/unrounded to match. Positioned
-     toward the FAB's right edge (roughly under its glyph). */
+     speech-bubble-tail trick, kept crisp/unrounded to match. The base
+     carries only the shared size/bg/transform; exactly one vertical
+     (ptr-down/ptr-up) and one horizontal (ptr-left/ptr-right) modifier is
+     always applied (mobile is always down/right), so the tail always faces
+     the companion regardless of which corner it snapped to. */
   .fab-tip-pointer {
     position: absolute;
-    bottom: -8px;
-    right: 22px;
     width: 12px;
     height: 12px;
     background: hsl(var(--popover));
+    border: none;
+    transform: rotate(45deg);
+  }
+
+  .fab-tip-pointer.ptr-down {
+    bottom: -8px;
     border-right: 2px solid hsl(var(--border));
     border-bottom: 2px solid hsl(var(--border));
-    transform: rotate(45deg);
+  }
+
+  .fab-tip-pointer.ptr-up {
+    top: -8px;
+    border-left: 2px solid hsl(var(--border));
+    border-top: 2px solid hsl(var(--border));
+  }
+
+  .fab-tip-pointer.ptr-left {
+    left: 22px;
+  }
+
+  .fab-tip-pointer.ptr-right {
+    right: 22px;
   }
 </style>
