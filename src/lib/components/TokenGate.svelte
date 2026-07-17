@@ -1,20 +1,38 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { normalizeServerUrl } from '../serverUrl'
 
-  /** Shown in web mode when no token is stored/provided. */
+  /** Shown in web mode when no token is stored/provided, or on auth failure. */
   export let error: string = ''
-  export let onSubmit: (token: string) => void
+  /** Prefilled server origin — the stored override, or location.origin. */
+  export let server: string = ''
+  export let onSubmit: (server: string, token: string) => void
 
-  let value = ''
-  let inputEl: HTMLInputElement
+  let serverValue = server
+  let token = ''
+  let localError = ''
+  let serverInputEl: HTMLInputElement
+  let tokenInputEl: HTMLInputElement
 
   onMount(() => {
-    inputEl?.focus()
+    if (!serverValue.trim()) {
+      serverInputEl?.focus()
+    } else {
+      tokenInputEl?.focus()
+    }
   })
 
+  $: canSubmit = !!serverValue.trim() && !!token.trim()
+
   function submit() {
-    const t = value.trim()
-    if (t) onSubmit(t)
+    if (!canSubmit) return
+    const normalized = normalizeServerUrl(serverValue, location.protocol)
+    if (!normalized) {
+      localError = 'Enter a valid server URL, e.g. https://your-server.example.com'
+      return
+    }
+    localError = ''
+    onSubmit(normalized, token.trim())
   }
 
   function keydown(e: KeyboardEvent) {
@@ -28,23 +46,43 @@
       <img src="/icons/icon.svg" alt="Slipstream" class="glyph" />
       <b>Slipstream</b>
     </div>
-    <h2>Access token required</h2>
-    <p class="gate-hint">Enter the token configured on the Slipstream server.</p>
+    <h2>Connect to your server</h2>
+    <p class="gate-hint">
+      Enter the URL of the Slipstream server and its access token. The URL is prefilled when the app
+      is served by the server itself.
+    </p>
 
-    {#if error}
-      <div class="gate-error">{error}</div>
+    {#if localError || error}
+      <div class="gate-error">{localError || error}</div>
     {/if}
 
-    <input
-      type="password"
-      class="gate-input"
-      placeholder="Token"
-      bind:value
-      bind:this={inputEl}
-      on:keydown={keydown}
-    />
+    <div class="gate-field">
+      <label class="gate-label" for="gate-server-input">Server URL</label>
+      <input
+        id="gate-server-input"
+        type="text"
+        class="gate-input"
+        placeholder="https://your-server.example.com"
+        bind:value={serverValue}
+        bind:this={serverInputEl}
+        on:keydown={keydown}
+      />
+    </div>
 
-    <button class="btn btn-primary gate-btn" on:click={submit} disabled={!value.trim()}>
+    <div class="gate-field">
+      <label class="gate-label" for="gate-token-input">Token</label>
+      <input
+        id="gate-token-input"
+        type="password"
+        class="gate-input"
+        placeholder="Token"
+        bind:value={token}
+        bind:this={tokenInputEl}
+        on:keydown={keydown}
+      />
+    </div>
+
+    <button class="btn btn-primary gate-btn" on:click={submit} disabled={!canSubmit}>
       Connect
     </button>
   </div>
@@ -113,6 +151,17 @@
     border: 1px solid hsl(var(--st-error) / 0.3);
     border-radius: var(--radius);
     padding: 8px 12px;
+  }
+
+  .gate-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .gate-label {
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
   }
 
   .gate-input {

@@ -208,14 +208,21 @@ Env vars:
 ### Renderer web boot (`src/main.ts` + `src/lib/wsApi.ts`)
 
 `src/main.ts` detects the absence of `window.slipstream` (no preload) and runs `bootWeb()`:
-resolves a token from `?token=` query param (stored in localStorage, stripped from URL) or
-shows a `TokenGate` login component. Once a token is in hand, `createWsApi({url, token})`
-constructs the WS-backed `SlipstreamApi` — with pre-open request queueing, per-request 30 s
-timeout, and exponential auto-reconnect. `window.slipstream` and `window.__slipstreamWeb=true`
-are assigned **before** `App.svelte` is dynamically imported, so `ipc.ts`'s module-level
-`hasBackend = !!window.slipstream` evaluates `true`. `pickAndRegisterRepo` returns `null` on
-web (no native dialog); the Settings → Repositories tab shows an "add by absolute path"
-input instead, gated by `window.__slipstreamWeb`.
+resolves a token from `?token=` query param (stored via `nativeStorage`, stripped from URL) and
+a server origin from a stored override under `DAEMON_URL_KEY` — defaulting to `location.origin`
+(the SPA's own host) when no override is stored. If no token is found, it shows a `TokenGate`
+login component that collects **both** the server URL (prefilled with the resolved origin) and
+the token; `src/lib/serverUrl.ts` normalizes the URL input and derives the `ws(s)://.../rpc`
+endpoint from it. On submit, the server choice is persisted under `DAEMON_URL_KEY` only when it
+differs from `location.origin` (so the SPA being served from a different host than the RPC
+server is supported without disturbing the historical same-origin default). Once a token and
+server are in hand, `createWsApi({url, token})` constructs the WS-backed `SlipstreamApi` — with
+pre-open request queueing, per-request 30 s timeout, and exponential auto-reconnect.
+`window.slipstream` and `window.__slipstreamWeb=true` are assigned **before** `App.svelte` is
+dynamically imported, so `ipc.ts`'s module-level `hasBackend = !!window.slipstream` evaluates
+`true`. `pickAndRegisterRepo` returns `null` on web (no native dialog); the Settings →
+Repositories tab shows an "add by absolute path" input instead, gated by
+`window.__slipstreamWeb`.
 
 ### Access model
 
