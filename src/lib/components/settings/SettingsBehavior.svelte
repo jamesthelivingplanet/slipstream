@@ -10,7 +10,7 @@
     setSchedulerPolicy,
   } from '../../ipc'
   import { pushToast } from '../../toast'
-  import { mobile } from '../../stores'
+  import { mobile, settingsOpen, settingsRepoId } from '../../stores'
   import {
     fabAngelEnabled,
     fabTipsEnabled,
@@ -18,6 +18,7 @@
     setFabAngelEnabled,
     setFabTipsEnabled,
   } from '../../fabPrefs'
+  import { replayOnboarding } from '../../onboarding'
   import SettingsSection from './SettingsSection.svelte'
   import type { GcPolicy, SchedulerPolicy } from '../../../../electron/shared/contract.js'
   import {
@@ -119,6 +120,14 @@
     }
   }
 
+  // TASK-EQOP4: closes Settings so the replayed onboarding (pager or modal,
+  // per onboardingMode()) isn't stacked underneath the still-open panel.
+  function handleReplayOnboarding() {
+    replayOnboarding()
+    settingsOpen.set(false)
+    settingsRepoId.set(null)
+  }
+
   function onFabAngelChange(e: Event) {
     setFabAngelEnabled((e.currentTarget as HTMLInputElement).checked)
   }
@@ -181,6 +190,15 @@
       {/if}
     </div>
   </div>
+</SettingsSection>
+
+<SettingsSection title="Tour">
+  <p class="integration-hint">
+    Replay the first-boot walkthrough of Slipstream's core features, guided by Nulliel.
+  </p>
+  <button type="button" class="btn btn-outline btn-sm" on:click={handleReplayOnboarding}>
+    Replay intro
+  </button>
 </SettingsSection>
 
 <SettingsSection title="Session cleanup (cost guard)">

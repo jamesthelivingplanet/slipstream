@@ -5,6 +5,7 @@
   import { shouldShowFab, shouldShowDesktopCompanion } from '../responsive'
   import { icons } from '../icons'
   import { nativeStorage } from '../nativeStorage'
+  import { onboardingVisible } from '../onboarding'
   import { fabAngelEnabled, fabTipsEnabled, initFabPrefs } from '../fabPrefs'
   import { FAB_TIPS } from '../fabTipsContent'
   import {
@@ -33,13 +34,21 @@
   let btn: HTMLButtonElement
   let reducedMotion = false
 
-  $: mobileVisible = shouldShowFab($mobile, $dialogOpen, $settingsOpen, $keyboardInset)
-  $: desktopVisible = shouldShowDesktopCompanion(
+  $: mobileVisible = shouldShowFab(
     $mobile,
-    $fabAngelEnabled,
     $dialogOpen,
     $settingsOpen,
+    $keyboardInset,
+    $onboardingVisible,
   )
+  // shouldShowDesktopCompanion's arity is pinned by responsive.test.ts (it
+  // predates onboarding and has no keyboard-inset param either) — gated on
+  // onboarding here instead of widening that function, so first-boot
+  // onboarding's modal (desktop/web presentation, see App.svelte) isn't
+  // fought by the companion glyph showing through its translucent backdrop.
+  $: desktopVisible =
+    shouldShowDesktopCompanion($mobile, $fabAngelEnabled, $dialogOpen, $settingsOpen) &&
+    !$onboardingVisible
   $: visible = $mobile ? mobileVisible : desktopVisible
 
   // ── Desktop companion: draggable with corner snapping (TASK-I9S44) ───────
