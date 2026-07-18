@@ -1,0 +1,96 @@
+<!--
+  Inline logo mark (TASK-F0TYG follow-up: transparent in-app glyph) — the same
+  13x13 Nulliel pixel-angel grid as public/icons/icon.svg/nulliel.svg, but
+  with NO backdrop: fully transparent background, tight viewBox (no 1.5-cell
+  padding), since this sits inline next to the "Slipstream" wordmark in the
+  app header (App.svelte) and the token-gate card (TokenGate.svelte) rather
+  than standing alone as an app/favicon tile.
+
+  Because it has no backdrop of its own, it must read on whatever the app's
+  current header background is — light or dark theme. icon.svg's white/near-
+  white ring only works against icon.svg's own dark-indigo backdrop, so it's
+  not reused here. Instead the ring uses the brand lavender-purple from the
+  pre-Nulliel swoosh mark (recovered via `git show 63dc0f2:public/icons/
+  icon-192.png` and sampled with ImageMagick's histogram: the dominant opaque
+  fill was #B493E8, ~3535px at ~99% opacity, matching the "brand purple"
+  already documented in nulliel.svg's own header comment as ~hsl(263 65% 74%)
+  — same swatch, independently re-derived here). That lavender has enough
+  contrast against both a near-white app background and a near-black one
+  (verified by compositing this file over #ffffff and #0b0a12 and reading the
+  result back) to work as a two-theme mark, which flat white or flat near-
+  black alone would not.
+
+  Opacities follow the same ring-1/ring-2/shard/debris/eye scheme as every
+  other Nulliel render (nulliel.svg, OnboardingAngel.svelte, NewAgentFab.svelte):
+  ring-1 full strength, ring-2 ~0.7, shard ~0.35, debris ~0.3, eye-core solid
+  red, eye-echo red @ 0.4.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 13 13"
+  width="64"
+  height="64"
+  shape-rendering="crispEdges"
+>
+  <!-- ring, arc 1: top vertex down through the left flank — lavender, full strength -->
+  <g fill="#b493e8">
+    <rect x="6" y="0" width="1" height="1" />
+    <rect x="5" y="1" width="1" height="1" />
+    <rect x="6" y="1" width="1" height="1" />
+    <rect x="7" y="1" width="1" height="1" />
+    <rect x="4" y="2" width="1" height="1" />
+    <rect x="5" y="2" width="1" height="1" />
+    <rect x="7" y="2" width="1" height="1" />
+    <rect x="3" y="3" width="1" height="1" />
+    <rect x="4" y="3" width="1" height="1" />
+    <rect x="2" y="4" width="1" height="1" />
+    <rect x="3" y="4" width="1" height="1" />
+    <rect x="1" y="5" width="1" height="1" />
+    <rect x="2" y="5" width="1" height="1" />
+    <rect x="0" y="6" width="1" height="1" />
+    <rect x="1" y="6" width="1" height="1" />
+    <rect x="1" y="7" width="1" height="1" />
+    <rect x="2" y="7" width="1" height="1" />
+    <rect x="2" y="8" width="1" height="1" />
+    <rect x="3" y="8" width="1" height="1" />
+    <rect x="3" y="9" width="1" height="1" />
+  </g>
+
+  <!-- ring, arc 2: bottom vertex up through the right flank — lavender @ 0.7 -->
+  <g fill="#b493e8" fill-opacity="0.7">
+    <rect x="6" y="12" width="1" height="1" />
+    <rect x="5" y="11" width="1" height="1" />
+    <rect x="6" y="11" width="1" height="1" />
+    <rect x="7" y="11" width="1" height="1" />
+    <rect x="4" y="10" width="1" height="1" />
+    <rect x="5" y="10" width="1" height="1" />
+    <rect x="7" y="10" width="1" height="1" />
+    <rect x="4" y="9" width="1" height="1" />
+    <rect x="8" y="9" width="1" height="1" />
+    <rect x="8" y="10" width="1" height="1" />
+    <rect x="9" y="8" width="1" height="1" />
+    <rect x="9" y="9" width="1" height="1" />
+    <rect x="10" y="7" width="1" height="1" />
+    <rect x="10" y="8" width="1" height="1" />
+    <rect x="11" y="5" width="1" height="1" />
+    <rect x="11" y="6" width="1" height="1" />
+    <rect x="11" y="7" width="1" height="1" />
+    <rect x="12" y="6" width="1" height="1" />
+    <rect x="9" y="4" width="1" height="1" />
+    <rect x="10" y="4" width="1" height="1" />
+    <rect x="10" y="5" width="1" height="1" />
+  </g>
+
+  <!-- the torn seam — lavender @ 0.35 -->
+  <g fill="#b493e8" fill-opacity="0.35">
+    <rect x="7" y="3" width="1" height="1" />
+    <rect x="7" y="4" width="1" height="1" />
+  </g>
+
+  <!-- the loose fleck — lavender @ 0.3 -->
+  <rect x="5" y="9" width="1" height="1" fill="#b493e8" fill-opacity="0.3" />
+
+  <!-- off-center core, with a dim echo pixel riding beside it -->
+  <rect x="8" y="7" width="1" height="1" fill="#eb4763" />
+  <rect x="9" y="7" width="1" height="1" fill="#eb4763" fill-opacity="0.4" />
+</svg>

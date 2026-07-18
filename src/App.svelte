@@ -223,7 +223,7 @@
         }
       }}
     >
-      <img src="/icons/icon.svg" alt="Slipstream" class="glyph" />
+      <img src="/icons/nulliel-glyph.svg" alt="Slipstream" class="glyph" />
       <b>Slipstream</b>
       {#if !$mobile}<span class="badge mono">dangerous mode</span>{/if}
       <CliStatus />

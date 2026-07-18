@@ -43,7 +43,7 @@
 <div class="gate-bg">
   <div class="gate-card">
     <div class="gate-logo">
-      <img src="/icons/icon.svg" alt="Slipstream" class="glyph" />
+      <img src="/icons/nulliel-glyph.svg" alt="Slipstream" class="glyph" />
       <b>Slipstream</b>
     </div>
     <h2>Connect to your server</h2>
