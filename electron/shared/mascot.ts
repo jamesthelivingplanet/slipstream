@@ -20,36 +20,39 @@ export const NOTIFICATION_TITLE_MAX_LENGTH = 65
 
 export type NotificationKind = 'needsInput' | 'needsBlocked' | 'needsApproval' | 'done' | 'running'
 
-/** Duolingo-style playful hooks, Nulliel-voiced, emoji-led for glanceability.
- *  3–4 variants per kind so back-to-back sessions don't all read identically;
- *  `pick()` below selects deterministically per episode. */
+/** Duolingo-style playful hooks, Nulliel-voiced. No leading emoji (TASK-F0TYG
+ *  follow-up) — the notification's own icon (public/icons/nulliel-*.png /
+ *  mobile/assets/nulliel-silhouette.svg) is what puts Nulliel in front of the
+ *  user now, so every title names Nulliel directly instead. 3–4 variants per
+ *  kind so back-to-back sessions don't all read identically; `pick()` below
+ *  selects deterministically per episode. */
 export const NOTIFICATION_TITLES: Record<NotificationKind, readonly string[]> = {
   needsInput: [
-    `👀 ${MASCOT_NAME} says your agent misses you`,
-    '🫣 An agent is staring at a prompt, waiting for you',
-    `⏳ ${MASCOT_NAME} taps the glass — your agent needs a human`,
-    `💬 ${MASCOT_NAME} relays a question from your agent`,
+    `${MASCOT_NAME} says your agent misses you`,
+    `An agent is staring at a prompt — ${MASCOT_NAME} noticed`,
+    `${MASCOT_NAME} taps the glass — your agent needs a human`,
+    `${MASCOT_NAME} relays a question from your agent`,
   ],
   needsBlocked: [
-    `⛔ ${MASCOT_NAME} found your agent stuck in a corner`,
-    `🧱 An agent hit a wall — ${MASCOT_NAME} suggests you look`,
-    `🚧 ${MASCOT_NAME} spotted a blocker only you can clear`,
+    `${MASCOT_NAME} found your agent stuck in a corner`,
+    `An agent hit a wall — ${MASCOT_NAME} suggests you look`,
+    `${MASCOT_NAME} spotted a blocker only you can clear`,
   ],
   needsApproval: [
-    `🔐 Your agent wants permission — ${MASCOT_NAME} is watching you decide`,
-    `🖊️ Sign-off needed — ${MASCOT_NAME} delivers the form`,
-    `🗝️ ${MASCOT_NAME} holds the door until you say go`,
+    `Your agent wants permission — ${MASCOT_NAME} is watching you decide`,
+    `Sign-off needed — ${MASCOT_NAME} delivers the form`,
+    `${MASCOT_NAME} holds the door until you say go`,
   ],
   done: [
-    `🎉 ${MASCOT_NAME} reports: mission complete`,
-    `✅ An agent finished — ${MASCOT_NAME} is mildly impressed`,
-    `🏁 Done! ${MASCOT_NAME} already read the diff`,
-    `🎊 ${MASCOT_NAME} wraps it up with a bow`,
+    `${MASCOT_NAME} reports: mission complete`,
+    `An agent finished — ${MASCOT_NAME} is mildly impressed`,
+    `Done! ${MASCOT_NAME} already read the diff`,
+    `${MASCOT_NAME} wraps it up with a bow`,
   ],
   running: [
-    `▶️ ${MASCOT_NAME} watches your agent get to work`,
-    `🚀 Agent launched — ${MASCOT_NAME} rides along`,
-    `🛫 ${MASCOT_NAME} waves your agent off`,
+    `${MASCOT_NAME} watches your agent get to work`,
+    `Agent launched — ${MASCOT_NAME} rides along`,
+    `${MASCOT_NAME} waves your agent off`,
   ],
 } as const
 

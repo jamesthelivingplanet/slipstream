@@ -1,0 +1,91 @@
+<!--
+  Standalone, static-color render of the pixel-angel mascot (Nulliel) for use
+  as a push-notification icon (TASK-F0TYG follow-up) — notification trays
+  render on unpredictable backgrounds, so unlike the in-app glyph (NewAgentFab
+  .svelte / OnboardingAngel.svelte, which sit on the app's own themed
+  background and use CSS custom-property fills), this version carries its own
+  filled rounded-square backdrop and fixed colors instead of theme tokens.
+
+  Same 13x13 pixel grid / rect coordinates as OnboardingAngel.svelte, padded
+  by 1.5 grid cells on every side (13 + 1.5*2 = 16 viewBox units) so the
+  mascot doesn't touch the backdrop's rounded corners.
+
+  Palette: backdrop is a dark indigo (#1b112c = hsl(263 45% 12%)) chosen to
+  sit near the brand purple used in icon-192.png/maskable-*.png (~hsl(263 65%
+  74%)) without competing with it; ring/shard/debris pixels are white at the
+  component's original opacities; the eye is the component's destructive-red
+  (hsl(350 80% 60%) = #eb4763) resolved to a concrete color, with the echo
+  pixel at 0.4 opacity same as the component.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 16 16"
+  width="512"
+  height="512"
+  shape-rendering="crispEdges"
+>
+  <rect width="16" height="16" rx="3.2" fill="#1b112c" />
+  <g transform="translate(1.5,1.5)">
+    <!-- ring, arc 1: top vertex down through the left flank — white @ 0.85 -->
+    <g fill="#ffffff" fill-opacity="0.85">
+      <rect x="6" y="0" width="1" height="1" />
+      <rect x="5" y="1" width="1" height="1" />
+      <rect x="6" y="1" width="1" height="1" />
+      <rect x="7" y="1" width="1" height="1" />
+      <rect x="4" y="2" width="1" height="1" />
+      <rect x="5" y="2" width="1" height="1" />
+      <rect x="7" y="2" width="1" height="1" />
+      <rect x="3" y="3" width="1" height="1" />
+      <rect x="4" y="3" width="1" height="1" />
+      <rect x="2" y="4" width="1" height="1" />
+      <rect x="3" y="4" width="1" height="1" />
+      <rect x="1" y="5" width="1" height="1" />
+      <rect x="2" y="5" width="1" height="1" />
+      <rect x="0" y="6" width="1" height="1" />
+      <rect x="1" y="6" width="1" height="1" />
+      <rect x="1" y="7" width="1" height="1" />
+      <rect x="2" y="7" width="1" height="1" />
+      <rect x="2" y="8" width="1" height="1" />
+      <rect x="3" y="8" width="1" height="1" />
+      <rect x="3" y="9" width="1" height="1" />
+    </g>
+
+    <!-- ring, arc 2: bottom vertex up through the right flank — white @ 0.65 -->
+    <g fill="#ffffff" fill-opacity="0.65">
+      <rect x="6" y="12" width="1" height="1" />
+      <rect x="5" y="11" width="1" height="1" />
+      <rect x="6" y="11" width="1" height="1" />
+      <rect x="7" y="11" width="1" height="1" />
+      <rect x="4" y="10" width="1" height="1" />
+      <rect x="5" y="10" width="1" height="1" />
+      <rect x="7" y="10" width="1" height="1" />
+      <rect x="4" y="9" width="1" height="1" />
+      <rect x="8" y="9" width="1" height="1" />
+      <rect x="8" y="10" width="1" height="1" />
+      <rect x="9" y="8" width="1" height="1" />
+      <rect x="9" y="9" width="1" height="1" />
+      <rect x="10" y="7" width="1" height="1" />
+      <rect x="10" y="8" width="1" height="1" />
+      <rect x="11" y="5" width="1" height="1" />
+      <rect x="11" y="6" width="1" height="1" />
+      <rect x="11" y="7" width="1" height="1" />
+      <rect x="12" y="6" width="1" height="1" />
+      <rect x="9" y="4" width="1" height="1" />
+      <rect x="10" y="4" width="1" height="1" />
+      <rect x="10" y="5" width="1" height="1" />
+    </g>
+
+    <!-- the torn seam — white @ 0.35 -->
+    <g fill="#ffffff" fill-opacity="0.35">
+      <rect x="7" y="3" width="1" height="1" />
+      <rect x="7" y="4" width="1" height="1" />
+    </g>
+
+    <!-- the loose fleck — white @ 0.3 -->
+    <rect x="5" y="9" width="1" height="1" fill="#ffffff" fill-opacity="0.3" />
+
+    <!-- off-center core, with a dim echo pixel riding beside it -->
+    <rect x="8" y="7" width="1" height="1" fill="#eb4763" />
+    <rect x="9" y="7" width="1" height="1" fill="#eb4763" fill-opacity="0.4" />
+  </g>
+</svg>

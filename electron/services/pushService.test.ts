@@ -13,12 +13,6 @@ import type { IConfigStore } from './configStore.js'
 import type { FcmServiceAccount } from './fcm.js'
 import { MASCOT_NAME, NOTIFICATION_TITLES } from '../shared/mascot.js'
 
-/** Extended-pictographic emoji lead-in check — mirrors mascot.test.ts's
- *  "every title mentions the mascot or leads with an emoji" invariant, used
- *  here to assert on titles without pinning exact copy. */
-
-const EMOJI_LEAD = /^\p{Extended_Pictographic}/u
-
 function isFromPool(title: string, pool: readonly string[]): boolean {
   return pool.includes(title)
 }
@@ -463,12 +457,12 @@ describe('createPushService', () => {
       expect(isFromPool(payload.title, NOTIFICATION_TITLES.needsInput)).toBe(true)
     })
 
-    it('every needs-kind title mentions Nulliel or leads with an emoji', async () => {
+    it('every needs-kind title mentions Nulliel by name (no emoji)', async () => {
       store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
       makeService()
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'input' })
       const payload = await firstPayload()
-      expect(payload.title.includes(MASCOT_NAME) || EMOJI_LEAD.test(payload.title)).toBe(true)
+      expect(payload.title.includes(MASCOT_NAME)).toBe(true)
     })
 
     it('meta.message beats the session title as body (prefixed with the tid)', async () => {

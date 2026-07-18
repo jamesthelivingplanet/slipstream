@@ -41,11 +41,19 @@ describe('NOTIFICATION_TITLES', () => {
     }
   })
 
-  it('every title mentions the mascot or leads with an emoji', () => {
+  it('every title mentions the mascot by name (no emoji — the icon carries that now)', () => {
+    for (const kind of KINDS) {
+      for (const title of NOTIFICATION_TITLES[kind]) {
+        expect(title.includes(MASCOT_NAME)).toBe(true)
+      }
+    }
+  })
+
+  it('no title leads with an emoji', () => {
     const emojiLead = /^\p{Extended_Pictographic}/u
     for (const kind of KINDS) {
       for (const title of NOTIFICATION_TITLES[kind]) {
-        expect(title.includes(MASCOT_NAME) || emojiLead.test(title)).toBe(true)
+        expect(emojiLead.test(title)).toBe(false)
       }
     }
   })

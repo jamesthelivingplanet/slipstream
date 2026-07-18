@@ -21,7 +21,11 @@ self.addEventListener('push', (event) => {
       body: data.body,
       tag: data.tid,
       data: { tid: data.tid, sessionId: data.sessionId },
-      icon: '/icons/icon-192.png',
+      // Nulliel is the notification's sender (TASK-F0TYG) — the mascot's own
+      // icon, not the app's generic brand icon. badge stays the brand icon:
+      // it's the monochrome status-bar glyph, rendered too small/silhouetted
+      // for Nulliel's detail to read.
+      icon: '/icons/nulliel-192.png',
       badge: '/icons/icon-192.png',
     })
   )
