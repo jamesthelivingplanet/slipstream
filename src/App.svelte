@@ -8,6 +8,7 @@
     initFromBackend,
     refreshAndReconcile,
     select,
+    openAgentById,
     subscribeSessionStatus,
     subscribeSessionPr,
     subscribeConnectionChange,
@@ -100,7 +101,7 @@
         const params = new URLSearchParams(location.search)
         const agentId = params.get('agent')
         if (agentId) {
-          select(agentId)
+          openAgentById(agentId)
           params.delete('agent')
           const clean = params.toString()
           history.replaceState(
@@ -116,7 +117,7 @@
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', (e: MessageEvent) => {
         if (e.data?.type === 'open-agent' && e.data.sessionId) {
-          select(e.data.sessionId as string)
+          openAgentById(e.data.sessionId as string)
         }
       })
     }

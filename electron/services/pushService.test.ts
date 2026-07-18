@@ -11,6 +11,11 @@ import type {
 } from '../shared/contract.js'
 import type { IConfigStore } from './configStore.js'
 import type { FcmServiceAccount } from './fcm.js'
+import { MASCOT_NAME, NOTIFICATION_TITLES } from '../shared/mascot.js'
+
+function isFromPool(title: string, pool: readonly string[]): boolean {
+  return pool.includes(title)
+}
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -117,6 +122,10 @@ interface FcmRow {
   ownerId: string
   platform: string
   createdAt: number
+  // Optional in the test fixture type (unlike the real FcmTokenRow, where
+  // it's always present but nullable) so pre-existing row literals below
+  // that predate TASK-F0TYG's origin field don't all need updating.
+  origin?: string | null
 }
 
 function makeFcmStore(rows: FcmRow[] = []): FcmStore & { rows: FcmRow[] } {
@@ -126,9 +135,9 @@ function makeFcmStore(rows: FcmRow[] = []): FcmStore & { rows: FcmRow[] } {
       return state.rows
     },
     all: () => state.rows,
-    upsert(token, ownerId, platform, now) {
+    upsert(token, ownerId, platform, now, origin) {
       const existing = state.rows.findIndex((r) => r.token === token)
-      const row = { token, ownerId, platform, createdAt: now }
+      const row = { token, ownerId, platform, createdAt: now, origin: origin ?? null }
       if (existing >= 0) state.rows[existing] = row
       else state.rows.push(row)
     },
@@ -409,7 +418,9 @@ describe('createPushService', () => {
     await new Promise((r) => setTimeout(r, 10))
     const [, payload] = send.mock.calls[0] as [PushSubscriptionDTO, string]
     expect(JSON.parse(payload).tid).toBe('FLO-42')
-    expect(JSON.parse(payload).body).toBe('Do work')
+    // Body is "{tid}: {message-or-title}" (TASK-F0TYG) — the concrete session
+    // id stays visible even though the title is now Nulliel's playful hook.
+    expect(JSON.parse(payload).body).toBe('FLO-42: Do work')
   })
 
   describe('status meta (FLO-104 reasons)', () => {
@@ -419,7 +430,7 @@ describe('createPushService', () => {
       return JSON.parse(payload) as { title: string; body: string }
     }
 
-    it('reason blocked → ⛔ title', async () => {
+    it('reason blocked → title drawn from the needsBlocked pool', async () => {
       store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
       makeService()
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus, {
@@ -427,12 +438,11 @@ describe('createPushService', () => {
         message: 'docker daemon down',
       })
       const payload = await firstPayload()
-      expect(payload.title).toContain('⛔')
-      expect(payload.title).toContain('blocked')
-      expect(payload.body).toBe('docker daemon down')
+      expect(isFromPool(payload.title, NOTIFICATION_TITLES.needsBlocked)).toBe(true)
+      expect(payload.body).toBe('s1: docker daemon down')
     })
 
-    it('reason approval → 🔐 title', async () => {
+    it('reason approval → title drawn from the needsApproval pool', async () => {
       store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
       makeService()
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus, {
@@ -440,20 +450,26 @@ describe('createPushService', () => {
         message: 'drop the table?',
       })
       const payload = await firstPayload()
-      expect(payload.title).toContain('🔐')
-      expect(payload.title).toContain('approval')
+      expect(isFromPool(payload.title, NOTIFICATION_TITLES.needsApproval)).toBe(true)
     })
 
-    it('reason input (and no reason) → default ⚠️ needs-input title', async () => {
+    it('reason input (and no reason) → title drawn from the needsInput pool', async () => {
       store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
       makeService()
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'input' })
       const payload = await firstPayload()
-      expect(payload.title).toContain('⚠️')
-      expect(payload.title).toContain('needs your input')
+      expect(isFromPool(payload.title, NOTIFICATION_TITLES.needsInput)).toBe(true)
     })
 
-    it('meta.message beats the session title as body', async () => {
+    it('every needs-kind title mentions Nulliel by name (no emoji)', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      makeService()
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'input' })
+      const payload = await firstPayload()
+      expect(payload.title.includes(MASCOT_NAME)).toBe(true)
+    })
+
+    it('meta.message beats the session title as body (prefixed with the tid)', async () => {
       store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
       const sessionStore2 = makeSessionStore([
         {
@@ -480,7 +496,35 @@ describe('createPushService', () => {
         message: 'Which DB should I use?',
       })
       const payload = await firstPayload()
-      expect(payload.body).toBe('Which DB should I use?')
+      expect(payload.body).toBe('FLO-42: Which DB should I use?')
+    })
+
+    it('body falls back to a bare tid when there is no message and no session title', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      const sessionStore2 = makeSessionStore([
+        {
+          id: 's1',
+          tid: 'FLO-42',
+          title: '',
+          prompt: 'do it',
+          repoId: 'r1',
+          branch: 'flo-42',
+          status: 'running',
+          createdAt: 0,
+        },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStore2,
+        send: send as PushSender,
+        now: () => nowMs,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'input' })
+      const payload = await firstPayload()
+      // Not "FLO-42: " — a dangling ": " with nothing after it would look broken.
+      expect(payload.body).toBe('FLO-42')
     })
 
     it('episode dedupe is unchanged: blocked then approval in one episode notifies once', async () => {
@@ -555,7 +599,26 @@ describe('createPushService', () => {
       const svc = makeService({ fcmStore })
       await svc.saveFcmToken('local', { token: 'dev-1', platform: 'android' })
       expect(fcmStore.rows).toEqual([
-        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: nowMs },
+        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: nowMs, origin: null },
+      ])
+    })
+
+    it('saveFcmToken persists the origin when the DTO carries one (TASK-F0TYG)', async () => {
+      const fcmStore = makeFcmStore()
+      const svc = makeService({ fcmStore })
+      await svc.saveFcmToken('local', {
+        token: 'dev-1',
+        platform: 'android',
+        origin: 'https://slipstream.example.ts.net',
+      })
+      expect(fcmStore.rows).toEqual([
+        {
+          token: 'dev-1',
+          ownerId: 'local',
+          platform: 'android',
+          createdAt: nowMs,
+          origin: 'https://slipstream.example.ts.net',
+        },
       ])
     })
 
@@ -610,12 +673,114 @@ describe('createPushService', () => {
         FcmServiceAccount,
         string,
         string,
-        { title: string; body: string },
+        { title: string; body: string; data?: Record<string, string>; image?: string },
       ]
       expect(sentAccount.project_id).toBe('test-project')
       expect(accessToken).toBe('tok-1')
       expect(deviceToken).toBe('dev-1')
-      expect(notification.title).toContain('needs your input')
+      expect(isFromPool(notification.title, NOTIFICATION_TITLES.needsInput)).toBe(true)
+      // data (TASK-F0TYG) rides alongside the notification so a tap can
+      // deep-link straight to the session on the native FCM path too.
+      expect(notification.data).toEqual({ sessionId: 's1', tid: 's1', status: 'needs' })
+      // No origin was stored for this token, so no image (TASK-F0TYG follow-up).
+      expect(notification.image).toBeUndefined()
+    })
+
+    describe('notification image (TASK-F0TYG follow-up)', () => {
+      it('builds an image URL from an https:// token origin', async () => {
+        config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+        const fcmStore = makeFcmStore([
+          {
+            token: 'dev-1',
+            ownerId: 'local',
+            platform: 'android',
+            createdAt: 0,
+            origin: 'https://slipstream.example.ts.net',
+          },
+        ])
+        makeService({ fcmStore, fcmMint, fcmSend })
+        sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+        await new Promise((r) => setTimeout(r, 10))
+
+        expect(fcmSend).toHaveBeenCalledOnce()
+        const [, , , notification] = fcmSend.mock.calls[0] as [
+          unknown,
+          unknown,
+          unknown,
+          { image?: string },
+        ]
+        expect(notification.image).toBe('https://slipstream.example.ts.net/icons/nulliel-512.png')
+      })
+
+      it('does NOT build an image URL from an http:// (cleartext) token origin', async () => {
+        config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+        const fcmStore = makeFcmStore([
+          {
+            token: 'dev-1',
+            ownerId: 'local',
+            platform: 'android',
+            createdAt: 0,
+            origin: 'http://192.168.1.50:9091',
+          },
+        ])
+        makeService({ fcmStore, fcmMint, fcmSend })
+        sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+        await new Promise((r) => setTimeout(r, 10))
+
+        const [, , , notification] = fcmSend.mock.calls[0] as [
+          unknown,
+          unknown,
+          unknown,
+          { image?: string },
+        ]
+        expect(notification.image).toBeUndefined()
+      })
+
+      it('does NOT build an image URL when the token has no stored origin', async () => {
+        config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+        const fcmStore = makeFcmStore([
+          { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0, origin: null },
+        ])
+        makeService({ fcmStore, fcmMint, fcmSend })
+        sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+        await new Promise((r) => setTimeout(r, 10))
+
+        const [, , , notification] = fcmSend.mock.calls[0] as [
+          unknown,
+          unknown,
+          unknown,
+          { image?: string },
+        ]
+        expect(notification.image).toBeUndefined()
+      })
+
+      it('builds a distinct per-token image URL when the owner has devices from different origins', async () => {
+        config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+        const fcmStore = makeFcmStore([
+          {
+            token: 'dev-https',
+            ownerId: 'local',
+            platform: 'android',
+            createdAt: 0,
+            origin: 'https://home.example.ts.net',
+          },
+          { token: 'dev-none', ownerId: 'local', platform: 'android', createdAt: 0, origin: null },
+        ])
+        makeService({ fcmStore, fcmMint, fcmSend })
+        sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+        await new Promise((r) => setTimeout(r, 10))
+
+        expect(fcmSend).toHaveBeenCalledTimes(2)
+        const calls = fcmSend.mock.calls as unknown as [
+          unknown,
+          unknown,
+          string,
+          { image?: string },
+        ][]
+        const byToken = Object.fromEntries(calls.map(([, , token, n]) => [token, n.image]))
+        expect(byToken['dev-https']).toBe('https://home.example.ts.net/icons/nulliel-512.png')
+        expect(byToken['dev-none']).toBeUndefined()
+      })
     })
 
     it('does not deliver to a device token owned by a different identity', async () => {

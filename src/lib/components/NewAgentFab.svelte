@@ -7,7 +7,7 @@
   import { nativeStorage } from '../nativeStorage'
   import { onboardingVisible } from '../onboarding'
   import { fabAngelEnabled, fabTipsEnabled, initFabPrefs } from '../fabPrefs'
-  import { FAB_TIPS } from '../fabTipsContent'
+  import { FAB_TIPS, FAB_TIP_INTROS } from '../fabTipsContent'
   import {
     FAB_TIP_INDEX_KEY,
     firstTipDueAtMs,
@@ -155,6 +155,12 @@
 
   $: tipsEligible =
     visible && $fabTipsEnabled && !dragging && ($mobile ? !$selected : true) && FAB_TIPS.length > 0
+
+  // Paired to tipIndex (not currentTip) so it only changes when tipIndex does
+  // — i.e. in hideTip(), after currentTip has already gone null — so the
+  // intro stays stable for the whole time a bubble is showing and rotates
+  // together with the tip it introduces.
+  $: currentTipIntro = FAB_TIP_INTROS[tipIndex % FAB_TIP_INTROS.length]
 
   // A tip that's currently up but whose eligibility just dropped (dialog
   // opened, settings opened, a session got selected, a drag started) is
@@ -387,7 +393,7 @@
     aria-live="polite"
     transition:fade={{ duration: reducedMotion ? 0 : 140 }}
   >
-    <span class="fab-tip-label">the angel observes</span>
+    <span class="fab-tip-label">{currentTipIntro}</span>
     <p class="fab-tip-text">{currentTip}</p>
     <button type="button" class="fab-tip-dismiss" aria-label="Dismiss tip" on:click={dismissTip}>
       ×

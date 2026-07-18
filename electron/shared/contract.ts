@@ -123,6 +123,14 @@ export interface PushSubscriptionDTO {
 export interface FcmTokenDTO {
   token: string
   platform: 'android' | 'ios'
+  /** The app origin (location.origin) the client loaded from when it
+   *  registered this token (TASK-F0TYG) — lets the daemon build a
+   *  device-reachable image URL (e.g. `${origin}/icons/nulliel-512.png`) for
+   *  the native notification without a config key. Per-token/per-device,
+   *  since the same identity can reach the daemon from different origins
+   *  (tailnet host, LAN IP, …). Omitted (not just falsy) when the client
+   *  can't determine a real http(s) origin. */
+  origin?: string
 }
 
 export interface RepoDTO {

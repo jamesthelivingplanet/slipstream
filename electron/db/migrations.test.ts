@@ -114,4 +114,21 @@ describe('runMigrations', () => {
       expect(f.execLog[0]).toContain(`ownerId   TEXT DEFAULT 'local'`)
     })
   })
+
+  describe('migration 7 (TASK-F0TYG push_fcm_tokens.origin)', () => {
+    it('adds the nullable origin column on a fresh DB', () => {
+      const f = makeFakeDb({ userVersion: 0 })
+      runMigrations(f.db)
+      const sql = f.execLog.find((s) => s.includes('ALTER TABLE push_fcm_tokens'))
+      expect(sql).toContain('ADD COLUMN origin TEXT')
+    })
+
+    it('runs only the new migration for a DB already at version 6', () => {
+      const f = makeFakeDb({ userVersion: 6 })
+      runMigrations(f.db)
+      expect(f.version).toBe(MIGRATIONS.length)
+      expect(f.execLog).toHaveLength(MIGRATIONS.length - 6)
+      expect(f.execLog[0]).toContain('ALTER TABLE push_fcm_tokens ADD COLUMN origin TEXT')
+    })
+  })
 })

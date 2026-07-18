@@ -2,14 +2,31 @@
 // mode"). Every tip below names a feature that actually exists and is
 // reachable from the mobile layout — verified against the component that
 // implements it (see the comment beside each entry). No invented features,
-// keybindings, or gestures. The oracle-flavored "the angel observes" label is
-// static UI chrome rendered by NewAgentFab.svelte, not baked into the tip
-// text — keeps the tip body itself plain and practical per the brief.
+// keybindings, or gestures. The oracle-flavored intro label (FAB_TIP_INTROS,
+// TASK-F0TYG) is static-per-bubble UI chrome rendered by NewAgentFab.svelte,
+// not baked into the tip text — keeps the tip body itself plain and
+// practical per the brief.
 
 /** Hard cap enforced by fabTipsContent.test.ts — keeps every tip readable in
  *  the small pixel-bordered bubble on a phone width without wrapping into a
  *  wall of text. */
 export const FAB_TIP_MAX_LENGTH = 120
+
+/** Hard cap for a tip-bubble intro — short enough that it never wraps above
+ *  the tip body it introduces. */
+export const FAB_TIP_INTRO_MAX_LENGTH = 40
+
+/** Nulliel-voiced lead-ins shown above the tip body (replaces the old static
+ *  "the angel observes" chrome). Paired with the current tip index in
+ *  NewAgentFab.svelte so the intro rotates together with the tip and stays
+ *  stable while a single bubble is showing. */
+export const FAB_TIP_INTROS: readonly string[] = [
+  'Nulliel drifts closer',
+  'Nulliel has a tip',
+  'a transmission from Nulliel',
+  'Nulliel noticed something',
+  'psst — Nulliel here',
+]
 
 export const FAB_TIPS: readonly string[] = [
   // Settings → Notifications (SettingsNotifications.svelte) — native push via

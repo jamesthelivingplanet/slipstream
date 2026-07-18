@@ -129,6 +129,14 @@ CREATE TABLE push_fcm_tokens (
   createdAt INTEGER NOT NULL
 )
 `),
+  // 7 — TASK-F0TYG: per-token app origin, so the daemon can build a
+  // device-reachable image URL for the native FCM notification's full-color
+  // Nulliel picture (Android SDK fetches it from the device, not the
+  // daemon — cleartext http(s) isn't reliably fetched, so pushService.ts only
+  // uses this when it starts with https://). Nullable: rows saved before this
+  // migration, or by a client that couldn't determine a real origin, just
+  // fall back to no image.
+  (db) => db.exec(`ALTER TABLE push_fcm_tokens ADD COLUMN origin TEXT`),
 ]
 
 /** Apply any migrations newer than the DB's current user_version, atomically. */
