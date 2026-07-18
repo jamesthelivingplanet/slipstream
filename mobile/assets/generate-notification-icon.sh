@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # Regenerates the FCM status-bar notification icon (mobile/android/app/src/main/res/drawable-*/ic_stat_notify.png)
-# from a source SVG — defaults to the brand SVG at public/icons/icon.svg, or pass a different
-# SVG as the first arg (e.g. mobile/assets/nulliel-silhouette.svg, TASK-F0TYG) to swap the glyph
-# without touching the pipeline below.
+# from a source SVG — defaults to the silhouette SVG at mobile/assets/nulliel-silhouette.svg, or
+# pass a different SVG as the first arg to swap the glyph without touching the pipeline below.
+#
+# The default used to be public/icons/icon.svg, back when that file WAS a bare glyph on a
+# transparent background. Since TASK-F0TYG's "nulliel-app-icon" follow-up, icon.svg carries its
+# own opaque rounded-square backdrop (so it looks right as a standalone favicon/app icon) — running
+# this script's alpha-extract pipeline against it now would produce a solid rounded-square blob,
+# not a silhouette. nulliel-silhouette.svg is the bare (no backdrop) counterpart kept specifically
+# for this script.
 #
 # Android's notification-icon renderer ignores color and only respects the alpha channel,
 # auto-tinting whatever it finds — so the source must be a pure white-on-transparent (or, since
@@ -20,7 +26,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SVG="${1:-$REPO_ROOT/public/icons/icon.svg}"
+SVG="${1:-$REPO_ROOT/mobile/assets/nulliel-silhouette.svg}"
 RES_DIR="$REPO_ROOT/mobile/android/app/src/main/res"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
