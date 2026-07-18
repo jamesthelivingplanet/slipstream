@@ -9,6 +9,7 @@ import {
 } from './ipc'
 import { pushToast } from './toast'
 import { nativeStorage, FCM_KEY } from './nativeStorage'
+import { openAgentById } from './stores'
 
 // ── Native push bridge (TASK-I9S44) ─────────────────────────────────────────
 //
@@ -33,6 +34,16 @@ interface CapacitorPluginListenerHandle {
   remove(): void | Promise<void>
 }
 
+/** Shape of the tapped notification as delivered by the Capacitor plugin —
+ *  only the `data` field is used here, which carries through the raw FCM
+ *  `data` block (TASK-F0TYG) sent by fcm.ts's sendFcmMessage. */
+interface CapacitorPushActionPerformed {
+  actionId: string
+  notification: {
+    data?: Record<string, string>
+  }
+}
+
 interface CapacitorPushNotificationsPlugin {
   requestPermissions(): Promise<CapacitorPushPermissionStatus>
   register(): Promise<void>
@@ -43,6 +54,10 @@ interface CapacitorPushNotificationsPlugin {
   addListener(
     eventName: 'registrationError',
     listenerFunc: (error: { error: string }) => void,
+  ): Promise<CapacitorPluginListenerHandle>
+  addListener(
+    eventName: 'pushNotificationActionPerformed',
+    listenerFunc: (action: CapacitorPushActionPerformed) => void,
   ): Promise<CapacitorPluginListenerHandle>
 }
 
@@ -143,6 +158,19 @@ function nativePlatform(): 'android' | 'ios' {
   return window.Capacitor?.getPlatform?.() === 'ios' ? 'ios' : 'android'
 }
 
+/** The app origin to register this device token under (TASK-F0TYG follow-up)
+ *  — lets the daemon build a device-reachable image URL for the native
+ *  notification's full-color Nulliel picture. Returns undefined (rather than
+ *  a bogus value) for anything that isn't a real http(s) origin: sandboxed/
+ *  opaque contexts report `location.origin` as the literal string 'null', and
+ *  a `file://` origin (`location.origin === 'null'` there too, in practice)
+ *  is never device-reachable by the daemon anyway. */
+function nativeAppOrigin(): string | undefined {
+  const origin = typeof location !== 'undefined' ? location.origin : undefined
+  if (!origin || !/^https?:\/\//.test(origin)) return undefined
+  return origin
+}
+
 // Tracks the plugin instance we've already bound listeners on (rather than a
 // plain boolean) so repeated enableNativePush() calls against the SAME bridge
 // don't double-register, while a different instance rebinds correctly.
@@ -169,12 +197,24 @@ export async function enableNativePush(): Promise<{ ok: boolean; reason?: string
           // best-effort persistence; saveFcmToken below is the source of
           // truth server-side, this is just the local "am I enabled" flag
         })
-        saveFcmToken({ token: token.value, platform: nativePlatform() }).catch(() => {
+        saveFcmToken({
+          token: token.value,
+          platform: nativePlatform(),
+          origin: nativeAppOrigin(),
+        }).catch(() => {
           pushToast('error', 'Could not save the push token.')
         })
       })
       await plugin.addListener('registrationError', (error) => {
         pushToast('error', `Push registration failed: ${error?.error ?? 'unknown error'}`)
+      })
+      // Native tap deep-link (TASK-F0TYG): mirrors the web-push path (SW
+      // notificationclick -> postMessage -> App.svelte -> openAgentById),
+      // sharing the same open-agent function so both transports behave
+      // identically. sessionId rides through as-sent in fcm.ts's `data`.
+      await plugin.addListener('pushNotificationActionPerformed', (action) => {
+        const sessionId = action?.notification?.data?.sessionId
+        if (sessionId) openAgentById(sessionId)
       })
     }
 

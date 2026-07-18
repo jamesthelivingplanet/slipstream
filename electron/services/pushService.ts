@@ -24,6 +24,7 @@ import {
   sendFcmMessage,
   type FcmServiceAccount,
 } from './fcm.js'
+import { NOTIFICATION_TITLES, pick, type NotificationKind } from '../shared/mascot.js'
 
 export type { PushSubscriptionRow, FcmTokenRow }
 
@@ -39,10 +40,12 @@ export type PushSender = (
   payload: string,
 ) => Promise<{ statusCode: number }>
 
-/** Storage seam for native FCM device tokens (TASK-I9S44) — mirrors PushStore. */
+/** Storage seam for native FCM device tokens (TASK-I9S44) — mirrors PushStore.
+ *  `origin` (TASK-F0TYG) is optional/per-call, like FcmTokenDTO's — omitted
+ *  when the client couldn't determine a real http(s) origin. */
 export interface FcmStore {
   all(): FcmTokenRow[]
-  upsert(token: string, ownerId: string, platform: string, now: number): void
+  upsert(token: string, ownerId: string, platform: string, now: number, origin?: string): void
   delete(token: string, ownerId: string): void
 }
 
@@ -57,7 +60,15 @@ export type FcmSender = (
   account: FcmServiceAccount,
   accessToken: string,
   deviceToken: string,
-  notification: { title: string; body: string },
+  notification: {
+    title: string
+    body: string
+    data?: Record<string, string>
+    /** Device-reachable HTTPS URL for the full-color Nulliel image
+     *  (TASK-F0TYG) — built per-token from that token's stored origin, so
+     *  never present when the origin is missing or not https://. */
+    image?: string
+  },
 ) => Promise<{ ok: boolean; status: number; unregistered: boolean }>
 
 export type FcmTokenMinter = (
@@ -103,7 +114,8 @@ export function createDbPushStore(db: Database): PushStore {
 export function createDbFcmStore(db: Database): FcmStore {
   return {
     all: () => allFcmTokens(db),
-    upsert: (token, ownerId, platform, now) => upsertFcmToken(db, token, ownerId, platform, now),
+    upsert: (token, ownerId, platform, now, origin) =>
+      upsertFcmToken(db, token, ownerId, platform, now, origin),
     delete: (token, ownerId) => dbDeleteFcmToken(db, token, ownerId),
   }
 }
@@ -116,8 +128,8 @@ function createInMemoryFcmStore(): FcmStore {
   const rows = new Map<string, FcmTokenRow>()
   return {
     all: () => Array.from(rows.values()),
-    upsert: (token, ownerId, platform, now) => {
-      rows.set(token, { token, ownerId, platform, createdAt: now })
+    upsert: (token, ownerId, platform, now, origin) => {
+      rows.set(token, { token, ownerId, platform, createdAt: now, origin: origin ?? null })
     },
     delete: (token, ownerId) => {
       const row = rows.get(token)
@@ -253,12 +265,23 @@ export function createPushService(deps: {
     return _fcmMintInFlight
   }
 
+  /** Device-reachable image URL for the notification's full-color Nulliel
+   *  picture (TASK-F0TYG), built from a token's stored origin — or undefined
+   *  to degrade to no-picture. Deliberately narrow: only https:// origins,
+   *  since the Android FCM SDK fetches the image directly from the device
+   *  and cleartext http(s) isn't reliably reachable/permitted there; a
+   *  missing/http origin must never turn into a send error. */
+  function fcmImageUrl(origin: string | null): string | undefined {
+    if (!origin || !origin.startsWith('https://')) return undefined
+    return `${origin}/icons/nulliel-512.png`
+  }
+
   /** Fan out one notification to every FCM token owned by `ownerId`. Never
    *  throws — a mint/network failure is swallowed the same way the web-push
    *  loop swallows per-subscription failures. */
   async function sendFcmForOwner(
     ownerId: string,
-    notification: { title: string; body: string },
+    notification: { title: string; body: string; data?: Record<string, string> },
   ): Promise<void> {
     const account = getFcmAccount()
     if (!account) return
@@ -276,7 +299,14 @@ export function createPushService(deps: {
 
     for (const row of tokens) {
       try {
-        const result = await fcmSend(account, accessToken, row.token, notification)
+        // image is per-token, not per-notification: two devices for the same
+        // owner can have registered from different origins (tailnet host,
+        // LAN IP, …), so it's computed inside the loop rather than once.
+        const image = fcmImageUrl(row.origin)
+        const result = await fcmSend(account, accessToken, row.token, {
+          ...notification,
+          ...(image ? { image } : {}),
+        })
         if (result.unregistered) fcmStore.delete(row.token, row.ownerId)
       } catch {
         // best-effort per-token; swallow and continue with the rest
@@ -331,24 +361,34 @@ export function createPushService(deps: {
     const session = sessionStore.get(sessionId)
     const tid = session?.tid ?? sessionId
 
-    const needsTitle =
-      meta?.reason === 'blocked'
-        ? `⛔ ${tid} is blocked`
-        : meta?.reason === 'approval'
-          ? `🔐 ${tid} requests approval`
-          : `⚠️ ${tid} needs your input`
-    const texts: Record<string, string> = {
-      needs: needsTitle,
-      done: `✅ ${tid} is done`,
-      running: `▶️ ${tid} started`,
-    }
+    // meta.reason still picks the needs flavor (blocked/approval/plain input);
+    // the resulting NotificationKind only selects which mascot.ts pool the
+    // title is drawn from — it does NOT feed the episode dedupe above, which
+    // stays keyed on the coarser 'needs'|'done'|'running' kind.
+    const notifKind: NotificationKind =
+      kind === 'needs'
+        ? meta?.reason === 'blocked'
+          ? 'needsBlocked'
+          : meta?.reason === 'approval'
+            ? 'needsApproval'
+            : 'needsInput'
+        : kind
+    // Seeded on sessionId + notifKind (not wall-clock or Math.random) so the
+    // same episode always renders the same line — see mascot.ts's pick().
+    const title = pick(NOTIFICATION_TITLES[notifKind], `${sessionId}:${notifKind}`)
+    // The concrete session id stays visible in the body even though the
+    // title is now Nulliel's playful hook rather than a per-kind fact —
+    // several sessions can notify at once. The agent's own message (why it
+    // stopped) beats the ticket title. Falls back to a bare tid (no dangling
+    // "TASK-X: ") when neither is available.
+    const detail = meta?.message ?? session?.title ?? ''
+    const body = detail ? `${tid}: ${detail}` : tid
 
     const payload = JSON.stringify({
       sessionId,
       tid,
-      title: texts[kind],
-      // The agent's own message (why it stopped) beats the ticket title.
-      body: meta?.message ?? session?.title ?? '',
+      title,
+      body,
       status: next,
     })
 
@@ -358,7 +398,10 @@ export function createPushService(deps: {
     // to the transitioning session's own owner (defaults to 'local', same
     // fallback as every other ownerId read — see IDENTITY-SEAM.md).
     const ownerId = session?.ownerId || 'local'
-    const fcmNotification = { title: texts[kind], body: meta?.message ?? session?.title ?? '' }
+    // data rides alongside notification (TASK-F0TYG) so a tap on the native
+    // notification can deep-link straight to this session — see fcm.ts and
+    // src/lib/push.ts's pushNotificationActionPerformed listener.
+    const fcmNotification = { title, body, data: { sessionId, tid, status: next } }
 
     ;(async () => {
       const sendFn = await getSend()
@@ -404,7 +447,7 @@ export function createPushService(deps: {
       return store.getPrefs(endpoint)
     },
     async saveFcmToken(ownerId, dto) {
-      fcmStore.upsert(dto.token, ownerId, dto.platform, now())
+      fcmStore.upsert(dto.token, ownerId, dto.platform, now(), dto.origin)
     },
     async deleteFcmToken(ownerId, token) {
       fcmStore.delete(token, ownerId)

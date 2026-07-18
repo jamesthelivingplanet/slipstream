@@ -289,26 +289,32 @@ export interface FcmTokenRow {
   ownerId: string
   platform: string
   createdAt: number
+  /** App origin the client registered this token from (TASK-F0TYG,
+   *  migration 7) — null for rows saved before the migration or by a client
+   *  that couldn't determine a real http(s) origin. */
+  origin: string | null
 }
 
 /** Dedupe by token (PRIMARY KEY): re-registering the same physical device
- *  token just refreshes ownerId/platform/createdAt in place. */
+ *  token just refreshes ownerId/platform/createdAt/origin in place. */
 export function upsertFcmToken(
   db: Database.Database,
   token: string,
   ownerId: string,
   platform: string,
   now: number,
+  origin?: string,
 ): void {
   db.prepare(
     `
-    INSERT INTO push_fcm_tokens (token, ownerId, platform, createdAt)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO push_fcm_tokens (token, ownerId, platform, createdAt, origin)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(token) DO UPDATE SET
       ownerId  = excluded.ownerId,
-      platform = excluded.platform
+      platform = excluded.platform,
+      origin   = excluded.origin
   `,
-  ).run(token, ownerId, platform, now)
+  ).run(token, ownerId, platform, now, origin ?? null)
 }
 
 export function allFcmTokens(db: Database.Database): FcmTokenRow[] {

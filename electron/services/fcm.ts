@@ -108,15 +108,28 @@ export interface FcmSendResult {
 
 /** POST a single notification to one FCM device token via HTTP v1. Never
  *  throws for an HTTP-level failure (returns { ok:false } instead) — only a
- *  network-level fetch rejection propagates, same contract as PushSender. */
+ *  network-level fetch rejection propagates, same contract as PushSender.
+ *
+ *  `notification.data` (TASK-F0TYG) rides alongside the title/body as the
+ *  FCM message's top-level `data` block, so a tap on the native notification
+ *  can deep-link to the session — FCM v1 requires every `data` value to be a
+ *  string, matching Record<string, string> below. Optional: omitted entirely
+ *  from the request body when not given, matching the pre-TASK-F0TYG shape.
+ *
+ *  `notification.image` (TASK-F0TYG follow-up) is a device-reachable HTTPS
+ *  URL for the full-color Nulliel picture; FCM v1 puts it at
+ *  `message.android.notification.image`, not on the top-level `notification`
+ *  block. When absent, `android` stays exactly `{ priority: 'high' }` as
+ *  before this change. */
 export async function sendFcmMessage(
   account: FcmServiceAccount,
   accessToken: string,
   deviceToken: string,
-  notification: { title: string; body: string },
+  notification: { title: string; body: string; data?: Record<string, string>; image?: string },
   opts: { fetchFn?: typeof fetch } = {},
 ): Promise<FcmSendResult> {
   const fetchFn = opts.fetchFn ?? fetch
+  const { data, image, ...notificationFields } = notification
   const res = await fetchFn(
     `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account.project_id)}/messages:send`,
     {
@@ -128,8 +141,9 @@ export async function sendFcmMessage(
       body: JSON.stringify({
         message: {
           token: deviceToken,
-          notification,
-          android: { priority: 'high' },
+          notification: notificationFields,
+          ...(data ? { data } : {}),
+          android: { priority: 'high', ...(image ? { notification: { image } } : {}) },
         },
       }),
     },
