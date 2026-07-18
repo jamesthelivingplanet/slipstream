@@ -158,6 +158,19 @@ function nativePlatform(): 'android' | 'ios' {
   return window.Capacitor?.getPlatform?.() === 'ios' ? 'ios' : 'android'
 }
 
+/** The app origin to register this device token under (TASK-F0TYG follow-up)
+ *  — lets the daemon build a device-reachable image URL for the native
+ *  notification's full-color Nulliel picture. Returns undefined (rather than
+ *  a bogus value) for anything that isn't a real http(s) origin: sandboxed/
+ *  opaque contexts report `location.origin` as the literal string 'null', and
+ *  a `file://` origin (`location.origin === 'null'` there too, in practice)
+ *  is never device-reachable by the daemon anyway. */
+function nativeAppOrigin(): string | undefined {
+  const origin = typeof location !== 'undefined' ? location.origin : undefined
+  if (!origin || !/^https?:\/\//.test(origin)) return undefined
+  return origin
+}
+
 // Tracks the plugin instance we've already bound listeners on (rather than a
 // plain boolean) so repeated enableNativePush() calls against the SAME bridge
 // don't double-register, while a different instance rebinds correctly.
@@ -184,7 +197,11 @@ export async function enableNativePush(): Promise<{ ok: boolean; reason?: string
           // best-effort persistence; saveFcmToken below is the source of
           // truth server-side, this is just the local "am I enabled" flag
         })
-        saveFcmToken({ token: token.value, platform: nativePlatform() }).catch(() => {
+        saveFcmToken({
+          token: token.value,
+          platform: nativePlatform(),
+          origin: nativeAppOrigin(),
+        }).catch(() => {
           pushToast('error', 'Could not save the push token.')
         })
       })

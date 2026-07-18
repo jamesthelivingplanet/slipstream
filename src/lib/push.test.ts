@@ -81,16 +81,25 @@ function makeFakeCapacitor(opts: { pluginAvailable?: boolean; platform?: string 
   }
 }
 
-function stubBrowserGlobals(capacitor?: ReturnType<typeof makeFakeCapacitor>) {
+// origin is a separate param (not read off window) because in a real
+// browser location is its own global, independent of window.Capacitor —
+// mirrors nativeAppOrigin()'s `typeof location` guard in push.ts. Omitted by
+// default so most tests run exactly as before TASK-F0TYG (no `location`
+// global at all in the Node test env, same as pre-existing behavior).
+function stubBrowserGlobals(capacitor?: ReturnType<typeof makeFakeCapacitor>, origin?: string) {
   const win = { Capacitor: capacitor } as unknown
   ;(globalThis as { window?: unknown }).window = win
   ;(globalThis as { localStorage?: unknown }).localStorage = makeFakeLocalStorage()
+  if (origin !== undefined) {
+    ;(globalThis as { location?: unknown }).location = { origin }
+  }
 }
 
 afterEach(() => {
   vi.clearAllMocks()
   delete (globalThis as { window?: unknown }).window
   delete (globalThis as { localStorage?: unknown }).localStorage
+  delete (globalThis as { location?: unknown }).location
 })
 
 describe('nativePushAvailable', () => {
@@ -173,6 +182,58 @@ describe('enableNativePush', () => {
     cap._fire('registration', { value: 'ios-token' })
     await new Promise((r) => setTimeout(r, 0))
     expect(ipcMocks.saveFcmToken).toHaveBeenCalledWith({ token: 'ios-token', platform: 'ios' })
+  })
+
+  describe('origin (TASK-F0TYG follow-up)', () => {
+    it('includes location.origin in the saved DTO when it is a real https origin', async () => {
+      const cap = makeFakeCapacitor({ platform: 'android' })
+      stubBrowserGlobals(cap, 'https://slipstream.example.ts.net')
+      await enableNativePush()
+      cap._fire('registration', { value: 'device-token-abc' })
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(ipcMocks.saveFcmToken).toHaveBeenCalledWith({
+        token: 'device-token-abc',
+        platform: 'android',
+        origin: 'https://slipstream.example.ts.net',
+      })
+    })
+
+    it('includes an http origin too — only pushService.ts filters by scheme for the image', async () => {
+      const cap = makeFakeCapacitor({ platform: 'android' })
+      stubBrowserGlobals(cap, 'http://192.168.1.50:9091')
+      await enableNativePush()
+      cap._fire('registration', { value: 'device-token-abc' })
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(ipcMocks.saveFcmToken).toHaveBeenCalledWith({
+        token: 'device-token-abc',
+        platform: 'android',
+        origin: 'http://192.168.1.50:9091',
+      })
+    })
+
+    it('omits origin when location.origin is the literal "null" (opaque/sandboxed context)', async () => {
+      const cap = makeFakeCapacitor({ platform: 'android' })
+      stubBrowserGlobals(cap, 'null')
+      await enableNativePush()
+      cap._fire('registration', { value: 'device-token-abc' })
+      await new Promise((r) => setTimeout(r, 0))
+
+      const call = ipcMocks.saveFcmToken.mock.calls[0][0] as { origin?: string }
+      expect(call.origin).toBeUndefined()
+    })
+
+    it('omits origin when there is no location global at all', async () => {
+      const cap = makeFakeCapacitor({ platform: 'android' })
+      stubBrowserGlobals(cap) // no origin arg — no `location` stubbed, matching plain Node
+      await enableNativePush()
+      cap._fire('registration', { value: 'device-token-abc' })
+      await new Promise((r) => setTimeout(r, 0))
+
+      const call = ipcMocks.saveFcmToken.mock.calls[0][0] as { origin?: string }
+      expect(call.origin).toBeUndefined()
+    })
   })
 
   it('surfaces a registrationError via the toast path', async () => {
