@@ -223,6 +223,17 @@ export function select(tid: string | null) {
   if (tid) historyOpen.set(false)
 }
 
+/** Deep-link entry point (TASK-F0TYG): opens the agent a notification points
+ *  at. Shared by every notification transport that can deliver a tap/click —
+ *  the service-worker 'open-agent' message (App.svelte), the `?agent=` query
+ *  param set by the SW's notificationclick before it opens/focuses a window
+ *  (App.svelte), and the native FCM pushNotificationActionPerformed listener
+ *  (push.ts) — so they all land on the exact same behavior instead of each
+ *  reimplementing "select this session". */
+export function openAgentById(sessionId: string) {
+  select(sessionId)
+}
+
 /** Seed stores from the real backend. No-op when hasBackend is false. */
 export async function initFromBackend(): Promise<void> {
   if (!hasBackend) return

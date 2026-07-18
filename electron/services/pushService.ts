@@ -24,6 +24,7 @@ import {
   sendFcmMessage,
   type FcmServiceAccount,
 } from './fcm.js'
+import { NOTIFICATION_TITLES, pick, type NotificationKind } from '../shared/mascot.js'
 
 export type { PushSubscriptionRow, FcmTokenRow }
 
@@ -57,7 +58,7 @@ export type FcmSender = (
   account: FcmServiceAccount,
   accessToken: string,
   deviceToken: string,
-  notification: { title: string; body: string },
+  notification: { title: string; body: string; data?: Record<string, string> },
 ) => Promise<{ ok: boolean; status: number; unregistered: boolean }>
 
 export type FcmTokenMinter = (
@@ -258,7 +259,7 @@ export function createPushService(deps: {
    *  loop swallows per-subscription failures. */
   async function sendFcmForOwner(
     ownerId: string,
-    notification: { title: string; body: string },
+    notification: { title: string; body: string; data?: Record<string, string> },
   ): Promise<void> {
     const account = getFcmAccount()
     if (!account) return
@@ -331,24 +332,34 @@ export function createPushService(deps: {
     const session = sessionStore.get(sessionId)
     const tid = session?.tid ?? sessionId
 
-    const needsTitle =
-      meta?.reason === 'blocked'
-        ? `⛔ ${tid} is blocked`
-        : meta?.reason === 'approval'
-          ? `🔐 ${tid} requests approval`
-          : `⚠️ ${tid} needs your input`
-    const texts: Record<string, string> = {
-      needs: needsTitle,
-      done: `✅ ${tid} is done`,
-      running: `▶️ ${tid} started`,
-    }
+    // meta.reason still picks the needs flavor (blocked/approval/plain input);
+    // the resulting NotificationKind only selects which mascot.ts pool the
+    // title is drawn from — it does NOT feed the episode dedupe above, which
+    // stays keyed on the coarser 'needs'|'done'|'running' kind.
+    const notifKind: NotificationKind =
+      kind === 'needs'
+        ? meta?.reason === 'blocked'
+          ? 'needsBlocked'
+          : meta?.reason === 'approval'
+            ? 'needsApproval'
+            : 'needsInput'
+        : kind
+    // Seeded on sessionId + notifKind (not wall-clock or Math.random) so the
+    // same episode always renders the same line — see mascot.ts's pick().
+    const title = pick(NOTIFICATION_TITLES[notifKind], `${sessionId}:${notifKind}`)
+    // The concrete session id stays visible in the body even though the
+    // title is now Nulliel's playful hook rather than a per-kind fact —
+    // several sessions can notify at once. The agent's own message (why it
+    // stopped) beats the ticket title. Falls back to a bare tid (no dangling
+    // "TASK-X: ") when neither is available.
+    const detail = meta?.message ?? session?.title ?? ''
+    const body = detail ? `${tid}: ${detail}` : tid
 
     const payload = JSON.stringify({
       sessionId,
       tid,
-      title: texts[kind],
-      // The agent's own message (why it stopped) beats the ticket title.
-      body: meta?.message ?? session?.title ?? '',
+      title,
+      body,
       status: next,
     })
 
@@ -358,7 +369,10 @@ export function createPushService(deps: {
     // to the transitioning session's own owner (defaults to 'local', same
     // fallback as every other ownerId read — see IDENTITY-SEAM.md).
     const ownerId = session?.ownerId || 'local'
-    const fcmNotification = { title: texts[kind], body: meta?.message ?? session?.title ?? '' }
+    // data rides alongside notification (TASK-F0TYG) so a tap on the native
+    // notification can deep-link straight to this session — see fcm.ts and
+    // src/lib/push.ts's pushNotificationActionPerformed listener.
+    const fcmNotification = { title, body, data: { sessionId, tid, status: next } }
 
     ;(async () => {
       const sendFn = await getSend()

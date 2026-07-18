@@ -156,6 +156,59 @@ describe('sendFcmMessage', () => {
     })
   })
 
+  it('sends notification.data as the message-level data block (TASK-F0TYG)', async () => {
+    let capturedBody: unknown
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedBody = JSON.parse(init!.body as string)
+      return jsonResponse({ name: 'projects/test-project/messages/123' })
+    })
+
+    await sendFcmMessage(
+      account,
+      'access-tok',
+      'device-tok-1',
+      {
+        title: 'Hi',
+        body: 'there',
+        data: { sessionId: 's1', tid: 'FLO-42', status: 'needs' },
+      },
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+
+    expect(capturedBody).toEqual({
+      message: {
+        token: 'device-tok-1',
+        notification: { title: 'Hi', body: 'there' },
+        data: { sessionId: 's1', tid: 'FLO-42', status: 'needs' },
+        android: { priority: 'high' },
+      },
+    })
+  })
+
+  it('omits the data block entirely when notification carries no data', async () => {
+    let capturedBody: unknown
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedBody = JSON.parse(init!.body as string)
+      return jsonResponse({ name: 'projects/test-project/messages/123' })
+    })
+
+    await sendFcmMessage(
+      account,
+      'access-tok',
+      'device-tok-1',
+      { title: 'Hi', body: 'there' },
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+
+    expect(capturedBody).toEqual({
+      message: {
+        token: 'device-tok-1',
+        notification: { title: 'Hi', body: 'there' },
+        android: { priority: 'high' },
+      },
+    })
+  })
+
   it('flags unregistered on a 404 response', async () => {
     const fetchFn = vi.fn(async () =>
       jsonResponse({ error: { code: 404, status: 'NOT_FOUND' } }, false, 404),

@@ -4,10 +4,13 @@
 // implementing component and cited in a comment beside it. No invented
 // features, keybindings, or gestures.
 
-/** The mascot's name — an original angel-styled name (from "null"), in the
- *  spirit of Evangelion's Angels but not one of them. Rendered in the
- *  pager's nameplate (uppercased) and the modal's header. */
-export const MASCOT_NAME = 'Nulliel'
+// MASCOT_NAME now lives in electron/shared/mascot.ts (TASK-F0TYG) — that
+// module is importable from both the renderer and the daemon (push
+// notification copy needs it too), whereas this file is renderer-only.
+// Re-exported here under the original name so every existing import
+// (pager nameplate, modal header, etc.) keeps working unchanged.
+import { MASCOT_NAME } from '../../electron/shared/mascot.js'
+export { MASCOT_NAME }
 
 /** Hard cap enforced by onboardingContent.test.ts — keeps a speech-bubble
  *  line readable on a phone width without wrapping into a wall of text. */

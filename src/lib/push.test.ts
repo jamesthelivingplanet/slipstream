@@ -24,6 +24,9 @@ vi.mock('./ipc', () => ipcMocks)
 const toastMocks = vi.hoisted(() => ({ pushToast: vi.fn() }))
 vi.mock('./toast', () => toastMocks)
 
+const storesMocks = vi.hoisted(() => ({ openAgentById: vi.fn() }))
+vi.mock('./stores', () => storesMocks)
+
 import {
   nativePushAvailable,
   nativePushEnabled,
@@ -49,7 +52,10 @@ function makeFakeLocalStorage() {
 
 // ── fake Capacitor bridge ───────────────────────────────────────────────────
 
-type RegistrationArg = { value: string } | { error: string }
+type RegistrationArg =
+  | { value: string }
+  | { error: string }
+  | { actionId: string; notification: { data?: Record<string, string> } }
 type Listener = (arg: RegistrationArg) => void
 
 function makeFakeCapacitor(opts: { pluginAvailable?: boolean; platform?: string } = {}) {
@@ -175,6 +181,49 @@ describe('enableNativePush', () => {
     await enableNativePush()
     cap._fire('registrationError', { error: 'boom' })
     expect(toastMocks.pushToast).toHaveBeenCalledWith('error', expect.stringContaining('boom'))
+  })
+
+  it('registers a pushNotificationActionPerformed listener that opens the tapped agent', async () => {
+    const cap = makeFakeCapacitor()
+    stubBrowserGlobals(cap)
+    await enableNativePush()
+
+    expect(cap._plugin.addListener).toHaveBeenCalledWith(
+      'pushNotificationActionPerformed',
+      expect.any(Function),
+    )
+
+    cap._fire('pushNotificationActionPerformed', {
+      actionId: 'tap',
+      notification: { data: { sessionId: 's1', tid: 'FLO-1', status: 'needs' } },
+    })
+
+    expect(storesMocks.openAgentById).toHaveBeenCalledWith('s1')
+  })
+
+  it('does not open an agent when the tapped notification carries no sessionId', async () => {
+    const cap = makeFakeCapacitor()
+    stubBrowserGlobals(cap)
+    await enableNativePush()
+
+    cap._fire('pushNotificationActionPerformed', {
+      actionId: 'tap',
+      notification: {},
+    })
+
+    expect(storesMocks.openAgentById).not.toHaveBeenCalled()
+  })
+
+  it('does not double-register the tap listener across repeated enableNativePush calls', async () => {
+    const cap = makeFakeCapacitor()
+    stubBrowserGlobals(cap)
+    await enableNativePush()
+    await enableNativePush()
+
+    const tapRegistrations = cap._plugin.addListener.mock.calls.filter(
+      (call: unknown[]) => call[0] === 'pushNotificationActionPerformed',
+    )
+    expect(tapRegistrations).toHaveLength(1)
   })
 })
 

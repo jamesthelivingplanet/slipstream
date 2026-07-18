@@ -97,6 +97,9 @@ A session's `status` has **three producers**, merged in `sessionManager.ts`:
    file-per-message store), so a usage/cost reader is deferred (future source: `kilo export
    <sessionID>` / `kilo stats`), same as antigravity/grok below.
 
+Notification copy (the mascot's Duolingo-style push titles, keyed off `kind`/`meta.reason`) lives
+in `electron/shared/mascot.ts`, not `pushService.ts` — see that file for the voice/pool/picker.
+
 Both antigravity and grok deliver the system prompt via a worktree `AGENTS.md` (same mechanism
 as opencode and kilo — `prepareWorktree` writes it, the CLI auto-discovers it), and neither has a
 documented on-disk usage/cost format, so `usage.ts`'s `readSessionUsage` returns

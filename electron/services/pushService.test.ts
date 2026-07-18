@@ -11,6 +11,17 @@ import type {
 } from '../shared/contract.js'
 import type { IConfigStore } from './configStore.js'
 import type { FcmServiceAccount } from './fcm.js'
+import { MASCOT_NAME, NOTIFICATION_TITLES } from '../shared/mascot.js'
+
+/** Extended-pictographic emoji lead-in check — mirrors mascot.test.ts's
+ *  "every title mentions the mascot or leads with an emoji" invariant, used
+ *  here to assert on titles without pinning exact copy. */
+
+const EMOJI_LEAD = /^\p{Extended_Pictographic}/u
+
+function isFromPool(title: string, pool: readonly string[]): boolean {
+  return pool.includes(title)
+}
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -409,7 +420,9 @@ describe('createPushService', () => {
     await new Promise((r) => setTimeout(r, 10))
     const [, payload] = send.mock.calls[0] as [PushSubscriptionDTO, string]
     expect(JSON.parse(payload).tid).toBe('FLO-42')
-    expect(JSON.parse(payload).body).toBe('Do work')
+    // Body is "{tid}: {message-or-title}" (TASK-F0TYG) — the concrete session
+    // id stays visible even though the title is now Nulliel's playful hook.
+    expect(JSON.parse(payload).body).toBe('FLO-42: Do work')
   })
 
   describe('status meta (FLO-104 reasons)', () => {
@@ -419,7 +432,7 @@ describe('createPushService', () => {
       return JSON.parse(payload) as { title: string; body: string }
     }
 
-    it('reason blocked → ⛔ title', async () => {
+    it('reason blocked → title drawn from the needsBlocked pool', async () => {
       store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
       makeService()
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus, {
@@ -427,12 +440,11 @@ describe('createPushService', () => {
         message: 'docker daemon down',
       })
       const payload = await firstPayload()
-      expect(payload.title).toContain('⛔')
-      expect(payload.title).toContain('blocked')
-      expect(payload.body).toBe('docker daemon down')
+      expect(isFromPool(payload.title, NOTIFICATION_TITLES.needsBlocked)).toBe(true)
+      expect(payload.body).toBe('s1: docker daemon down')
     })
 
-    it('reason approval → 🔐 title', async () => {
+    it('reason approval → title drawn from the needsApproval pool', async () => {
       store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
       makeService()
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus, {
@@ -440,20 +452,26 @@ describe('createPushService', () => {
         message: 'drop the table?',
       })
       const payload = await firstPayload()
-      expect(payload.title).toContain('🔐')
-      expect(payload.title).toContain('approval')
+      expect(isFromPool(payload.title, NOTIFICATION_TITLES.needsApproval)).toBe(true)
     })
 
-    it('reason input (and no reason) → default ⚠️ needs-input title', async () => {
+    it('reason input (and no reason) → title drawn from the needsInput pool', async () => {
       store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
       makeService()
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'input' })
       const payload = await firstPayload()
-      expect(payload.title).toContain('⚠️')
-      expect(payload.title).toContain('needs your input')
+      expect(isFromPool(payload.title, NOTIFICATION_TITLES.needsInput)).toBe(true)
     })
 
-    it('meta.message beats the session title as body', async () => {
+    it('every needs-kind title mentions Nulliel or leads with an emoji', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      makeService()
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'input' })
+      const payload = await firstPayload()
+      expect(payload.title.includes(MASCOT_NAME) || EMOJI_LEAD.test(payload.title)).toBe(true)
+    })
+
+    it('meta.message beats the session title as body (prefixed with the tid)', async () => {
       store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
       const sessionStore2 = makeSessionStore([
         {
@@ -480,7 +498,35 @@ describe('createPushService', () => {
         message: 'Which DB should I use?',
       })
       const payload = await firstPayload()
-      expect(payload.body).toBe('Which DB should I use?')
+      expect(payload.body).toBe('FLO-42: Which DB should I use?')
+    })
+
+    it('body falls back to a bare tid when there is no message and no session title', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      const sessionStore2 = makeSessionStore([
+        {
+          id: 's1',
+          tid: 'FLO-42',
+          title: '',
+          prompt: 'do it',
+          repoId: 'r1',
+          branch: 'flo-42',
+          status: 'running',
+          createdAt: 0,
+        },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStore2,
+        send: send as PushSender,
+        now: () => nowMs,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'input' })
+      const payload = await firstPayload()
+      // Not "FLO-42: " — a dangling ": " with nothing after it would look broken.
+      expect(payload.body).toBe('FLO-42')
     })
 
     it('episode dedupe is unchanged: blocked then approval in one episode notifies once', async () => {
@@ -610,12 +656,15 @@ describe('createPushService', () => {
         FcmServiceAccount,
         string,
         string,
-        { title: string; body: string },
+        { title: string; body: string; data?: Record<string, string> },
       ]
       expect(sentAccount.project_id).toBe('test-project')
       expect(accessToken).toBe('tok-1')
       expect(deviceToken).toBe('dev-1')
-      expect(notification.title).toContain('needs your input')
+      expect(isFromPool(notification.title, NOTIFICATION_TITLES.needsInput)).toBe(true)
+      // data (TASK-F0TYG) rides alongside the notification so a tap can
+      // deep-link straight to the session on the native FCM path too.
+      expect(notification.data).toEqual({ sessionId: 's1', tid: 's1', status: 'needs' })
     })
 
     it('does not deliver to a device token owned by a different identity', async () => {
