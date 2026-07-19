@@ -43,6 +43,7 @@
   import AgentSelector from './AgentSelector.svelte'
   import { icons } from '../icons'
   import NullielLoader from './NullielLoader.svelte'
+  import SearchInput from './SearchInput.svelte'
 
   // Ticks every 30s so "waiting Xm" labels stay fresh without a full re-render trigger.
   let now = Date.now()
@@ -396,14 +397,11 @@
         <section>
           <div class="eyebrow">
             Ready to launch <span class="cnt">{$ticketsTotalCount || $tickets.length}</span>
-            <div class="tickets-search path-add">
-              <input
-                type="search"
-                placeholder="Search tickets…"
+            <div class="tickets-search">
+              <SearchInput
                 bind:value={ticketsQueryState}
-                on:input={() => handleTicketsSearch(ticketsQueryState)}
-                class="path-input"
-                aria-label="Search tickets"
+                placeholder="Search tickets…"
+                ariaLabel="Search tickets"
               />
             </div>
             <div class="quick-agent">
@@ -603,11 +601,6 @@
     flex: 1;
     min-width: 180px;
     max-width: 300px;
-  }
-  .tickets-search .path-input {
-    height: 30px;
-    font-size: 11.5px;
-    padding: 0 10px;
   }
 
   .eyebrow {
@@ -973,31 +966,9 @@
     }
   }
 
-  /* Search input in eyebrow */
-  .eyebrow .tickets-search {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  .tickets-search {
     flex: 1;
-    max-width: 320px;
-  }
-  .eyebrow .tickets-search .path-input {
-    width: 100%;
-    height: 28px;
-    font-size: 11.5px;
-    padding: 0 10px;
-    background: hsl(var(--background));
-    border: 1px solid hsl(var(--input));
-    border-radius: var(--radius);
-    color: inherit;
-    font-family: 'Geist Mono', monospace;
-  }
-  .eyebrow .tickets-search .path-input:focus {
-    outline: none;
-    border-color: hsl(var(--ring));
-    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.12);
-  }
-  .eyebrow .tickets-search .path-input::placeholder {
-    color: hsl(var(--muted-foreground) / 0.6);
+    min-width: 180px;
+    max-width: 300px;
   }
 </style>

@@ -24,6 +24,7 @@
   import { branchFor } from '../branch'
   import { icons } from '../icons'
   import { agentOption } from '../agents'
+  import SearchInput from './SearchInput.svelte'
   import {
     checkAgentCli,
     listPromptTemplates,
@@ -218,13 +219,10 @@
         <div>
           <div class="ticket-section-header path-add">
             <span class="lbl-f">From ticket</span>
-            <input
-              type="search"
-              placeholder="Search tickets…"
+            <SearchInput
               bind:value={ticketsQueryState}
-              on:input={() => handleTicketsSearch(ticketsQueryState)}
-              class="path-input"
-              aria-label="Search tickets"
+              placeholder="Search tickets…"
+              ariaLabel="Search tickets"
             />
           </div>
           {#if ticketsLoadingState}
@@ -498,11 +496,5 @@
   .ticket-section-header .lbl-f {
     margin-bottom: 0;
     white-space: nowrap;
-  }
-  .ticket-section-header .path-input {
-    flex: 1;
-    height: 30px;
-    font-size: 11.5px;
-    padding: 0 10px;
   }
 </style>
