@@ -154,6 +154,12 @@ export function resizeSession(id: string, cols: number, rows: number): void {
   if (hasBackend) window.slipstream.resizeSession(id, cols, rows)
 }
 
+/** Uploads a clipboard image to the daemon's per-session virtual clipboard. */
+export function syncClipboardImage(id: string, dataBase64: string): Promise<void> {
+  if (!hasBackend) return Promise.reject(new Error('No backend'))
+  return window.slipstream.syncClipboardImage(id, dataBase64)
+}
+
 export function killSession(id: string): Promise<void> {
   return hasBackend ? window.slipstream.killSession(id) : Promise.resolve()
 }

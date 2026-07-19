@@ -20,6 +20,7 @@ import type {
   IPromptTemplateStore,
   PromptTemplateDTO,
   IOutcomeStore,
+  IClipboardStore,
   SessionStatus,
   WriteLockState,
 } from '../shared/contract.js'
@@ -215,6 +216,16 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     },
   }
 
+  const clipboardMap = new Map<string, Buffer>()
+  const clipboardStore: IClipboardStore = {
+    save: vi.fn((sessionId: string, data: Buffer) => {
+      clipboardMap.set(sessionId, data)
+    }),
+    delete: vi.fn((sessionId: string) => {
+      clipboardMap.delete(sessionId)
+    }),
+  }
+
   return {
     repos,
     worktrees,
@@ -225,6 +236,7 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     sessionStore,
     promptTemplates,
     outcomeStore,
+    clipboardStore,
     editor,
     appRunner,
     tailscale,
@@ -339,6 +351,51 @@ describe('createRpc', () => {
     deps.sessionStore.upsert(makeSession())
     await rpc.handle(IPC.writeSession, ['s1', 'hello'])
     expect(deps.sessions.write).toHaveBeenCalledWith('s1', 'hello')
+  })
+
+  describe('syncClipboardImage (TASK-CWLL6)', () => {
+    it('saves decoded PNG bytes for an owned session', async () => {
+      deps.sessionStore.upsert(makeSession())
+      const dataBase64 = Buffer.from('fake-png-bytes').toString('base64')
+      await rpc.handle(IPC.syncClipboardImage, ['s1', dataBase64])
+      expect(deps.clipboardStore!.save).toHaveBeenCalledWith(
+        's1',
+        Buffer.from(dataBase64, 'base64'),
+      )
+    })
+
+    it("rejects for another identity's session", async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
+      const dataBase64 = Buffer.from('fake-png-bytes').toString('base64')
+      await expect(rpc.handle(IPC.syncClipboardImage, ['s1', dataBase64])).rejects.toThrow(
+        /Session not found/,
+      )
+      expect(deps.clipboardStore!.save).not.toHaveBeenCalled()
+    })
+
+    it('rejects an oversize payload (> 10 MiB)', async () => {
+      deps.sessionStore.upsert(makeSession())
+      const big = Buffer.alloc(10 * 1024 * 1024 + 1)
+      const dataBase64 = big.toString('base64')
+      await expect(rpc.handle(IPC.syncClipboardImage, ['s1', dataBase64])).rejects.toThrow(/10 MiB/)
+      expect(deps.clipboardStore!.save).not.toHaveBeenCalled()
+    })
+
+    it('rejects invalid base64', async () => {
+      deps.sessionStore.upsert(makeSession())
+      await expect(
+        rpc.handle(IPC.syncClipboardImage, ['s1', 'not-valid-base64!!!']),
+      ).rejects.toThrow(/[Ii]nvalid base64/)
+      expect(deps.clipboardStore!.save).not.toHaveBeenCalled()
+    })
+
+    it('cleanupSession deletes the persisted clipboard image', async () => {
+      await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+      ])
+      await rpc.handle(IPC.cleanupSession, ['s1'])
+      expect(deps.clipboardStore!.delete).toHaveBeenCalledWith('s1')
+    })
   })
 
   it('routes resizeSession', async () => {
