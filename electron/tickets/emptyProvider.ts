@@ -1,4 +1,9 @@
-import type { ITicketProvider, TicketDTO, WorkflowState, PaginatedTickets } from '../shared/contract.js'
+import type {
+  ITicketProvider,
+  TicketDTO,
+  WorkflowState,
+  PaginatedTickets,
+} from '../shared/contract.js'
 
 export function createEmptyProvider(): ITicketProvider {
   return {

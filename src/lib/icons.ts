@@ -15,6 +15,7 @@ export const icons = {
   search: svg('<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>', 15),
   chevronDown: svg('<path d="m6 9 6 6 6-6"/>', 14),
   chevronLeft: svg('<path d="m15 18-6-6 6-6"/>'),
+  chevronRight: svg('<path d="m9 18 6-6-6-6"/>'),
   check: svg('<path d="M20 6 9 17l-5-5"/>', 15),
   terminal: svg(
     '<path d="m7 8 4 4-4 4M13 16h4"/><rect x="2" y="3" width="20" height="18" rx="2"/>',

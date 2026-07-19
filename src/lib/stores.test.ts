@@ -207,9 +207,7 @@ describe('discardDraft', () => {
     expect(get(tickets)).toHaveLength(0)
 
     vi.mocked(listTickets).mockResolvedValue({
-      tickets: [
-        { id: 'FLO-42', tid: 'FLO-42', src: 'linear', title: 'Restore me', done: false },
-      ],
+      tickets: [{ id: 'FLO-42', tid: 'FLO-42', src: 'linear', title: 'Restore me', done: false }],
       totalCount: 1,
       page: 1,
       pageSize: 20,
@@ -1143,7 +1141,13 @@ describe('refreshAndReconcile merged-branch cleanup', () => {
     sessions.set([makeSession()])
     toasts.set([])
     vi.clearAllMocks()
-    vi.mocked(listTickets).mockResolvedValue({ tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false })
+    vi.mocked(listTickets).mockResolvedValue({
+      tickets: [],
+      totalCount: 0,
+      page: 1,
+      pageSize: 20,
+      hasMore: false,
+    })
     vi.mocked(killSession).mockResolvedValue(undefined)
     vi.mocked(getTicketStatus).mockResolvedValue({
       current: { id: 'st1', name: 'In Progress', type: 'started' },

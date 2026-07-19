@@ -77,7 +77,9 @@ describe('createLinearProvider', () => {
   it('sends Authorization header without Bearer prefix', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } }),
+      json: async () => ({
+        data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+      }),
     } as Response)
 
     const provider = createLinearProvider(makeConfigStore('lin_api_mykey'))
@@ -124,7 +126,11 @@ describe('createLinearProvider', () => {
     }
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { issues: { nodes: [completedNode], pageInfo: { hasNextPage: false, endCursor: null } } } }),
+      json: async () => ({
+        data: {
+          issues: { nodes: [completedNode], pageInfo: { hasNextPage: false, endCursor: null } },
+        },
+      }),
     } as Response)
 
     const provider = createLinearProvider(makeConfigStore('lin_api_test'))
@@ -137,7 +143,11 @@ describe('createLinearProvider', () => {
     const nodeNoTeam = { id: 'uuid-2', identifier: 'ENG-456', title: 'No team issue' }
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { issues: { nodes: [nodeNoTeam], pageInfo: { hasNextPage: false, endCursor: null } } } }),
+      json: async () => ({
+        data: {
+          issues: { nodes: [nodeNoTeam], pageInfo: { hasNextPage: false, endCursor: null } },
+        },
+      }),
     } as Response)
 
     const provider = createLinearProvider(makeConfigStore('lin_api_test'))
