@@ -1,11 +1,12 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { resolveDaemonConfig, ensureLocalDaemon } from './core/daemonManager.js'
 import type { DaemonConfig, DaemonHandle } from './core/daemonManager.js'
 import { runBootstrap, renderDaemonErrorPage, daemonErrorMessage } from './core/bootstrap.js'
 import type { BootstrapDeps, BootOutcome } from './core/bootstrap.js'
 import { IPC } from './shared/contract.js'
+import { isAllowedNavigation } from './shared/navigationGuard.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -23,6 +24,12 @@ function createWindow(cfg: DaemonConfig, reused: boolean): void {
     '--slipstream-daemon=' +
     Buffer.from(JSON.stringify({ url: cfg.wsUrl, token: cfg.token, reused })).toString('base64')
 
+  // The origin this window is pinned to: the Vite dev server in dev, the
+  // built SPA file:// URL in production. Passed to the preload (so it can
+  // gate token exposure on the loaded origin) and used to cancel any
+  // top-level navigation off it (FLO-127).
+  const appUrl = VITE_DEV_SERVER_URL ?? pathToFileURL(path.join(RENDERER_DIST, 'index.html')).href
+
   win = new BrowserWindow({
     width: 1320,
     height: 860,
@@ -36,7 +43,7 @@ function createWindow(cfg: DaemonConfig, reused: boolean): void {
       // vite.config.ts (format: 'cjs') and CLAUDE.md's preload gotcha.
       preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,
-      additionalArguments: [daemonArg],
+      additionalArguments: [daemonArg, '--slipstream-app-url=' + appUrl],
     },
   })
 
@@ -46,9 +53,30 @@ function createWindow(cfg: DaemonConfig, reused: boolean): void {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'))
   }
 
+  // `setWindowOpenHandler` only governs *new* windows (target=_blank /
+  // window.open). An in-place top-level navigation — renderer XSS, a stray
+  // `window.location = …`, or a server redirect — loads the target origin in
+  // *this* window, where the preload re-runs and hands the daemon URL + bearer
+  // token to that origin. Cancel any navigation (and redirect) off the app
+  // origin so the window can't be repurposed onto a foreign document (FLO-127).
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!isAllowedNavigation(url, appUrl)) {
+      e.preventDefault()
+      console.warn(`[slipstream] blocked top-level navigation to ${url} (off app origin)`)
+    }
+  })
+  win.webContents.on('will-redirect', (e, url, _isInPlace, isMainFrame) => {
+    // Only the main frame matters — a subframe redirecting off-origin must not
+    // tear down the whole page, and only the main frame's document runs the
+    // token-exposing preload.
+    if (isMainFrame && !isAllowedNavigation(url, appUrl)) {
+      e.preventDefault()
+      console.warn(`[slipstream] blocked redirect to ${url} (off app origin)`)
+    }
   })
 }
 
