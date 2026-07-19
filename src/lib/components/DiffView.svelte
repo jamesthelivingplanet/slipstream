@@ -6,6 +6,7 @@
     removeReviewComment,
     clearReviewComments,
     confirmDialog,
+    markSessionInput,
   } from '../stores'
   import { composeReviewPrompt, frameForPty } from '../review.js'
   import { pushToast } from '../toast'
@@ -162,6 +163,7 @@
     const n = myComments.length
     try {
       const { paste, submit } = frameForPty(composeReviewPrompt(myComments, diff.base))
+      markSessionInput(session.id)
       writeSession(session.id, paste)
       await new Promise((r) => setTimeout(r, 75))
       writeSession(session.id, submit)

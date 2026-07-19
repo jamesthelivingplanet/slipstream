@@ -22,6 +22,7 @@
     cleanError,
     reviewComments,
     mobile,
+    markSessionInput,
   } from '../stores'
   import {
     hasBackend,
@@ -520,7 +521,10 @@
       exitCode = code
     })
     onDataSub = term.onData((d) => {
-      if (session.id && canWrite) writeSession(session.id, d)
+      if (session.id && canWrite) {
+        markSessionInput(session.id)
+        writeSession(session.id, d)
+      }
     })
     // Mouse reports from a TUI that never enabled an extended encoding
     // (?1006h etc.) are emitted X10-encoded through onBinary, not onData —
@@ -528,7 +532,10 @@
     // column ~95) get UTF-8 mangled by the utf8 PTY write path; acceptable,
     // since snapshots restore SGR encoding and this is the legacy fallback.
     onBinarySub = term.onBinary((d) => {
-      if (session.id && canWrite) writeSession(session.id, d)
+      if (session.id && canWrite) {
+        markSessionInput(session.id)
+        writeSession(session.id, d)
+      }
     })
 
     const sendResize = () => {
@@ -1088,7 +1095,11 @@
   {#key session.id}
     <MobileTermInput
       disabled={!canWrite}
-      onData={(d) => session.id && writeSession(session.id, d)}
+      onData={(d) => {
+        if (!session.id) return
+        markSessionInput(session.id)
+        writeSession(session.id, d)
+      }}
     />
   {/key}
 {/if}

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { isStartableTicket } from './ticketFilter.js'
 
@@ -56,6 +56,7 @@ import {
   selectedId,
   setSessionStatus,
   removeSession,
+  markSessionInput,
   refreshAndReconcile,
   selected,
   confirmState,
@@ -70,7 +71,7 @@ import {
   clearReviewComments,
 } from './stores.js'
 import { toasts } from './toast.js'
-import type { Ticket, Session } from './types.js'
+import type { Ticket, Session, Status } from './types.js'
 import type { SessionDTO } from '../../electron/shared/contract.js'
 import type { ReviewComment } from './review.js'
 
@@ -329,6 +330,137 @@ describe('setSessionPrUrl', () => {
     ])
     setSessionPrUrl('zzz', 'https://gitlab.com/acme/repo/-/merge_requests/1')
     expect(get(sessions)[0].prUrl).toBeUndefined()
+  })
+})
+
+describe('FLO-105 per-episode desktop-notification dedupe', () => {
+  // vitest runs in a node env, so globalThis.Notification is undefined and
+  // notifyTransition no-ops unless we install a mock. Track constructions to
+  // assert how many desktop notifications actually fired.
+  let notifCalls: { heading: string; body: string }[]
+  const MockNotification = vi.fn()
+
+  function makeSession(id: string, status: Status = 'running', needsSince?: number): Session {
+    return {
+      id,
+      tid: id.toUpperCase(),
+      src: 'linear',
+      status,
+      title: 'Some task',
+      repo: 'repo1',
+      branch: `${id}-branch`,
+      add: 0,
+      del: 0,
+      behind: 0,
+      ago: '',
+      activity: { text: '' },
+      ...(needsSince !== undefined ? { needsSince } : {}),
+    } as Session
+  }
+
+  beforeEach(() => {
+    notifCalls = []
+    MockNotification.mockReset()
+    MockNotification.mockImplementation((heading: string, opts?: { body?: string }) => {
+      notifCalls.push({ heading, body: opts?.body ?? '' })
+    })
+    ;(MockNotification as unknown as { permission: string }).permission = 'granted'
+    // notifyTransition reads the bare global `Notification`, so install on globalThis.
+    ;(globalThis as unknown as { Notification: unknown }).Notification = MockNotification
+    sessions.set([makeSession('u1')])
+  })
+
+  afterEach(() => {
+    // Clean module-level episode state so tests don't leak into each other.
+    removeSession('u1')
+    delete (globalThis as unknown as { Notification?: unknown }).Notification
+  })
+
+  it('fires one desktop notification per needs episode across a needs↔running flap', () => {
+    // The documented idle-TUI flap: needs → running → needs every few seconds.
+    setSessionStatus('u1', 'needs')
+    setSessionStatus('u1', 'running')
+    setSessionStatus('u1', 'needs')
+    setSessionStatus('u1', 'running')
+    setSessionStatus('u1', 'needs')
+
+    expect(notifCalls).toHaveLength(1)
+    expect(notifCalls[0].heading).toBe('Agent needs you')
+  })
+
+  it('dedupes needs and done independently within one episode', () => {
+    setSessionStatus('u1', 'needs')
+    setSessionStatus('u1', 'running')
+    setSessionStatus('u1', 'done')
+    setSessionStatus('u1', 'running')
+    setSessionStatus('u1', 'needs')
+    setSessionStatus('u1', 'done')
+
+    // exactly one needs + one done notification for the whole episode
+    expect(notifCalls).toHaveLength(2)
+    expect(notifCalls.map((n) => n.heading)).toEqual(['Agent needs you', 'Agent finished'])
+  })
+
+  it('re-arms on real user input (markSessionInput) so the next needs notifies again', () => {
+    setSessionStatus('u1', 'needs')
+    expect(notifCalls).toHaveLength(1)
+
+    // Without input, a flap re-entry is suppressed.
+    setSessionStatus('u1', 'running')
+    setSessionStatus('u1', 'needs')
+    expect(notifCalls).toHaveLength(1)
+
+    // User responds → episode resets → next genuine needs fires again.
+    markSessionInput('u1')
+    setSessionStatus('u1', 'running')
+    setSessionStatus('u1', 'needs')
+    expect(notifCalls).toHaveLength(2)
+  })
+
+  it('does not fire when Notification permission is not granted', () => {
+    ;(MockNotification as unknown as { permission: string }).permission = 'default'
+    setSessionStatus('u1', 'needs')
+    expect(notifCalls).toHaveLength(0)
+  })
+
+  it('preserves needsSince across the needs→running→needs flap', () => {
+    setSessionStatus('u1', 'needs')
+    const firstSince = get(sessions).find((s) => s.id === 'u1')?.needsSince
+    expect(firstSince).toBeTypeOf('number')
+
+    setSessionStatus('u1', 'running')
+    expect(get(sessions).find((s) => s.id === 'u1')?.needsSince).toBe(firstSince)
+
+    // Re-entry into needs must NOT reset the waiting clock — that was the
+    // Mission Control "waiting Xm" label snapping back to 0.
+    setSessionStatus('u1', 'needs')
+    expect(get(sessions).find((s) => s.id === 'u1')?.needsSince).toBe(firstSince)
+  })
+
+  it('clears needsSince on real user input (markSessionInput) so the next episode restarts the clock', () => {
+    setSessionStatus('u1', 'needs')
+    expect(get(sessions).find((s) => s.id === 'u1')?.needsSince).toBeTypeOf('number')
+
+    markSessionInput('u1')
+    expect(get(sessions).find((s) => s.id === 'u1')?.needsSince).toBeUndefined()
+
+    // A fresh needs episode stamps a new timestamp.
+    setSessionStatus('u1', 'running')
+    setSessionStatus('u1', 'needs')
+    expect(get(sessions).find((s) => s.id === 'u1')?.needsSince).toBeTypeOf('number')
+  })
+
+  it('clears episode tracking when the session is reaped', () => {
+    setSessionStatus('u1', 'needs')
+    expect(notifCalls).toHaveLength(1)
+
+    setSessionStatus('u1', 'reaped')
+
+    // After reap, episode tracking is cleared. Re-adding the session (same id)
+    // and going needs again should notify as a fresh episode.
+    sessions.set([makeSession('u1', 'running')])
+    setSessionStatus('u1', 'needs')
+    expect(notifCalls).toHaveLength(2)
   })
 })
 
