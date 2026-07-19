@@ -530,23 +530,76 @@ describe('cleanupAgent auto-reconcile', () => {
     expect(cleanupSession).toHaveBeenCalledWith('u1', { force: false })
   })
 
-  it('manual path: not-clean worktree opens the confirm dialog and resolving false does not force-remove', async () => {
-    vi.mocked(cleanupSession).mockResolvedValue({ removed: false, reason: '2 files changed' })
-    const session = makeSession()
-
-    const pending = cleanupAgent(session, { auto: false })
-
-    // Wait for the confirmDialog request to be registered (killSession + cleanupSession
-    // resolve as microtasks first).
+  // Drain microtasks until the confirm dialog is registered, then resolve it.
+  async function resolveConfirm(value: boolean) {
     for (let i = 0; i < 10 && get(confirmState) === null; i++) {
       await Promise.resolve()
     }
     const req = get(confirmState)
     expect(req).not.toBeNull()
-    expect(req?.detail).toBe('2 files changed')
-
-    req?.resolve(false)
+    req?.resolve(value)
     confirmState.set(null)
+    return req
+  }
+
+  it('manual path: confirms before tearing down, mentioning a linked ticket', async () => {
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: true })
+    const session = makeSession({ tid: 'FLO-7', src: 'linear' })
+
+    const pending = cleanupAgent(session, { auto: false })
+
+    const req = await resolveConfirm(true)
+    expect(req?.title).toBe('Clean up agent?')
+    expect(req?.message).toContain('FLO-7')
+    expect(req?.message).toMatch(/ticket status/i)
+    expect(req?.danger).toBe(true)
+
+    const result = await pending
+    expect(result).toBe(true)
+    expect(killSession).toHaveBeenCalledWith('u1')
+  })
+
+  it('manual path: confirm omits the ticket note for a blank (TASK-) session', async () => {
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: true })
+    const session = makeSession({ tid: 'TASK-AB123' })
+
+    const pending = cleanupAgent(session, { auto: false })
+
+    const req = await resolveConfirm(true)
+    expect(req?.message).not.toMatch(/ticket status/i)
+
+    await pending
+  })
+
+  it('manual path: cancelling the confirm aborts before any teardown', async () => {
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: true })
+    const session = makeSession()
+
+    const pending = cleanupAgent(session, { auto: false })
+
+    await resolveConfirm(false)
+    const result = await pending
+
+    expect(result).toBe(false)
+    expect(killSession).not.toHaveBeenCalled()
+    expect(cleanupSession).not.toHaveBeenCalled()
+    expect(get(sessions).find((s) => s.tid === 'A')).toBeDefined()
+  })
+
+  it('manual path: not-clean worktree opens the force-remove confirm after the initial confirm', async () => {
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: false, reason: '2 files changed' })
+    const session = makeSession()
+
+    const pending = cleanupAgent(session, { auto: false })
+
+    // First confirm: the initial "Clean up agent?" gate.
+    const first = await resolveConfirm(true)
+    expect(first?.title).toBe('Clean up agent?')
+
+    // Second confirm: the force-remove prompt for the dirty worktree.
+    const forceReq = await resolveConfirm(false)
+    expect(forceReq?.detail).toBe('2 files changed')
+
     const result = await pending
 
     expect(result).toBe(false)
