@@ -680,6 +680,23 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
     if (get(selectedId) === s.id) select(null)
     return true
   }
+  // Manual path only: confirm before tearing the agent down. Auto-reconcile
+  // (refresh-driven) must stay non-blocking. If the agent is linked to a real
+  // ticket, remind the user to update the ticket status too — cleanup doesn't
+  // touch the tracker, so an in-progress ticket would otherwise go stale.
+  if (!opts?.auto) {
+    const hasTicket = !s.tid.startsWith('TASK-')
+    const srcLabel = s.src === 'linear' ? 'Linear' : 'Jira'
+    const ok = await confirmDialog({
+      title: 'Clean up agent?',
+      message: hasTicket
+        ? `This stops ${s.tid} and removes its worktree and branch. It's linked to a ${srcLabel} ticket — remember to update the ticket status there too.`
+        : `This stops ${s.tid} and removes its worktree and branch.`,
+      confirmLabel: 'Clean up',
+      danger: true,
+    })
+    if (!ok) return false
+  }
   try {
     await killSession(s.id)
     let result = await cleanupSession(s.id, { force: false })
