@@ -43,6 +43,7 @@
     getPrStatus,
     onConnectionChange,
     syncClipboardImage,
+    getChatMessages,
   } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
@@ -58,7 +59,9 @@
   import { decodeOsc52, writeClipboardText } from '../osc52'
   import { termKeyAction } from '../termKeys'
   import DiffView from './DiffView.svelte'
+  import ChatView from './ChatView.svelte'
   import MobileTermInput from './MobileTermInput.svelte'
+  import { initChatViewPref, preferChatView, setPreferChatView } from '../chatViewPrefs'
 
   export let session: Session
 
@@ -112,6 +115,9 @@
   let moreOpen = false
   let lastTid = ''
   let lastNonce = 0
+  let viewMode: 'terminal' | 'chat' = 'terminal'
+  let chatAvailable = false
+  let chatCheckedFor: string | null = null
   // Svelte runs reactive statements once during init, BEFORE onMount creates
   // `term` — and App.svelte keys this component by session id, so a fresh
   // instance mounts with a live session already selected. Gate the reactive
@@ -366,6 +372,13 @@
 
     mounted = true
 
+    // TASK-FPH60: seed viewMode from the persisted global preference once it
+    // resolves. Thereafter the header toggle button is the sole writer of the
+    // preference; this is a one-time read on mount.
+    void initChatViewPref().then(() => {
+      viewMode = $preferChatView ? 'chat' : 'terminal'
+    })
+
     return () => {
       window.removeEventListener('resize', onResize)
       unsub()
@@ -410,6 +423,25 @@
       })
   }
   $: refreshPrStatus(session.id, session.prUrl)
+
+  // TASK-FPH60: cheap 1-message probe purely to decide whether to show the
+  // chat/terminal toggle button — ChatView.svelte does its own real 50-message
+  // load independently. Clearing chatAvailable synchronously before the async
+  // call resolves prevents a stale `true` from a previous session leaking into
+  // the new one's render (mirrors refreshPrStatus's clear-immediately idiom).
+  function refreshChatAvailability(id: string | undefined, kind: BackendKind) {
+    if (!hasBackend || !id || kind !== 'claude-code' || id === chatCheckedFor) return
+    chatCheckedFor = id
+    chatAvailable = false
+    getChatMessages(id, { limit: 1 })
+      .then((r) => {
+        if (id === chatCheckedFor) chatAvailable = r.available
+      })
+      .catch(() => {
+        if (id === chatCheckedFor) chatAvailable = false
+      })
+  }
+  $: refreshChatAvailability(session.id, currentKind)
 
   interface PrBadge {
     text: string
@@ -840,6 +872,13 @@
     if (!showDiff) refocusTerm()
   }
 
+  function toggleViewMode() {
+    const next = viewMode === 'chat' ? 'terminal' : 'chat'
+    viewMode = next
+    void setPreferChatView(next === 'chat')
+    if (next === 'terminal') refocusTerm()
+  }
+
   function handleDiffSubmitted() {
     showDiff = false
     refocusTerm()
@@ -1003,6 +1042,17 @@
         <span class="diff-count">{pendingCommentCount}</span>
       {/if}
     </button>
+    {#if chatAvailable}
+      <button
+        class="btn btn-outline btn-sm"
+        class:btn-active={viewMode === 'chat'}
+        title={viewMode === 'chat' ? 'Switch to the terminal' : 'Switch to chat'}
+        on:click={toggleViewMode}
+      >
+        {@html viewMode === 'chat' ? icons.terminal : icons.chat}
+        <span class="btn-label">{viewMode === 'chat' ? 'Terminal' : 'Chat'}</span>
+      </button>
+    {/if}
     {#if appRunning}
       {#if appUrl}
         <a
@@ -1110,12 +1160,21 @@
   {/if}
 </div>
 
-<div class="term-wrap" class:hidden={showDiff}>
+<div class="term-wrap" class:hidden={showDiff || viewMode === 'chat'}>
   <div class="term-mount" bind:this={mountEl}></div>
 </div>
 
 {#if showDiff}
   <DiffView {session} {canWrite} onSubmitted={handleDiffSubmitted} />
+{:else if viewMode === 'chat' && chatAvailable}
+  <ChatView
+    {session}
+    {canWrite}
+    onSwitchToTerminal={() => {
+      viewMode = 'terminal'
+      refocusTerm()
+    }}
+  />
 {/if}
 
 {#if liveMode && !canWrite}
@@ -1159,7 +1218,7 @@
   </div>
 {/if}
 
-{#if $mobile && liveMode && !exited && !showDiff}
+{#if $mobile && liveMode && !exited && !showDiff && viewMode === 'terminal'}
   <!-- TerminalView is reused across sessions, so key the composer to reset its diff base on switch. -->
   {#key session.id}
     <MobileTermInput
@@ -1218,6 +1277,16 @@
         <span class="diff-count">{pendingCommentCount}</span>
       {/if}
     </button>
+    {#if chatAvailable}
+      <button
+        class="btn btn-outline btn-sm"
+        class:btn-active={viewMode === 'chat'}
+        title={viewMode === 'chat' ? 'Switch to the terminal' : 'Switch to chat'}
+        on:click={toggleViewMode}
+      >
+        {@html viewMode === 'chat' ? icons.terminal : icons.chat}
+      </button>
+    {/if}
     <div class="sel-head" id="handoffSelMob">
       <button
         class="btn btn-outline btn-sm"

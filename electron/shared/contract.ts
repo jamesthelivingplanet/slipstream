@@ -384,6 +384,33 @@ export interface IAgentEventStore {
   delete(sessionId: string): void
 }
 
+/* ───────── Chat view (TASK-FPH60) ─────────
+ * Claude Code writes a transcript JSONL per session; sessionManager tails it
+ * (transcriptMessages.ts parses it) and this view renders alongside the
+ * terminal instead of re-parsing the PTY stream (TUIs repaint the alternate
+ * screen buffer — not messages). Non-claude-code backends have no reader
+ * yet, so `getChatMessages` reports `available: false` for them. */
+
+/** One content block of a chat message. `tool_use.input` is passed through
+ *  from the transcript as-is (tool-specific shape, e.g. Bash's
+ *  `{ command, description }`) — the renderer decides how to display it per
+ *  tool name. */
+export type ChatBlock =
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
+
+/** One parsed line of a Claude Code transcript JSONL (TASK-FPH60). One DTO
+ *  per transcript `uuid` — a single turn's content blocks can each land on
+ *  their own transcript line (chained via `parentUuid`), so `blocks` is
+ *  usually length 1; grouping into a full turn is a renderer concern. */
+export interface SessionChatMessageDTO {
+  uuid: string
+  role: 'user' | 'assistant'
+  blocks: ChatBlock[]
+  ts: number // epoch ms, parsed from the transcript's ISO `timestamp`
+}
+
 /** Per-session "virtual clipboard" image (TASK-CWLL6): the renderer uploads a
  *  clipboard PNG here before sending Ctrl+V to the PTY, so PATH-shimmed
  *  clipboard tools on the agent side can serve it. Single-slot per session —
@@ -539,6 +566,8 @@ export interface SessionEvents {
   /** User keystrokes were written to the session's PTY (write() is only
    *  reachable via the writeSession RPC, i.e. a human typing in a terminal). */
   input: (sessionId: string) => void
+  /** New message parsed from the tailed Claude Code transcript (TASK-FPH60). */
+  chatMessage: (sessionId: string, msg: SessionChatMessageDTO) => void
 }
 
 export interface StartSessionInput {
@@ -911,6 +940,18 @@ export interface SlipstreamApi {
   /** Live agent-event push for sessions this client can see. Returns unsubscribe fn. */
   onSessionAgentEvent(cb: (event: SessionAgentEventDTO) => void): () => void
 
+  /** Claude Code transcript tailed as chat (TASK-FPH60): `available` is false
+   *  when the session isn't claude-code or has no transcript file yet — the
+   *  UI falls back to terminal-only. `opts.beforeTs` pages older messages;
+   *  `opts.limit` caps the page (default: the most recent 50). */
+  getChatMessages(
+    id: string,
+    opts?: { beforeTs?: number; limit?: number },
+  ): Promise<{ available: boolean; messages: SessionChatMessageDTO[] }>
+  /** Live chat-message push for sessions this client can see (TASK-FPH60).
+   *  Returns unsubscribe fn. */
+  onChatMessage(cb: (id: string, msg: SessionChatMessageDTO) => void): () => void
+
   /** Subscribe to transport connection state (true = connected). Fires on every
    *  transition; used by the UI to resync terminals after a reconnect. */
   onConnectionChange(cb: (connected: boolean) => void): () => void
@@ -989,6 +1030,8 @@ export const IPC = {
   sessionPrStatus: 'session:prStatus',
   listSessionAgentEvents: 'session:agentEvents',
   sessionAgentEvent: 'session:agentEvent', // main → renderer push
+  getChatMessages: 'session:chatMessages',
+  sessionChatMessage: 'session:chatMessage', // main → renderer push
 } as const
 
 declare global {

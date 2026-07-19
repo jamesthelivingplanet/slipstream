@@ -40,6 +40,8 @@ import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
 import { findAgentCli, binForKind } from '../services/cliProbe.js'
 import { readSessionUsage, buildUsageSummary } from '../services/usage.js'
 import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
+import { transcriptPathFor } from '../services/transcripts.js'
+import { parseTranscriptMessages } from '../services/transcriptMessages.js'
 
 function parseCsv(raw: string | undefined): string[] {
   return (raw ?? '')
@@ -185,11 +187,16 @@ export function createRpc(
     emit(IPC.sessionAgentEvent, event)
   }
 
+  function onChatMessage(id: string, msg: import('../shared/contract.js').SessionChatMessageDTO) {
+    emit(IPC.sessionChatMessage, id, msg)
+  }
+
   deps.sessions.on('data', onData)
   deps.sessions.on('status', onStatus)
   deps.sessions.on('pr', onPr)
   deps.sessions.on('exit', onExit)
   deps.sessions.on('agentEvent', onAgentEvent)
+  deps.sessions.on('chatMessage', onChatMessage)
 
   function onLockChange(sessionId: string): void {
     if (!coord!.isViewer(sessionId, clientId)) return
@@ -957,6 +964,38 @@ export function createRpc(
         return deps.agentEventStore?.list(id) ?? []
       }
 
+      case IPC.getChatMessages: {
+        const id = args[0] as string
+        const opts = (args[1] as { beforeTs?: number; limit?: number } | undefined) ?? {}
+        // Owner-scoped like getSessionOutcome/listSessionAgentEvents: missing
+        // and other-owner rows surface the same "not found".
+        const session = ownedSession(id)
+        if (!session) throw new Error(`Session not found: ${id}`)
+
+        // Only claude-code sessions have a transcript reader (TASK-FPH60) —
+        // other backends fall back to terminal-only, not an error.
+        if ((session.agentKind ?? 'claude-code') !== 'claude-code') {
+          return { available: false, messages: [] }
+        }
+        const file = transcriptPathFor(id)
+        if (!file) return { available: false, messages: [] }
+
+        let raw: string
+        try {
+          raw = await fs.promises.readFile(file, 'utf8')
+        } catch {
+          return { available: false, messages: [] }
+        }
+
+        let messages = parseTranscriptMessages(raw)
+        if (opts.beforeTs !== undefined) {
+          messages = messages.filter((m) => m.ts < opts.beforeTs!)
+        }
+        const limit = opts.limit ?? 50
+        if (messages.length > limit) messages = messages.slice(-limit)
+        return { available: true, messages }
+      }
+
       case IPC.listSessionHistory: {
         const sessions = deps.sessionStore.list().filter(ownedByCaller)
         sessions.sort((a, b) => b.createdAt - a.createdAt)
@@ -1007,6 +1046,7 @@ export function createRpc(
     deps.sessions.off('pr', onPr)
     deps.sessions.off('exit', onExit)
     deps.sessions.off('agentEvent', onAgentEvent)
+    deps.sessions.off('chatMessage', onChatMessage)
     if (coord) {
       coord.dropClient(clientId)
       coord.off('change', onLockChange)
