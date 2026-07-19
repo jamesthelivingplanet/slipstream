@@ -522,9 +522,10 @@ export async function startAgentsFromTickets(
  * Subscribe to the backend's global session-status broadcast and mirror every
  * transition into the store for ALL sessions (not just the selected one).
  * This keeps the Agent list + filters live without each TerminalView needing
- * its own per-terminal subscription. `setSessionStatus` already dedupes desktop
- * notifications via its prev-check, so this is safe even though TerminalView no
- * longer subscribes.
+ * its own per-terminal subscription. `setSessionStatus` dedupes desktop
+ * notifications per episode (re-armed by `markSessionInput` on the writeSession
+ * path — the renderer mirror of the backend `input` session event), so this is
+ * safe even though TerminalView no longer subscribes.
  */
 export function subscribeSessionStatus(): () => void {
   if (!hasBackend) return () => {}
@@ -570,6 +571,15 @@ export function setSessionAgent(id: string, agentKind: BackendKind) {
   sessions.update(($s) => $s.map((s) => (s.id === id ? { ...s, agentKind } : s)))
 }
 
+// FLO-105: per-session set of desktop-notification kinds already fired this
+// episode. The status detector's heuristics flap on idle TUIs (screen repaint →
+// running, quiet prompt → needs, repeat), so a per-transition check re-notifies
+// forever. Each kind fires at most once per episode; an episode ends on real
+// user input (markSessionInput, wired to the writeSession IPC path) or session
+// exit/reap. Mirrors pushService.ts's `notified` map — the documented
+// reference (ARCHITECTURE.md §Session status pipeline).
+const notified = new Map<string, Set<'needs' | 'done'>>()
+
 /** Update the status of the session identified by its backend UUID. */
 export function setSessionStatus(id: string, status: Status) {
   let prev: Status | undefined
@@ -579,20 +589,48 @@ export function setSessionStatus(id: string, status: Status) {
       if (s.id !== id) return s
       prev = s.status
       title = s.title
-      // Set needsSince when transitioning into 'needs'
-      if (prev !== 'needs' && status === 'needs') {
+      // FLO-105: needsSince is episode-scoped, not transition-scoped. Stamp it
+      // on the FIRST entry into 'needs' this episode and PRESERVE it across the
+      // needs→running→needs heuristic flap, so Mission Control's "waiting Xm"
+      // shows when the agent actually went idle rather than snapping back to 0
+      // on every re-entry. It's cleared on real user input (markSessionInput)
+      // and on session reap/removal — never on a transition out of 'needs',
+      // which is what caused the label to flicker.
+      if (status === 'needs' && prev !== 'needs' && s.needsSince === undefined) {
         return { ...s, status, needsSince: Date.now() }
-      }
-      // Clear needsSince when transitioning out of 'needs'
-      if (prev === 'needs' && status !== 'needs') {
-        return { ...s, status, needsSince: undefined }
       }
       return { ...s, status }
     }),
   )
+  // Reaped sessions are terminal: drop their episode tracking so the map can't
+  // grow unboundedly across the renderer's lifetime.
+  if (status === 'reaped') {
+    notified.delete(id)
+    return
+  }
   if (prev !== status && (status === 'needs' || status === 'done')) {
+    // Per-episode dedupe (FLO-105): without this, the needs↔running flap on an
+    // idle TUI fires a fresh "Agent needs you" Notification every few seconds.
+    const seen = notified.get(id)
+    if (seen?.has(status)) return
+    const next = new Set(seen)
+    next.add(status)
+    notified.set(id, next)
     notifyTransition(status, title)
   }
+}
+
+/**
+ * FLO-105: re-arm per-episode desktop-notification + needsSince tracking for a
+ * session. Called on the writeSession path (real user input) — the renderer
+ * equivalent of the backend `input` session event that re-arms pushService.ts's
+ * `notified` map. Without this, the next genuine needs/done transition after the
+ * user responds would be silently swallowed by the per-episode dedupe, and the
+ * "waiting Xm" clock would keep counting from the stale pre-response entry.
+ */
+export function markSessionInput(id: string) {
+  notified.delete(id)
+  sessions.update(($s) => $s.map((s) => (s.id === id ? { ...s, needsSince: undefined } : s)))
 }
 
 /**
@@ -615,6 +653,9 @@ function notifyTransition(status: 'needs' | 'done', title?: string) {
 
 /** Remove a session by its backend UUID from the store. */
 export function removeSession(id: string) {
+  // FLO-105: drop per-episode notification tracking so the map can't grow
+  // unboundedly as sessions come and go.
+  notified.delete(id)
   sessions.update(($s) => $s.filter((s) => s.id !== id))
 }
 
