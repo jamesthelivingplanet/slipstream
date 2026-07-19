@@ -599,6 +599,17 @@
     }
   }
 
+  .tickets-search {
+    flex: 1;
+    min-width: 180px;
+    max-width: 300px;
+  }
+  .tickets-search .path-input {
+    height: 30px;
+    font-size: 11.5px;
+    padding: 0 10px;
+  }
+
   .eyebrow {
     font-family: 'Geist Mono', monospace;
     font-size: 10.5px;
@@ -960,5 +971,33 @@
     .row .dot {
       animation: none;
     }
+  }
+
+  /* Search input in eyebrow */
+  .eyebrow .tickets-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    max-width: 320px;
+  }
+  .eyebrow .tickets-search .path-input {
+    width: 100%;
+    height: 28px;
+    font-size: 11.5px;
+    padding: 0 10px;
+    background: hsl(var(--background));
+    border: 1px solid hsl(var(--input));
+    border-radius: var(--radius);
+    color: inherit;
+    font-family: 'Geist Mono', monospace;
+  }
+  .eyebrow .tickets-search .path-input:focus {
+    outline: none;
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.12);
+  }
+  .eyebrow .tickets-search .path-input::placeholder {
+    color: hsl(var(--muted-foreground) / 0.6);
   }
 </style>

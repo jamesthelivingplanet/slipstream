@@ -488,4 +488,21 @@
     flex: 1;
     min-width: 0;
   }
+
+  .ticket-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .ticket-section-header .lbl-f {
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+  .ticket-section-header .path-input {
+    flex: 1;
+    height: 30px;
+    font-size: 11.5px;
+    padding: 0 10px;
+  }
 </style>
