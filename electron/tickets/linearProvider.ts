@@ -1,4 +1,10 @@
-import type { ITicketProvider, ScopeOption, TicketDTO, WorkflowState, PaginatedTickets } from '../shared/contract.js'
+import type {
+  ITicketProvider,
+  ScopeOption,
+  TicketDTO,
+  WorkflowState,
+  PaginatedTickets,
+} from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 
 interface LinearNode {
@@ -124,7 +130,11 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
       return (teams?.nodes ?? []).map((t) => ({ id: t.id, key: t.key, name: t.name }))
     },
 
-    async listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets> {
+    async listTickets(opts?: {
+      page?: number
+      pageSize?: number
+      query?: string
+    }): Promise<PaginatedTickets> {
       const apiKey = config.get('linear.apiKey')
       if (!apiKey) return { tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false }
 
@@ -157,7 +167,9 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
       }
 
       const data = await gql(apiKey, LIST_QUERY, variables)
-      const issues = data.issues as { nodes: LinearNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } | undefined
+      const issues = data.issues as
+        | { nodes: LinearNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } }
+        | undefined
       const nodes = issues?.nodes ?? []
       const hasNextPage = issues?.pageInfo?.hasNextPage ?? false
 

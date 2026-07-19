@@ -1,4 +1,10 @@
-import type { ITicketProvider, ScopeOption, TicketDTO, WorkflowState, PaginatedTickets } from '../shared/contract.js'
+import type {
+  ITicketProvider,
+  ScopeOption,
+  TicketDTO,
+  WorkflowState,
+  PaginatedTickets,
+} from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 
 interface AdfNode {
@@ -209,7 +215,11 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
       return (data?.values ?? []).map((p) => ({ id: p.id, key: p.key, name: p.name }))
     },
 
-    async listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets> {
+    async listTickets(opts?: {
+      page?: number
+      pageSize?: number
+      query?: string
+    }): Promise<PaginatedTickets> {
       const c = creds()
       if (!c) return { tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false }
 
@@ -270,7 +280,9 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
       let filtered = tickets
       if (query) {
         const q = query.toLowerCase()
-        filtered = tickets.filter((t) => t.tid.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))
+        filtered = tickets.filter(
+          (t) => t.tid.toLowerCase().includes(q) || t.title.toLowerCase().includes(q),
+        )
       }
 
       const start = (page - 1) * pageSize

@@ -216,18 +216,16 @@
 
       {#if ticketsLoadingState || $tickets.length > 0}
         <div>
-          <div class="ticket-section-header">
+          <div class="ticket-section-header path-add">
             <span class="lbl-f">From ticket</span>
-            <div class="tickets-search">
-              <input
-                type="search"
-                placeholder="Search tickets…"
-                bind:value={ticketsQueryState}
-                on:input={() => handleTicketsSearch(ticketsQueryState)}
-                class="search-input"
-                aria-label="Search tickets"
-              />
-            </div>
+            <input
+              type="search"
+              placeholder="Search tickets…"
+              bind:value={ticketsQueryState}
+              on:input={() => handleTicketsSearch(ticketsQueryState)}
+              class="path-input"
+              aria-label="Search tickets"
+            />
           </div>
           {#if ticketsLoadingState}
             <div class="tickets-loading">
@@ -249,14 +247,29 @@
                 </button>
               {/each}
             </div>
-            {#if ticketsHasMoreState}
-              <div class="tickets-load-more">
+            {#if ticketsHasMoreState || ticketsPageState > 1}
+              <div class="tickets-pagination">
+                <button
+                  class="btn btn-outline btn-sm"
+                  on:click={() => {
+                    if (ticketsPageState > 1) {
+                      ticketsPage.set(ticketsPageState - 1)
+                      refreshTickets()
+                    }
+                  }}
+                  disabled={ticketsLoadingState || ticketsPageState <= 1}
+                  aria-label="Previous page"
+                >
+                  {@html icons.chevronLeft}
+                </button>
+                <span class="page-info">Page {ticketsPageState}</span>
                 <button
                   class="btn btn-outline btn-sm"
                   on:click={handleLoadMoreTickets}
-                  disabled={ticketsLoadingState}
+                  disabled={ticketsLoadingState || !ticketsHasMoreState}
+                  aria-label="Next page"
                 >
-                  {ticketsLoadingState ? 'Loading…' : `Load more (${$tickets.length} of {ticketsTotalCountState})`}
+                  {@html icons.chevronRight}
                 </button>
               </div>
             {/if}

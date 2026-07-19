@@ -372,7 +372,11 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.removeRepo, [id]) as Promise<void>
     },
 
-    listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets> {
+    listTickets(opts?: {
+      page?: number
+      pageSize?: number
+      query?: string
+    }): Promise<PaginatedTickets> {
       return request(IPC.listTickets, [opts]) as Promise<PaginatedTickets>
     },
 

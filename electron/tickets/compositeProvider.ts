@@ -1,4 +1,10 @@
-import type { ITicketProvider, TicketDTO, TicketSource, WorkflowState, PaginatedTickets } from '../shared/contract.js'
+import type {
+  ITicketProvider,
+  TicketDTO,
+  TicketSource,
+  WorkflowState,
+  PaginatedTickets,
+} from '../shared/contract.js'
 
 /** Merges multiple ticket providers into a single ITicketProvider. Per-ticket
  *  ops route by the `src` param (falling back to the sole provider, or to
@@ -21,7 +27,11 @@ export function createCompositeProvider(providers: ITicketProvider[]): ITicketPr
   return {
     id: 'composite',
 
-async listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets> {
+    async listTickets(opts?: {
+      page?: number
+      pageSize?: number
+      query?: string
+    }): Promise<PaginatedTickets> {
       const results = await Promise.allSettled(providers.map((p) => p.listTickets(opts)))
 
       const allTickets: TicketDTO[] = []
@@ -45,7 +55,9 @@ async listTickets(opts?: { page?: number; pageSize?: number; query?: string }): 
       let filtered = allTickets
       if (opts?.query) {
         const q = opts.query.toLowerCase()
-        filtered = allTickets.filter((t) => t.tid.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))
+        filtered = allTickets.filter(
+          (t) => t.tid.toLowerCase().includes(q) || t.title.toLowerCase().includes(q),
+        )
       }
 
       // Sort by updated (most recent first) - we need a proxy for this

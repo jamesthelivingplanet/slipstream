@@ -39,7 +39,7 @@
     SessionUsage,
     PrStatusDTO,
   } from '../../../electron/shared/contract.js'
-import Streamlines from './Streamlines.svelte'
+  import Streamlines from './Streamlines.svelte'
   import AgentSelector from './AgentSelector.svelte'
   import { icons } from '../icons'
   import NullielLoader from './NullielLoader.svelte'
@@ -396,13 +396,13 @@ import Streamlines from './Streamlines.svelte'
         <section>
           <div class="eyebrow">
             Ready to launch <span class="cnt">{$ticketsTotalCount || $tickets.length}</span>
-            <div class="tickets-search">
+            <div class="tickets-search path-add">
               <input
                 type="search"
                 placeholder="Search tickets…"
                 bind:value={ticketsQueryState}
                 on:input={() => handleTicketsSearch(ticketsQueryState)}
-                class="search-input"
+                class="path-input"
                 aria-label="Search tickets"
               />
             </div>
@@ -438,14 +438,29 @@ import Streamlines from './Streamlines.svelte'
                 </button>
               {/each}
             </div>
-            {#if ticketsHasMoreState}
-              <div class="tickets-load-more">
+            {#if ticketsHasMoreState || ticketsPageState > 1}
+              <div class="tickets-pagination">
+                <button
+                  class="btn btn-outline btn-sm"
+                  on:click={() => {
+                    if (ticketsPageState > 1) {
+                      ticketsPage.set(ticketsPageState - 1)
+                      refreshTickets()
+                    }
+                  }}
+                  disabled={ticketsLoadingState || ticketsPageState <= 1}
+                  aria-label="Previous page"
+                >
+                  {@html icons.chevronLeft}
+                </button>
+                <span class="page-info">Page {ticketsPageState}</span>
                 <button
                   class="btn btn-outline btn-sm"
                   on:click={handleLoadMoreTickets}
-                  disabled={ticketsLoadingState}
+                  disabled={ticketsLoadingState || !ticketsHasMoreState}
+                  aria-label="Next page"
                 >
-                  {ticketsLoadingState ? 'Loading…' : `Load more (${$tickets.length} of {$ticketsTotalCount})`}
+                  {@html icons.chevronRight}
                 </button>
               </div>
             {/if}
