@@ -16,7 +16,8 @@ import { createPromptTemplateStore } from '../services/promptTemplates.js'
 import { createTicketWriteback } from '../services/ticketWriteback.js'
 import { createOutcomeStore } from '../services/outcomeStore.js'
 import { createAgentEventStore } from '../services/agentEventStore.js'
-import { provisionCliWrapper } from '../services/agentCliProvision.js'
+import { createClipboardStore } from '../services/clipboardStore.js'
+import { provisionCliWrapper, provisionClipboardShims } from '../services/agentCliProvision.js'
 import { createEditorLauncher } from '../services/editorLauncher.js'
 import { createAppRunner } from '../services/appRunner.js'
 import { createTailscaleExposer } from '../services/tailscale.js'
@@ -113,6 +114,7 @@ export function createServices(root: string): IpcDeps {
     promptTemplates: createPromptTemplateStore(db),
     outcomeStore,
     agentEventStore,
+    clipboardStore: createClipboardStore(root),
     editor: createEditorLauncher(),
     appRunner: createAppRunner(),
     tailscale: createTailscaleExposer(),
@@ -131,6 +133,7 @@ export function createServices(root: string): IpcDeps {
   // FLO-104: one static wrapper at <root>/bin/slipstream puts the agent CLI on
   // every session PTY's PATH. Best-effort: a wrapper failure shouldn't stop the
   // daemon (sessions still run, just without the CLI — health check surfaces it).
+  // TASK-CWLL6: clipboard-tool PATH shims ride the same binDir.
   try {
     provisionCliWrapper({
       binDir: deps.agentCli!.binDir,
@@ -139,6 +142,11 @@ export function createServices(root: string): IpcDeps {
     })
   } catch {
     // surfaced via getCliStatus
+  }
+  try {
+    provisionClipboardShims(deps.agentCli!.binDir)
+  } catch {
+    // best-effort: same rationale as the wrapper above
   }
   // One-time cleanup of the retired per-session MCP config dir.
   fs.rmSync(path.join(root, 'mcp'), { recursive: true, force: true })

@@ -314,6 +314,19 @@ describe('wsApi', () => {
       const result = await promise
       expect(result).toEqual({ id: 'sess-1', agentKind: 'opencode' })
     })
+
+    it('sends session:clipboard-image with [id, dataBase64] and resolves when the server responds ok', async () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      const promise = api.syncClipboardImage('sess-1', 'YmFzZTY0ZGF0YQ==')
+      const req = lastSent(ws)
+      expect(req.channel).toBe(IPC.syncClipboardImage)
+      expect(req.args).toEqual(['sess-1', 'YmFzZTY0ZGF0YQ=='])
+
+      ws.simulateMessage({ t: 'res', id: req.id, ok: true, result: undefined })
+      await expect(promise).resolves.toBeUndefined()
+    })
   })
 
   describe('request queueing before open', () => {

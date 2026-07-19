@@ -37,4 +37,25 @@ describe('buildAgentEnv', () => {
     const env = buildAgentEnv({ SLIPSTREAM_DATA_DIR: '/data' })
     expect(env.SLIPSTREAM_DATA_DIR).toBe('/data')
   })
+
+  it('sets DISPLAY=":0" when neither DISPLAY nor WAYLAND_DISPLAY is present', () => {
+    const env = buildAgentEnv({ PATH: '/usr/bin' })
+    expect(env.DISPLAY).toBe(':0')
+  })
+
+  it('leaves a real DISPLAY value alone', () => {
+    const env = buildAgentEnv({ DISPLAY: ':1' })
+    expect(env.DISPLAY).toBe(':1')
+  })
+
+  it('leaves a real WAYLAND_DISPLAY value alone and does not also set DISPLAY', () => {
+    const env = buildAgentEnv({ WAYLAND_DISPLAY: 'wayland-0' })
+    expect(env.WAYLAND_DISPLAY).toBe('wayland-0')
+    expect(env.DISPLAY).toBeUndefined()
+  })
+
+  it('does not override a per-session DISPLAY override', () => {
+    const env = buildAgentEnv({}, { DISPLAY: ':99' })
+    expect(env.DISPLAY).toBe(':99')
+  })
 })

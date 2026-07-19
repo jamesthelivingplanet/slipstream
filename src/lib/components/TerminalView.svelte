@@ -41,6 +41,7 @@
     onSessionExit,
     getPrStatus,
     onConnectionChange,
+    syncClipboardImage,
   } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
@@ -53,6 +54,8 @@
   import { AGENTS, agentOption } from '../agents'
   import { ReplayGate } from '../replayGate.js'
   import { TouchScrollTracker, momentumStep, touchScrollRoute } from '../touchScroll.js'
+  import { decodeOsc52, writeClipboardText } from '../osc52'
+  import { termKeyAction } from '../termKeys'
   import DiffView from './DiffView.svelte'
   import MobileTermInput from './MobileTermInput.svelte'
 
@@ -63,6 +66,7 @@
   let fit: FitAddon
   let timer: ReturnType<typeof setTimeout> | null = null
   let askSub: IDisposable | null = null
+  let osc52Sub: IDisposable | null = null
   let needsInput = false
   let alertMsg = ''
 
@@ -248,6 +252,56 @@
     stopMomentum()
   }
 
+  // Converts a Blob to base64 without spreading into a giant intermediate
+  // array/string — safe for multi-MB clipboard images.
+  function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result as string
+        const idx = result.indexOf(',')
+        resolve(idx >= 0 ? result.slice(idx + 1) : result)
+      }
+      reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'))
+      reader.readAsDataURL(blob)
+    })
+  }
+
+  // Shared by the desktop capture-phase paste interceptor (onPaste) and the
+  // mobile composer's image-paste sink (MobileTermInput's onPasteImage): upload
+  // the image to the daemon's per-session virtual clipboard, then send ^V so
+  // the agent's clipboard shell-out can read the synced file.
+  async function uploadImageAndSignal(sessionId: string, blob: Blob) {
+    const b64 = await blobToBase64(blob)
+    await syncClipboardImage(sessionId, b64)
+    writeSession(sessionId, '\x16')
+  }
+
+  // Fire-and-forget wrapper: swallows/logs a rejection so callers don't need
+  // their own try/catch (and don't leave an unhandled promise rejection).
+  function uploadImageAndSignalSafe(sessionId: string, blob: Blob) {
+    uploadImageAndSignal(sessionId, blob).catch((err) => console.warn('Failed to paste image', err))
+  }
+
+  function onPaste(e: ClipboardEvent) {
+    if (!session.id || !canWrite) return
+    const items = e.clipboardData?.items
+    if (!items) return
+    let imageItem: DataTransferItem | null = null
+    for (const item of items) {
+      if (item.kind === 'image') {
+        imageItem = item
+        break
+      }
+    }
+    if (!imageItem) return // let text flow to xterm's own paste handling — do not interfere
+    e.preventDefault()
+    e.stopPropagation()
+    const blob = imageItem.getAsFile()
+    if (!blob) return
+    uploadImageAndSignalSafe(session.id, blob)
+  }
+
   onMount(() => {
     term = new Terminal({
       fontFamily: "'Geist Mono', monospace",
@@ -265,11 +319,23 @@
       fit.fit()
     } catch {}
 
+    term.attachCustomKeyEventHandler((ev) => termKeyAction(ev, term.hasSelection()) !== 'native')
+    // Consume the OSC 52 clipboard-write sequence and write it to the local clipboard.
+    // Always return true (handled) — critically this means we never answer OSC 52
+    // clipboard-READ queries (payload `?`), since letting a remote agent read the
+    // viewer's clipboard would be a data-exfiltration vector.
+    osc52Sub = term.parser.registerOscHandler(52, (data) => {
+      const text = decodeOsc52(data)
+      if (text) void writeClipboardText(text)
+      return true
+    })
+
     touchTracker = new TouchScrollTracker(terminalCellHeight)
     mountEl.addEventListener('touchstart', onTouchStart, { passive: true })
     mountEl.addEventListener('touchmove', onTouchMove, { passive: false })
     mountEl.addEventListener('touchend', onTouchEnd, { passive: true })
     mountEl.addEventListener('touchcancel', onTouchCancel, { passive: true })
+    mountEl.addEventListener('paste', onPaste, { capture: true })
 
     const onResize = () => {
       try {
@@ -306,6 +372,7 @@
       mountEl.removeEventListener('touchmove', onTouchMove)
       mountEl.removeEventListener('touchend', onTouchEnd)
       mountEl.removeEventListener('touchcancel', onTouchCancel)
+      mountEl.removeEventListener('paste', onPaste)
       stopMomentum()
     }
   })
@@ -384,6 +451,7 @@
     cleanupSimulation()
     simStarted = false
     if (session.id) detachSession(session.id)
+    osc52Sub?.dispose()
     term?.dispose()
   })
 
@@ -1089,6 +1157,8 @@
     <MobileTermInput
       disabled={!canWrite}
       onData={(d) => session.id && writeSession(session.id, d)}
+      onPaste={(t) => term?.paste(t)}
+      onPasteImage={(blob) => session.id && uploadImageAndSignalSafe(session.id, blob)}
     />
   {/key}
 {/if}

@@ -429,6 +429,10 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       send(req)
     },
 
+    syncClipboardImage(id: string, dataBase64: string): Promise<void> {
+      return request(IPC.syncClipboardImage, [id, dataBase64]) as Promise<void>
+    },
+
     resizeSession(id: string, cols: number, rows: number): void {
       // Fire-and-forget: drop the frame while the socket is down instead of queuing
       // it — replaying a stale terminal size on reconnect is useless (the UI sends a
