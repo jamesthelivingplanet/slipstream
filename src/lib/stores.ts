@@ -138,6 +138,13 @@ export const settingsRepoId = writable<string | null>(null)
 // FLO-97: the Run history view, toggled from the header.
 export const historyOpen = writable<boolean>(false)
 
+/** The session id currently booting up (creating its worktree + spawning its
+ *  agent), or null. Set by `startAgent` for a foreground (selected) start and
+ *  cleared once the backend `startSession` resolves — drives the Nulliel
+ *  loading screen over that agent's terminal (TASK-RAHTX). Batch starts
+ *  (startAgentsFromTickets) never select, so they never set this. */
+export const bootingId = writable<string | null>(null)
+
 /** True when the viewport is at or below the mobile breakpoint. Synced from App.svelte. */
 export const mobile = writable<boolean>(false)
 
@@ -440,6 +447,12 @@ export async function startAgent(
   if (!s) return
 
   if (hasBackend) {
+    // Only the agent the user is actively watching start gets the Nulliel
+    // booting screen — batch-launched agents (startAgentsFromTickets) are
+    // never selected, so bootingId stays null for them and they don't flash a
+    // global loader. (TASK-RAHTX)
+    const foreground = get(selectedId) === id
+    if (foreground) bootingId.set(id)
     // Optimistically update to show activity before the async call resolves.
     patch(id, (s) => ({
       ...s,
@@ -483,6 +496,8 @@ export async function startAgent(
         activity: { text: cleanError(err) },
       }))
       pushToast('error', cleanError(err))
+    } finally {
+      if (foreground) bootingId.set(null)
     }
   } else {
     // Mock path — simulate immediately.
@@ -589,6 +604,11 @@ export function setSessionStatus(id: string, status: Status) {
       if (s.id !== id) return s
       prev = s.status
       title = s.title
+      // A tearing-down session is being removed by cleanupAgent; ignore any
+      // backend status push (e.g. the PTY-exit flap when it's killed) so the
+      // "Tearing down" loading state doesn't flicker to running/done before
+      // the row is dropped. (TASK-RAHTX)
+      if (s.status === 'tearing-down') return s
       // FLO-105: needsSince is episode-scoped, not transition-scoped. Stamp it
       // on the FIRST entry into 'needs' this episode and PRESERVE it across the
       // needs→running→needs heuristic flap, so Mission Control's "waiting Xm"
@@ -697,6 +717,20 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
     })
     if (!ok) return false
   }
+  // Manual teardown confirmed (or auto-reconcile). Only the MANUAL path
+  // (TASK-RAHTX) flips the agent to the optimistic 'tearing-down' loading
+  // state + bounces the user to mission control on confirm — auto-reconcile
+  // is a background refresh and must stay non-disruptive (no tearing-down
+  // flash, no yanking the user off whatever they're viewing). The row is
+  // dropped once kill + cleanup finish below.
+  const prevStatus = s.status
+  const revert = () => {
+    if (s.id) patch(s.id, (x) => ({ ...x, status: prevStatus }))
+  }
+  if (!opts?.auto) {
+    if (s.id) patch(s.id, (x) => ({ ...x, status: 'tearing-down' }))
+    if (get(selectedId) === s.id) select(null)
+  }
   try {
     await killSession(s.id)
     let result = await cleanupSession(s.id, { force: false })
@@ -706,6 +740,7 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
         // Never force-destroy a dirty/unmerged worktree during auto-reconcile —
         // that silently discards unpushed agent work. Skip and surface a warning.
         patch(s.id, (x) => ({ ...x, reconcileWarning: reason }))
+        revert()
         pushToast('warning', `Kept ${s.tid}: worktree not clean (${reason})`)
         return false
       }
@@ -716,7 +751,10 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
         confirmLabel: 'Force remove',
         danger: true,
       })
-      if (!ok) return false
+      if (!ok) {
+        revert()
+        return false
+      }
       result = await cleanupSession(s.id, { force: true })
     }
     if (result.removed) {
@@ -725,8 +763,10 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
       pushToast('success', `Cleaned up ${s.tid}`)
       return true
     }
+    revert()
     return false
   } catch (e) {
+    revert()
     pushToast('error', cleanError(e))
     return false
   }

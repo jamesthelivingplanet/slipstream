@@ -8,6 +8,10 @@ export type Status =
   | 'interrupted'
   | 'reaped'
   | 'queued'
+  // Renderer-only optimistic status: set the instant a manual teardown is
+  // confirmed, cleared when the session is removed. Never persisted or sent by
+  // the backend — it's the "this agent is going away" loading state.
+  | 'tearing-down'
 export type Source = 'jira' | 'linear'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi' | 'antigravity' | 'grok' | 'kilo'
 export type Filter = 'all' | 'needs' | 'running' | 'done'
@@ -70,4 +74,5 @@ export const STATUS_LABEL: Record<Status, string> = {
   detached: 'Detached',
   interrupted: 'Interrupted',
   reaped: 'Reaped',
+  'tearing-down': 'Tearing down',
 }

@@ -44,6 +44,7 @@ import {
   dialogOpen,
   createBlankAgent,
   createAgentFromTicket,
+  startAgent,
   startAgentsFromTickets,
   discardDraft,
   setSessionPrUrl,
@@ -64,6 +65,7 @@ import {
   appRunKey,
   runAppForSession,
   stopAppForSession,
+  bootingId,
   dtoToSession,
   reviewComments,
   addReviewComment,
@@ -830,6 +832,181 @@ describe('startAgentsFromTickets (FLO-95 batch launch)', () => {
 
     expect(get(selectedId)).toBe('preserved')
     expect(get(dialogOpen)).toBe(true)
+  })
+})
+
+describe('TASK-RAHTX loading screens', () => {
+  function startedDto(overrides: Partial<SessionDTO> = {}): SessionDTO {
+    return {
+      id: 'started',
+      tid: 'FLO-1',
+      title: 'Some task',
+      prompt: 'Begin implementing FLO-1.',
+      repoId: 'repo1',
+      branch: 'FLO-1-branch',
+      status: 'running',
+      createdAt: 0,
+      src: 'linear',
+      ...overrides,
+    } as SessionDTO
+  }
+
+  beforeEach(() => {
+    sessions.set([])
+    repos.set([{ id: 'repo1', org: 'acme', name: 'widgets', base: 'main' }])
+    selectedId.set(null)
+    bootingId.set(null)
+    toasts.set([])
+    vi.clearAllMocks()
+  })
+
+  it('startAgent: a foreground (selected) start shows + clears the Nulliel booting screen', async () => {
+    // createBlankAgent selects the new draft, so this start is "foreground".
+    const id = createBlankAgent('Some task', 'Begin implementing FLO-1.', 'FLO-1')
+    selectedId.set(id)
+    let resolveStart!: (dto: SessionDTO) => void
+    vi.mocked(startSession).mockReturnValue(
+      new Promise<SessionDTO>((r) => {
+        resolveStart = r
+      }),
+    )
+
+    const pending = startAgent(id, 'repo1', 'Begin implementing FLO-1.', 'claude-code')
+    // While the backend is creating the worktree, the booting screen is on.
+    expect(get(bootingId)).toBe(id)
+
+    resolveStart(startedDto({ id }))
+    await pending
+
+    expect(get(bootingId)).toBeNull()
+  })
+
+  it('startAgent: a batch (non-selected) start never sets the booting screen', async () => {
+    const id = createBlankAgent('Some task', 'Begin implementing FLO-1.', 'FLO-1')
+    // Not selected → batch-style start must not flash a global loader.
+    selectedId.set('something-else')
+    vi.mocked(startSession).mockResolvedValue(startedDto({ id }))
+
+    await startAgent(id, 'repo1', 'Begin implementing FLO-1.', 'claude-code')
+
+    expect(get(bootingId)).toBeNull()
+  })
+
+  it('startAgent: clears the booting screen even when the start fails', async () => {
+    const id = createBlankAgent('Some task', 'Begin implementing FLO-1.', 'FLO-1')
+    selectedId.set(id)
+    vi.mocked(startSession).mockRejectedValue(new Error('worktree blew up'))
+
+    await startAgent(id, 'repo1', 'Begin implementing FLO-1.', 'claude-code')
+
+    expect(get(bootingId)).toBeNull()
+    expect(get(sessions).find((s) => s.id === id)?.status).toBe('errored')
+  })
+
+  it('cleanupAgent manual: confirm flips the agent to tearing-down + goes home', async () => {
+    const session: Session = {
+      id: 'u1',
+      tid: 'FLO-7',
+      src: 'linear',
+      status: 'done',
+      title: 'Landed',
+      repo: 'repo1',
+      branch: 'FLO-7-branch',
+      add: 0,
+      del: 0,
+      behind: 0,
+      ago: '',
+      activity: { text: '' },
+    }
+    sessions.set([session])
+    selectedId.set('u1')
+    vi.mocked(killSession).mockResolvedValue(undefined)
+    // Stall cleanup so we can observe the tearing-down mid-state.
+    let resolveCleanup!: (v: { removed: boolean }) => void
+    vi.mocked(cleanupSession).mockReturnValue(
+      new Promise<{ removed: boolean }>((r) => {
+        resolveCleanup = r
+      }),
+    )
+
+    const pending = cleanupAgent(session, { auto: false })
+
+    // Confirm the initial "Clean up agent?" gate.
+    for (let i = 0; i < 10 && get(confirmState) === null; i++) await Promise.resolve()
+    get(confirmState)?.resolve(true)
+    confirmState.set(null)
+
+    // Drain past the confirm so the tearing-down patch + select(null) land.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(get(sessions).find((s) => s.id === 'u1')?.status).toBe('tearing-down')
+    expect(get(selectedId)).toBeNull() // bounced to mission control / home
+
+    resolveCleanup({ removed: true })
+    expect(await pending).toBe(true)
+    expect(get(sessions).find((s) => s.id === 'u1')).toBeUndefined()
+  })
+
+  it('cleanupAgent manual: cancelling force-remove reverts the tearing-down status', async () => {
+    const session: Session = {
+      id: 'u1',
+      tid: 'FLO-7',
+      src: 'linear',
+      status: 'done',
+      title: 'Landed',
+      repo: 'repo1',
+      branch: 'FLO-7-branch',
+      add: 0,
+      del: 0,
+      behind: 0,
+      ago: '',
+      activity: { text: '' },
+    }
+    sessions.set([session])
+    selectedId.set('u1')
+    vi.mocked(killSession).mockResolvedValue(undefined)
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: false, reason: '2 files changed' })
+
+    const pending = cleanupAgent(session, { auto: false })
+
+    // First confirm: "Clean up agent?".
+    for (let i = 0; i < 10 && get(confirmState) === null; i++) await Promise.resolve()
+    get(confirmState)?.resolve(true)
+    confirmState.set(null)
+
+    // Second confirm: "Force remove worktree?" — user cancels.
+    for (let i = 0; i < 10 && get(confirmState) === null; i++) await Promise.resolve()
+    get(confirmState)?.resolve(false)
+    confirmState.set(null)
+
+    expect(await pending).toBe(false)
+    // Status reverted from tearing-down back to the pre-teardown status.
+    expect(get(sessions).find((s) => s.id === 'u1')?.status).toBe('done')
+  })
+
+  it('setSessionStatus: a tearing-down session ignores backend status pushes', () => {
+    const session: Session = {
+      id: 'u1',
+      tid: 'FLO-7',
+      src: 'linear',
+      status: 'tearing-down',
+      title: 'Going away',
+      repo: 'repo1',
+      branch: 'FLO-7-branch',
+      add: 0,
+      del: 0,
+      behind: 0,
+      ago: '',
+      activity: { text: '' },
+    }
+    sessions.set([session])
+
+    // Backend pushes a PTY-exit flap while the kill is in flight.
+    setSessionStatus('u1', 'running')
+    setSessionStatus('u1', 'done')
+
+    expect(get(sessions).find((s) => s.id === 'u1')?.status).toBe('tearing-down')
   })
 })
 
