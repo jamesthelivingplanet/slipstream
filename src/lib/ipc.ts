@@ -44,6 +44,7 @@ import type {
   PrStatusDTO,
   GitProviderInfoDTO,
   GitHostConfigDTO,
+  SessionChatMessageDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY, DEFAULT_SCHEDULER_POLICY } from '../../electron/shared/contract.js'
 
@@ -514,6 +515,25 @@ export function listSessionAgentEvents(sessionId: string): Promise<SessionAgentE
 export function onSessionAgentEvent(cb: (event: SessionAgentEventDTO) => void): () => void {
   if (!hasBackend) return () => {}
   return window.slipstream.onSessionAgentEvent(cb)
+}
+
+// ── Chat transcript (TASK-FPH60) ────────────────────────────────────────────
+
+/** Claude Code transcript tailed as chat. `available` is false when there's no
+ *  backend, the session isn't claude-code, or it has no transcript file yet. */
+export function getChatMessages(
+  id: string,
+  opts?: { beforeTs?: number; limit?: number },
+): Promise<{ available: boolean; messages: SessionChatMessageDTO[] }> {
+  return hasBackend
+    ? window.slipstream.getChatMessages(id, opts)
+    : Promise.resolve({ available: false, messages: [] })
+}
+
+/** Subscribe to live chat-message push. Returns an unsubscribe fn. */
+export function onChatMessage(cb: (id: string, msg: SessionChatMessageDTO) => void): () => void {
+  if (!hasBackend) return () => {}
+  return window.slipstream.onChatMessage(cb)
 }
 
 // ── PR / CI status (FLO-96) ───────────────────────────────────────────────
