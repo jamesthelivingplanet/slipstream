@@ -2,6 +2,7 @@
   import { visible, counts, filter, query, selectedId, select, repoById } from '../stores'
   import { STATUS_LABEL, type Filter } from '../types'
   import { icons } from '../icons'
+  import NullielLoader from './NullielLoader.svelte'
 
   /** On mobile, controlled by parent to show/hide as drawer overlay. */
   export let mobileOpen: boolean = true
@@ -61,7 +62,13 @@
         tabindex="0"
       >
         <div class="a-top">
-          <span class="stat-dot"></span>
+          {#if s.status === 'tearing-down'}
+            <span class="td-loader" title="Tearing down">
+              <NullielLoader size={14} />
+            </span>
+          {:else}
+            <span class="stat-dot"></span>
+          {/if}
           <span class="a-status">{STATUS_LABEL[s.status]}</span>
           <span class="a-id mono">{s.tid}</span>
         </div>
@@ -94,3 +101,20 @@
     {/if}
   </div>
 </aside>
+
+<style>
+  /* TASK-RAHTX: a tearing-down agent shows the Nulliel loader in place of its
+   * status dot and dims the row while cleanup finishes. The "Tearing down"
+   * label itself comes from STATUS_LABEL via the shared .a-status style. */
+  .agent.tearing-down {
+    opacity: 0.62;
+    pointer-events: none;
+  }
+  .td-loader {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 7px;
+    width: 7px;
+    height: 7px;
+  }
+</style>
