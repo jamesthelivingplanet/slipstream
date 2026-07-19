@@ -39,7 +39,7 @@
     SessionUsage,
     PrStatusDTO,
   } from '../../../electron/shared/contract.js'
-import Streamlines from './Streamlines.svelte'
+  import Streamlines from './Streamlines.svelte'
   import AgentSelector from './AgentSelector.svelte'
   import { icons } from '../icons'
   import NullielLoader from './NullielLoader.svelte'
