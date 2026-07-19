@@ -384,6 +384,17 @@ export interface IAgentEventStore {
   delete(sessionId: string): void
 }
 
+/** Per-session "virtual clipboard" image (TASK-CWLL6): the renderer uploads a
+ *  clipboard PNG here before sending Ctrl+V to the PTY, so PATH-shimmed
+ *  clipboard tools on the agent side can serve it. Single-slot per session —
+ *  each sync overwrites the previous image. */
+export interface IClipboardStore {
+  /** Persist decoded PNG bytes for a session, overwriting any previous image. */
+  save(sessionId: string, data: Buffer): void
+  /** Remove the persisted image (session removed/GC'd). No-op if absent. */
+  delete(sessionId: string): void
+}
+
 /** One bucket of a by-repo / by-day usage summary (FLO-94). */
 export interface UsageBucket {
   key: string // repoId (byRepo) or 'YYYY-MM-DD' (byDay)
@@ -740,6 +751,11 @@ export interface SlipstreamApi {
     src?: TicketSource
   }): Promise<SessionDTO>
   writeSession(id: string, data: string): void
+  /** Upload a clipboard image (PNG bytes, base64-encoded) for this session before
+   *  sending Ctrl+V (\x16) to the PTY — the daemon persists it so PATH-shimmed
+   *  clipboard tools can serve it to the agent process. Rejects for an unknown/
+   *  unowned session, invalid base64, or a payload over 10 MiB. */
+  syncClipboardImage(id: string, dataBase64: string): Promise<void>
   resizeSession(id: string, cols: number, rows: number): void
   killSession(id: string): Promise<void>
   cleanupSession(
@@ -898,6 +914,7 @@ export const IPC = {
   listTicketScopes: 'tickets:listScopes',
   startSession: 'session:start',
   writeSession: 'session:write',
+  syncClipboardImage: 'session:clipboard-image',
   resizeSession: 'session:resize',
   killSession: 'session:kill',
   cleanupSession: 'session:cleanup',

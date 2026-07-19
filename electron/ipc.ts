@@ -8,6 +8,7 @@ import type {
   IPromptTemplateStore,
   IOutcomeStore,
   IAgentEventStore,
+  IClipboardStore,
   IAppRunner,
   ITailscaleExposer,
   TicketSource,
@@ -43,6 +44,9 @@ export interface IpcDeps {
    *  (FLO-104). Optional so tests can omit it; listSessionAgentEvents then
    *  returns []. */
   agentEventStore?: IAgentEventStore
+  /** Per-session clipboard-image store (TASK-CWLL6). Optional so tests can
+   *  omit it; syncClipboardImage then throws (no store wired). */
+  clipboardStore?: IClipboardStore
   editor: IEditorLauncher
   appRunner: IAppRunner
   /** Optional: when present, launched apps are also published on the tailnet. */

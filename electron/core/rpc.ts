@@ -290,6 +290,24 @@ export function createRpc(
         return undefined
       }
 
+      case IPC.syncClipboardImage: {
+        const id = args[0] as string
+        const dataBase64 = args[1] as string
+        if (!ownedSession(id)) throw new Error(`Session not found: ${id}`)
+        if (coord && !coord.noteWrite(id, clientId)) return undefined
+        if (!deps.clipboardStore) throw new Error('Clipboard storage is not configured')
+        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(dataBase64) || dataBase64.length % 4 !== 0) {
+          throw new Error('Invalid base64 image data')
+        }
+        const buf = Buffer.from(dataBase64, 'base64')
+        const MAX_CLIPBOARD_BYTES = 10 * 1024 * 1024
+        if (buf.length > MAX_CLIPBOARD_BYTES) {
+          throw new Error('Clipboard image exceeds the 10 MiB limit')
+        }
+        deps.clipboardStore.save(id, buf)
+        return undefined
+      }
+
       case IPC.resizeSession: {
         const id = args[0] as string
         if (!ownedSession(id)) return undefined
@@ -354,6 +372,7 @@ export function createRpc(
         if (result.removed) {
           sessionMeta.delete(id)
           deps.sessionStore.delete(id)
+          deps.clipboardStore?.delete(id)
 
           // FLO-35: move the linked ticket back to "To Do" when the agent run
           // is deleted, so the next agent can pick it up. Best-effort — a

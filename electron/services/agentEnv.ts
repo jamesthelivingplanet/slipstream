@@ -16,6 +16,10 @@
  * from the SLIPSTREAM_DATA_DIR/SESSION_ID/BASE/BRANCH overrides injected per
  * session (see agentCliProvision.ts), none of which are secrets.
  *
+ * Also nudges a fake DISPLAY (TASK-CWLL6) when the host has neither DISPLAY
+ * nor WAYLAND_DISPLAY, so agents don't skip clipboard shell-outs on a
+ * headless daemon — see the virtual clipboard image store (clipboardStore.ts).
+ *
  * Pure (no node-pty import) so it stays unit-testable under plain Node.
  */
 
@@ -36,5 +40,12 @@ export function buildAgentEnv(
 ): Record<string, string> {
   const merged = { ...base, ...(overrides ?? {}) } as Record<string, string>
   for (const key of DAEMON_INTERNAL_KEYS) delete merged[key]
+  // TASK-CWLL6: agents skip clipboard shell-outs entirely on a headless host with
+  // no display env var, which would bypass the session's virtual clipboard shims —
+  // nudge a fake DISPLAY so clipboard tooling still gets invoked. Only set when
+  // truly absent; never override a real value (inherited or per-session override).
+  if (!merged.DISPLAY && !merged.WAYLAND_DISPLAY) {
+    merged.DISPLAY = ':0'
+  }
   return merged
 }

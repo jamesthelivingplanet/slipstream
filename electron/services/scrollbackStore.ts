@@ -13,16 +13,27 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { Osc52Stripper } from './oscStrip.js'
 
 const MAX_CHARS = 256 * 1024 // 256 KB
 const SUBDIR = 'scrollback'
 
 export class ScrollbackStore {
   private root: string
+  private strippers = new Map<string, Osc52Stripper>()
 
   constructor(root: string) {
     this.root = root
     fs.mkdirSync(path.join(root, SUBDIR), { recursive: true })
+  }
+
+  private getStripper(sessionId: string): Osc52Stripper {
+    let stripper = this.strippers.get(sessionId)
+    if (!stripper) {
+      stripper = new Osc52Stripper()
+      this.strippers.set(sessionId, stripper)
+    }
+    return stripper
   }
 
   private filePath(sessionId: string): string {
@@ -36,15 +47,22 @@ export class ScrollbackStore {
   /**
    * Append a chunk of PTY output to the session's scrollback file.
    * Bounds the file to MAX_CHARS by keeping only the tail when exceeded.
+   *
+   * OSC 52 clipboard-write sequences are stripped before persisting: they'd
+   * otherwise be replayed as live `data` on session resume (re-triggering
+   * the renderer's clipboard handler with stale data), waste the scrollback
+   * budget on large base64 payloads, and risk corruption from tail-slice
+   * truncation mid-sequence.
    */
   append(sessionId: string, chunk: string): void {
     const file = this.filePath(sessionId)
+    const stripped = this.getStripper(sessionId).push(chunk)
     try {
       let buf = ''
       if (fs.existsSync(file)) {
         buf = fs.readFileSync(file, 'utf8')
       }
-      buf += chunk
+      buf += stripped
       if (buf.length > MAX_CHARS) {
         buf = buf.slice(buf.length - MAX_CHARS)
       }
@@ -69,7 +87,8 @@ export class ScrollbackStore {
 
   /**
    * Delete the scrollback file (and persisted size, if any) for a session
-   * (cleanup on session delete).
+   * (cleanup on session delete). Also drops the session's OSC 52 stripper,
+   * since its cross-chunk state has no more scrollback to write into.
    */
   delete(sessionId: string): void {
     const file = this.filePath(sessionId)
@@ -83,6 +102,7 @@ export class ScrollbackStore {
     } catch {
       // ignore
     }
+    this.strippers.delete(sessionId)
   }
 
   /** Persist the last-known PTY size for a session (best-effort). */
