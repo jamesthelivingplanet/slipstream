@@ -23,10 +23,26 @@ describe('createCompositeProvider', () => {
   describe('listTickets', () => {
     it('merges tickets from all providers', async () => {
       const linear = makeProvider('linear', {
-        listTickets: vi.fn().mockResolvedValue({ tickets: [ticket('ENG-1', 'linear')], totalCount: 1, page: 1, pageSize: 20, hasMore: false }),
+        listTickets: vi
+          .fn()
+          .mockResolvedValue({
+            tickets: [ticket('ENG-1', 'linear')],
+            totalCount: 1,
+            page: 1,
+            pageSize: 20,
+            hasMore: false,
+          }),
       })
       const jira = makeProvider('jira', {
-        listTickets: vi.fn().mockResolvedValue({ tickets: [ticket('PROJ-1', 'jira')], totalCount: 1, page: 1, pageSize: 20, hasMore: false }),
+        listTickets: vi
+          .fn()
+          .mockResolvedValue({
+            tickets: [ticket('PROJ-1', 'jira')],
+            totalCount: 1,
+            page: 1,
+            pageSize: 20,
+            hasMore: false,
+          }),
       })
       const composite = createCompositeProvider([linear, jira])
 
@@ -37,7 +53,15 @@ describe('createCompositeProvider', () => {
     it("is resilient: one provider throwing does not blank the other's tickets", async () => {
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       const linear = makeProvider('linear', {
-        listTickets: vi.fn().mockResolvedValue({ tickets: [ticket('ENG-1', 'linear')], totalCount: 1, page: 1, pageSize: 20, hasMore: false }),
+        listTickets: vi
+          .fn()
+          .mockResolvedValue({
+            tickets: [ticket('ENG-1', 'linear')],
+            totalCount: 1,
+            page: 1,
+            pageSize: 20,
+            hasMore: false,
+          }),
       })
       const jira = makeProvider('jira', {
         listTickets: vi.fn().mockRejectedValue(new Error('Jira 401')),

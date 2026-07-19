@@ -666,7 +666,11 @@ export interface ITailscaleExposer {
 
 export interface ITicketProvider {
   readonly id: string
-  listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets>
+  listTickets(opts?: {
+    page?: number
+    pageSize?: number
+    query?: string
+  }): Promise<PaginatedTickets>
   /** Available scopes (Linear teams / Jira projects) for the settings picker.
    *  Throws with a readable message on bad credentials — doubles as a
    *  connection test. Optional: single-purpose providers may omit it. */
@@ -726,7 +730,11 @@ export interface SlipstreamApi {
    *  Rejects with a descriptive Error if the folder isn't a valid git repo. */
   pickAndRegisterRepo(): Promise<RepoDTO | null>
   removeRepo(id: string): Promise<void>
-  listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets>
+  listTickets(opts?: {
+    page?: number
+    pageSize?: number
+    query?: string
+  }): Promise<PaginatedTickets>
   getTicketStatus(
     tid: string,
     src?: TicketSource,

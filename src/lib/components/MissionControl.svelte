@@ -39,10 +39,11 @@
     SessionUsage,
     PrStatusDTO,
   } from '../../../electron/shared/contract.js'
-import Streamlines from './Streamlines.svelte'
+  import Streamlines from './Streamlines.svelte'
   import AgentSelector from './AgentSelector.svelte'
   import { icons } from '../icons'
   import NullielLoader from './NullielLoader.svelte'
+  import SearchInput from './SearchInput.svelte'
 
   // Ticks every 30s so "waiting Xm" labels stay fresh without a full re-render trigger.
   let now = Date.now()
@@ -397,13 +398,10 @@ import Streamlines from './Streamlines.svelte'
           <div class="eyebrow">
             Ready to launch <span class="cnt">{$ticketsTotalCount || $tickets.length}</span>
             <div class="tickets-search">
-              <input
-                type="search"
-                placeholder="Search tickets…"
+              <SearchInput
                 bind:value={ticketsQueryState}
-                on:input={() => handleTicketsSearch(ticketsQueryState)}
-                class="search-input"
-                aria-label="Search tickets"
+                placeholder="Search tickets…"
+                ariaLabel="Search tickets"
               />
             </div>
             <div class="quick-agent">
@@ -438,14 +436,29 @@ import Streamlines from './Streamlines.svelte'
                 </button>
               {/each}
             </div>
-            {#if ticketsHasMoreState}
-              <div class="tickets-load-more">
+            {#if ticketsHasMoreState || ticketsPageState > 1}
+              <div class="tickets-pagination">
+                <button
+                  class="btn btn-outline btn-sm"
+                  on:click={() => {
+                    if (ticketsPageState > 1) {
+                      ticketsPage.set(ticketsPageState - 1)
+                      refreshTickets()
+                    }
+                  }}
+                  disabled={ticketsLoadingState || ticketsPageState <= 1}
+                  aria-label="Previous page"
+                >
+                  {@html icons.chevronLeft}
+                </button>
+                <span class="page-info">Page {ticketsPageState}</span>
                 <button
                   class="btn btn-outline btn-sm"
                   on:click={handleLoadMoreTickets}
-                  disabled={ticketsLoadingState}
+                  disabled={ticketsLoadingState || !ticketsHasMoreState}
+                  aria-label="Next page"
                 >
-                  {ticketsLoadingState ? 'Loading…' : `Load more (${$tickets.length} of {$ticketsTotalCount})`}
+                  {@html icons.chevronRight}
                 </button>
               </div>
             {/if}
@@ -582,6 +595,12 @@ import Streamlines from './Streamlines.svelte'
     to {
       transform: rotate(360deg);
     }
+  }
+
+  .tickets-search {
+    flex: 1;
+    min-width: 180px;
+    max-width: 300px;
   }
 
   .eyebrow {
@@ -945,5 +964,11 @@ import Streamlines from './Streamlines.svelte'
     .row .dot {
       animation: none;
     }
+  }
+
+  .tickets-search {
+    flex: 1;
+    min-width: 180px;
+    max-width: 300px;
   }
 </style>
