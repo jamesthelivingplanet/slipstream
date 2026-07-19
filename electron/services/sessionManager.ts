@@ -39,6 +39,15 @@ import { parseStatusSentinel, STATUS_SENTINEL_FILE } from './statusSentinel.js'
 import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from './outcomeSentinel.js'
 import { eventsAfter, AGENT_EVENTS_FILE } from './agentEventsSentinel.js'
 import { writeSlipstreamSkill } from './promptWriter.js'
+import { transcriptPathFor } from './transcripts.js'
+import { completeLines, createChatCursor } from './transcriptMessages.js'
+
+// Chat transcript tail (TASK-FPH60): how often to retry resolving the
+// transcript path before it exists (a modest poll — the PTY-data hook below
+// covers the common case near-instantly) and how long to keep retrying
+// before giving up on a session that may never produce one.
+const CHAT_RETRY_INTERVAL_MS = 2000
+const CHAT_RETRY_TIMEOUT_MS = 5 * 60_000
 
 function spawnAgent(
   cmd: string,
@@ -79,6 +88,10 @@ interface SessionRecord {
   opencodeSid?: string
   pollTimer?: ReturnType<typeof setInterval>
   watcher?: ReturnType<typeof fs.watch>
+  // Chat transcript tail (TASK-FPH60, claude-code only): fs.watch on the
+  // resolved transcript file, and the retry timer used before it's resolved.
+  chatWatcher?: ReturnType<typeof fs.watch>
+  chatRetryTimer?: ReturnType<typeof setInterval>
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
@@ -121,6 +134,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       stopPolling(rec)
       rec.watcher?.close()
       rec.watcher = undefined
+      disposeChatTail(rec)
       rec.disposed = true
       detector.markExit(exitCode)
       const s = detector.status()
@@ -147,6 +161,98 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       clearInterval(rec.pollTimer)
       rec.pollTimer = undefined
     }
+  }
+
+  // ── Chat transcript tail plumbing (TASK-FPH60) ────────────────────────────
+
+  function disposeChatTail(rec: SessionRecord): void {
+    if (rec.chatRetryTimer) {
+      clearInterval(rec.chatRetryTimer)
+      rec.chatRetryTimer = undefined
+    }
+    rec.chatWatcher?.close()
+    rec.chatWatcher = undefined
+  }
+
+  /**
+   * Tail the Claude Code transcript for chat (TASK-FPH60). The transcript
+   * doesn't exist until the agent's first turn, so resolution is lazy:
+   * retried on PTY data (cheap, fires constantly while the agent works — the
+   * common path to resolving fast) and a modest backstop timer, given up
+   * after CHAT_RETRY_TIMEOUT_MS so a session that never produces one (killed
+   * immediately, or the rare non-claude-code id collision) doesn't poll
+   * forever. Once resolved, re-reads only the file's tail on each fs event
+   * using a byte-offset cursor that never consumes a still-being-written
+   * trailing line, and dedupes by uuid (transcriptMessages.ts).
+   */
+  function setupChatTail(id: string, rec: SessionRecord, proc: pty.IPty): void {
+    if (rec.backend.kind !== 'claude-code') return
+
+    let chatFile: string | null = null
+    let chatOffset = 0
+    const cursor = createChatCursor()
+    const retryDeadline = Date.now() + CHAT_RETRY_TIMEOUT_MS
+
+    function tailChat(): void {
+      if (!chatFile) return
+      let stat: fs.Stats
+      try {
+        stat = fs.statSync(chatFile)
+      } catch {
+        return // file briefly missing between watch events — next event retries
+      }
+      if (stat.size < chatOffset) chatOffset = 0 // rotated/truncated — restart
+      if (stat.size <= chatOffset) return
+
+      let fd: number
+      try {
+        fd = fs.openSync(chatFile, 'r')
+      } catch {
+        return
+      }
+      const length = stat.size - chatOffset
+      const buf = Buffer.alloc(length)
+      try {
+        fs.readSync(fd, buf, 0, length, chatOffset)
+      } catch {
+        return
+      } finally {
+        fs.closeSync(fd)
+      }
+
+      const { complete, consumedBytes } = completeLines(buf.toString('utf8'))
+      if (consumedBytes === 0) return // trailing partial line — wait for more data
+      chatOffset += consumedBytes
+      for (const msg of cursor.next(complete)) {
+        emit('chatMessage', id, msg)
+      }
+    }
+
+    function resolveChatFile(): void {
+      if (chatFile || rec.disposed) return
+      const found = transcriptPathFor(id)
+      if (!found) {
+        if (Date.now() > retryDeadline) disposeChatTail(rec)
+        return
+      }
+      chatFile = found
+      disposeChatTail(rec) // stop the retry timer — it's served its purpose
+      tailChat() // catch up on whatever the first turn already wrote
+      try {
+        const w = fs.watch(chatFile, { persistent: false }, () => tailChat())
+        w.on('error', () => {
+          /* ignore */
+        })
+        rec.chatWatcher = w
+      } catch {
+        // Watch failed (e.g. fs limits) — the file is still readable on
+        // future PTY-data-triggered attempts, just without live push.
+      }
+    }
+
+    rec.chatRetryTimer = setInterval(resolveChatFile, CHAT_RETRY_INTERVAL_MS)
+    proc.onData(() => resolveChatFile())
+    resolveChatFile() // resume/attach: the transcript may already exist
   }
 
   /** Handle a polling backend uses to report status + register its timer. */
@@ -354,6 +460,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     }
 
     wire(id, rec)
+    setupChatTail(id, rec, proc)
     emit('status', id, 'running')
     backend.beginStatusTracking?.({
       cwd,
@@ -450,6 +557,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       old.disposed = true
       old.pty.kill()
       old.screen.dispose()
+      disposeChatTail(old)
       sessions.delete(id)
     }
 
@@ -493,6 +601,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       stopPolling(old)
       old.watcher?.close()
       old.watcher = undefined
+      disposeChatTail(old)
       old.disposed = true
       old.pty.kill()
       old.screen.dispose()
@@ -561,6 +670,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     stopPolling(rec)
     rec.watcher?.close()
     rec.watcher = undefined
+    disposeChatTail(rec)
     rec.disposed = true
     rec.pty.kill()
     rec.screen.dispose()
@@ -599,6 +709,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       stopPolling(rec)
       rec.watcher?.close()
       rec.watcher = undefined
+      disposeChatTail(rec)
       rec.disposed = true
       try {
         rec.pty.kill()
@@ -629,6 +740,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     stopPolling(rec)
     rec.watcher?.close()
     rec.watcher = undefined
+    disposeChatTail(rec)
     rec.disposed = true // suppress the onExit status/exit emission
     rec.dto.status = 'reaped'
     emit('status', sessionId, 'reaped')

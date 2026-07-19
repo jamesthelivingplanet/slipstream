@@ -509,6 +509,120 @@ describe('createRpc', () => {
     })
   })
 
+  describe('chat messages (TASK-FPH60)', () => {
+    // getChatMessages reads transcripts from claudeProjectsDir(), which honors
+    // CLAUDE_CONFIG_DIR — same fixture-writing approach as the usage suite above.
+    let configDir: string
+    let prevConfigDir: string | undefined
+
+    function chatLine(
+      uuid: string,
+      ts: string,
+      text: string,
+      role: 'user' | 'assistant' = 'assistant',
+    ): string {
+      return JSON.stringify({
+        type: role,
+        isSidechain: false,
+        uuid,
+        timestamp: ts,
+        message: { role, content: [{ type: 'text', text }] },
+      })
+    }
+
+    function writeTranscript(id: string, lines: string[]): void {
+      const sub = path.join(configDir, 'projects', 'proj-a')
+      fs.mkdirSync(sub, { recursive: true })
+      fs.writeFileSync(path.join(sub, `${id}.jsonl`), lines.join('\n') + '\n')
+    }
+
+    beforeEach(() => {
+      configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-rpc-chat-'))
+      prevConfigDir = process.env.CLAUDE_CONFIG_DIR
+      process.env.CLAUDE_CONFIG_DIR = configDir
+    })
+
+    afterEach(() => {
+      if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = prevConfigDir
+      fs.rmSync(configDir, { recursive: true, force: true })
+    })
+
+    it('getChatMessages returns available:true with parsed messages for a claude-code session', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      writeTranscript('s1', [
+        chatLine('u1', '2026-07-19T10:00:00.000Z', 'hi', 'user'),
+        chatLine('a1', '2026-07-19T10:00:01.000Z', 'hello'),
+      ])
+
+      const result = (await rpc.handle(IPC.getChatMessages, ['s1'])) as {
+        available: boolean
+        messages: { uuid: string }[]
+      }
+      expect(result.available).toBe(true)
+      expect(result.messages.map((m) => m.uuid)).toEqual(['u1', 'a1'])
+    })
+
+    it('getChatMessages returns available:false when no transcript exists yet', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'pre-turn', agentKind: 'claude-code' }))
+      const result = (await rpc.handle(IPC.getChatMessages, ['pre-turn'])) as {
+        available: boolean
+        messages: unknown[]
+      }
+      expect(result.available).toBe(false)
+      expect(result.messages).toEqual([])
+    })
+
+    it('getChatMessages returns available:false for a non-claude-code session, even with a same-id file on disk', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'opencode' }))
+      writeTranscript('s1', [chatLine('a1', '2026-07-19T10:00:00.000Z', 'hello')])
+
+      const result = (await rpc.handle(IPC.getChatMessages, ['s1'])) as { available: boolean }
+      expect(result.available).toBe(false)
+    })
+
+    it('getChatMessages rejects for a session the caller does not own', async () => {
+      deps.sessionStore.upsert(
+        makeSession({ id: 'hers', ownerId: 'alice', agentKind: 'claude-code' }),
+      )
+      await expect(rpc.handle(IPC.getChatMessages, ['hers'])).rejects.toThrow(/Session not found/)
+    })
+
+    it('getChatMessages caps to the most recent `limit` messages (default 50)', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      const lines = Array.from({ length: 5 }, (_, i) =>
+        chatLine(`m${i}`, `2026-07-19T10:00:0${i}.000Z`, `msg ${i}`),
+      )
+      writeTranscript('s1', lines)
+
+      const result = (await rpc.handle(IPC.getChatMessages, ['s1', { limit: 2 }])) as {
+        messages: { uuid: string }[]
+      }
+      expect(result.messages.map((m) => m.uuid)).toEqual(['m3', 'm4'])
+    })
+
+    it('getChatMessages pages older messages via opts.beforeTs', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      writeTranscript('s1', [
+        chatLine('m0', '2026-07-19T10:00:00.000Z', 'msg 0'),
+        chatLine('m1', '2026-07-19T10:00:01.000Z', 'msg 1'),
+        chatLine('m2', '2026-07-19T10:00:02.000Z', 'msg 2'),
+      ])
+
+      const result = (await rpc.handle(IPC.getChatMessages, [
+        's1',
+        { beforeTs: Date.parse('2026-07-19T10:00:02.000Z') },
+      ])) as { messages: { uuid: string }[] }
+      expect(result.messages.map((m) => m.uuid)).toEqual(['m0', 'm1'])
+    })
+
+    it('fans out chatMessage session events on the push channel', () => {
+      const msg = { uuid: 'a1', role: 'assistant', blocks: [], ts: 5 }
+      deps._emit('chatMessage', 's1', msg)
+      expect(emitted).toContainEqual([IPC.sessionChatMessage, 's1', msg])
+    })
+  })
+
   describe('usage (pi backend, cwd-based, FLO-94 parity)', () => {
     let piRoot: string
     let prevPiSessionDir: string | undefined

@@ -45,6 +45,7 @@ import type {
   PrStatusDTO,
   GitProviderInfoDTO,
   GitHostConfigDTO,
+  SessionChatMessageDTO,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -117,6 +118,8 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
   const writeLockListeners = new Set<WriteLockCb>()
   type AgentEventCb = (event: SessionAgentEventDTO) => void
   const agentEventListeners = new Set<AgentEventCb>()
+  type ChatMessageCb = (id: string, msg: SessionChatMessageDTO) => void
+  const chatMessageListeners = new Set<ChatMessageCb>()
   type ConnectionCb = (connected: boolean) => void
   const connectionListeners = new Set<ConnectionCb>()
 
@@ -235,6 +238,9 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
         } else if (msg.channel === IPC.sessionAgentEvent) {
           const [event] = msg.args as [SessionAgentEventDTO]
           for (const cb of agentEventListeners) cb(event)
+        } else if (msg.channel === IPC.sessionChatMessage) {
+          const [id, chatMsg] = msg.args as [string, SessionChatMessageDTO]
+          for (const cb of chatMessageListeners) cb(id, chatMsg)
         }
       }
     }
@@ -706,6 +712,21 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     onSessionAgentEvent(cb: AgentEventCb): () => void {
       agentEventListeners.add(cb)
       return () => agentEventListeners.delete(cb)
+    },
+
+    getChatMessages(
+      id: string,
+      opts?: { beforeTs?: number; limit?: number },
+    ): Promise<{ available: boolean; messages: SessionChatMessageDTO[] }> {
+      return request(IPC.getChatMessages, [id, opts]) as Promise<{
+        available: boolean
+        messages: SessionChatMessageDTO[]
+      }>
+    },
+
+    onChatMessage(cb: ChatMessageCb): () => void {
+      chatMessageListeners.add(cb)
+      return () => chatMessageListeners.delete(cb)
     },
 
     onConnectionChange(cb: ConnectionCb): () => void {
