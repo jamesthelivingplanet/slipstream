@@ -1,10 +1,10 @@
-import type { ITicketProvider, TicketDTO, WorkflowState } from '../shared/contract.js'
+import type { ITicketProvider, TicketDTO, WorkflowState, PaginatedTickets } from '../shared/contract.js'
 
 export function createEmptyProvider(): ITicketProvider {
   return {
     id: 'none',
-    async listTickets(): Promise<TicketDTO[]> {
-      return []
+    async listTickets(): Promise<PaginatedTickets> {
+      return { tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false }
     },
     async getTicketStatus(
       _tid: string,

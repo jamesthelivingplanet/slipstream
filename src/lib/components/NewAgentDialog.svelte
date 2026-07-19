@@ -10,6 +10,14 @@
     repoById,
     settingsOpen,
     mobile,
+    ticketsLoading,
+    ticketsTotalCount,
+    ticketsPage,
+    ticketsPageSize,
+    ticketsHasMore,
+    ticketsQuery,
+    setTicketsQuery,
+    loadMoreTickets,
   } from '../stores'
   import ResponsivePanel from './ResponsivePanel.svelte'
   import AgentSelector from './AgentSelector.svelte'
@@ -26,6 +34,7 @@
   import type { Ticket, BackendKind } from '../types'
   import type { AgentCliCheck, PromptTemplateDTO } from '../../../electron/shared/contract'
   import { floatingAnchor } from '../floating'
+  import NullielLoader from './NullielLoader.svelte'
 
   let picked: Ticket | null = null
   let title = ''
@@ -111,6 +120,22 @@
   $: previewTid = picked ? picked.tid : draftTid
   $: branch = previewTid ? branchFor(previewTid, title.trim() || 'task') : ''
 
+  // Tickets pagination reactive state
+  $: ticketsLoadingState = $ticketsLoading
+  $: ticketsTotalCountState = $ticketsTotalCount
+  $: ticketsPageState = $ticketsPage
+  $: ticketsPageSizeState = $ticketsPageSize
+  $: ticketsHasMoreState = $ticketsHasMore
+  $: ticketsQueryState = $ticketsQuery
+
+  function handleTicketsSearch(query: string): void {
+    setTicketsQuery(query)
+  }
+
+  async function handleLoadMoreTickets(): Promise<void> {
+    await loadMoreTickets()
+  }
+
   $: if ($dialogOpen && !wasOpen) {
     picked = null
     title = ''
@@ -189,11 +214,25 @@
         {/if}
       </div>
 
-      {#if loadingTickets || $tickets.length > 0}
+      {#if ticketsLoadingState || $tickets.length > 0}
         <div>
-          <span class="lbl-f">From ticket</span>
-          {#if loadingTickets}
-            <p class="muted" style="font-size: 0.85em;">Loading tickets…</p>
+          <div class="ticket-section-header">
+            <span class="lbl-f">From ticket</span>
+            <div class="tickets-search">
+              <input
+                type="search"
+                placeholder="Search tickets…"
+                bind:value={ticketsQueryState}
+                on:input={() => handleTicketsSearch(ticketsQueryState)}
+                class="search-input"
+                aria-label="Search tickets"
+              />
+            </div>
+          </div>
+          {#if ticketsLoadingState}
+            <div class="tickets-loading">
+              <NullielLoader size={32} caption="Loading tickets" />
+            </div>
           {:else}
             <div class="ticket-pick">
               {#each $tickets as t (t.tid)}
@@ -210,6 +249,17 @@
                 </button>
               {/each}
             </div>
+            {#if ticketsHasMoreState}
+              <div class="tickets-load-more">
+                <button
+                  class="btn btn-outline btn-sm"
+                  on:click={handleLoadMoreTickets}
+                  disabled={ticketsLoadingState}
+                >
+                  {ticketsLoadingState ? 'Loading…' : `Load more (${$tickets.length} of {ticketsTotalCountState})`}
+                </button>
+              </div>
+            {/if}
           {/if}
         </div>
       {/if}

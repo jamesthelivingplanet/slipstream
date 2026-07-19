@@ -16,6 +16,18 @@
     dialogOpen,
     registerRepo,
     repoById,
+    initialLoadLoading,
+    initialLoadError,
+    retryInitialLoad,
+    ticketsLoading,
+    ticketsTotalCount,
+    ticketsPage,
+    ticketsPageSize,
+    ticketsHasMore,
+    ticketsQuery,
+    loadMoreTickets,
+    setTicketsQuery,
+    refreshTickets,
   } from '../stores'
   import { getSessionBuffer, hasBackend, getUsageSummary, getPrStatus } from '../ipc'
   import { extractAsk, formatWait } from '../missionControl'
@@ -27,8 +39,10 @@
     SessionUsage,
     PrStatusDTO,
   } from '../../../electron/shared/contract.js'
-  import Streamlines from './Streamlines.svelte'
+import Streamlines from './Streamlines.svelte'
   import AgentSelector from './AgentSelector.svelte'
+  import { icons } from '../icons'
+  import NullielLoader from './NullielLoader.svelte'
 
   // Ticks every 30s so "waiting Xm" labels stay fresh without a full re-render trigger.
   let now = Date.now()
@@ -162,8 +176,19 @@
   $: doneSessions = $sessions.filter((s) => s.status === 'done')
   $: runningCount = $sessions.filter((s) => s.status === 'running').length
 
-  $: showOnboarding = $repos.length === 0
-  $: showLaunchHint = !showOnboarding && $sessions.length === 0 && $tickets.length === 0
+  $: initialLoading = $initialLoadLoading
+  $: initialError = $initialLoadError
+  // Show onboarding only when NOT loading, NO error, and genuinely no repos
+  $: showOnboarding = !initialLoading && !initialError && $repos.length === 0
+  // Show retry UI when there's an error
+  $: showRetry = !initialLoading && initialError
+  // Show launch hint only when not loading, no error, has repos, but no sessions/tickets
+  $: showLaunchHint =
+    !initialLoading &&
+    !initialError &&
+    $repos.length > 0 &&
+    $sessions.length === 0 &&
+    $tickets.length === 0
 
   onMount(() => {
     tickTimer = setInterval(() => (now = Date.now()), 30_000)
@@ -207,6 +232,21 @@
   // repo. Starts beyond the scheduler's concurrency cap queue and drain on
   // their own, so this is safe to fire for an arbitrary number of tickets.
   $: launchableTickets = $tickets.filter((t) => repoById(t.repo))
+  // Tickets pagination reactive state
+  $: ticketsLoadingState = $ticketsLoading
+  $: ticketsTotalCountState = $ticketsTotalCount
+  $: ticketsPageState = $ticketsPage
+  $: ticketsPageSizeState = $ticketsPageSize
+  $: ticketsHasMoreState = $ticketsHasMore
+  $: ticketsQueryState = $ticketsQuery
+
+  function handleTicketsSearch(query: string): void {
+    setTicketsQuery(query)
+  }
+
+  async function handleLoadMoreTickets(): Promise<void> {
+    await loadMoreTickets()
+  }
   let launchingAll = false
   async function launchAll() {
     if (launchingAll) return
@@ -240,7 +280,20 @@
       {/if}
     </div>
 
-    {#if showOnboarding}
+    {#if initialLoading}
+      <div class="first-run loading">
+        <div class="spin" aria-label="Loading repositories and sessions...">
+          {@html icons.refresh}
+        </div>
+        <p>Loading your repositories and agents...</p>
+      </div>
+    {:else if showRetry}
+      <div class="first-run error">
+        <h2>Couldn't load your data</h2>
+        <p>{initialError}</p>
+        <button class="btn btn-primary" on:click={retryInitialLoad}>Try again</button>
+      </div>
+    {:else if showOnboarding}
       <div class="first-run">
         <h2>Add a repository to get started</h2>
         <p>
@@ -339,10 +392,20 @@
         </section>
       {/if}
 
-      {#if $tickets.length > 0}
+      {#if $tickets.length > 0 || ticketsLoadingState}
         <section>
           <div class="eyebrow">
-            Ready to launch <span class="cnt">{$tickets.length}</span>
+            Ready to launch <span class="cnt">{$ticketsTotalCount || $tickets.length}</span>
+            <div class="tickets-search">
+              <input
+                type="search"
+                placeholder="Search tickets…"
+                bind:value={ticketsQueryState}
+                on:input={() => handleTicketsSearch(ticketsQueryState)}
+                class="search-input"
+                aria-label="Search tickets"
+              />
+            </div>
             <div class="quick-agent">
               <AgentSelector
                 value={launchAgent}
@@ -361,15 +424,32 @@
               </button>
             {/if}
           </div>
-          <div class="tiks">
-            {#each $tickets as t (t.tid)}
-              <button type="button" class="tik" on:click={() => launch(t)}>
-                <span class="t-src mono">{t.tid}</span>
-                <span class="t-title">{t.title}</span>
-                <span class="launch">Launch agent →</span>
-              </button>
-            {/each}
-          </div>
+          {#if ticketsLoadingState}
+            <div class="tickets-loading">
+              <NullielLoader size={32} caption="Loading tickets" />
+            </div>
+          {:else}
+            <div class="tiks">
+              {#each $tickets as t (t.tid)}
+                <button type="button" class="tik" on:click={() => launch(t)}>
+                  <span class="t-src mono">{t.tid}</span>
+                  <span class="t-title">{t.title}</span>
+                  <span class="launch">Launch agent →</span>
+                </button>
+              {/each}
+            </div>
+            {#if ticketsHasMoreState}
+              <div class="tickets-load-more">
+                <button
+                  class="btn btn-outline btn-sm"
+                  on:click={handleLoadMoreTickets}
+                  disabled={ticketsLoadingState}
+                >
+                  {ticketsLoadingState ? 'Loading…' : `Load more (${$tickets.length} of {$ticketsTotalCount})`}
+                </button>
+              </div>
+            {/if}
+          {/if}
         </section>
       {/if}
 
@@ -478,6 +558,30 @@
   }
   .first-run .btn {
     margin-top: 6px;
+  }
+  .first-run.loading .spin {
+    width: 32px;
+    height: 32px;
+    animation: spin 0.8s linear infinite;
+    color: hsl(var(--primary));
+  }
+  .first-run.error {
+    border: 1px solid hsl(var(--st-error) / 0.35);
+    box-shadow: 0 0 0 3px hsl(var(--st-error) / 0.06);
+    padding: 20px;
+    border-radius: var(--radius);
+    background: hsl(var(--st-error) / 0.05);
+  }
+  .first-run.error h2 {
+    color: hsl(var(--st-error));
+  }
+  .first-run.error p {
+    color: hsl(var(--foreground));
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .eyebrow {

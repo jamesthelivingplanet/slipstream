@@ -9,6 +9,7 @@
 import type {
   BackendKind,
   BranchMergedDTO,
+  PaginatedTickets,
   RepoDTO,
   RepoSettings,
   SessionDTO,
@@ -81,8 +82,10 @@ export function removeRepo(id: string): Promise<void> {
 
 // ── Tickets ────────────────────────────────────────────────────────────────
 
-export function listTickets(): Promise<TicketDTO[]> {
-  return hasBackend ? window.slipstream.listTickets() : Promise.resolve([])
+export function listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets> {
+  return hasBackend
+    ? window.slipstream.listTickets(opts)
+    : Promise.resolve({ tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false })
 }
 
 export function getTicketStatus(

@@ -234,7 +234,9 @@ export function createRpc(
       }
 
       case IPC.listTickets:
-        return deps.tickets.listTickets()
+        return deps.tickets.listTickets(
+          args[0] as { page?: number; pageSize?: number; query?: string } | undefined,
+        )
 
       case IPC.startSession: {
         const input = args[0] as {

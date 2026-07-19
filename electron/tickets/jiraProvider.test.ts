@@ -44,19 +44,19 @@ describe('createJiraProvider', () => {
         }),
       )
       const result = await provider.listTickets()
-      expect(result).toEqual([])
+      expect(result).toEqual({ tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false })
       expect(fetch).not.toHaveBeenCalled()
     })
 
     it('returns [] when only some credentials are set', async () => {
       const provider = createJiraProvider(makeConfigStore({ 'jira.apiToken': undefined }))
       const result = await provider.listTickets()
-      expect(result).toEqual([])
+      expect(result).toEqual({ tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false })
       expect(fetch).not.toHaveBeenCalled()
     })
 
     it('sends Basic auth header built from email:apiToken', async () => {
-      vi.mocked(fetch).mockResolvedValue(jsonResponse({ issues: [] }))
+      vi.mocked(fetch).mockResolvedValue(jsonResponse({ issues: [], nextPageToken: undefined }))
 
       const provider = createJiraProvider(makeConfigStore())
       await provider.listTickets()
@@ -138,18 +138,24 @@ describe('createJiraProvider', () => {
       const provider = createJiraProvider(makeConfigStore())
       const result = await provider.listTickets()
 
-      expect(result).toEqual([
-        {
-          id: '10001',
-          tid: 'PROJ-1',
-          src: 'jira',
-          title: 'Fix the thing',
-          description: 'First line\nSecond line',
-          done: false,
-          repoHint: 'PROJ',
-          status: { id: 's1', name: 'In Progress', type: 'started' },
-        },
-      ])
+      expect(result).toEqual({
+        tickets: [
+          {
+            id: '10001',
+            tid: 'PROJ-1',
+            src: 'jira',
+            title: 'Fix the thing',
+            description: 'First line\nSecond line',
+            done: false,
+            repoHint: 'PROJ',
+            status: { id: 's1', name: 'In Progress', type: 'started' },
+          },
+        ],
+        totalCount: 1,
+        page: 1,
+        pageSize: 20,
+        hasMore: false,
+      })
     })
 
     it('maps done status category to done: true', async () => {
@@ -171,9 +177,9 @@ describe('createJiraProvider', () => {
       )
       const provider = createJiraProvider(makeConfigStore())
       const result = await provider.listTickets()
-      expect(result[0].done).toBe(true)
-      expect(result[0].status).toEqual({ id: 's2', name: 'Done', type: 'completed' })
-      expect(result[0].description).toBeUndefined()
+      expect(result.tickets[0].done).toBe(true)
+      expect(result.tickets[0].status).toEqual({ id: 's2', name: 'Done', type: 'completed' })
+      expect(result.tickets[0].description).toBeUndefined()
     })
 
     it('follows nextPageToken up to 3 pages', async () => {
@@ -195,7 +201,7 @@ describe('createJiraProvider', () => {
       const result = await provider.listTickets()
 
       expect(fetch).toHaveBeenCalledTimes(3)
-      expect(result.map((t) => t.tid)).toEqual(['PROJ-1', 'PROJ-2', 'PROJ-3'])
+      expect(result.tickets.map((t) => t.tid)).toEqual(['PROJ-1', 'PROJ-2', 'PROJ-3'])
       const secondBody = JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)
       expect(secondBody.nextPageToken).toBe('p2')
     })

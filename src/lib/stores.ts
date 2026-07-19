@@ -3,7 +3,9 @@ import type { Filter, Repo, Session, Status, Ticket, BackendKind, Source } from 
 import type {
   CliStatusDTO,
   DiagnosticsDTO,
+  RepoDTO,
   SessionDTO,
+  TicketDTO,
   WorktreeUpdateMode,
 } from '../../electron/shared/contract.js'
 import { branchFor } from './branch'
@@ -138,6 +140,13 @@ export const settingsRepoId = writable<string | null>(null)
 // FLO-97: the Run history view, toggled from the header.
 export const historyOpen = writable<boolean>(false)
 
+export const ticketsTotalCount = writable<number>(0)
+export const ticketsPage = writable<number>(1)
+export const ticketsPageSize = writable<number>(20)
+export const ticketsHasMore = writable<boolean>(false)
+export const ticketsLoading = writable<boolean>(false)
+export const ticketsQuery = writable<string>('')
+
 /** The session id currently booting up (creating its worktree + spawning its
  *  agent), or null. Set by `startAgent` for a foreground (selected) start and
  *  cleared once the backend `startSession` resolves — drives the Nulliel
@@ -243,9 +252,41 @@ export function openAgentById(sessionId: string) {
 
 /** Seed stores from the real backend. No-op when hasBackend is false. */
 export async function initFromBackend(): Promise<void> {
-  if (!hasBackend) return
+  if (!hasBackend) {
+    initialLoadLoading.set(false)
+    return
+  }
 
-  const [repoDTOs, ticketDTOs] = await Promise.all([listRepos(), listTickets()])
+  initialLoadLoading.set(true)
+  initialLoadError.set(null)
+
+  let repoDTOs: RepoDTO[] = []
+  let ticketDTOs: TicketDTO[] = []
+  let sessionDTOs: SessionDTO[] = []
+
+  try {
+    repoDTOs = await listRepos()
+  } catch (e) {
+    pushToast('error', `Failed to load repositories: ${cleanError(e)}`)
+    initialLoadError.set('repos')
+  }
+
+  try {
+    const ticketResult = await listTickets({ page: 1, pageSize: 20 })
+    ticketDTOs = ticketResult.tickets
+    ticketsTotalCount.set(ticketResult.totalCount)
+    ticketsHasMore.set(ticketResult.hasMore)
+  } catch (e) {
+    pushToast('error', `Failed to load tickets: ${cleanError(e)}`)
+    initialLoadError.set('tickets')
+  }
+
+  try {
+    sessionDTOs = await listSessions()
+  } catch (e) {
+    pushToast('error', `Failed to load sessions: ${cleanError(e)}`)
+    initialLoadError.set('sessions')
+  }
 
   repos.set(
     repoDTOs.map((d) => ({
@@ -258,9 +299,17 @@ export async function initFromBackend(): Promise<void> {
 
   tickets.set(dtoToTickets(ticketDTOs).filter(isStartableTicket))
 
-  const sessionDTOs = await listSessions()
   sessions.set(sessionDTOs.map(dtoToSession))
   await refreshDiffStats().catch(() => {})
+
+  initialLoadLoading.set(false)
+}
+
+export const initialLoadLoading = writable<boolean>(true)
+export const initialLoadError = writable<'repos' | 'tickets' | 'sessions' | null>(null)
+
+export function retryInitialLoad(): void {
+  initFromBackend()
 }
 
 /** Fetch real worktree diff stats for every started agent and update its +add/-del badge. */
@@ -286,12 +335,45 @@ export async function refreshDiffStats(): Promise<void> {
 
 export async function refreshTickets(): Promise<void> {
   if (!hasBackend) return
+  ticketsLoading.set(true)
   try {
-    const dtos = await listTickets()
-    tickets.set(dtoToTickets(dtos).filter(isStartableTicket))
+    const page = get(ticketsPage)
+    const pageSize = get(ticketsPageSize)
+    const query = get(ticketsQuery)
+    const result = await listTickets({ page, pageSize, query: query || undefined })
+    tickets.set(dtoToTickets(result.tickets).filter(isStartableTicket))
+    ticketsTotalCount.set(result.totalCount)
+    ticketsHasMore.set(result.hasMore)
   } catch (e) {
     pushToast('error', cleanError(e))
+  } finally {
+    ticketsLoading.set(false)
   }
+}
+
+export async function loadMoreTickets(): Promise<void> {
+  if (!hasBackend || get(ticketsLoading) || !get(ticketsHasMore)) return
+  ticketsLoading.set(true)
+  try {
+    const nextPage = get(ticketsPage) + 1
+    const pageSize = get(ticketsPageSize)
+    const query = get(ticketsQuery)
+    const result = await listTickets({ page: nextPage, pageSize, query: query || undefined })
+    tickets.update(($t) => [...$t, ...dtoToTickets(result.tickets).filter(isStartableTicket)])
+    ticketsTotalCount.set(result.totalCount)
+    ticketsPage.set(nextPage)
+    ticketsHasMore.set(result.hasMore)
+  } catch (e) {
+    pushToast('error', cleanError(e))
+  } finally {
+    ticketsLoading.set(false)
+  }
+}
+
+export function setTicketsQuery(query: string): void {
+  ticketsQuery.set(query)
+  ticketsPage.set(1)
+  refreshTickets()
 }
 
 /** Insert or replace a repo summary in the store, keyed by id (registration is
@@ -823,14 +905,18 @@ export async function updateAgentFromBase(s: Session, mode: WorktreeUpdateMode):
  *  providers, so the merged+done session can be cleaned safely. */
 export async function refreshAndReconcile(): Promise<void> {
   if (!hasBackend) return
-  let dtos
+  let result
   try {
-    dtos = await listTickets()
+    result = await listTickets({ page: 1, pageSize: 100 })
   } catch (e) {
     pushToast('error', cleanError(e))
     return
   }
+  const dtos = result.tickets
   tickets.set(dtoToTickets(dtos).filter(isStartableTicket))
+  ticketsTotalCount.set(result.totalCount)
+  ticketsHasMore.set(result.hasMore)
+  ticketsPage.set(1)
 
   const toClean = new Map<string, Session>()
   for (const s of sessionsToReconcile(get(sessions), dtos)) {

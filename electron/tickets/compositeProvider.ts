@@ -1,4 +1,4 @@
-import type { ITicketProvider, TicketDTO, TicketSource, WorkflowState } from '../shared/contract.js'
+import type { ITicketProvider, TicketDTO, TicketSource, WorkflowState, PaginatedTickets } from '../shared/contract.js'
 
 /** Merges multiple ticket providers into a single ITicketProvider. Per-ticket
  *  ops route by the `src` param (falling back to the sole provider, or to
@@ -21,15 +21,15 @@ export function createCompositeProvider(providers: ITicketProvider[]): ITicketPr
   return {
     id: 'composite',
 
-    async listTickets(): Promise<TicketDTO[]> {
-      const results = await Promise.allSettled(providers.map((p) => p.listTickets()))
+async listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets> {
+      const results = await Promise.allSettled(providers.map((p) => p.listTickets(opts)))
 
-      const tickets: TicketDTO[] = []
+      const allTickets: TicketDTO[] = []
       let anyRejected = false
       let firstRejection: unknown
       for (const result of results) {
         if (result.status === 'fulfilled') {
-          tickets.push(...result.value)
+          allTickets.push(...result.value.tickets)
         } else {
           anyRejected = true
           if (firstRejection === undefined) firstRejection = result.reason
@@ -37,11 +37,35 @@ export function createCompositeProvider(providers: ITicketProvider[]): ITicketPr
         }
       }
 
-      if (anyRejected && tickets.length === 0) {
+      if (anyRejected && allTickets.length === 0) {
         throw firstRejection
       }
 
-      return tickets
+      // Filter by query if provided
+      let filtered = allTickets
+      if (opts?.query) {
+        const q = opts.query.toLowerCase()
+        filtered = allTickets.filter((t) => t.tid.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))
+      }
+
+      // Sort by updated (most recent first) - we need a proxy for this
+      // For now, just sort by tid descending as a rough proxy
+      filtered.sort((a, b) => b.tid.localeCompare(a.tid))
+
+      // Apply pagination
+      const page = opts?.page ?? 1
+      const pageSize = opts?.pageSize ?? 20
+      const start = (page - 1) * pageSize
+      const end = start + pageSize
+      const paginated = filtered.slice(start, end)
+
+      return {
+        tickets: paginated,
+        totalCount: filtered.length,
+        page,
+        pageSize,
+        hasMore: end < filtered.length,
+      }
     },
 
     async getTicketStatus(

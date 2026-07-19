@@ -10,6 +10,7 @@
 import type {
   SlipstreamApi,
   BranchMergedDTO,
+  PaginatedTickets,
   RepoDTO,
   RepoSettings,
   SessionDTO,
@@ -371,8 +372,8 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       return request(IPC.removeRepo, [id]) as Promise<void>
     },
 
-    listTickets(): Promise<TicketDTO[]> {
-      return request(IPC.listTickets, []) as Promise<TicketDTO[]>
+    listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets> {
+      return request(IPC.listTickets, [opts]) as Promise<PaginatedTickets>
     },
 
     getTicketStatus(
