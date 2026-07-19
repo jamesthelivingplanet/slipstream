@@ -29,8 +29,8 @@ function parseTeamKeys(raw: string | undefined): string[] {
 }
 
 const LIST_QUERY = `
-  query($filter: IssueFilter, $first: Int!, $after: String, $term: String) {
-    issues(filter: $filter, orderBy: updatedAt, first: $first, after: $after, term: $term) {
+  query($filter: IssueFilter, $first: Int!, $after: String) {
+    issues(filter: $filter, orderBy: updatedAt, first: $first, after: $after) {
       nodes {
         id
         identifier
@@ -162,9 +162,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
         // Since we can't easily get total count, we'll fetch pageSize * page and slice
         variables.first = pageSize * page
       }
-      if (query) {
-        variables.term = query
-      }
+      // Note: Linear's issues query doesn't support term search. Client-side filtering is used instead.
 
       const data = await gql(apiKey, LIST_QUERY, variables)
       const issues = data.issues as
@@ -190,11 +188,18 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
           : undefined,
       }))
 
+      // Client-side filtering for search query (since Linear's issues query doesn't support term)
+      let filtered = tickets
+      if (query) {
+        const q = query.toLowerCase()
+        filtered = tickets.filter((t) => t.tid.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))
+      }
+
       // Estimate total count - since Linear doesn't easily provide it, we use a heuristic
-      const totalCount = hasNextPage ? start + pageSize + 1 : tickets.length
+      const totalCount = hasNextPage ? start + pageSize + 1 : filtered.length
       const hasMore = hasNextPage && pageNodes.length >= pageSize
 
-      return { tickets, totalCount, page, pageSize, hasMore }
+      return { tickets: filtered, totalCount, page, pageSize, hasMore }
     },
 
     async getTicketStatus(
