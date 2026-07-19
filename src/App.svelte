@@ -19,6 +19,7 @@
     contentResolvedAt,
     contentRefreshNonce,
     historyOpen,
+    bootingId,
   } from './lib/stores'
   import { icons } from './lib/icons'
   import AgentList from './lib/components/AgentList.svelte'
@@ -32,6 +33,7 @@
   import ConfirmDialog from './lib/components/ConfirmDialog.svelte'
   import InstallNudge from './lib/components/InstallNudge.svelte'
   import NewAgentFab from './lib/components/NewAgentFab.svelte'
+  import NullielLoader from './lib/components/NullielLoader.svelte'
   import ThemeMenu from './lib/components/ThemeMenu.svelte'
   import CliStatus from './lib/components/CliStatus.svelte'
   import OnboardingPager from './lib/components/OnboardingPager.svelte'
@@ -299,6 +301,14 @@
           <TerminalView session={$selected} />
         {/key}
       {/if}
+      {#if $selected && $bootingId === $selected.id}
+        <!-- TASK-RAHTX: Nulliel loading screen shown over the selected agent's
+             terminal while its worktree is created + agent spawned. Cleared by
+             startAgent once the backend start resolves. -->
+        <div class="boot-overlay">
+          <NullielLoader size={64} caption="Spinning up your agent" />
+        </div>
+      {/if}
     </section>
   </div>
 
@@ -321,6 +331,21 @@
     inset: 0;
     z-index: 29;
     background: rgba(0, 0, 0, 0.45);
+  }
+  /* TASK-RAHTX: the booting Nulliel loading screen overlays the whole term
+   * pane (terminal area) while a freshly started agent spins up. */
+  :global(.term-pane) {
+    position: relative;
+  }
+  .boot-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: hsl(var(--background));
+    animation: fade 0.18s ease-out;
   }
   .spin {
     display: inline-flex;
