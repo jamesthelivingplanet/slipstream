@@ -109,7 +109,13 @@ export async function loadOrCreateLocalIdentity(
   const writeFile =
     deps?.writeFile ??
     ((p: string, data: string) => {
-      fs.writeFileSync(p, data, 'utf8')
+      // 0600 hygiene for a file holding a bearer token. NOTE: this does NOT
+      // stop a same-uid reader — the agent PTY runs as the same OS uid as the
+      // daemon and can `cat daemon.json` regardless; only filesystem/uid
+      // isolation would. See docs/SECURITY.md §7. mode applies on create only,
+      // which is fine: daemon.json is written exactly once (a present file
+      // short-circuits on the `existing` read above) and never rewritten.
+      fs.writeFileSync(p, data, { encoding: 'utf8', mode: 0o600 })
     })
   const mkdir =
     deps?.mkdir ??

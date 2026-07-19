@@ -202,3 +202,55 @@ unprivileged user; see [POD-DEPLOY.md](POD-DEPLOY.md)).
 prefixed `ss1:` value is decrypted, an unprefixed value is returned as-is. Existing
 plaintext secrets are left in place rather than force-migrated, so an upgrade never
 locks you out of your own config.
+
+## 7. Same-uid agent execution — the env-scrub is hygiene, not a boundary
+
+`agentEnv.ts` strips the daemon-internal variables (above all `SLIPSTREAM_TOKEN`)
+from the environment inherited by spawned agent PTYs, and `sessionManager.ts`'
+`spawnAgent` runs the scrubbed env. The comments used to imply this *prevented*
+worktree code from opening the daemon's WebSocket RPC. That is not true, and the
+framing was dangerous, so it is corrected here (FLO-126).
+
+**The agent runs as the same OS uid as the daemon.** A prompt-injected or
+malicious agent can:
+
+- `cat <dataDir>/daemon.json` — it holds `{ token, port }` (the data dir is
+  `0700`, but owned by that same uid).
+- open `ws://127.0.0.1:<port>/rpc` with the recovered token and drive every
+  session/repo, or call `getGitHostConfig` (`rpc.ts`) to pull credentials over
+  the RPC.
+- skip the RPC entirely and read `<dataDir>/slipstream.db` directly for every
+  stored git token, the Linear/Jira key, and the raw Firebase service-account
+  private key (see §6 — these are plaintext under the daemon / headless
+  server).
+
+So the scrub's only real effect is to defeat the most casual drive-by (a process
+that happens to `printenv` an inherited token) and to keep the per-session env
+clean for the `slipstream` CLI. It does **not** contain a determined agent.
+
+**Why this is MED, not higher.** Slipstream is a single-user tool: pointing an
+agent at a repo already means choosing to run that repo's code as your own uid.
+The agent reading your config is the same trust decision as the agent running
+`rm -rf ~`. What this adds is *breadth* — one prompt injection can exfiltrate
+every stored credential and reach across every other session — not a new
+privilege boundary being crossed.
+
+**Mitigations (largely inherent to same-uid execution — future work):**
+
+- **Separate uid / sandbox.** Run each agent PTY under a different uid (or a
+  `bubblewrap` / `firejail` / separate-account sandbox) with no read access to
+  the data dir. This is the only thing that actually closes the hole; it is a
+  platform-specific architectural change and is not shipped. The
+  `sessionManager` `spawnAgent` call site (`pty.spawn`, no uid drop) is where it
+  would go.
+- **Token in daemon memory only.** Pass the daemon's token to its children via
+  an inherited fd/pipe instead of persisting `{ token, port }` to
+  `daemon.json`. This is partial — it removes the trivial `cat daemon.json`
+  path but does nothing about the direct `slipstream.db` read, and it breaks
+  daemon reuse across Electron restarts (the parent needs the token to auth to
+  an already-running detached daemon). Not shipped.
+
+**Hygiene applied now (FLO-126):** `daemon.json` is created `0600` (was default
+`0644`). This changes nothing against a same-uid reader — the `0700` data dir
+already gated it — but a file holding a bearer token should not be
+world/group-readable as a matter of course.
