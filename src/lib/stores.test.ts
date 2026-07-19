@@ -206,9 +206,15 @@ describe('discardDraft', () => {
     const id = createAgentFromTicket(t, 'go')
     expect(get(tickets)).toHaveLength(0)
 
-    vi.mocked(listTickets).mockResolvedValue([
-      { id: 'FLO-42', tid: 'FLO-42', src: 'linear', title: 'Restore me', done: false },
-    ])
+    vi.mocked(listTickets).mockResolvedValue({
+      tickets: [
+        { id: 'FLO-42', tid: 'FLO-42', src: 'linear', title: 'Restore me', done: false },
+      ],
+      totalCount: 1,
+      page: 1,
+      pageSize: 20,
+      hasMore: false,
+    })
 
     const draft = get(sessions).find((s) => s.id === id)!
     discardDraft(draft)
@@ -1137,7 +1143,7 @@ describe('refreshAndReconcile merged-branch cleanup', () => {
     sessions.set([makeSession()])
     toasts.set([])
     vi.clearAllMocks()
-    vi.mocked(listTickets).mockResolvedValue([])
+    vi.mocked(listTickets).mockResolvedValue({ tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false })
     vi.mocked(killSession).mockResolvedValue(undefined)
     vi.mocked(getTicketStatus).mockResolvedValue({
       current: { id: 'st1', name: 'In Progress', type: 'started' },

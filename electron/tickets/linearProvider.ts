@@ -1,4 +1,4 @@
-import type { ITicketProvider, ScopeOption, TicketDTO, WorkflowState } from '../shared/contract.js'
+import type { ITicketProvider, ScopeOption, TicketDTO, WorkflowState, PaginatedTickets } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 
 interface LinearNode {
@@ -23,8 +23,8 @@ function parseTeamKeys(raw: string | undefined): string[] {
 }
 
 const LIST_QUERY = `
-  query($filter: IssueFilter, $first: Int!) {
-    issues(filter: $filter, orderBy: updatedAt, first: $first) {
+  query($filter: IssueFilter, $first: Int!, $after: String, $term: String) {
+    issues(filter: $filter, orderBy: updatedAt, first: $first, after: $after, term: $term) {
       nodes {
         id
         identifier
@@ -32,6 +32,10 @@ const LIST_QUERY = `
         description
         team { key }
         state { id name type }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
       }
     }
   }
@@ -120,12 +124,16 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
       return (teams?.nodes ?? []).map((t) => ({ id: t.id, key: t.key, name: t.name }))
     },
 
-    async listTickets(): Promise<TicketDTO[]> {
+    async listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets> {
       const apiKey = config.get('linear.apiKey')
-      if (!apiKey) return []
+      if (!apiKey) return { tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false }
 
       const teamKeys = parseTeamKeys(config.get('linear.teamKeys'))
       const onlyMine = config.get('linear.onlyMine') !== '0'
+
+      const page = opts?.page ?? 1
+      const pageSize = opts?.pageSize ?? 20
+      const query = opts?.query
 
       const and: unknown[] = [{ state: { type: { nin: ['completed', 'canceled'] } } }]
       if (teamKeys.length > 0) {
@@ -135,10 +143,29 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
         and.push({ or: [{ assignee: { isMe: { eq: true } } }, { assignee: { null: true } }] })
       }
 
-      const data = await gql(apiKey, LIST_QUERY, { filter: { and }, first: 100 })
-      const issues = data.issues as { nodes: LinearNode[] } | undefined
+      const variables: Record<string, unknown> = {
+        filter: { and },
+        first: pageSize,
+      }
+      if (page > 1) {
+        // For simplicity, we'll just fetch more and slice. Linear cursor pagination is complex.
+        // Since we can't easily get total count, we'll fetch pageSize * page and slice
+        variables.first = pageSize * page
+      }
+      if (query) {
+        variables.term = query
+      }
+
+      const data = await gql(apiKey, LIST_QUERY, variables)
+      const issues = data.issues as { nodes: LinearNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } | undefined
       const nodes = issues?.nodes ?? []
-      return nodes.map((node): TicketDTO => ({
+      const hasNextPage = issues?.pageInfo?.hasNextPage ?? false
+
+      // Slice for the requested page
+      const start = (page - 1) * pageSize
+      const pageNodes = nodes.slice(start, start + pageSize)
+
+      const tickets = pageNodes.map((node): TicketDTO => ({
         id: node.id,
         tid: node.identifier,
         src: 'linear',
@@ -150,6 +177,12 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
           ? { id: node.state.id, name: node.state.name ?? '', type: node.state.type }
           : undefined,
       }))
+
+      // Estimate total count - since Linear doesn't easily provide it, we use a heuristic
+      const totalCount = hasNextPage ? start + pageSize + 1 : tickets.length
+      const hasMore = hasNextPage && pageNodes.length >= pageSize
+
+      return { tickets, totalCount, page, pageSize, hasMore }
     },
 
     async getTicketStatus(

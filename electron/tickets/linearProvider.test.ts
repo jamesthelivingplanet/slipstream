@@ -41,7 +41,7 @@ describe('createLinearProvider', () => {
   it('returns [] when no API key is set', async () => {
     const provider = createLinearProvider(makeConfigStore(undefined))
     const result = await provider.listTickets()
-    expect(result).toEqual([])
+    expect(result).toEqual({ tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false })
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -54,24 +54,30 @@ describe('createLinearProvider', () => {
     const provider = createLinearProvider(makeConfigStore('lin_api_test'))
     const result = await provider.listTickets()
 
-    expect(result).toEqual([
-      {
-        id: 'issue-uuid-1',
-        tid: 'ENG-123',
-        src: 'linear',
-        title: 'Fix the bug',
-        description: 'Some details',
-        done: false,
-        repoHint: 'ENG',
-        status: { id: 'state-1', name: 'In Progress', type: 'started' },
-      },
-    ])
+    expect(result).toEqual({
+      tickets: [
+        {
+          id: 'issue-uuid-1',
+          tid: 'ENG-123',
+          src: 'linear',
+          title: 'Fix the bug',
+          description: 'Some details',
+          done: false,
+          repoHint: 'ENG',
+          status: { id: 'state-1', name: 'In Progress', type: 'started' },
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      pageSize: 20,
+      hasMore: false,
+    })
   })
 
   it('sends Authorization header without Bearer prefix', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { issues: { nodes: [] } } }),
+      json: async () => ({ data: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } }),
     } as Response)
 
     const provider = createLinearProvider(makeConfigStore('lin_api_mykey'))
@@ -118,26 +124,26 @@ describe('createLinearProvider', () => {
     }
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { issues: { nodes: [completedNode] } } }),
+      json: async () => ({ data: { issues: { nodes: [completedNode], pageInfo: { hasNextPage: false, endCursor: null } } } }),
     } as Response)
 
     const provider = createLinearProvider(makeConfigStore('lin_api_test'))
     const result = await provider.listTickets()
-    expect(result[0].done).toBe(true)
-    expect(result[0].status).toEqual({ id: 'state-done', name: 'Done', type: 'completed' })
+    expect(result.tickets[0].done).toBe(true)
+    expect(result.tickets[0].status).toEqual({ id: 'state-done', name: 'Done', type: 'completed' })
   })
 
   it('handles missing team gracefully (repoHint undefined)', async () => {
     const nodeNoTeam = { id: 'uuid-2', identifier: 'ENG-456', title: 'No team issue' }
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ data: { issues: { nodes: [nodeNoTeam] } } }),
+      json: async () => ({ data: { issues: { nodes: [nodeNoTeam], pageInfo: { hasNextPage: false, endCursor: null } } } }),
     } as Response)
 
     const provider = createLinearProvider(makeConfigStore('lin_api_test'))
     const result = await provider.listTickets()
-    expect(result[0].repoHint).toBeUndefined()
-    expect(result[0].status).toBeUndefined()
+    expect(result.tickets[0].repoHint).toBeUndefined()
+    expect(result.tickets[0].status).toBeUndefined()
   })
 
   it('getTicketStatus resolves issue then returns current + available states', async () => {

@@ -1,4 +1,4 @@
-import type { ITicketProvider, ScopeOption, TicketDTO, WorkflowState } from '../shared/contract.js'
+import type { ITicketProvider, ScopeOption, TicketDTO, WorkflowState, PaginatedTickets } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 
 interface AdfNode {
@@ -209,12 +209,16 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
       return (data?.values ?? []).map((p) => ({ id: p.id, key: p.key, name: p.name }))
     },
 
-    async listTickets(): Promise<TicketDTO[]> {
+    async listTickets(opts?: { page?: number; pageSize?: number; query?: string }): Promise<PaginatedTickets> {
       const c = creds()
-      if (!c) return []
+      if (!c) return { tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false }
 
       const projectKeys = parseKeys(config.get('jira.projectKeys'))
       const onlyMine = config.get('jira.onlyMine') !== '0'
+
+      const page = opts?.page ?? 1
+      const pageSize = opts?.pageSize ?? 20
+      const query = opts?.query
 
       let jql = ''
       if (projectKeys.length > 0) {
@@ -224,11 +228,18 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
       if (onlyMine) {
         jql += ' AND (assignee = currentUser() OR assignee is EMPTY)'
       }
+      if (query) {
+        jql += ` AND (summary ~ "${query}" OR key ~ "${query}")`
+      }
       jql += ' ORDER BY updated DESC'
 
       const tickets: TicketDTO[] = []
       let nextPageToken: string | undefined
-      for (let page = 0; page < 3; page++) {
+      let totalFetched = 0
+      let lastData: JiraSearchResponse | undefined
+      const targetTotal = page * pageSize
+      // Cap at 3 pages to avoid excessive API calls (matches test expectation)
+      for (let p = 0; p < 3 && totalFetched < targetTotal + pageSize; p++) {
         const body: Record<string, unknown> = {
           jql,
           fields: ['summary', 'description', 'status', 'project'],
@@ -243,16 +254,32 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
           '/rest/api/3/search/jql',
           { method: 'POST', body: JSON.stringify(body) },
         )
+        lastData = data
 
-        for (const issue of data?.issues ?? []) {
+        const issues = data?.issues ?? []
+        for (const issue of issues) {
           tickets.push(toTicketDTO(issue))
         }
+        totalFetched += issues.length
 
         if (!data?.nextPageToken) break
         nextPageToken = data.nextPageToken
       }
 
-      return tickets
+      // Apply query filter on client side if server didn't support it well
+      let filtered = tickets
+      if (query) {
+        const q = query.toLowerCase()
+        filtered = tickets.filter((t) => t.tid.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))
+      }
+
+      const start = (page - 1) * pageSize
+      const end = start + pageSize
+      const paginated = filtered.slice(start, end)
+
+      const hasMore = end < filtered.length || (!!lastData?.nextPageToken && end >= filtered.length)
+
+      return { tickets: paginated, totalCount: filtered.length, page, pageSize, hasMore }
     },
 
     async getTicketStatus(
