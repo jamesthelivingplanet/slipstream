@@ -1,12 +1,20 @@
 /**
- * Environment scrubbing for spawned agent PTYs.
+ * Environment scrubbing for spawned agent PTYs — hygiene, NOT a security
+ * boundary.
  *
- * Agents run arbitrary repo code, so they must not inherit the daemon's
- * internal variables — above all SLIPSTREAM_TOKEN, which would let worktree
- * code open the daemon's WebSocket RPC and drive every other session. The
- * slipstream CLI needs none of these: its identity comes from the
- * SLIPSTREAM_DATA_DIR/SESSION_ID/BASE/BRANCH overrides injected per session
- * (see agentCliProvision.ts), none of which are secrets.
+ * The scrub strips the daemon's internal variables (above all
+ * SLIPSTREAM_TOKEN) from the env inherited by agent PTYs, so a process can't
+ * grab the token with a trivial `printenv`. That is ALL it does. It is not
+ * containment: the agent PTY runs as the SAME OS uid as the daemon, so
+ * worktree code can read `<dataDir>/daemon.json` (which holds `{ token, port }`)
+ * and open the daemon's WebSocket RPC anyway, or read `<dataDir>/slipstream.db`
+ * directly for every stored git token / Linear / Jira key / the raw Firebase
+ * service-account private key. Real isolation requires running agents under
+ * a separate uid / sandbox with no read access to the data dir — see
+ * docs/SECURITY.md §7. This scrub defeats only the most casual drive-by and
+ * keeps the per-session env clean for the slipstream CLI, whose identity comes
+ * from the SLIPSTREAM_DATA_DIR/SESSION_ID/BASE/BRANCH overrides injected per
+ * session (see agentCliProvision.ts), none of which are secrets.
  *
  * Pure (no node-pty import) so it stays unit-testable under plain Node.
  */

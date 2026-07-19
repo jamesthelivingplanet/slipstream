@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { buildAgentEnv } from './agentEnv.js'
 
+// The scrub these tests exercise is HYGIENE, not a security boundary: it strips
+// the daemon-internal vars from the agent PTY env so a process can't grab
+// SLIPSTREAM_TOKEN with a trivial `printenv`. It does NOT contain a same-uid
+// agent, which can read daemon.json / slipstream.db directly — see agentEnv.ts
+// header and docs/SECURITY.md §7. Behavior under test is unchanged by FLO-126.
 describe('buildAgentEnv', () => {
   it('strips the daemon token and internal daemon vars from the inherited env', () => {
     const env = buildAgentEnv({

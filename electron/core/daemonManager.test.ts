@@ -110,6 +110,15 @@ describe('loadOrCreateLocalIdentity', () => {
     )
     expect(id.token).toBe('envtoken')
   })
+
+  it('writes daemon.json with mode 0600 (hygiene for a bearer-token file)', async () => {
+    // Same-uid agents can still read it — this is hygiene, not containment
+    // (the 0700 data dir already gated same-uid readers; only a separate
+    // uid/sandbox would actually close the hole). See docs/SECURITY.md §7.
+    await loadOrCreateLocalIdentity(tmpDir, {}, { pickPort: async () => 9999 })
+    const mode = fs.statSync(path.join(tmpDir, 'daemon.json')).mode & 0o777
+    expect(mode).toBe(0o600)
+  })
 })
 
 // ── pickPort ──────────────────────────────────────────────────────────────────
