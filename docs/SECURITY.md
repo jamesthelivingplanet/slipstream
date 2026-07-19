@@ -254,3 +254,39 @@ privilege boundary being crossed.
 `0644`). This changes nothing against a same-uid reader — the `0700` data dir
 already gated it — but a file holding a bearer token should not be
 world/group-readable as a matter of course.
+
+## 8. Window pinned to the app origin (FLO-127)
+
+The desktop `BrowserWindow`'s preload (`electron/preload.ts`) deliberately
+exposes `window.__slipstreamDaemon = { url, token }` — the daemon WS URL +
+bearer token — to the main world so the renderer can bootstrap the WebSocket
+connection. `contextIsolation` and `sandbox: true` don't help here: the exposure
+is intentional, not a leak through them.
+
+`setWindowOpenHandler` only governs *new* windows (`target=_blank` /
+`window.open`, which Slipstream always redirects to the system browser). It does
+**not** govern an in-place top-level navigation of the existing window —
+renderer-side XSS, a stray `window.location = …`, or a server-side redirect
+loads the target origin in the *same* `BrowserWindow`, where the preload re-runs
+and hands the credential to that origin.
+
+**Fix (shipped):** the window is pinned to its app origin:
+
+- `main.ts` registers `webContents.on('will-navigate')` and `will-redirect`
+  handlers that `preventDefault()` any target off the app origin (the Vite dev
+  server in dev, the built `file://…/dist/index.html` in prod). The decision is a
+  pure, unit-tested predicate — `isAllowedNavigation(target, appUrl)` in
+  `electron/shared/navigationGuard.ts` — same-origin for `http(s)://`, exact path
+  for `file://` (whose origin is the opaque `'null'` shared by every local doc),
+  deny everything else (`data:`, `blob:`, `javascript:`, custom schemes).
+- **Defense in depth:** the preload is also passed `--slipstream-app-url=<url>`
+  via `additionalArguments` and gates *both* `__slipstreamDaemon` and
+  `__slipstreamNative` on `isAllowedNavigation(location.href, appUrl)`. If a
+  navigation ever slipped past the main-process guard (or a subframe ran the
+  preload on a foreign document), the credential stays `null` and the renderer
+  falls back to web mode rather than leaking. The normal app load always passes
+  the check, so desktop behavior is unchanged.
+
+Same-origin SPA route changes are history/hash mutations, not navigations, so a
+real `will-navigate` off the origin is never legitimate app behavior — blocking
+it cannot regress normal routing.
