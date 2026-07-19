@@ -53,8 +53,10 @@ function spawnAgent(
     cols,
     rows,
     cwd,
-    // Scrubbed: agents run arbitrary repo code and must not inherit the
-    // daemon's internal env (SLIPSTREAM_TOKEN above all) — see agentEnv.ts.
+    // Hygiene only — NOT a boundary. The scrub strips the daemon-internal env
+    // (SLIPSTREAM_TOKEN above all) so a process can't grab it with `printenv`,
+    // but the agent PTY runs as the SAME uid as the daemon and can read
+    // daemon.json / slipstream.db directly — see agentEnv.ts + SECURITY.md §7.
     env: buildAgentEnv(process.env, env),
   })
 }
