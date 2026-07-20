@@ -1021,14 +1021,16 @@ export function createRpc(
           return { available: true, messages: pageChatMessages(parsePiChatMessages(raw), opts) }
         }
 
-        if (kind === 'opencode') {
+        if (usesEmbeddedServer(kind)) {
           const state = deps.sessions.getOpencodeState?.(id)
           if (!state?.port || !state.sid) return { available: false, messages: [] }
           const raw = await fetchOpencodeMessages(state.port, state.sid)
           return { available: true, messages: pageChatMessages(opencodeMessagesToChat(raw), opts) }
         }
 
-        // antigravity/grok/kilo have no chat reader (TASK-FPH60) — terminal-only.
+        // antigravity/grok have no chat reader (TASK-FPH60) — terminal-only.
+        // kilo goes through the embedded-server branch above (opencode + kilo
+        // share it — see usesEmbeddedServer).
         return { available: false, messages: [] }
       }
 

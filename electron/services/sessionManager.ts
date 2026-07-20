@@ -247,7 +247,9 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
    * tick.
    */
   function startOpencodeChatPollIfNeeded(id: string, rec: SessionRecord): void {
-    if (rec.backend.kind !== 'opencode') return
+    // Covers opencode AND kilo (an opencode fork with the same embedded
+    // server) — both reuse the opencodePort/opencodeSid fields below.
+    if (!rec.backend.embeddedServer) return
     if (rec.opencodeChatPollTimer) return // already running
     if (!rec.chatSubscribers || rec.chatSubscribers.size === 0) return
     if (!rec.opencodePort || !rec.opencodeSid) return // sid not captured yet — setOpencodeSid retries this
