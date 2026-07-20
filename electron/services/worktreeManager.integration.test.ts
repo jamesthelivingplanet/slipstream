@@ -364,6 +364,11 @@ describe('worktreeManager.diff (real git)', () => {
     execFileSync('git', ['init', '-b', 'main', repoPath], { encoding: 'utf8' })
     git(repoPath, 'config', 'user.email', 'test@slipstream.dev')
     git(repoPath, 'config', 'user.name', 'Slipstream Test')
+    // Regression guard (FLO-138): turn ON mnemonic diff prefixes here so this
+    // suite exercises the c// w// path on every machine, regardless of the
+    // developer's global git config. worktreeManager.diff must force
+    // diff.mnemonicprefix=false itself, so the parsed paths stay canonical.
+    git(repoPath, 'config', 'diff.mnemonicprefix', 'true')
     writeFileSync(join(repoPath, 'README.md'), 'line one\nline two\nline three\n')
     writeFileSync(join(repoPath, 'to-delete.txt'), 'will be removed\n')
     git(repoPath, 'add', '-A')
@@ -377,7 +382,7 @@ describe('worktreeManager.diff (real git)', () => {
     rmSync(droot, { recursive: true, force: true })
   })
 
-  it.skip('reports modified/added/deleted/untracked statuses with correct hunk line numbers (TODO: fix pre-existing flake)', async () => {
+  it('reports modified/added/deleted/untracked statuses with correct hunk line numbers', async () => {
     const info = await dwm.create(drepo, 'feat-diffreview')
     const wtPath = info.path
 
