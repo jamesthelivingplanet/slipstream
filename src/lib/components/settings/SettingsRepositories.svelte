@@ -275,7 +275,7 @@
     border: none;
     padding: 0;
     margin: 6px 0 4px;
-    font-size: 12.5px;
+    font-size: 13px;
     color: hsl(var(--muted-foreground));
     text-decoration: underline;
     text-underline-offset: 2px;

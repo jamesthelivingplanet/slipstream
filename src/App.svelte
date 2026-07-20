@@ -226,8 +226,8 @@
       }}
     >
       <img src="/icons/nulliel-glyph.svg" alt="Slipstream" class="glyph" />
-      <b>Slipstream</b>
-      {#if !$mobile}<span class="badge mono">dangerous mode</span>{/if}
+      <b>Slip<span class="wm-accent">stream</span></b>
+      {#if !$mobile}<span class="danger-chip"><span class="dd"></span>Dangerous mode</span>{/if}
       <CliStatus />
     </div>
     {#if $selected}

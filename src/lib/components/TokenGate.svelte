@@ -127,7 +127,7 @@
 
   .gate-logo b {
     font-weight: 600;
-    font-size: 14.5px;
+    font-size: 14px;
   }
 
   h2 {
@@ -145,7 +145,7 @@
   }
 
   .gate-error {
-    font-size: 12.5px;
+    font-size: 13px;
     color: hsl(var(--st-error));
     background: hsl(var(--st-error) / 0.1);
     border: 1px solid hsl(var(--st-error) / 0.3);

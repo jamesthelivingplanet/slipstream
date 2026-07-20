@@ -231,8 +231,12 @@ header.bar {
 .logo b {
   font-family: 'Chakra Petch', sans-serif;
   font-weight: 600;
-  font-size: 14.5px;
-  letter-spacing: 0.04em;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.logo b .wm-accent {
+  color: hsl(var(--primary));
 }
 header .spacer {
   flex: 1;
@@ -386,7 +390,7 @@ html[data-mode='light'] .seg.on {
   flex: 0 0 7px;
 }
 .a-status {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
 }
 .needs .stat-dot {
@@ -528,7 +532,7 @@ html[data-mode='light'] .seg.on {
 }
 .th-title .t {
   font-family: 'Chakra Petch', sans-serif;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -605,7 +609,7 @@ html[data-mode='light'] .seg.on {
   gap: 18px;
 }
 .cfg-hint {
-  font-size: 12.5px;
+  font-size: 13px;
   color: hsl(var(--muted-foreground));
   line-height: 1.5;
   margin-top: 8px;
@@ -699,7 +703,7 @@ html[data-mode='light'] .seg.on {
   border-radius: var(--radius);
   background: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition:
@@ -786,7 +790,7 @@ html[data-mode='light'] .seg.on {
 }
 .drow .v {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 .drow .v b {
   color: hsl(var(--primary));
@@ -875,7 +879,7 @@ textarea:focus {
 .btn-sm {
   height: 30px;
   padding: 0 10px;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .btn-icon {
   width: 34px;
@@ -902,13 +906,51 @@ textarea:focus {
   color: hsl(var(--muted-foreground));
 }
 .badge.mono {
-  font-size: 10.5px;
+  font-size: 11px;
 }
 .badge.jira {
   color: #5b8def;
 }
 .badge.linear {
   color: #9b8afb;
+}
+.danger-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: hsl(var(--st-needs));
+  border: 1px solid hsl(var(--st-needs) / 0.45);
+  background: hsl(var(--st-needs) / 0.12);
+  padding: 3px 8px 3px 7px;
+  border-radius: 6px;
+}
+.danger-chip .dd {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: hsl(var(--st-needs));
+  box-shadow: 0 0 8px hsl(var(--st-needs));
+  animation: danger-blink 1.6s steps(1) infinite;
+}
+@keyframes danger-blink {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .danger-chip .dd {
+    animation: none;
+  }
 }
 
 .kbd {
@@ -1033,7 +1075,7 @@ html[data-mode='light'] .mode-toggle .mt.on {
   font-weight: 600;
 }
 .dlg-head p {
-  font-size: 12.5px;
+  font-size: 13px;
   color: hsl(var(--muted-foreground));
   margin-top: 3px;
 }
@@ -1078,7 +1120,7 @@ html[data-mode='light'] .mode-toggle .mt.on {
   flex: 0 0 auto;
 }
 .tk .tk-t {
-  font-size: 12.5px;
+  font-size: 13px;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1095,7 +1137,7 @@ html[data-mode='light'] .mode-toggle .mt.on {
   padding: 16px;
   text-align: center;
   color: hsl(var(--muted-foreground));
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .dlg-foot {
@@ -1209,6 +1251,10 @@ body {
     padding-left: max(12px, env(safe-area-inset-left));
     padding-right: max(12px, env(safe-area-inset-right));
   }
+  .logo b {
+    font-size: 12px;
+    letter-spacing: 0.1em;
+  }
 
   /* Larger touch targets for primary buttons. */
   .btn {
@@ -1254,7 +1300,7 @@ body {
     width: 40px;
   }
   .term-head .th-title .t {
-    font-size: 12.5px;
+    font-size: 13px;
   }
   /* Repo/branch badges are redundant with the list on mobile — hide to save room. */
   .term-head .th-title .m {
@@ -1414,7 +1460,7 @@ body {
 }
 
 .tab-title {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
 }
 
