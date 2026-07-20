@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   selectNewestSessionSince,
   parseOpencodeSessionIdFromStdout,
@@ -12,6 +15,26 @@ import {
 } from './opencodeSessions.js'
 import type { OpencodeSession, OpencodeMessage } from './opencodeSessions.js'
 import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
+
+// captureOpencodeSessionId / queryOpencodeSessionIdFromCli are thin wrappers
+// around execFile + parseOpencodeSessionIdFromStdout. The parse logic itself
+// is covered by parseOpencodeSessionIdFromStdout above; to drive the real
+// execFile→parse path without depending on opencode being installed (the old
+// smoke test was a tautology that always passed), these tests stand up a stub
+// binary. queryOpencodeSessionIdFromCli calls execFile(bin,
+// ['session','list','--format','json','-n','1']) — argv is fixed, so the stub
+// must be a self-contained executable (a node shebang script). Run as CJS
+// (extensionless → CommonJS), so the stubs use require, not import.
+
+/** Write an executable shebang script that runs `body` (CJS) to a fresh temp
+ *  dir and return its path plus a cleanup thunk. */
+function writeFakeBin(body: string): { bin: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'slipstream-fake-opencode-'))
+  const bin = join(dir, 'fake-opencode')
+  writeFileSync(bin, `#!/usr/bin/env node\n${body}\n`)
+  chmodSync(bin, 0o755)
+  return { bin, cleanup: () => rmSync(dir, { recursive: true, force: true }) }
+}
 
 // ── parseOpencodeSessionIdFromStdout ────────────────────────────────────────
 
@@ -49,41 +72,110 @@ describe('parseOpencodeSessionIdFromStdout', () => {
   })
 })
 
-// ── captureOpencodeSessionId ────────────────────────────────────────────────
+// ── queryOpencodeSessionIdFromCli (stub binary) ────────────────────────────
 
-describe('captureOpencodeSessionId', () => {
-  it('returns null or a string (smoke test — depends on opencode being installed)', async () => {
-    // We can't mock the CLI call in ESM tests, so this is a smoke test.
-    // The pure parse logic is covered by parseOpencodeSessionIdFromStdout above.
-    const result = await captureOpencodeSessionId({
-      cwd: process.cwd(),
-      attempts: 1,
-      intervalMs: 0,
-    })
-    expect(result === null || typeof result === 'string').toBe(true)
+describe('queryOpencodeSessionIdFromCli', () => {
+  it('parses the newest session id from the bin stdout', async () => {
+    const { bin, cleanup } = writeFakeBin(
+      `process.stdout.write(${JSON.stringify(JSON.stringify([{ id: 'ses_real123', title: 'x' }]))})`,
+    )
+    try {
+      expect(await queryOpencodeSessionIdFromCli(process.cwd(), bin)).toBe('ses_real123')
+    } finally {
+      cleanup()
+    }
   })
 
-  it('accepts a "bin" override (smoke test — a bogus bin resolves to null, never throws)', async () => {
-    // Kilo Code reuses this helper with its own resolved binary; a bin that
-    // doesn't exist must degrade to null (same as opencode missing) rather
-    // than reject.
-    const result = await captureOpencodeSessionId({
-      cwd: process.cwd(),
-      attempts: 1,
-      intervalMs: 0,
-      bin: 'definitely-not-a-real-cli-binary',
-    })
-    expect(result).toBeNull()
+  it('resolves null when the bin emits invalid JSON', async () => {
+    const { bin, cleanup } = writeFakeBin(`process.stdout.write('not json at all')`)
+    try {
+      expect(await queryOpencodeSessionIdFromCli(process.cwd(), bin)).toBeNull()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('resolves null when the bin emits an empty session array', async () => {
+    const { bin, cleanup } = writeFakeBin(`process.stdout.write('[]')`)
+    try {
+      expect(await queryOpencodeSessionIdFromCli(process.cwd(), bin)).toBeNull()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('resolves null for a nonexistent binary instead of throwing', async () => {
+    expect(
+      await queryOpencodeSessionIdFromCli(process.cwd(), 'definitely-not-a-real-cli-binary'),
+    ).toBeNull()
   })
 })
 
-describe('queryOpencodeSessionIdFromCli with a "bin" override', () => {
-  it('resolves null for a nonexistent binary instead of throwing', async () => {
-    const result = await queryOpencodeSessionIdFromCli(
-      process.cwd(),
-      'definitely-not-a-real-cli-binary',
+// ── captureOpencodeSessionId (stub binary) ──────────────────────────────────
+
+describe('captureOpencodeSessionId', () => {
+  it('returns the id when the bin reports a session on the first attempt', async () => {
+    const { bin, cleanup } = writeFakeBin(
+      `process.stdout.write(${JSON.stringify(JSON.stringify([{ id: 'ses_immediate' }]))})`,
     )
-    expect(result).toBeNull()
+    try {
+      expect(
+        await captureOpencodeSessionId({ cwd: process.cwd(), bin, attempts: 1, intervalMs: 0 }),
+      ).toBe('ses_immediate')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('polls until a session appears within the attempt budget', async () => {
+    // First invocation reports no session and drops a marker file; the next
+    // invocation sees the marker and reports the session — exercising the
+    // retry loop that captureOpencodeSessionId adds over a single query.
+    const dir = mkdtempSync(join(tmpdir(), 'slipstream-fake-opencode-'))
+    const bin = join(dir, 'fake-opencode')
+    const marker = join(dir, 'ready')
+    writeFileSync(
+      bin,
+      '#!/usr/bin/env node\n' +
+        `const {existsSync,writeFileSync}=require('node:fs')\n` +
+        `const m=${JSON.stringify(marker)}\n` +
+        `if(existsSync(m)){process.stdout.write(${JSON.stringify(
+          JSON.stringify([{ id: 'ses_polled' }]),
+        )})}else{writeFileSync(m,'1');process.stdout.write('[]')}\n`,
+    )
+    chmodSync(bin, 0o755)
+    try {
+      expect(
+        await captureOpencodeSessionId({ cwd: process.cwd(), bin, attempts: 3, intervalMs: 0 }),
+      ).toBe('ses_polled')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('gives up with null when no session appears within the attempt budget', async () => {
+    const { bin, cleanup } = writeFakeBin(`process.stdout.write('[]')`)
+    try {
+      expect(
+        await captureOpencodeSessionId({ cwd: process.cwd(), bin, attempts: 2, intervalMs: 0 }),
+      ).toBeNull()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('accepts a "bin" override (a bogus bin resolves to null, never throws)', async () => {
+    // Kilo Code reuses this helper with its own resolved binary; a bin that
+    // doesn't exist must degrade to null (same as opencode missing) rather
+    // than reject.
+    expect(
+      await captureOpencodeSessionId({
+        cwd: process.cwd(),
+        attempts: 1,
+        intervalMs: 0,
+        bin: 'definitely-not-a-real-cli-binary',
+      }),
+    ).toBeNull()
   })
 })
 
