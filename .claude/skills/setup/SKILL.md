@@ -57,7 +57,8 @@ What `pnpm setup` produces:
   ```
 - Writes `~/.config/slipstream/server.env` (chmod 600) containing:
   `SLIPSTREAM_TOKEN`, `SLIPSTREAM_BIND=127.0.0.1`, `SLIPSTREAM_PORT=7421`,
-  `SLIPSTREAM_SERVE=tailscale|none`, `ELECTRON_RUN_AS_NODE=1`
+  `SLIPSTREAM_SERVE=tailscale|none`, `ELECTRON_RUN_AS_NODE=1`,
+  `SLIPSTREAM_SANDBOX=bwrap` (optional; bwrap agent sandbox, Linux only)
 - On **Linux**: writes `~/.config/systemd/user/slipstream.service` and enables it
   (`systemctl --user daemon-reload && systemctl --user enable slipstream.service`)
 - On **macOS**: writes `~/Library/LaunchAgents/com.slipstream.server.plist` and bootstraps

@@ -25,6 +25,7 @@ import type {
 } from '../shared/contract.js'
 import { parseAgentArgs } from '../shared/agentCli.js'
 import { buildAgentEnv } from './agentEnv.js'
+import { sandboxSpawnSpec } from './agentSandbox.js'
 import { StatusDetector } from './statusDetector.js'
 import { OutputBuffer } from './outputBuffer.js'
 import { ScrollbackStore } from './scrollbackStore.js'
@@ -84,16 +85,23 @@ function defaultSpawnAgent(
   rows: number,
   env?: Record<string, string>,
 ): pty.IPty {
-  return pty.spawn(cmd, args, {
+  // Hygiene only — NOT a boundary. The scrub strips the daemon-internal env
+  // (SLIPSTREAM_TOKEN above all) so a process can't grab it with `printenv`,
+  // but the agent PTY runs as the SAME uid as the daemon and can read
+  // daemon.json / slipstream.db directly — see agentEnv.ts + SECURITY.md §7.
+  const finalEnv = buildAgentEnv(process.env, env)
+  // FLO-146: opt-in bwrap containment. When SLIPSTREAM_SANDBOX=bwrap and
+  // bwrap is available, this wraps cmd/args so the agent runs in a mount
+  // namespace with the data dir overmounted (daemon.json/slipstream.db/
+  // secrets hidden); off by default → spec is cmd/args unchanged. See
+  // agentSandbox.ts + docs/SECURITY.md §7.
+  const spec = sandboxSpawnSpec({ cmd, args, env: finalEnv })
+  return pty.spawn(spec.cmd, spec.args, {
     name: 'xterm-color',
     cols,
     rows,
     cwd,
-    // Hygiene only — NOT a boundary. The scrub strips the daemon-internal env
-    // (SLIPSTREAM_TOKEN above all) so a process can't grab it with `printenv`,
-    // but the agent PTY runs as the SAME uid as the daemon and can read
-    // daemon.json / slipstream.db directly — see agentEnv.ts + SECURITY.md §7.
-    env: buildAgentEnv(process.env, env),
+    env: finalEnv,
   })
 }
 
