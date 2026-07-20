@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { readdirSync } from 'node:fs'
+import { readdirSync, statSync } from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import type { SessionStatus } from '../shared/contract.js'
@@ -176,6 +176,34 @@ export function hasPiSessionFileSync(cwd: string, root?: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Sync variant of findNewestPiSessionFile, used by the chat tail's
+ * `resolveFile` hook (chatTail.ts's startChatTail expects a synchronous
+ * resolver, matching transcriptPathFor's contract for the claude-code tail).
+ * Any error (dir missing, unreadable entries) resolves to null/skips, same
+ * leniency as hasPiSessionFileSync.
+ */
+export function findNewestPiSessionFileSync(sessionDir: string): string | null {
+  let entries: string[]
+  try {
+    entries = readdirSync(sessionDir)
+  } catch {
+    return null
+  }
+  const files: PiFileMtime[] = []
+  for (const name of entries) {
+    if (!name.endsWith('.jsonl')) continue
+    const file = path.join(sessionDir, name)
+    try {
+      const st = statSync(file)
+      files.push({ file, mtime: st.mtimeMs })
+    } catch {
+      /* skip unreadable */
+    }
+  }
+  return selectNewestPiSessionFile(files)
 }
 
 /** Read a pi session JSONL file. Returns '' on any error (missing, unreadable). */

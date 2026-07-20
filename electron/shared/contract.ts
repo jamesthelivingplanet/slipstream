@@ -411,6 +411,16 @@ export interface SessionChatMessageDTO {
   ts: number // epoch ms, parsed from the transcript's ISO `timestamp`
 }
 
+/** One discovered skill (`SKILL.md`-convention directory), surfaced via
+ *  `listAgentSkills` (TASK-FPH60 skills listing). `source` distinguishes a
+ *  worktree-local skill from one installed for the user globally; when both
+ *  define a skill with the same `name`, the project entry wins. */
+export interface AgentSkillDTO {
+  name: string
+  description: string
+  source: 'project' | 'user'
+}
+
 /** Per-session "virtual clipboard" image (TASK-CWLL6): the renderer uploads a
  *  clipboard PNG here before sending Ctrl+V to the PTY, so PATH-shimmed
  *  clipboard tools on the agent side can serve it. Single-slot per session —
@@ -641,6 +651,22 @@ export interface ISessionManager {
   /** Reap a session for the cost guard: kill the PTY and mark it 'reaped'.
    *  Distinct from kill() so the exit is recorded as a policy reap, not a crash. */
   reap(sessionId: string): void
+  /** Live opencode embedded-server port/sid for a session (TASK-FPH60 chat),
+   *  or undefined when the session isn't live or isn't an opencode session.
+   *  Optional: only the real sessionManager implements it — a fake lacking it
+   *  makes getChatMessages report available:false for opencode. */
+  getOpencodeState?(sessionId: string): { port?: number; sid?: string } | undefined
+  /** Chat-subscriber ref-count for the independent opencode chat poller
+   *  (TASK-FPH60): starts polling `fetchOpencodeMessages` every ~3s while at
+   *  least one subscriber is registered and the session has a captured sid;
+   *  stops when the last subscriber unsubscribes or the session exits.
+   *  Deliberately separate from the status pipeline. Optional, same
+   *  rationale as getOpencodeState. */
+  subscribeChat?(sessionId: string, clientId: string): void
+  unsubscribeChat?(sessionId: string, clientId: string): void
+  /** Drop a disconnected client from every session's chat-subscriber set
+   *  (rpc.ts calls this from dispose()). Optional, same rationale. */
+  dropChatClient?(clientId: string): void
 }
 
 /**
@@ -940,10 +966,12 @@ export interface SlipstreamApi {
   /** Live agent-event push for sessions this client can see. Returns unsubscribe fn. */
   onSessionAgentEvent(cb: (event: SessionAgentEventDTO) => void): () => void
 
-  /** Claude Code transcript tailed as chat (TASK-FPH60): `available` is false
-   *  when the session isn't claude-code or has no transcript file yet — the
-   *  UI falls back to terminal-only. `opts.beforeTs` pages older messages;
-   *  `opts.limit` caps the page (default: the most recent 50). */
+  /** Chat view (TASK-FPH60, extended to pi/opencode): `available` is false
+   *  when the session's backend has no chat reader (antigravity/grok/kilo) or
+   *  the reader has nothing yet (no transcript/session-file, or the opencode
+   *  sid/port hasn't been captured) — the UI falls back to terminal-only.
+   *  `opts.beforeTs` pages older messages; `opts.limit` caps the page
+   *  (default: the most recent 50). */
   getChatMessages(
     id: string,
     opts?: { beforeTs?: number; limit?: number },
@@ -951,6 +979,19 @@ export interface SlipstreamApi {
   /** Live chat-message push for sessions this client can see (TASK-FPH60).
    *  Returns unsubscribe fn. */
   onChatMessage(cb: (id: string, msg: SessionChatMessageDTO) => void): () => void
+  /** Register/unregister this client as a chat viewer for an opencode session
+   *  (TASK-FPH60): opencode has no file to fs.watch, so live updates are an
+   *  independent ~3s poll of its embedded server, run only while at least one
+   *  subscriber exists. No-op for other backends. Call subscribeChat when a
+   *  chat view opens and unsubscribeChat when it closes (or the client
+   *  disconnects, which the server treats as an implicit unsubscribe). */
+  subscribeChat(id: string): Promise<void>
+  unsubscribeChat(id: string): Promise<void>
+  /** Discovered skills (`SKILL.md`-convention) available to a session's agent
+   *  (TASK-FPH60): project-scoped (worktree) merged with user-scoped
+   *  (home dir), project winning on a name collision. [] for backends with no
+   *  known skills convention (antigravity/grok/kilo) or an unresolvable cwd. */
+  listAgentSkills(id: string): Promise<AgentSkillDTO[]>
 
   /** Subscribe to transport connection state (true = connected). Fires on every
    *  transition; used by the UI to resync terminals after a reconnect. */
@@ -1032,6 +1073,9 @@ export const IPC = {
   sessionAgentEvent: 'session:agentEvent', // main → renderer push
   getChatMessages: 'session:chatMessages',
   sessionChatMessage: 'session:chatMessage', // main → renderer push
+  subscribeChat: 'session:chatSubscribe',
+  unsubscribeChat: 'session:chatUnsubscribe',
+  listAgentSkills: 'session:skills',
 } as const
 
 declare global {

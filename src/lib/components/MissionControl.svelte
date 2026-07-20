@@ -22,7 +22,6 @@
     ticketsLoading,
     ticketsTotalCount,
     ticketsPage,
-    ticketsPageSize,
     ticketsHasMore,
     ticketsQuery,
     loadMoreTickets,
@@ -233,11 +232,13 @@
   // repo. Starts beyond the scheduler's concurrency cap queue and drain on
   // their own, so this is safe to fire for an arbitrary number of tickets.
   $: launchableTickets = $tickets.filter((t) => repoById(t.repo))
-  // Tickets pagination reactive state
+  // Tickets pagination reactive state. ticketsTotalCount/ticketsPageSize have
+  // no UI here (no total-count or page-size display yet), so they're left
+  // unmirrored — an unused `$:` reactive var crashes @typescript-eslint's
+  // no-unused-vars (it doesn't recognize Svelte's "ComputedVariable"
+  // definition kind), so dead ones can't just be left in place.
   $: ticketsLoadingState = $ticketsLoading
-  $: ticketsTotalCountState = $ticketsTotalCount
   $: ticketsPageState = $ticketsPage
-  $: ticketsPageSizeState = $ticketsPageSize
   $: ticketsHasMoreState = $ticketsHasMore
   $: ticketsQueryState = $ticketsQuery
 
@@ -399,7 +400,8 @@
             Ready to launch <span class="cnt">{$ticketsTotalCount || $tickets.length}</span>
             <div class="tickets-search">
               <SearchInput
-                bind:value={ticketsQueryState}
+                value={ticketsQueryState}
+                onInput={handleTicketsSearch}
                 placeholder="Search tickets…"
                 ariaLabel="Search tickets"
               />

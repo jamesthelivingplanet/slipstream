@@ -32,6 +32,12 @@ import type { IWriteCoordinator } from '../services/writeCoordinator.js'
 import type { ISessionScheduler } from '../services/sessionScheduler.js'
 import { piSessionDirFor } from '../services/piSessions.js'
 
+vi.mock('../services/opencodeSessions.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/opencodeSessions.js')>()
+  return { ...actual, fetchOpencodeMessages: vi.fn() }
+})
+const { fetchOpencodeMessages } = await import('../services/opencodeSessions.js')
+
 // ── Fake deps ─────────────────────────────────────────────────────────────────
 
 function makeRepo(overrides: Partial<RepoDTO> = {}): RepoDTO {
@@ -92,6 +98,10 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     killAll: vi.fn(),
     getBuffer: vi.fn().mockResolvedValue({ data: 'buffered output', seq: 15 }),
     setOpencodeSid: vi.fn(),
+    getOpencodeState: vi.fn().mockReturnValue(undefined),
+    subscribeChat: vi.fn(),
+    unsubscribeChat: vi.fn(),
+    dropChatClient: vi.fn(),
     on(event: string, listener: Listener) {
       listeners[event] ??= []
       listeners[event].push(listener)
@@ -620,6 +630,173 @@ describe('createRpc', () => {
       const msg = { uuid: 'a1', role: 'assistant', blocks: [], ts: 5 }
       deps._emit('chatMessage', 's1', msg)
       expect(emitted).toContainEqual([IPC.sessionChatMessage, 's1', msg])
+    })
+  })
+
+  describe('chat messages — pi (TASK-FPH60 extension)', () => {
+    let piRoot: string
+    let prevPiSessionDir: string | undefined
+    const cwd = '/wt/t-1-fix-bug' // matches the mocked worktrees.pathFor return
+
+    function piChatLine(id: string, ts: string, text: string, role: 'user' | 'assistant'): string {
+      return JSON.stringify({
+        type: 'message',
+        id,
+        parentId: null,
+        timestamp: ts,
+        message: { role, content: [{ type: 'text', text }] },
+      })
+    }
+
+    beforeEach(() => {
+      piRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-rpc-pi-chat-'))
+      prevPiSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR
+      process.env.PI_CODING_AGENT_SESSION_DIR = piRoot
+    })
+
+    afterEach(() => {
+      if (prevPiSessionDir === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR
+      else process.env.PI_CODING_AGENT_SESSION_DIR = prevPiSessionDir
+      fs.rmSync(piRoot, { recursive: true, force: true })
+    })
+
+    it('returns available:true with parsed messages for a pi session', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'pi-1', repoId: 'r1', agentKind: 'pi' }))
+      const dir = piSessionDirFor(cwd, piRoot)
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(
+        path.join(dir, 'run1.jsonl'),
+        [
+          piChatLine('u1', '2026-07-19T10:00:00.000Z', 'hi', 'user'),
+          piChatLine('a1', '2026-07-19T10:00:01.000Z', 'hello', 'assistant'),
+        ].join('\n') + '\n',
+      )
+
+      const result = (await rpc.handle(IPC.getChatMessages, ['pi-1'])) as {
+        available: boolean
+        messages: { uuid: string }[]
+      }
+      expect(result.available).toBe(true)
+      expect(result.messages.map((m) => m.uuid)).toEqual(['u1', 'a1'])
+    })
+
+    it('returns available:false when no pi session file exists yet', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'pi-1', repoId: 'r1', agentKind: 'pi' }))
+      const result = (await rpc.handle(IPC.getChatMessages, ['pi-1'])) as { available: boolean }
+      expect(result.available).toBe(false)
+    })
+  })
+
+  describe('chat messages — opencode (TASK-FPH60 extension)', () => {
+    beforeEach(() => {
+      vi.mocked(fetchOpencodeMessages).mockReset()
+      vi.mocked(deps.sessions.getOpencodeState!).mockReset()
+    })
+
+    it('returns available:false when the sid/port have not been captured yet', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'oc-1', agentKind: 'opencode' }))
+      vi.mocked(deps.sessions.getOpencodeState!).mockReturnValue(undefined)
+
+      const result = (await rpc.handle(IPC.getChatMessages, ['oc-1'])) as { available: boolean }
+      expect(result.available).toBe(false)
+      expect(fetchOpencodeMessages).not.toHaveBeenCalled()
+    })
+
+    it('returns available:true with mapped messages once sid/port are known', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'oc-1', agentKind: 'opencode' }))
+      vi.mocked(deps.sessions.getOpencodeState!).mockReturnValue({ port: 4001, sid: 'ses_1' })
+      vi.mocked(fetchOpencodeMessages).mockResolvedValue([
+        {
+          info: { id: 'm1', role: 'user', time: { created: 1 } },
+          parts: [{ type: 'text', text: 'hi' }],
+        },
+      ])
+
+      const result = (await rpc.handle(IPC.getChatMessages, ['oc-1'])) as {
+        available: boolean
+        messages: { uuid: string }[]
+      }
+      expect(fetchOpencodeMessages).toHaveBeenCalledWith(4001, 'ses_1')
+      expect(result.available).toBe(true)
+      expect(result.messages.map((m) => m.uuid)).toEqual(['m1'])
+    })
+  })
+
+  describe('subscribeChat / unsubscribeChat (TASK-FPH60)', () => {
+    it('subscribeChat delegates to sessions.subscribeChat with the caller-owned session', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      await rpc.handle(IPC.subscribeChat, ['s1'])
+      expect(deps.sessions.subscribeChat).toHaveBeenCalledWith('s1', expect.any(String))
+    })
+
+    it('unsubscribeChat delegates to sessions.unsubscribeChat with the caller-owned session', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1' }))
+      await rpc.handle(IPC.unsubscribeChat, ['s1'])
+      expect(deps.sessions.unsubscribeChat).toHaveBeenCalledWith('s1', expect.any(String))
+    })
+
+    it('subscribeChat no-ops for a session the caller does not own', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
+      await rpc.handle(IPC.subscribeChat, ['hers'])
+      expect(deps.sessions.subscribeChat).not.toHaveBeenCalled()
+    })
+
+    it('dispose() drops this client from every session chat subscription', () => {
+      rpc.dispose()
+      expect(deps.sessions.dropChatClient).toHaveBeenCalled()
+    })
+  })
+
+  describe('listAgentSkills (TASK-FPH60)', () => {
+    let root: string
+    let cwdDir: string
+    let prevHome: string | undefined
+
+    function writeSkill(dir: string, name: string): void {
+      const skillDir = path.join(dir, name)
+      fs.mkdirSync(skillDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        `---\nname: ${name}\ndescription: desc for ${name}\n---\n`,
+      )
+    }
+
+    beforeEach(() => {
+      root = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-rpc-skills-'))
+      cwdDir = path.join(root, 'cwd')
+      fs.mkdirSync(cwdDir, { recursive: true })
+      prevHome = process.env.HOME
+      process.env.HOME = path.join(root, 'home')
+      fs.mkdirSync(process.env.HOME, { recursive: true })
+      vi.mocked(deps.worktrees.pathFor).mockReturnValue(cwdDir)
+    })
+
+    afterEach(() => {
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+      fs.rmSync(root, { recursive: true, force: true })
+      vi.mocked(deps.worktrees.pathFor).mockReturnValue('/wt/t-1-fix-bug')
+    })
+
+    it('lists claude-code skills resolved from the session worktree', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+      writeSkill(path.join(cwdDir, '.claude', 'skills'), 'my-skill')
+
+      const result = await rpc.handle(IPC.listAgentSkills, ['s1'])
+      expect(result).toEqual([
+        { name: 'my-skill', description: 'desc for my-skill', source: 'project' },
+      ])
+    })
+
+    it('rejects for a session the caller does not own', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'hers', ownerId: 'alice' }))
+      await expect(rpc.handle(IPC.listAgentSkills, ['hers'])).rejects.toThrow(/Session not found/)
+    })
+
+    it('returns [] for a backend with no skills convention', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'grok' }))
+      writeSkill(path.join(cwdDir, '.claude', 'skills'), 'irrelevant')
+      expect(await rpc.handle(IPC.listAgentSkills, ['s1'])).toEqual([])
     })
   })
 

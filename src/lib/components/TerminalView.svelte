@@ -140,6 +140,23 @@
   $: currentKind = (session.agentKind ?? 'claude-code') as BackendKind
   $: handoffTargets = AGENTS.filter((a) => a.kind !== currentKind)
 
+  // TASK-FPH60: the view actually rendered — chat only when both the user's
+  // (or preference-seeded) viewMode says chat AND the backend has confirmed
+  // chat is available for this session. Falls back to terminal whenever
+  // chat can't render, so `.term-wrap` hidden, the ChatView branch, and the
+  // mobile composer guard never disagree (a prior bug hid BOTH — term-wrap
+  // hid on viewMode alone while the ChatView branch also required
+  // chatAvailable, so a pre-first-turn session with the chat-default
+  // preference rendered a blank body). The toggle button that lets a user
+  // manually flip viewMode only renders once chatAvailable is already true
+  // (see `{#if chatAvailable}` below), so viewMode can't be left on 'chat'
+  // by a manual toggle while unavailable — it only ever gets there via the
+  // initial preference seed, which means once chatAvailable later flips
+  // true this recomputes to 'chat' on its own, satisfying "switch to chat
+  // automatically when it becomes available and the user hasn't manually
+  // chosen terminal for this session".
+  $: effectiveViewMode = viewMode === 'chat' && chatAvailable ? 'chat' : 'terminal'
+
   function openLink(_event: MouseEvent, uri: string) {
     window.open(uri, '_blank', 'noopener,noreferrer')
   }
@@ -429,10 +446,22 @@
   // load independently. Clearing chatAvailable synchronously before the async
   // call resolves prevents a stale `true` from a previous session leaking into
   // the new one's render (mirrors refreshPrStatus's clear-immediately idiom).
-  function refreshChatAvailability(id: string | undefined, kind: BackendKind) {
-    if (!hasBackend || !id || kind !== 'claude-code' || id === chatCheckedFor) return
+  // Backend answers `available` for claude-code/pi/opencode sessions (false
+  // for other kinds) — no kind gating needed here, the backend is the source
+  // of truth. Re-probes when session.status changes and the last probe came
+  // back false, since a session only becomes chat-capable once its first
+  // turn/session file appears (e.g. right after launch).
+  let chatCheckedStatus: string | undefined
+  function refreshChatAvailability(id: string | undefined, status: string | undefined) {
+    if (!hasBackend || !id) return
+    const isNewSession = id !== chatCheckedFor
+    if (!isNewSession) {
+      if (chatAvailable) return // already known available — nothing left to probe for
+      if (status === chatCheckedStatus) return // status hasn't moved since the last probe
+    }
     chatCheckedFor = id
-    chatAvailable = false
+    chatCheckedStatus = status
+    if (isNewSession) chatAvailable = false
     getChatMessages(id, { limit: 1 })
       .then((r) => {
         if (id === chatCheckedFor) chatAvailable = r.available
@@ -441,7 +470,7 @@
         if (id === chatCheckedFor) chatAvailable = false
       })
   }
-  $: refreshChatAvailability(session.id, currentKind)
+  $: refreshChatAvailability(session.id, session.status)
 
   interface PrBadge {
     text: string
@@ -1160,13 +1189,13 @@
   {/if}
 </div>
 
-<div class="term-wrap" class:hidden={showDiff || viewMode === 'chat'}>
+<div class="term-wrap" class:hidden={showDiff || effectiveViewMode === 'chat'}>
   <div class="term-mount" bind:this={mountEl}></div>
 </div>
 
 {#if showDiff}
   <DiffView {session} {canWrite} onSubmitted={handleDiffSubmitted} />
-{:else if viewMode === 'chat' && chatAvailable}
+{:else if effectiveViewMode === 'chat'}
   <ChatView
     {session}
     {canWrite}
@@ -1218,7 +1247,7 @@
   </div>
 {/if}
 
-{#if $mobile && liveMode && !exited && !showDiff && viewMode === 'terminal'}
+{#if $mobile && liveMode && !exited && !showDiff && effectiveViewMode === 'terminal'}
   <!-- TerminalView is reused across sessions, so key the composer to reset its diff base on switch. -->
   {#key session.id}
     <MobileTermInput

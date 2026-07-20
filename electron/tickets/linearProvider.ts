@@ -192,7 +192,9 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
       let filtered = tickets
       if (query) {
         const q = query.toLowerCase()
-        filtered = tickets.filter((t) => t.tid.toLowerCase().includes(q) || t.title.toLowerCase().includes(q))
+        filtered = tickets.filter(
+          (t) => t.tid.toLowerCase().includes(q) || t.title.toLowerCase().includes(q),
+        )
       }
 
       // Estimate total count - since Linear doesn't easily provide it, we use a heuristic

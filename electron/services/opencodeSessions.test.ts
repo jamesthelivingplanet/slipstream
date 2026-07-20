@@ -7,6 +7,8 @@ import {
   opencodeStatusFromText,
   opencodeStatusFromMessages,
   withOpencodePromptArg,
+  opencodeMessageToChat,
+  opencodeMessagesToChat,
 } from './opencodeSessions.js'
 import type { OpencodeSession, OpencodeMessage } from './opencodeSessions.js'
 import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
@@ -264,5 +266,171 @@ describe('withOpencodePromptArg', () => {
   it('keeps a multi-line prompt intact as a single argv value', () => {
     const prompt = 'Line one\nLine two'
     expect(withOpencodePromptArg([], prompt)).toEqual(['--prompt', prompt])
+  })
+})
+
+// ── opencodeMessageToChat / opencodeMessagesToChat (TASK-FPH60) ────────────
+
+describe('opencodeMessageToChat', () => {
+  it('maps a user text message', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'user', time: { created: 1000 } },
+      parts: [{ type: 'text', text: 'hi' }],
+    }
+    expect(opencodeMessageToChat(msg)).toEqual({
+      uuid: 'msg_1',
+      role: 'user',
+      blocks: [{ type: 'text', text: 'hi' }],
+      ts: 1000,
+    })
+  })
+
+  it('maps an assistant text message', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_2', role: 'assistant', time: { created: 2000 } },
+      parts: [{ type: 'text', text: 'hello there' }],
+    }
+    expect(opencodeMessageToChat(msg)).toEqual({
+      uuid: 'msg_2',
+      role: 'assistant',
+      blocks: [{ type: 'text', text: 'hello there' }],
+      ts: 2000,
+    })
+  })
+
+  it('defaults ts to 0 when time.created is missing', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'user' },
+      parts: [{ type: 'text', text: 'hi' }],
+    }
+    expect(opencodeMessageToChat(msg)?.ts).toBe(0)
+  })
+
+  it('drops an empty text part but keeps other blocks', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
+      parts: [
+        { type: 'text', text: '' },
+        { type: 'text', text: 'real' },
+      ],
+    }
+    expect(opencodeMessageToChat(msg)?.blocks).toEqual([{ type: 'text', text: 'real' }])
+  })
+
+  it('maps a running tool part to just a tool_use block (no result yet)', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
+      parts: [
+        {
+          type: 'tool',
+          callID: 'call_1',
+          tool: 'bash',
+          state: { status: 'running', input: { command: 'ls' } },
+        },
+      ],
+    }
+    expect(opencodeMessageToChat(msg)?.blocks).toEqual([
+      { type: 'tool_use', id: 'call_1', name: 'bash', input: { command: 'ls' } },
+    ])
+  })
+
+  it('maps a completed tool part to a tool_use + tool_result pair', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
+      parts: [
+        {
+          type: 'tool',
+          callID: 'call_1',
+          tool: 'bash',
+          state: { status: 'completed', input: { command: 'ls' }, output: 'file.txt' },
+        },
+      ],
+    }
+    expect(opencodeMessageToChat(msg)?.blocks).toEqual([
+      { type: 'tool_use', id: 'call_1', name: 'bash', input: { command: 'ls' } },
+      { type: 'tool_result', toolUseId: 'call_1', content: 'file.txt' },
+    ])
+  })
+
+  it('marks isError:true on an errored tool part and JSON-stringifies a non-string output', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
+      parts: [
+        {
+          type: 'tool',
+          callID: 'call_1',
+          tool: 'bash',
+          state: { status: 'error', output: { message: 'boom' } },
+        },
+      ],
+    }
+    expect(opencodeMessageToChat(msg)?.blocks[1]).toEqual({
+      type: 'tool_result',
+      toolUseId: 'call_1',
+      content: JSON.stringify({ message: 'boom' }),
+      isError: true,
+    })
+  })
+
+  it('falls back to id when callID is absent', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
+      parts: [{ type: 'tool', id: 'part_1', tool: 'bash', state: { status: 'running' } }],
+    }
+    expect(opencodeMessageToChat(msg)?.blocks).toEqual([
+      { type: 'tool_use', id: 'part_1', name: 'bash', input: {} },
+    ])
+  })
+
+  it('drops a tool part with no id and no tool name', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
+      parts: [{ type: 'tool', state: { status: 'running' } }],
+    }
+    expect(opencodeMessageToChat(msg)).toBeNull()
+  })
+
+  it('ignores unrendered part kinds (reasoning, step-start/finish)', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
+      parts: [{ type: 'step-start' }, { type: 'text', text: 'ok' }, { type: 'step-finish' }],
+    }
+    expect(opencodeMessageToChat(msg)?.blocks).toEqual([{ type: 'text', text: 'ok' }])
+  })
+
+  it('returns null for a message with no role', () => {
+    expect(opencodeMessageToChat({ parts: [{ type: 'text', text: 'hi' }] })).toBeNull()
+  })
+
+  it('returns null for a message with no id', () => {
+    expect(
+      opencodeMessageToChat({ info: { role: 'user' }, parts: [{ type: 'text', text: 'hi' }] }),
+    ).toBeNull()
+  })
+
+  it('returns null when there is nothing renderable', () => {
+    const msg: OpencodeMessage = { info: { id: 'msg_1', role: 'assistant' }, parts: [] }
+    expect(opencodeMessageToChat(msg)).toBeNull()
+  })
+})
+
+describe('opencodeMessagesToChat', () => {
+  it('maps and filters a list, preserving order', () => {
+    const msgs: OpencodeMessage[] = [
+      {
+        info: { id: 'u1', role: 'user', time: { created: 1 } },
+        parts: [{ type: 'text', text: 'go' }],
+      },
+      { info: { role: 'assistant' }, parts: [] }, // dropped: no id
+      {
+        info: { id: 'a1', role: 'assistant', time: { created: 2 } },
+        parts: [{ type: 'text', text: 'ok' }],
+      },
+    ]
+    expect(opencodeMessagesToChat(msgs).map((m) => m.uuid)).toEqual(['u1', 'a1'])
+  })
+
+  it('returns [] for an empty list', () => {
+    expect(opencodeMessagesToChat([])).toEqual([])
   })
 })

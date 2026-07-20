@@ -24,24 +24,26 @@
   <input
     type="search"
     class="path-input"
-    placeholder={placeholder}
-    bind:value={value}
+    {placeholder}
+    bind:value
     on:input={handleInput}
     aria-label={ariaLabel ?? placeholder}
   />
   {#if showClear && value}
-    <button
-      class="search-clear"
-      type="button"
-      on:click={clear}
-      aria-label="Clear search"
-    >
+    <button class="search-clear" type="button" on:click={clear} aria-label="Clear search">
       {@html icons.trash}
     </button>
   {/if}
   {#if loading}
     <span class="search-spinner" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
         <circle cx="12" cy="12" r="10" stroke-opacity="0.25" />
         <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="1">
           <animateTransform

@@ -18,6 +18,7 @@ import type {
   ISessionManager,
   LiveSessionInfo,
   ResumeSessionInput,
+  SessionChatMessageDTO,
   SessionDTO,
   SessionEvents,
   StartSessionInput,
@@ -40,14 +41,24 @@ import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from './outcomeSentinel.j
 import { eventsAfter, AGENT_EVENTS_FILE } from './agentEventsSentinel.js'
 import { writeSlipstreamSkill } from './promptWriter.js'
 import { transcriptPathFor } from './transcripts.js'
-import { completeLines, createChatCursor } from './transcriptMessages.js'
+import { parseTranscriptMessages } from './transcriptMessages.js'
+import { startChatTail, type ChatTailHandle } from './chatTail.js'
+import { parsePiChatMessages } from './piChatMessages.js'
+import { findNewestPiSessionFileSync, piSessionDirFor } from './piSessions.js'
+import { fetchOpencodeMessages, opencodeMessagesToChat } from './opencodeSessions.js'
 
-// Chat transcript tail (TASK-FPH60): how often to retry resolving the
-// transcript path before it exists (a modest poll — the PTY-data hook below
-// covers the common case near-instantly) and how long to keep retrying
-// before giving up on a session that may never produce one.
+// Chat tail (TASK-FPH60, claude-code + pi): how often to retry resolving the
+// transcript/session-file path before it exists (a modest poll — the
+// PTY-data hook below covers the common case near-instantly) and how long to
+// keep retrying before giving up on a session that may never produce one.
 const CHAT_RETRY_INTERVAL_MS = 2000
 const CHAT_RETRY_TIMEOUT_MS = 5 * 60_000
+
+// Opencode chat poll (TASK-FPH60): opencode has no file to fs.watch, so live
+// chat updates are an independent poll of its embedded server — deliberately
+// separate from the status pipeline's own OPENCODE_STATUS_POLL_MS poll.
+// Runs only while >=1 chat subscriber is registered (see subscribeChat).
+const OPENCODE_CHAT_POLL_MS = 3000
 
 function spawnAgent(
   cmd: string,
@@ -88,10 +99,15 @@ interface SessionRecord {
   opencodeSid?: string
   pollTimer?: ReturnType<typeof setInterval>
   watcher?: ReturnType<typeof fs.watch>
-  // Chat transcript tail (TASK-FPH60, claude-code only): fs.watch on the
-  // resolved transcript file, and the retry timer used before it's resolved.
-  chatWatcher?: ReturnType<typeof fs.watch>
-  chatRetryTimer?: ReturnType<typeof setInterval>
+  // Chat tail (TASK-FPH60, claude-code + pi): fs.watch-backed tail on the
+  // resolved transcript/session file. Undefined for backends with no file
+  // tail (opencode uses the poller below; antigravity/grok/kilo have none).
+  chatTail?: ChatTailHandle
+  // Opencode chat poll (TASK-FPH60): independent ~3s poll of the embedded
+  // server, gated on chatSubscribers being non-empty (see subscribeChat).
+  opencodeChatPollTimer?: ReturnType<typeof setInterval>
+  opencodeChatSeen?: Set<string>
+  chatSubscribers?: Set<string>
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
@@ -135,6 +151,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       rec.watcher?.close()
       rec.watcher = undefined
       disposeChatTail(rec)
+      disposeOpencodeChatPoll(rec)
       rec.disposed = true
       detector.markExit(exitCode)
       const s = detector.status()
@@ -163,96 +180,90 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     }
   }
 
-  // ── Chat transcript tail plumbing (TASK-FPH60) ────────────────────────────
+  // ── Chat tail / poll plumbing (TASK-FPH60, extended to pi + opencode) ─────
 
   function disposeChatTail(rec: SessionRecord): void {
-    if (rec.chatRetryTimer) {
-      clearInterval(rec.chatRetryTimer)
-      rec.chatRetryTimer = undefined
+    rec.chatTail?.dispose()
+    rec.chatTail = undefined
+  }
+
+  function disposeOpencodeChatPoll(rec: SessionRecord): void {
+    if (rec.opencodeChatPollTimer) {
+      clearInterval(rec.opencodeChatPollTimer)
+      rec.opencodeChatPollTimer = undefined
     }
-    rec.chatWatcher?.close()
-    rec.chatWatcher = undefined
   }
 
   /**
-   * Tail the Claude Code transcript for chat (TASK-FPH60). The transcript
-   * doesn't exist until the agent's first turn, so resolution is lazy:
-   * retried on PTY data (cheap, fires constantly while the agent works — the
-   * common path to resolving fast) and a modest backstop timer, given up
-   * after CHAT_RETRY_TIMEOUT_MS so a session that never produces one (killed
-   * immediately, or the rare non-claude-code id collision) doesn't poll
-   * forever. Once resolved, re-reads only the file's tail on each fs event
-   * using a byte-offset cursor that never consumes a still-being-written
-   * trailing line, and dedupes by uuid (transcriptMessages.ts).
+   * Tail the Claude Code transcript / pi session file for chat (TASK-FPH60).
+   * Both are lazily-resolved, byte-offset-tailed files — the shared mechanism
+   * lives in chatTail.ts; only file resolution + line parsing differ here.
+   * opencode has no file to tail (see startOpencodeChatPollIfNeeded instead);
+   * antigravity/grok/kilo have no chat reader at all.
    */
-  function setupChatTail(id: string, rec: SessionRecord, proc: pty.IPty): void {
-    if (rec.backend.kind !== 'claude-code') return
-
-    let chatFile: string | null = null
-    let chatOffset = 0
-    const cursor = createChatCursor()
-    const retryDeadline = Date.now() + CHAT_RETRY_TIMEOUT_MS
-
-    function tailChat(): void {
-      if (!chatFile) return
-      let stat: fs.Stats
-      try {
-        stat = fs.statSync(chatFile)
-      } catch {
-        return // file briefly missing between watch events — next event retries
-      }
-      if (stat.size < chatOffset) chatOffset = 0 // rotated/truncated — restart
-      if (stat.size <= chatOffset) return
-
-      let fd: number
-      try {
-        fd = fs.openSync(chatFile, 'r')
-      } catch {
-        return
-      }
-      const length = stat.size - chatOffset
-      const buf = Buffer.alloc(length)
-      try {
-        fs.readSync(fd, buf, 0, length, chatOffset)
-      } catch {
-        return
-      } finally {
-        fs.closeSync(fd)
-      }
-
-      const { complete, consumedBytes } = completeLines(buf.toString('utf8'))
-      if (consumedBytes === 0) return // trailing partial line — wait for more data
-      chatOffset += consumedBytes
-      for (const msg of cursor.next(complete)) {
-        emit('chatMessage', id, msg)
-      }
+  function setupChatTail(id: string, rec: SessionRecord, proc: pty.IPty, cwd: string): void {
+    if (rec.backend.kind === 'claude-code') {
+      rec.chatTail = startChatTail<SessionChatMessageDTO>({
+        resolveFile: () => transcriptPathFor(id),
+        parse: parseTranscriptMessages,
+        onMessage: (msg) => emit('chatMessage', id, msg),
+        retryIntervalMs: CHAT_RETRY_INTERVAL_MS,
+        retryTimeoutMs: CHAT_RETRY_TIMEOUT_MS,
+      })
+      proc.onData(() => rec.chatTail?.poke())
+      return
     }
+    if (rec.backend.kind === 'pi') {
+      const sessionDir = piSessionDirFor(cwd)
+      rec.chatTail = startChatTail<SessionChatMessageDTO>({
+        resolveFile: () => findNewestPiSessionFileSync(sessionDir),
+        parse: parsePiChatMessages,
+        onMessage: (msg) => emit('chatMessage', id, msg),
+        retryIntervalMs: CHAT_RETRY_INTERVAL_MS,
+        retryTimeoutMs: CHAT_RETRY_TIMEOUT_MS,
+      })
+      proc.onData(() => rec.chatTail?.poke())
+    }
+  }
 
-    function resolveChatFile(): void {
-      if (chatFile || rec.disposed) return
-      const found = transcriptPathFor(id)
-      if (!found) {
-        if (Date.now() > retryDeadline) disposeChatTail(rec)
+  /**
+   * Independent opencode chat poller (TASK-FPH60): opencode's embedded server
+   * has no file to fs.watch, so live chat updates are polled directly, gated
+   * on both a captured sid/port AND at least one chat subscriber (subscribers
+   * ref-count via subscribeChat/unsubscribeChat below) — a session nobody has
+   * a chat view open for doesn't get polled. Deliberately does not touch
+   * detector/status state; a fetch failure is swallowed and just retried next
+   * tick.
+   */
+  function startOpencodeChatPollIfNeeded(id: string, rec: SessionRecord): void {
+    if (rec.backend.kind !== 'opencode') return
+    if (rec.opencodeChatPollTimer) return // already running
+    if (!rec.chatSubscribers || rec.chatSubscribers.size === 0) return
+    if (!rec.opencodePort || !rec.opencodeSid) return // sid not captured yet — setOpencodeSid retries this
+
+    const port = rec.opencodePort
+    const sid = rec.opencodeSid
+    rec.opencodeChatSeen ??= new Set<string>()
+    const seen = rec.opencodeChatSeen
+
+    rec.opencodeChatPollTimer = setInterval(() => {
+      if (rec.disposed) {
+        disposeOpencodeChatPoll(rec)
         return
       }
-      chatFile = found
-      disposeChatTail(rec) // stop the retry timer — it's served its purpose
-      tailChat() // catch up on whatever the first turn already wrote
-      try {
-        const w = fs.watch(chatFile, { persistent: false }, () => tailChat())
-        w.on('error', () => {
-          /* ignore */
+      void fetchOpencodeMessages(port, sid)
+        .then((messages) => {
+          if (rec.disposed) return
+          for (const msg of opencodeMessagesToChat(messages)) {
+            if (seen.has(msg.uuid)) continue
+            seen.add(msg.uuid)
+            emit('chatMessage', id, msg)
+          }
         })
-        rec.chatWatcher = w
-      } catch {
-        // Watch failed (e.g. fs limits) — the file is still readable on
-        // future PTY-data-triggered attempts, just without live push.
-      }
-    }
-
-    rec.chatRetryTimer = setInterval(resolveChatFile, CHAT_RETRY_INTERVAL_MS)
-    proc.onData(() => resolveChatFile())
-    resolveChatFile() // resume/attach: the transcript may already exist
+        .catch(() => {
+          /* transient — retried next tick */
+        })
+    }, OPENCODE_CHAT_POLL_MS)
   }
 
   /** Handle a polling backend uses to report status + register its timer. */
@@ -460,7 +471,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     }
 
     wire(id, rec)
-    setupChatTail(id, rec, proc)
+    setupChatTail(id, rec, proc, cwd)
     emit('status', id, 'running')
     backend.beginStatusTracking?.({
       cwd,
@@ -558,6 +569,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       old.pty.kill()
       old.screen.dispose()
       disposeChatTail(old)
+      disposeOpencodeChatPoll(old)
       sessions.delete(id)
     }
 
@@ -602,6 +614,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       old.watcher?.close()
       old.watcher = undefined
       disposeChatTail(old)
+      disposeOpencodeChatPoll(old)
       old.disposed = true
       old.pty.kill()
       old.screen.dispose()
@@ -671,6 +684,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     rec.watcher?.close()
     rec.watcher = undefined
     disposeChatTail(rec)
+    disposeOpencodeChatPoll(rec)
     rec.disposed = true
     rec.pty.kill()
     rec.screen.dispose()
@@ -710,6 +724,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       rec.watcher?.close()
       rec.watcher = undefined
       disposeChatTail(rec)
+      disposeOpencodeChatPoll(rec)
       rec.disposed = true
       try {
         rec.pty.kill()
@@ -741,6 +756,7 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     rec.watcher?.close()
     rec.watcher = undefined
     disposeChatTail(rec)
+    disposeOpencodeChatPoll(rec)
     rec.disposed = true // suppress the onExit status/exit emission
     rec.dto.status = 'reaped'
     emit('status', sessionId, 'reaped')
@@ -768,6 +784,39 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       isInitialStart: false,
       handle: makeStatusHandle(sessionId, rec),
     })
+    // TASK-FPH60: the sid is also what the chat poller needs — start it now if
+    // a subscriber was already registered before the sid arrived.
+    startOpencodeChatPollIfNeeded(sessionId, rec)
+  }
+
+  // ── Chat subscriber ref-counting (TASK-FPH60) ─────────────────────────────
+
+  function getOpencodeState(sessionId: string): { port?: number; sid?: string } | undefined {
+    const rec = sessions.get(sessionId)
+    if (!rec) return undefined
+    return { port: rec.opencodePort, sid: rec.opencodeSid }
+  }
+
+  function subscribeChat(sessionId: string, clientId: string): void {
+    const rec = sessions.get(sessionId)
+    if (!rec) return
+    rec.chatSubscribers ??= new Set()
+    rec.chatSubscribers.add(clientId)
+    startOpencodeChatPollIfNeeded(sessionId, rec)
+  }
+
+  function unsubscribeChat(sessionId: string, clientId: string): void {
+    const rec = sessions.get(sessionId)
+    if (!rec?.chatSubscribers) return
+    rec.chatSubscribers.delete(clientId)
+    if (rec.chatSubscribers.size === 0) disposeOpencodeChatPoll(rec)
+  }
+
+  function dropChatClient(clientId: string): void {
+    for (const rec of sessions.values()) {
+      if (!rec.chatSubscribers?.delete(clientId)) continue
+      if (rec.chatSubscribers.size === 0) disposeOpencodeChatPoll(rec)
+    }
   }
 
   return {
@@ -786,5 +835,9 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     setOpencodeSid,
     liveSessions,
     reap,
+    getOpencodeState,
+    subscribeChat,
+    unsubscribeChat,
+    dropChatClient,
   }
 }
