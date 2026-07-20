@@ -81,11 +81,11 @@
     object-fit: contain;
   }
   .about-logo b {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
   }
   .about-desc {
-    font-size: 12.5px;
+    font-size: 13px;
     color: hsl(var(--muted-foreground));
     margin-top: 4px;
     line-height: 1.5;
