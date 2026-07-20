@@ -50,6 +50,7 @@ import {
 } from '../services/piSessions.js'
 import { fetchOpencodeMessages, opencodeMessagesToChat } from '../services/opencodeSessions.js'
 import { listAgentSkillsFor } from '../services/agentSkills.js'
+import { extractScreenQuestion } from '../services/chatQuestion.js'
 import type { SessionChatMessageDTO } from '../shared/contract.js'
 
 /** Shared paging for getChatMessages across every backend (TASK-FPH60):
@@ -1052,6 +1053,30 @@ export function createRpc(
         const cwd = await cwdForSession(session)
         if (!cwd) return []
         return listAgentSkillsFor(session.agentKind, cwd)
+      }
+
+      case IPC.getChatQuestion: {
+        const id = args[0] as string
+        // Owner-scoped like getChatMessages/listAgentSkills: missing and
+        // other-owner rows surface the same "not found".
+        const session = ownedSession(id)
+        if (!session) throw new Error(`Session not found: ${id}`)
+        if (session.status !== 'needs') return null
+
+        // Prefer the agent's own report (status.json sentinel message) when
+        // fresh — see sessionManager's getSessionActivity/activityMessage.
+        const agentMsg = deps.sessions.getSessionActivity?.(id)
+        if (agentMsg) return { text: agentMsg, source: 'agent' }
+
+        // Fall back to the live headless-screen mirror — covers interactive
+        // permission prompts, where the agent process is frozen and reports
+        // nothing. Only for a LIVE session: getBuffer() falls back to
+        // persisted scrollback for a dead one, which isn't a "screen".
+        if (!deps.sessions.has(id)) return null
+        const { data } = await deps.sessions.getBuffer(id)
+        const excerpt = extractScreenQuestion(data)
+        if (!excerpt) return null
+        return { text: excerpt, source: 'screen' }
       }
 
       case IPC.listSessionHistory: {

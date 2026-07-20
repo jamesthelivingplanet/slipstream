@@ -108,6 +108,13 @@ interface SessionRecord {
   opencodeChatPollTimer?: ReturnType<typeof setInterval>
   opencodeChatSeen?: Set<string>
   chatSubscribers?: Set<string>
+  // Episode-scoped "what is the agent asking" message from the most recent
+  // status.json sentinel report that carried one (`slipstream request-input`/
+  // `approval-request`) — TASK-FPH60 chat question card. Set only alongside a
+  // transition INTO 'needs' with a message; cleared on any transition away
+  // from 'needs', same convention as pushService's needsSince. See
+  // getSessionActivity below.
+  activityMessage?: string
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
@@ -142,6 +149,10 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
       if (ptyDrivenStatus) {
         const s = detector.status()
         rec.dto.status = s
+        // Heuristic (non-sentinel) status changes never carry a message —
+        // clear any stale one from a prior 'needs' episode so a fresh,
+        // report-less 'needs' doesn't surface old text (episode-scoped).
+        if (s !== 'needs') rec.activityMessage = undefined
         emit('status', id, s)
       }
     })
@@ -447,9 +458,11 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
                     detector.applySignal(parsed.state)
                     const s = detector.status()
                     rec.dto.status = s
+                    rec.activityMessage = s === 'needs' ? meta?.message : undefined
                     emit('status', id, s, meta)
                   } else {
                     rec.dto.status = parsed.state
+                    rec.activityMessage = parsed.state === 'needs' ? meta?.message : undefined
                     emit('status', id, parsed.state, meta)
                   }
                 }
@@ -797,6 +810,12 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     return { port: rec.opencodePort, sid: rec.opencodeSid }
   }
 
+  // TASK-FPH60 chat question card: the freshest 'needs'-episode message
+  // reported via the status.json sentinel, if any. See SessionRecord.activityMessage.
+  function getSessionActivity(sessionId: string): string | undefined {
+    return sessions.get(sessionId)?.activityMessage
+  }
+
   function subscribeChat(sessionId: string, clientId: string): void {
     const rec = sessions.get(sessionId)
     if (!rec) return
@@ -839,5 +858,6 @@ export function createSessionManager(logger?: RunLogger, root?: string): ISessio
     subscribeChat,
     unsubscribeChat,
     dropChatClient,
+    getSessionActivity,
   }
 }

@@ -10,7 +10,11 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
   import type { Session, BackendKind } from '../types'
-  import type { SessionChatMessageDTO, AgentSkillDTO } from '../../../electron/shared/contract.js'
+  import type {
+    SessionChatMessageDTO,
+    AgentSkillDTO,
+    ChatQuestionDTO,
+  } from '../../../electron/shared/contract.js'
   import {
     getChatMessages,
     onChatMessage,
@@ -19,6 +23,7 @@
     subscribeChat,
     unsubscribeChat,
     listAgentSkills,
+    getChatQuestion,
   } from '../ipc'
   import { markSessionInput } from '../stores'
   import {
@@ -97,6 +102,55 @@
   let textareaEl: HTMLTextAreaElement
   let inputBarEl: HTMLDivElement
 
+  // ── Needs-input question (TASK-FPH60) ─────────────────────────────────────
+  // What the agent is actually asking, shown inside the needs-card instead of
+  // the generic "Claude is asking something in the terminal" wording.
+  let chatQuestion: ChatQuestionDTO | null = null
+  // Bumped on every fetch start/clear so a stale in-flight response can't
+  // clobber a newer one (mirrors loadInitial's loadedFor guard).
+  let questionFetchSeq = 0
+  // needsSince is episode-scoped (stores.ts) — keying the "have we fetched
+  // for this episode" check on it (rather than just session.id) re-fetches
+  // exactly once per needs episode, including the very first render when
+  // mounting straight into an already-'needs' session.
+  let questionFetchedFor: string | null = null
+
+  async function fetchChatQuestion(sessionId: string) {
+    const seq = ++questionFetchSeq
+    let result: ChatQuestionDTO | null
+    try {
+      result = await getChatQuestion(sessionId)
+    } catch {
+      result = null
+    }
+    if (seq !== questionFetchSeq) return // superseded by a newer fetch/clear
+    chatQuestion = result
+  }
+
+  // Re-fetch once per needs episode (on mount if already 'needs', and again
+  // whenever a fresh episode starts); clear the instant the session leaves
+  // 'needs' so a stale question never lingers into the next episode. A plain
+  // function (not inline in the $: block below) — mirrors refreshChatAvailability
+  // in TerminalView.svelte, which avoids eslint-plugin-svelte flagging the
+  // synchronous state writes as a possible infinite reactive loop.
+  function syncChatQuestion(
+    id: string | undefined,
+    status: string,
+    needsSince: number | undefined,
+  ) {
+    if (id && status === 'needs') {
+      const episodeKey = `${id}:${needsSince ?? ''}`
+      if (questionFetchedFor !== episodeKey) {
+        questionFetchedFor = episodeKey
+        void fetchChatQuestion(id)
+      }
+    } else if (chatQuestion !== null || questionFetchedFor !== null) {
+      questionFetchSeq++ // invalidate any in-flight fetch from the episode just left
+      questionFetchedFor = null
+      chatQuestion = null
+    }
+  }
+
   // ── Slash-command skills menu ─────────────────────────────────────────────
   let skills: AgentSkillDTO[] = []
   let skillsLoadedFor: string | null = null
@@ -113,6 +167,7 @@
     session.status === 'needs' &&
     (session.needsSince == null || !messages.some((m) => m.ts >= (session.needsSince as number)))
   $: writeDisabledReason = !canWrite ? 'Another client controls this session.' : ''
+  $: syncChatQuestion(session.id, session.status, session.needsSince)
 
   $: slashToken = detectSlashToken(draftText)
   $: if (slashToken && session.id) void ensureSkillsLoaded(session.id)
@@ -346,7 +401,16 @@
 
       {#if showNeedsCard}
         <div class="needs-card">
-          <div class="needs-text">Claude is asking something in the terminal</div>
+          {#if chatQuestion}
+            <div class="needs-question">
+              <div class="needs-question-label">
+                {chatQuestion.source === 'agent' ? 'Claude asks:' : 'From the terminal:'}
+              </div>
+              <pre class="needs-question-text">{chatQuestion.text}</pre>
+            </div>
+          {:else}
+            <div class="needs-text">Claude is asking something in the terminal</div>
+          {/if}
           <button type="button" class="btn btn-outline btn-sm" on:click={onSwitchToTerminal}>
             Switch to terminal
           </button>
@@ -583,8 +647,9 @@
   /* ── needs-input fallback card ── */
   .needs-card {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
     margin-top: 0.6rem;
     padding: 0.7rem 0.85rem;
     border-radius: var(--radius);
@@ -593,8 +658,34 @@
     background: hsl(var(--st-needs) / 0.08);
     font-size: 0.82rem;
   }
+  .needs-card > .btn {
+    align-self: flex-start;
+  }
   .needs-text {
     flex: 1;
+  }
+  .needs-question {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .needs-question-label {
+    font-weight: 600;
+  }
+  .needs-question-text {
+    margin: 0;
+    max-height: 14rem;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: hsl(var(--foreground));
+    padding: 0.5rem 0.6rem;
+    border-radius: calc(var(--radius) - 3px);
+    background: hsl(var(--accent-bg));
+    border: 1px solid hsl(var(--st-needs) / 0.25);
   }
 
   /* ── input bar ── */

@@ -421,6 +421,17 @@ export interface AgentSkillDTO {
   source: 'project' | 'user'
 }
 
+/** Best-effort "what is the agent asking" for the ChatView needs-input card
+ *  (TASK-FPH60), surfaced via `getChatQuestion`. `'agent'` is the CLI's own
+ *  reported message (slipstream request-input/approval-request sentinel) —
+ *  preferred when fresh. `'screen'` is a fallback excerpt of the live
+ *  headless-terminal mirror, covering interactive permission prompts where
+ *  the agent process is frozen and reports nothing. */
+export interface ChatQuestionDTO {
+  text: string
+  source: 'agent' | 'screen'
+}
+
 /** Per-session "virtual clipboard" image (TASK-CWLL6): the renderer uploads a
  *  clipboard PNG here before sending Ctrl+V to the PTY, so PATH-shimmed
  *  clipboard tools on the agent side can serve it. Single-slot per session —
@@ -667,6 +678,14 @@ export interface ISessionManager {
   /** Drop a disconnected client from every session's chat-subscriber set
    *  (rpc.ts calls this from dispose()). Optional, same rationale. */
   dropChatClient?(clientId: string): void
+  /** The most recent operator-facing message from a 'needs' status.json
+   *  sentinel report (`slipstream request-input`/`approval-request`),
+   *  episode-scoped: undefined once the session's status leaves 'needs' or
+   *  when no such message has been reported for the current episode
+   *  (TASK-FPH60 chat question card — getChatQuestion in rpc.ts). Undefined
+   *  when the session isn't live. Optional: a fake sessionManager lacking it
+   *  makes getChatQuestion fall through to the screen-excerpt fallback. */
+  getSessionActivity?(sessionId: string): string | undefined
 }
 
 /**
@@ -993,6 +1012,11 @@ export interface SlipstreamApi {
    *  known skills convention (antigravity/grok/kilo) or an unresolvable cwd. */
   listAgentSkills(id: string): Promise<AgentSkillDTO[]>
 
+  /** What is the agent asking, for the ChatView needs-input card (TASK-FPH60).
+   *  null when the session isn't in 'needs', or when neither an agent-reported
+   *  message nor a live screen excerpt is available. */
+  getChatQuestion(id: string): Promise<ChatQuestionDTO | null>
+
   /** Subscribe to transport connection state (true = connected). Fires on every
    *  transition; used by the UI to resync terminals after a reconnect. */
   onConnectionChange(cb: (connected: boolean) => void): () => void
@@ -1076,6 +1100,7 @@ export const IPC = {
   subscribeChat: 'session:chatSubscribe',
   unsubscribeChat: 'session:chatUnsubscribe',
   listAgentSkills: 'session:skills',
+  getChatQuestion: 'session:chatQuestion',
 } as const
 
 declare global {

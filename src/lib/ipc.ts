@@ -45,6 +45,7 @@ import type {
   GitHostConfigDTO,
   SessionChatMessageDTO,
   AgentSkillDTO,
+  ChatQuestionDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY, DEFAULT_SCHEDULER_POLICY } from '../../electron/shared/contract.js'
 
@@ -553,6 +554,13 @@ export function unsubscribeChat(id: string): Promise<void> {
  *  session's agent, for the chat input's `/`-command menu. */
 export function listAgentSkills(id: string): Promise<AgentSkillDTO[]> {
   return hasBackend ? window.slipstream.listAgentSkills(id) : Promise.resolve([])
+}
+
+/** What is the agent asking, for the ChatView needs-input card. null when
+ *  there's no backend, the session isn't in 'needs', or nothing is available
+ *  to show (see ChatQuestionDTO). */
+export function getChatQuestion(id: string): Promise<ChatQuestionDTO | null> {
+  return hasBackend ? window.slipstream.getChatQuestion(id) : Promise.resolve(null)
 }
 
 // ── PR / CI status (FLO-96) ───────────────────────────────────────────────
