@@ -5,6 +5,11 @@
   // and back) skills cache keyed by session id — "fetch lazily on first open,
   // cache per session" (TASK-FPH60).
   const skillsCache = new Map<string, CachedAgentSkillDTO[]>()
+
+  // Module-level per-session draft cache — survives ChatView mount/destroy
+  // (session switch, or toggling to Terminal and back), so an in-progress
+  // draft message isn't silently lost.
+  const draftCache = new Map<string, string>()
 </script>
 
 <script lang="ts">
@@ -26,6 +31,7 @@
     getChatQuestion,
   } from '../ipc'
   import { markSessionInput } from '../stores'
+  import { frameForPty } from '../review.js'
   import {
     mergeChatMessages,
     buildChatView,
@@ -98,6 +104,9 @@
   let atBottom = true
   let expandedIds = new Set<string>()
   let draftText = ''
+  // The session id draftText's current value belongs to — used to persist it
+  // into draftCache per-session and restore it on session switch (TASK-5E5CY).
+  let draftSessionId: string | null = null
   let offChatMessage: (() => void) | null = null
   let textareaEl: HTMLTextAreaElement
   let inputBarEl: HTMLDivElement
@@ -115,34 +124,47 @@
   // mounting straight into an already-'needs' session.
   let questionFetchedFor: string | null = null
 
-  async function fetchChatQuestion(sessionId: string) {
+  // Retries because getChatQuestion is gated on the backend's own
+  // instantaneous session status, which flaps needs↔running on an idle TUI
+  // (status pings on every PTY chunk, not on change — see docs/ARCHITECTURE.md
+  // §Session status pipeline). A single fetch can land in a momentary
+  // 'running' flap and come back null even though the episode (needsSince)
+  // is still live, so we poll a few times before giving up. Never clobbers an
+  // already-fetched good question with a later null.
+  async function fetchChatQuestion(sessionId: string, episodeSince: number) {
     const seq = ++questionFetchSeq
-    let result: ChatQuestionDTO | null
-    try {
-      result = await getChatQuestion(sessionId)
-    } catch {
-      result = null
+    for (let i = 0; i < 8; i++) {
+      let result: ChatQuestionDTO | null
+      try {
+        result = await getChatQuestion(sessionId)
+      } catch {
+        result = null
+      }
+      if (seq !== questionFetchSeq || session.id !== sessionId) return // superseded
+      if (result) {
+        chatQuestion = result
+        return
+      }
+      if (session.needsSince !== episodeSince) return // episode ended/changed
+      await new Promise((r) => setTimeout(r, 1200))
+      if (seq !== questionFetchSeq || session.id !== sessionId) return // superseded
     }
-    if (seq !== questionFetchSeq) return // superseded by a newer fetch/clear
-    chatQuestion = result
   }
 
-  // Re-fetch once per needs episode (on mount if already 'needs', and again
-  // whenever a fresh episode starts); clear the instant the session leaves
-  // 'needs' so a stale question never lingers into the next episode. A plain
-  // function (not inline in the $: block below) — mirrors refreshChatAvailability
-  // in TerminalView.svelte, which avoids eslint-plugin-svelte flagging the
+  // Re-fetch once per needs episode (on mount if already in one, and again
+  // whenever a fresh episode starts); clear the instant the episode ends
+  // (needsSince clears) so a stale question never lingers into the next
+  // episode. Gated on needsSince (episode-scoped, stamped once) rather than
+  // the flappy instantaneous session.status. A plain function (not inline in
+  // the $: block below) — mirrors refreshChatAvailability in
+  // TerminalView.svelte, which avoids eslint-plugin-svelte flagging the
   // synchronous state writes as a possible infinite reactive loop.
-  function syncChatQuestion(
-    id: string | undefined,
-    status: string,
-    needsSince: number | undefined,
-  ) {
-    if (id && status === 'needs') {
-      const episodeKey = `${id}:${needsSince ?? ''}`
+  function syncChatQuestion(id: string | undefined, needsSince: number | undefined) {
+    if (id && needsSince != null) {
+      const episodeKey = `${id}:${needsSince}`
       if (questionFetchedFor !== episodeKey) {
         questionFetchedFor = episodeKey
-        void fetchChatQuestion(id)
+        void fetchChatQuestion(id, needsSince)
       }
     } else if (chatQuestion !== null || questionFetchedFor !== null) {
       questionFetchSeq++ // invalidate any in-flight fetch from the episode just left
@@ -164,10 +186,9 @@
   $: renderGroups = buildRenderGroups(items)
   $: agentIcon = agentOption((session.agentKind ?? 'claude-code') as BackendKind).icon
   $: showNeedsCard =
-    session.status === 'needs' &&
-    (session.needsSince == null || !messages.some((m) => m.ts >= (session.needsSince as number)))
+    session.needsSince != null && !messages.some((m) => m.ts >= (session.needsSince as number))
   $: writeDisabledReason = !canWrite ? 'Another client controls this session.' : ''
-  $: syncChatQuestion(session.id, session.status, session.needsSince)
+  $: syncChatQuestion(session.id, session.needsSince)
 
   $: slashToken = detectSlashToken(draftText)
   $: if (slashToken && session.id) void ensureSkillsLoaded(session.id)
@@ -233,6 +254,23 @@
     void loadInitial(session.id)
   }
 
+  // Per-session draft persistence (TASK-5E5CY): restore the saved draft the
+  // moment session.id changes to one we haven't already switched to — this
+  // must run (and settle draftSessionId/draftText) before the persist
+  // reactive below so typing after a switch doesn't immediately stomp the
+  // cache with a mid-restore value. On the very next session switch it also
+  // fires before the persist reactive re-runs for the new session, so no
+  // draft is ever attributed to the wrong session.
+  $: if (session.id && session.id !== draftSessionId) {
+    draftSessionId = session.id
+    draftText = draftCache.get(session.id) ?? ''
+  }
+
+  // Persist every keystroke into the module-level cache so the draft
+  // survives this component being destroyed (session switch, or toggling to
+  // Terminal and back).
+  $: if (draftSessionId) draftCache.set(draftSessionId, draftText)
+
   async function loadOlder() {
     if (loadingOlder || !hasMore || !session.id || messages.length === 0) return
     const sessionId = session.id
@@ -282,6 +320,10 @@
   onDestroy(() => {
     offChatMessage?.()
     if (hasBackend && session.id) void unsubscribeChat(session.id)
+    // Belt-and-suspenders: the persist reactive already keeps draftCache
+    // current, but save once more in case destroy fires before Svelte flushes
+    // a final reactive pass.
+    if (draftSessionId) draftCache.set(draftSessionId, draftText)
   })
 
   function toggleExpanded(toolUseId: string) {
@@ -297,12 +339,17 @@
     return 'hsl(var(--st-done))'
   }
 
-  function submit() {
-    if (!canWrite || !session.id) return
+  async function submit() {
     const text = draftText.trim()
-    if (!text) return
+    if (!canWrite || !session.id || !text) return
+    // Bracketed-paste the text, then send the submit key as a separate,
+    // delayed write — a plain `text + '\r'` in one chunk lands in the TUI's
+    // input box without submitting it (mirrors DiffView's handleSubmit).
+    const { paste, submit: submitSeq } = frameForPty(text)
     markSessionInput(session.id)
-    writeSession(session.id, text + '\r')
+    writeSession(session.id, paste)
+    await new Promise((r) => setTimeout(r, 75))
+    writeSession(session.id, submitSeq)
     draftText = ''
   }
 
@@ -331,7 +378,7 @@
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      submit()
+      void submit()
     }
   }
 </script>
