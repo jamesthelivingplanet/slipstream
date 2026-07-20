@@ -195,7 +195,7 @@ scripts/
   serve-with-env.sh       sources server.env and execs the server; called by systemd/launchd
   build-server.mjs        esbuild script for the headless server bundle
   check-preload-cjs.mjs   post-build guard: preload output has no top-level ESM import/export
-  e2e/                    Playwright drivers (smoke-add-repo is the CI gate)
+  e2e/                    Playwright drivers (smoke-add-repo + restart-recovery are the CI gates)
 prototype.html            original design reference (not used at runtime)
 ```
 
