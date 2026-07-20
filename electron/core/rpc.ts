@@ -42,6 +42,32 @@ import { readSessionUsage, buildUsageSummary } from '../services/usage.js'
 import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
 import { transcriptPathFor } from '../services/transcripts.js'
 import { parseTranscriptMessages } from '../services/transcriptMessages.js'
+import { parsePiChatMessages } from '../services/piChatMessages.js'
+import {
+  findNewestPiSessionFile,
+  piSessionDirFor,
+  readPiSessionFile,
+} from '../services/piSessions.js'
+import { fetchOpencodeMessages, opencodeMessagesToChat } from '../services/opencodeSessions.js'
+import { listAgentSkillsFor } from '../services/agentSkills.js'
+import { extractScreenQuestion } from '../services/chatQuestion.js'
+import type { SessionChatMessageDTO } from '../shared/contract.js'
+
+/** Shared paging for getChatMessages across every backend (TASK-FPH60):
+ *  `beforeTs` filters to strictly-older messages (pagination cursor), `limit`
+ *  (default 50) caps to the most recent page after that filter. */
+function pageChatMessages(
+  messages: SessionChatMessageDTO[],
+  opts: { beforeTs?: number; limit?: number },
+): SessionChatMessageDTO[] {
+  let out = messages
+  if (opts.beforeTs !== undefined) {
+    out = out.filter((m) => m.ts < opts.beforeTs!)
+  }
+  const limit = opts.limit ?? 50
+  if (out.length > limit) out = out.slice(-limit)
+  return out
+}
 
 function parseCsv(raw: string | undefined): string[] {
   return (raw ?? '')
@@ -972,28 +998,85 @@ export function createRpc(
         const session = ownedSession(id)
         if (!session) throw new Error(`Session not found: ${id}`)
 
-        // Only claude-code sessions have a transcript reader (TASK-FPH60) —
-        // other backends fall back to terminal-only, not an error.
-        if ((session.agentKind ?? 'claude-code') !== 'claude-code') {
-          return { available: false, messages: [] }
-        }
-        const file = transcriptPathFor(id)
-        if (!file) return { available: false, messages: [] }
+        const kind = session.agentKind ?? 'claude-code'
 
-        let raw: string
-        try {
-          raw = await fs.promises.readFile(file, 'utf8')
-        } catch {
-          return { available: false, messages: [] }
+        if (kind === 'claude-code') {
+          const file = transcriptPathFor(id)
+          if (!file) return { available: false, messages: [] }
+          let raw: string
+          try {
+            raw = await fs.promises.readFile(file, 'utf8')
+          } catch {
+            return { available: false, messages: [] }
+          }
+          return { available: true, messages: pageChatMessages(parseTranscriptMessages(raw), opts) }
         }
 
-        let messages = parseTranscriptMessages(raw)
-        if (opts.beforeTs !== undefined) {
-          messages = messages.filter((m) => m.ts < opts.beforeTs!)
+        if (kind === 'pi') {
+          const cwd = await cwdForSession(session)
+          if (!cwd) return { available: false, messages: [] }
+          const file = await findNewestPiSessionFile(piSessionDirFor(cwd))
+          if (!file) return { available: false, messages: [] }
+          const raw = await readPiSessionFile(file)
+          return { available: true, messages: pageChatMessages(parsePiChatMessages(raw), opts) }
         }
-        const limit = opts.limit ?? 50
-        if (messages.length > limit) messages = messages.slice(-limit)
-        return { available: true, messages }
+
+        if (kind === 'opencode') {
+          const state = deps.sessions.getOpencodeState?.(id)
+          if (!state?.port || !state.sid) return { available: false, messages: [] }
+          const raw = await fetchOpencodeMessages(state.port, state.sid)
+          return { available: true, messages: pageChatMessages(opencodeMessagesToChat(raw), opts) }
+        }
+
+        // antigravity/grok/kilo have no chat reader (TASK-FPH60) — terminal-only.
+        return { available: false, messages: [] }
+      }
+
+      case IPC.subscribeChat: {
+        const id = args[0] as string
+        if (!ownedSession(id)) return undefined
+        deps.sessions.subscribeChat?.(id, clientId)
+        return undefined
+      }
+
+      case IPC.unsubscribeChat: {
+        const id = args[0] as string
+        if (!ownedSession(id)) return undefined
+        deps.sessions.unsubscribeChat?.(id, clientId)
+        return undefined
+      }
+
+      case IPC.listAgentSkills: {
+        const id = args[0] as string
+        const session = ownedSession(id)
+        if (!session) throw new Error(`Session not found: ${id}`)
+        const cwd = await cwdForSession(session)
+        if (!cwd) return []
+        return listAgentSkillsFor(session.agentKind, cwd)
+      }
+
+      case IPC.getChatQuestion: {
+        const id = args[0] as string
+        // Owner-scoped like getChatMessages/listAgentSkills: missing and
+        // other-owner rows surface the same "not found".
+        const session = ownedSession(id)
+        if (!session) throw new Error(`Session not found: ${id}`)
+        if (session.status !== 'needs') return null
+
+        // Prefer the agent's own report (status.json sentinel message) when
+        // fresh — see sessionManager's getSessionActivity/activityMessage.
+        const agentMsg = deps.sessions.getSessionActivity?.(id)
+        if (agentMsg) return { text: agentMsg, source: 'agent' }
+
+        // Fall back to the live headless-screen mirror — covers interactive
+        // permission prompts, where the agent process is frozen and reports
+        // nothing. Only for a LIVE session: getBuffer() falls back to
+        // persisted scrollback for a dead one, which isn't a "screen".
+        if (!deps.sessions.has(id)) return null
+        const { data } = await deps.sessions.getBuffer(id)
+        const excerpt = extractScreenQuestion(data)
+        if (!excerpt) return null
+        return { text: excerpt, source: 'screen' }
       }
 
       case IPC.listSessionHistory: {
@@ -1047,6 +1130,7 @@ export function createRpc(
     deps.sessions.off('exit', onExit)
     deps.sessions.off('agentEvent', onAgentEvent)
     deps.sessions.off('chatMessage', onChatMessage)
+    deps.sessions.dropChatClient?.(clientId)
     if (coord) {
       coord.dropClient(clientId)
       coord.off('change', onLockChange)
