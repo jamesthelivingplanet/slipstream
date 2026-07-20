@@ -60,7 +60,22 @@ const CHAT_RETRY_TIMEOUT_MS = 5 * 60_000
 // Runs only while >=1 chat subscriber is registered (see subscribeChat).
 const OPENCODE_CHAT_POLL_MS = 3000
 
-function spawnAgent(
+/** Factory for the node-pty process backing a session. Extracted as an
+ *  injectable seam (FLO-132) so the entire SessionManager state machine —
+ *  launch/kill/handoff/attach event ordering, disposed suppression, watcher
+ *  teardown — can be exercised against a stub PTY in plain Node (vitest),
+ *  with no dependency on the Electron native ABI. Production callers omit it
+ *  and get defaultSpawnAgent (real pty.spawn); tests pass a stub. */
+export type SpawnAgent = (
+  cmd: string,
+  args: string[],
+  cwd: string,
+  cols: number,
+  rows: number,
+  env?: Record<string, string>,
+) => pty.IPty
+
+function defaultSpawnAgent(
   cmd: string,
   args: string[],
   cwd: string,
@@ -119,7 +134,14 @@ interface SessionRecord {
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
-export function createSessionManager(logger?: RunLogger, root?: string): ISessionManager {
+export function createSessionManager(
+  logger?: RunLogger,
+  root?: string,
+  /** Injectable PTY factory (FLO-132). Defaults to the real pty.spawn; tests
+   *  pass a stub so the state machine runs in plain Node without node-pty's
+   *  Electron native ABI. */
+  spawnAgent: SpawnAgent = defaultSpawnAgent,
+): ISessionManager {
   const emitter = new EventEmitter()
   const sessions = new Map<string, SessionRecord>()
 
