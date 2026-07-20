@@ -421,7 +421,7 @@
     border: none;
     color: inherit;
     font-family: inherit;
-    font-size: 12.5px;
+    font-size: 13px;
     cursor: pointer;
     text-align: left;
   }
@@ -465,7 +465,7 @@
 
   .hunk-header {
     padding: 4px 10px;
-    font-size: 11.5px;
+    font-size: 12px;
     color: hsl(var(--muted-foreground));
     background: hsl(var(--accent-bg));
   }
@@ -549,7 +549,7 @@
     background: hsl(var(--primary) / 0.06);
     border-top: 1px solid hsl(var(--border));
     border-bottom: 1px solid hsl(var(--border));
-    font-size: 12.5px;
+    font-size: 13px;
   }
   .cc-text {
     flex: 1;

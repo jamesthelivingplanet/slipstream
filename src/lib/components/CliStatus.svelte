@@ -141,7 +141,7 @@
     margin-bottom: 8px;
   }
   .mcp-title {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
   }
   .mcp-state {
@@ -157,7 +157,7 @@
     margin-bottom: 8px;
   }
   .mcp-tool {
-    font-size: 10.5px;
+    font-size: 11px;
     padding: 2px 6px;
     border-radius: 6px;
     border: 1px solid hsl(var(--border));
@@ -165,12 +165,12 @@
   }
 
   .mcp-line {
-    font-size: 11.5px;
+    font-size: 12px;
     margin-bottom: 2px;
   }
 
   .mcp-error {
-    font-size: 11.5px;
+    font-size: 12px;
     color: hsl(var(--st-error));
     margin-top: 4px;
     margin-bottom: 4px;

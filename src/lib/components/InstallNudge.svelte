@@ -332,14 +332,14 @@
   }
 
   .nudge-headline {
-    font-size: 13.5px;
+    font-size: 14px;
     font-weight: 600;
     line-height: 1.4;
     color: hsl(var(--foreground));
   }
 
   .nudge-text {
-    font-size: 12.5px;
+    font-size: 13px;
     color: hsl(var(--muted-foreground));
     line-height: 1.5;
   }

@@ -778,7 +778,7 @@
   }
 
   .fab-tip-label {
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.02em;
     color: hsl(var(--muted-foreground));
@@ -786,7 +786,7 @@
 
   .fab-tip-text {
     margin: 0;
-    font-size: 12.5px;
+    font-size: 13px;
     line-height: 1.45;
     color: hsl(var(--foreground));
   }
@@ -804,7 +804,7 @@
     border: none;
     border-radius: 0;
     color: hsl(var(--muted-foreground));
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1;
     cursor: pointer;
   }

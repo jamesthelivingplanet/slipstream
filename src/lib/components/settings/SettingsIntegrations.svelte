@@ -505,7 +505,7 @@
     background: hsl(var(--st-error));
   }
   .mcp-settings-state {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 500;
   }
   .mcp-settings-tools {
@@ -515,7 +515,7 @@
     margin-bottom: 8px;
   }
   .mcp-settings-tool {
-    font-size: 10.5px;
+    font-size: 11px;
     padding: 2px 6px;
     border-radius: 6px;
     border: 1px solid hsl(var(--border));

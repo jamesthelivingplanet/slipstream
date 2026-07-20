@@ -77,7 +77,7 @@
   }
 
   .onb-modal-nameplate {
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.08em;
     color: hsl(var(--muted-foreground));
@@ -85,7 +85,7 @@
 
   .onb-modal-line {
     margin: 0;
-    font-size: 13.5px;
+    font-size: 14px;
     line-height: 1.5;
     color: hsl(var(--foreground));
   }

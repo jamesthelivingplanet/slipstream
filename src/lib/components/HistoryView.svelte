@@ -337,12 +337,12 @@
     gap: 14px;
   }
   .hv-head h1 {
-    font-size: 19px;
+    font-size: 20px;
     font-weight: 650;
     letter-spacing: -0.01em;
   }
   .head-sum {
-    font-size: 12.5px;
+    font-size: 13px;
   }
   .hv-close {
     margin-left: auto;
@@ -424,7 +424,7 @@
     flex: 0 0 auto;
   }
   .chip {
-    font-size: 10.5px;
+    font-size: 11px;
     padding: 2px 8px;
     border-radius: 99px;
     background: hsl(var(--muted) / 0.6);
@@ -462,7 +462,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 11.5px;
+    font-size: 12px;
     color: hsl(var(--foreground) / 0.85);
     flex: 0 0 auto;
   }
@@ -485,7 +485,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 550;
     color: hsl(var(--primary));
     flex: 0 0 auto;
@@ -546,7 +546,7 @@
 
   .eyebrow {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 550;
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -599,6 +599,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-    font-size: 11.5px;
+    font-size: 12px;
   }
 </style>

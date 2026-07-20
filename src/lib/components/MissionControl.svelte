@@ -268,11 +268,20 @@
   <Streamlines running={runningCount} needs={needsSessions.length} />
 
   <div class="mc-inner">
-    <div class="mc-head">
-      <h1>Mission control</h1>
-      <span class="muted head-sum"
-        >{runningCount} running · {needsSessions.length} waiting on you</span
-      >
+    <div class="deck">
+      <div class="watch" class:alert={needsSessions.length > 0}>
+        <img src="/icons/nulliel-glyph.svg" alt="" />
+      </div>
+      <div class="deck-text">
+        <h1>Mission control</h1>
+        <div class="readout mono">
+          <span><b class="rc">{runningCount}</b> running</span><span class="sep">·</span>
+          <span><b class="nc">{needsSessions.length}</b> waiting on you</span>
+          {#if doneSessions.length}<span class="sep">·</span><span
+              ><b>{doneSessions.length}</b> landed</span
+            >{/if}
+        </div>
+      </div>
       {#if hasUsage}
         <span class="head-spend" title="Estimated from transcript usage">
           <span class="spend-today">today {formatCost(todayCost)}</span>
@@ -525,19 +534,64 @@
     gap: 30px;
   }
 
-  .mc-head {
+  .deck {
+    position: relative;
     display: flex;
-    align-items: baseline;
-    gap: 14px;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 18px;
+    border: 1px solid hsl(var(--border));
+    border-radius: calc(var(--radius) + 2px);
+    background: hsl(var(--card) / 0.5);
   }
-  .mc-head h1 {
+  .deck-text {
+    min-width: 0;
+  }
+  .deck h1 {
     font-family: 'Chakra Petch', sans-serif;
-    font-size: 19px;
-    font-weight: 650;
-    letter-spacing: -0.01em;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
   }
-  .head-sum {
-    font-size: 12.5px;
+  .watch img {
+    width: 44px;
+    height: 44px;
+    filter: drop-shadow(0 0 8px hsl(263 60% 74% / 0.55));
+  }
+  .watch.alert img {
+    animation: watchpulse 1.9s ease-in-out infinite;
+  }
+  @keyframes watchpulse {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 8px hsl(263 60% 74% / 0.5));
+    }
+    50% {
+      filter: drop-shadow(0 0 16px hsl(var(--st-error) / 0.75));
+    }
+  }
+  .readout {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+    font-variant-numeric: tabular-nums;
+  }
+  .readout b {
+    color: hsl(var(--foreground));
+    font-weight: 600;
+  }
+  .readout .rc {
+    color: hsl(var(--st-run));
+  }
+  .readout .nc {
+    color: hsl(var(--st-needs));
+  }
+  .readout .sep {
+    color: hsl(var(--border));
   }
 
   .head-spend {
@@ -609,7 +663,7 @@
 
   .eyebrow {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 550;
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -669,7 +723,7 @@
   }
   .quick-agent :global(.agent-select select) {
     height: 28px;
-    font-size: 11.5px;
+    font-size: 12px;
     padding: 0 26px 0 8px;
   }
 
@@ -705,7 +759,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 11.5px;
+    font-size: 12px;
   }
   .c-top .dot {
     width: 7px;
@@ -713,10 +767,13 @@
     border-radius: 99px;
     flex: 0 0 auto;
     background: hsl(var(--st-needs));
-    animation: mc-breathe 2.4s ease-in-out infinite;
+    box-shadow: 0 0 0 0 hsl(var(--st-needs));
+    animation: pulse 1.9s infinite;
   }
   .c-top .dot.err {
     background: hsl(var(--st-error));
+    box-shadow: none;
+    animation: none;
   }
   .wait {
     color: hsl(var(--st-needs));
@@ -727,7 +784,7 @@
   }
   .c-id {
     margin-left: auto;
-    font-size: 10.5px;
+    font-size: 11px;
     color: hsl(var(--muted-foreground));
   }
   .c-title {
@@ -758,7 +815,7 @@
     align-items: center;
     gap: 10px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10.5px;
+    font-size: 11px;
     color: hsl(var(--muted-foreground));
   }
   .c-foot .add {
@@ -771,7 +828,7 @@
     margin-left: auto;
     color: hsl(var(--st-needs));
     font-family: 'Hanken Grotesk', sans-serif;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 550;
   }
   .c-foot .go.err {
@@ -804,7 +861,7 @@
     border-radius: 99px;
     flex: 0 0 auto;
     background: hsl(var(--st-run));
-    animation: mc-breathe 1.6s ease-in-out infinite;
+    animation: breathe 2.2s ease-in-out infinite;
   }
   .row .dot.queued {
     background: hsl(var(--muted-foreground));
@@ -826,7 +883,7 @@
     white-space: nowrap;
   }
   .chip {
-    font-size: 10.5px;
+    font-size: 11px;
     padding: 2px 8px;
     border-radius: 99px;
     background: hsl(var(--muted) / 0.6);
@@ -859,7 +916,7 @@
     background: hsl(var(--muted) / 0.6);
   }
   .r-activity {
-    font-size: 11.5px;
+    font-size: 12px;
     flex: 0 0 auto;
     max-width: 40%;
     overflow: hidden;
@@ -876,7 +933,7 @@
   }
   .pr-chip {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 550;
     padding: 1px 7px;
     border-radius: 99px;
@@ -921,7 +978,7 @@
     opacity: 1;
   }
   .t-src {
-    font-size: 10.5px;
+    font-size: 11px;
     color: hsl(var(--primary));
     width: 58px;
     flex: 0 0 auto;
@@ -936,7 +993,7 @@
   }
   .launch {
     opacity: 0;
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 550;
     color: hsl(var(--primary));
     transition: opacity 0.12s;
@@ -957,16 +1014,22 @@
     background: hsl(var(--st-needs));
   }
 
-  @keyframes mc-breathe {
-    50% {
-      opacity: 0.45;
+  @media (prefers-reduced-motion: reduce) {
+    .c-top .dot,
+    .row .dot,
+    .watch.alert img {
+      animation: none;
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .c-top .dot,
-    .row .dot {
-      animation: none;
+  @media (max-width: 700px) {
+    .deck {
+      padding: 13px 14px;
+      gap: 12px;
+    }
+    .watch img {
+      width: 36px;
+      height: 36px;
     }
   }
 
