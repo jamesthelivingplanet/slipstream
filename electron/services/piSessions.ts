@@ -15,9 +15,19 @@ import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/p
  * See https://pi.dev/docs/latest/session-format
  */
 
-/** pi session directory name for a working directory (pure, documented encoding). */
+/**
+ * pi session directory name for a working directory (pure, documented encoding).
+ * Pi treats the cwd as a directory path — i.e. with a trailing separator — before
+ * encoding, so the trailing `/` (added if not already present) becomes part of the
+ * slash-to-dash replacement. That's why the encoded name ends in a double dash
+ * (one dash for the trailing separator, one for the wrapping dash), not a single
+ * one. Idempotent: a cwd that already ends in `/` encodes to the same result.
+ *
+ * See https://pi.dev/docs/latest/session-format
+ */
 export function piSessionDirName(cwd: string): string {
-  return `-${cwd.replace(/\//g, '-')}-`
+  const withTrailingSlash = cwd.endsWith('/') ? cwd : `${cwd}/`
+  return `-${withTrailingSlash.replace(/\//g, '-')}-`
 }
 
 /** Resolve pi's session storage root, honoring env overrides. */

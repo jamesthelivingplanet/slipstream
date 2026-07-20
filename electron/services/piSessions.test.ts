@@ -14,19 +14,24 @@ import { DONE_MARKER, NEEDS_INPUT_MARKER, IN_PROGRESS_MARKER } from '../shared/p
 
 describe('piSessionDirName', () => {
   it('encodes cwd by replacing / with - and wrapping in -', () => {
-    expect(piSessionDirName('/home/james')).toBe('--home-james-')
+    expect(piSessionDirName('/home/james')).toBe('--home-james--')
   })
 
   it('encodes a nested worktree path', () => {
     expect(piSessionDirName('/home/james/.worktrees/foo/bar')).toBe(
-      '--home-james-.worktrees-foo-bar-',
+      '--home-james-.worktrees-foo-bar--',
     )
+  })
+
+  it('is idempotent when cwd already ends in a trailing slash', () => {
+    expect(piSessionDirName('/home/james/')).toBe(piSessionDirName('/home/james'))
+    expect(piSessionDirName('/home/james/')).toBe('--home-james--')
   })
 })
 
 describe('piSessionDirFor', () => {
   it('joins the root with the encoded dir name', () => {
-    expect(piSessionDirFor('/home/james', '/tmp/sessions')).toBe('/tmp/sessions/--home-james-')
+    expect(piSessionDirFor('/home/james', '/tmp/sessions')).toBe('/tmp/sessions/--home-james--')
   })
 })
 

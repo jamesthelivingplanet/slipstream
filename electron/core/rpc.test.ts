@@ -720,6 +720,25 @@ describe('createRpc', () => {
       expect(result.available).toBe(true)
       expect(result.messages.map((m) => m.uuid)).toEqual(['m1'])
     })
+
+    it('returns available:true with mapped messages for a kilo session (shares the embedded-server branch)', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 'kilo-1', agentKind: 'kilo' }))
+      vi.mocked(deps.sessions.getOpencodeState!).mockReturnValue({ port: 4001, sid: 'ses_1' })
+      vi.mocked(fetchOpencodeMessages).mockResolvedValue([
+        {
+          info: { id: 'm1', role: 'user', time: { created: 1 } },
+          parts: [{ type: 'text', text: 'hi' }],
+        },
+      ])
+
+      const result = (await rpc.handle(IPC.getChatMessages, ['kilo-1'])) as {
+        available: boolean
+        messages: { uuid: string }[]
+      }
+      expect(fetchOpencodeMessages).toHaveBeenCalledWith(4001, 'ses_1')
+      expect(result.available).toBe(true)
+      expect(result.messages.map((m) => m.uuid)).toEqual(['m1'])
+    })
   })
 
   describe('subscribeChat / unsubscribeChat (TASK-FPH60)', () => {
