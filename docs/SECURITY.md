@@ -266,14 +266,11 @@ The agent reading your config is the same trust decision as the agent running
 every stored credential and reach across every other session — not a new
 privilege boundary being crossed.
 
-**Mitigations (largely inherent to same-uid execution — future work):**
+**Mitigations:**
 
-- **Separate uid / sandbox.** Run each agent PTY under a different uid (or a
-  `bubblewrap` / `firejail` / separate-account sandbox) with no read access to
-  the data dir. This is the only thing that actually closes the hole; it is a
-  platform-specific architectural change and is not shipped. The
-  `sessionManager` `spawnAgent` call site (`pty.spawn`, no uid drop) is where it
-  would go.
+- **Sandbox (opt-in, SHIPPED — FLO-146).** See "Opt-in bwrap sandbox" below.
+  This is the mitigation that actually closes the hole described above, when
+  enabled.
 - **Token in daemon memory only.** Pass the daemon's token to its children via
   an inherited fd/pipe instead of persisting `{ token, port }` to
   `daemon.json`. This is partial — it removes the trivial `cat daemon.json`
@@ -285,6 +282,37 @@ privilege boundary being crossed.
 `0644`). This changes nothing against a same-uid reader — the `0700` data dir
 already gated it — but a file holding a bearer token should not be
 world/group-readable as a matter of course.
+
+### Opt-in bwrap sandbox (FLO-146)
+
+Shipped, off by default. Set `SLIPSTREAM_SANDBOX=bwrap` to contain each agent
+PTY in a `bubblewrap` mount namespace so a prompt-injected agent can't read
+the daemon's data dir. Existing deployments are unaffected unless this is set.
+
+- **Linux-only** (bubblewrap); requires unprivileged user namespaces. When
+  `bwrap` is absent, `agentSandbox.ts` logs a one-time warning and runs the
+  agent **UNSANDBOXED** — this is a fail-open-for-availability choice, so
+  setting the env var is not by itself a hard guarantee; `bwrap` must actually
+  be installed and working.
+- **Mechanism:** `--dev-bind / /` shares the whole filesystem, then `--tmpfs
+  <dataDir>` overmounts the data dir with an empty tmpfs, then only
+  `sessions/<sid>` (rw — so the daemon's `fs.watch`-based status sentinel
+  still observes writes through the shared host inode), `bin` (ro, the CLI
+  wrapper dir), and `clipboard` (ro) are re-bound into it. It does **not**
+  change uid — the agent runs as the same OS user as before — it hides the
+  data dir from the mount namespace's view, which is what the "no read access
+  to the data dir" acceptance requires. `daemon.json`, `slipstream.db`,
+  `secret.key`/`secret.salt`, and every other session's directory become
+  invisible to the agent.
+- **Caveat:** `slipstream open-mr` reads `<dataDir>/slipstream.db` directly to
+  resolve the stored git token. Under the sandbox that read is exactly what
+  gets blocked, so an agent cannot resolve a token to open a PR/MR itself. A
+  daemon-mediated per-session credential handoff (so the token never needs to
+  be readable from inside the sandbox) is the follow-up; until then, turning
+  the sandbox on trades away agent-initiated `open-mr`.
+- The `sessionManager.ts` `defaultSpawnAgent` call site is the sandbox seam
+  (see `agentSandbox.ts`'s `sandboxSpawnSpec`) — previously noted above as
+  "where it would go," it is now wired in.
 
 ## 8. Window pinned to the app origin (FLO-127)
 
