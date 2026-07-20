@@ -7,7 +7,11 @@ import { createRepoRegistry } from '../services/repoRegistry.js'
 import { createWorktreeManager } from '../services/worktreeManager.js'
 import { createSessionManager } from '../services/sessionManager.js'
 import { createPortBroker } from '../services/portBroker.js'
-import { createConfigStore, createSafeStorageEncryptor } from '../services/configStore.js'
+import {
+  createConfigStore,
+  createSafeStorageEncryptor,
+  createServerEncryptor,
+} from '../services/configStore.js'
 import { createLinearProvider } from '../tickets/linearProvider.js'
 import { createJiraProvider } from '../tickets/jiraProvider.js'
 import { createCompositeProvider } from '../tickets/compositeProvider.js'
@@ -65,7 +69,9 @@ export function createServices(root: string): IpcDeps {
     // best-effort: non-POSIX filesystems / Windows may not support chmod
   }
   const db = openDb(path.join(root, 'slipstream.db'))
-  const configStore = createConfigStore(db, { encryptor: createSafeStorageEncryptor() })
+  const configStore = createConfigStore(db, {
+    encryptor: createSafeStorageEncryptor() ?? createServerEncryptor({ dataDir: root }),
+  })
   const sessionStore = createSessionStore(db)
   const outcomeStore = createOutcomeStore(db)
   const agentEventStore = createAgentEventStore(db)

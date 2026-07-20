@@ -328,10 +328,12 @@ export async function main(): Promise<void> {
   async function loadConfigStore(): Promise<IConfigStore> {
     if (!cachedConfigStore) {
       const { openDb } = await import('../db/db.js')
-      const { createConfigStore, createSafeStorageEncryptor } =
+      const { createConfigStore, createSafeStorageEncryptor, createServerEncryptor } =
         await import('../services/configStore.js')
       const db = openDb(path.join(dataDir, 'slipstream.db'))
-      cachedConfigStore = createConfigStore(db, { encryptor: createSafeStorageEncryptor() })
+      cachedConfigStore = createConfigStore(db, {
+        encryptor: createSafeStorageEncryptor() ?? createServerEncryptor({ dataDir }),
+      })
     }
     return cachedConfigStore
   }

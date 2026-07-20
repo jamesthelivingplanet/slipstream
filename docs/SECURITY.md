@@ -181,27 +181,58 @@ than a runtime click-through.
 
 ## 6. Secrets at rest
 
-Config-table secrets — the Linear API key, GitHub/GitLab tokens — are stored in the
+Config-table secrets — the Linear API key, GitHub/GitLab/Gitea/Bitbucket tokens,
+the Jira API token, and the raw Firebase service-account key — are stored in the
 SQLite `config` table inside the app's data directory (`<dataDir>/slipstream.db`).
 VAPID keys (for Web Push) live there too, which is expected: they're server
 credentials, not user secrets.
 
+`configStore.ts` distinguishes ciphertext from plaintext by a marker prefix and
+reads all forms transparently:
+
+- `ss1:` — Electron `safeStorage` (desktop OS keychain).
+- `sk1:` — server-key AES-256-GCM (FLO-145), used where no keychain is reachable.
+- no prefix — legacy plaintext.
+
+An encrypted value is only ever decrypted by the encryptor whose marker it
+carries; a value the active process can't decrypt reads back as **absent**, never
+as raw ciphertext handed to a caller.
+
 **Encrypted on the desktop.** Where a real Electron process with an OS keychain is
-available (the desktop app), `configStore.ts` encrypts each value with Electron
-`safeStorage` before writing it, prefixed with a `ss1:` marker so encrypted and
-plaintext values are distinguishable.
+available, values are `safeStorage`-encrypted (`ss1:`).
 
-**Plaintext on the daemon / headless server.** The detached local daemon and the
-headless `pnpm serve` server both run under `ELECTRON_RUN_AS_NODE=1`, where
-`safeStorage` is unavailable. There the same values are stored **plaintext**, with
-only the data directory's 0700 permissions protecting them — so on a shared or
-remote host, restrict filesystem access accordingly (the pod image runs as an
-unprivileged user; see [POD-DEPLOY.md](POD-DEPLOY.md)).
+**Encrypted on the daemon / headless server (FLO-145).** The detached local daemon
+and the headless `pnpm serve` server both run under `ELECTRON_RUN_AS_NODE=1`, where
+`safeStorage` is unavailable. There `configStore.ts` falls back to a non-keychain
+AES-256-GCM encryptor (`sk1:`), keyed one of two ways:
 
-**Legacy values keep working.** `configStore.ts` transparently reads both forms: a
-prefixed `ss1:` value is decrypted, an unprefixed value is returned as-is. Existing
-plaintext secrets are left in place rather than force-migrated, so an upgrade never
-locks you out of your own config.
+- **`SLIPSTREAM_SECRET` (operator passphrase, preferred).** The key is derived via
+  scrypt from the env-supplied passphrase and a per-install random salt persisted
+  at `<dataDir>/secret.salt`. The key itself never touches disk.
+- **File-backed key (zero-config fallback).** If `SLIPSTREAM_SECRET` is unset, a
+  random 32-byte key is generated once and persisted at `<dataDir>/secret.key`
+  (0600, inside the 0700 data dir).
+
+**Threat model — what this buys.** With `sk1:` encryption in place, the config
+secrets are **not recoverable from `slipstream.db` alone**: a stolen DB file, a
+leaked backup, or a snapshot of just the database yields ciphertext. Under the
+`SLIPSTREAM_SECRET` path this holds even against theft of the *entire* data dir,
+because the key lives only in the operator's env / secret store, not on disk.
+
+**What it does NOT protect against.** The file-backed fallback does not defend
+against an attacker who can read the whole data dir — they get `secret.key` too.
+And neither mode defends against a **same-uid reader**: a process running as the
+daemon's own uid can read the key file (or `SLIPSTREAM_SECRET` from the process
+environment) and the DB alike. That is the deliberately-unclosed gap documented in
+§7 — encryption at rest raises the bar against offline/file-level exposure, not
+against code already executing as the daemon.
+
+**Legacy values keep working; no force-migration lockout.** Unprefixed plaintext
+values are read as-is. When an encryptor is present, `createConfigStore` also
+*opportunistically re-encrypts* any legacy plaintext secrets in place on startup
+so they stop sitting in the DB as cleartext — a safe rewrite (the key is held, so
+the value stays readable), never a lockout. An upgrade of an existing install
+therefore never locks you out of your own config.
 
 ## 7. Same-uid agent execution — the env-scrub is hygiene, not a boundary
 
