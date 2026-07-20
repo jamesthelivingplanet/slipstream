@@ -1,3 +1,53 @@
+@font-face {
+  font-family: 'Hanken Grotesk';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/hanken-grotesk-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Hanken Grotesk';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/hanken-grotesk-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Hanken Grotesk';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/hanken-grotesk-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Chakra Petch';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/chakra-petch-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Chakra Petch';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/chakra-petch-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-600.woff2') format('woff2');
+}
+
 @tailwind components;
 @tailwind utilities;
 
@@ -7,36 +57,48 @@
 }
 
 html[data-mode='dark'] {
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 240 8% 6%;
-  --card-hover: 240 6% 9%;
-  --popover: 240 9% 7%;
-  --muted: 240 3.7% 15.9%;
-  --muted-foreground: 240 5% 64.9%;
-  --accent-bg: 240 4% 13%;
-  --border: 240 3.7% 14.5%;
-  --input: 240 3.7% 17%;
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
+  --background: 207 39% 4.5%;
+  --foreground: 192 29% 93.3%;
+  --card: 204 37% 8%;
+  --card-hover: 202 40% 11.8%;
+  --popover: 201 36% 9.2%;
+  --muted: 201 33% 13.5%;
+  --muted-foreground: 200 12% 49.4%;
+  --accent-bg: 202 40% 11.8%;
+  --border: 202 33% 16.3%;
+  --input: 201 30% 20.2%;
+  --secondary: 201 33% 13.5%;
+  --secondary-foreground: 192 29% 93.3%;
   --shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
 }
 html[data-mode='light'] {
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
+  --background: 192 17% 94.3%;
+  --foreground: 204 41% 7.3%;
   --card: 0 0% 100%;
-  --card-hover: 240 4.8% 97%;
+  --card-hover: 192 26% 96.3%;
   --popover: 0 0% 100%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --accent-bg: 240 4.8% 95.9%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 88%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
+  --muted: 195 19% 91.8%;
+  --muted-foreground: 198 12% 40%;
+  --accent-bg: 189 24% 94.3%;
+  --border: 194 18% 86.1%;
+  --input: 195 17% 82%;
+  --secondary: 195 19% 91.8%;
+  --secondary-foreground: 204 41% 7.3%;
   --shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.18);
+  --st-needs: 35 90% 38.2%;
+  --st-run: 218 74% 53.1%;
+  --st-done: 150 72% 35.9%;
+  --st-error: 349 65% 50.2%;
 }
 
+html[data-accent='cyan'] {
+  --primary: 175 71% 53.1%;
+  --primary-foreground: 171 62% 4.1%;
+}
+html[data-mode='light'][data-accent='cyan'] {
+  --primary: 176 88% 32.7%;
+  --primary-foreground: 0 0% 100%;
+}
 html[data-accent='violet'] {
   --primary: 263 70% 60%;
   --primary-foreground: 0 0% 100%;
@@ -70,10 +132,10 @@ html[data-mode='light'][data-accent='zinc'] {
 }
 
 :root {
-  --st-needs: 38 95% 55%;
-  --st-run: 217 91% 62%;
-  --st-done: 142 70% 48%;
-  --st-error: 0 72% 58%;
+  --st-needs: 37 91% 55.1%;
+  --st-run: 218 100% 64.9%;
+  --st-done: 148 63% 49.8%;
+  --st-error: 350 80% 60%;
 }
 
 * {
@@ -92,7 +154,7 @@ html {
 body {
   background: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: 'Geist', sans-serif;
+  font-family: 'Hanken Grotesk', sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
@@ -114,7 +176,7 @@ body {
 }
 
 .mono {
-  font-family: 'Geist Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
 }
 .muted {
   color: hsl(var(--muted-foreground));
@@ -167,9 +229,10 @@ header.bar {
   object-fit: contain;
 }
 .logo b {
+  font-family: 'Chakra Petch', sans-serif;
   font-weight: 600;
   font-size: 14.5px;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.04em;
 }
 header .spacer {
   flex: 1;
@@ -464,6 +527,7 @@ html[data-mode='light'] .seg.on {
   min-width: 0;
 }
 .th-title .t {
+  font-family: 'Chakra Petch', sans-serif;
   font-size: 13.5px;
   font-weight: 600;
   display: flex;
@@ -567,7 +631,7 @@ html[data-mode='light'] .seg.on {
   border: 1px solid hsl(var(--input));
   border-radius: var(--radius);
   color: inherit;
-  font-family: 'Geist Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
   cursor: pointer;
   transition: 0.14s;
@@ -602,7 +666,7 @@ html[data-mode='light'] .seg.on {
   padding: 8px 10px;
   border-radius: calc(var(--radius) - 3px);
   cursor: pointer;
-  font-family: 'Geist Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
 }
 .opt:hover {
@@ -721,7 +785,7 @@ html[data-mode='light'] .seg.on {
   flex: 0 0 92px;
 }
 .drow .v {
-  font-family: 'Geist Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11.5px;
 }
 .drow .v b {
@@ -848,7 +912,7 @@ textarea:focus {
 }
 
 .kbd {
-  font-family: 'Geist Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: hsl(var(--muted-foreground));
   border: 1px solid hsl(var(--border));
@@ -964,6 +1028,7 @@ html[data-mode='light'] .mode-toggle .mt.on {
   border-bottom: 1px solid hsl(var(--border));
 }
 .dlg-head h2 {
+  font-family: 'Chakra Petch', sans-serif;
   font-size: 16px;
   font-weight: 600;
 }
@@ -1007,7 +1072,7 @@ html[data-mode='light'] .mode-toggle .mt.on {
   border-color: hsl(var(--border));
 }
 .tk .tk-id {
-  font-family: 'Geist Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: hsl(var(--muted-foreground));
   flex: 0 0 auto;
@@ -1245,7 +1310,7 @@ body {
     border: 1px solid hsl(var(--input));
     background: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 16px; /* ≥16px so iOS Safari doesn't zoom on focus */
   }
   .term-input input:focus-visible {
@@ -1300,7 +1365,7 @@ body {
   border: 1px solid hsl(var(--input));
   border-radius: var(--radius);
   color: inherit;
-  font-family: 'Geist Mono', monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   padding: 0 10px;
 }

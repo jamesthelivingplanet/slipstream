@@ -531,6 +531,7 @@
     gap: 14px;
   }
   .mc-head h1 {
+    font-family: 'Chakra Petch', sans-serif;
     font-size: 19px;
     font-weight: 650;
     letter-spacing: -0.01em;
@@ -544,7 +545,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     color: hsl(var(--muted-foreground));
@@ -563,6 +564,7 @@
     gap: 10px;
   }
   .first-run h2 {
+    font-family: 'Chakra Petch', sans-serif;
     font-size: 16px;
     font-weight: 600;
   }
@@ -606,7 +608,7 @@
   }
 
   .eyebrow {
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 10.5px;
     font-weight: 550;
     letter-spacing: 0.14em;
@@ -733,7 +735,7 @@
     font-weight: 600;
   }
   .ask {
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
     line-height: 1.5;
     color: hsl(var(--foreground) / 0.85);
@@ -755,7 +757,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 10.5px;
     color: hsl(var(--muted-foreground));
   }
@@ -768,7 +770,7 @@
   .c-foot .go {
     margin-left: auto;
     color: hsl(var(--st-needs));
-    font-family: 'Geist', sans-serif;
+    font-family: 'Hanken Grotesk', sans-serif;
     font-size: 11.5px;
     font-weight: 550;
   }
@@ -873,7 +875,7 @@
     flex: 0 0 auto;
   }
   .pr-chip {
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 10.5px;
     font-weight: 550;
     padding: 1px 7px;

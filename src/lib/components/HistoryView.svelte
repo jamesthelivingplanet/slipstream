@@ -524,7 +524,7 @@
     gap: 6px;
   }
   .hv-pre {
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
     line-height: 1.5;
     white-space: pre-wrap;
@@ -545,7 +545,7 @@
   }
 
   .eyebrow {
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 10.5px;
     font-weight: 550;
     letter-spacing: 0.14em;
