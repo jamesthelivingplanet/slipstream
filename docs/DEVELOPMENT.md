@@ -77,3 +77,14 @@ relaunch (so it leaves a daemon running — kill it afterward).
   and exits nonzero on any failed assertion. It runs unattended in the
   `e2e-smoke` GitLab CI job under `xvfb-run`, on a nightly schedule and
   `when: manual` on merge requests.
+
+- **`restart-recovery-flow.mjs`** is the headless restart/crash-recovery CI
+  driver (FLO-135) — the only path that exercises reconnect/replay/restart.
+  Unlike the drivers above it needs **no display and no Electron**: it runs
+  the daemon directly (`ELECTRON_RUN_AS_NODE` server.js) and drives the web UI
+  with Playwright chromium. A stub `claude` on PATH emits a marker; the driver
+  SIGKILLs the daemon, restarts against the same data dir, and asserts the
+  orphaned session is marked `interrupted` (`restoreInterruptedSessions` on
+  boot) and its scrollback replays via `getSessionBuffer`. Runs in the
+  `e2e-restart` GitLab CI job, scheduled + `when: manual`, alongside
+  `e2e-smoke`.
