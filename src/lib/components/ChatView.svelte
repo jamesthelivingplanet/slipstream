@@ -637,11 +637,11 @@
     padding: 0.5rem 0.6rem;
     border-radius: calc(var(--radius) - 3px);
     background: hsl(var(--accent-bg));
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
   }
   .assistant-text :global(code) {
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 0.85em;
   }
 
@@ -652,7 +652,7 @@
     text-align: left;
     padding: 0.3rem 0.5rem;
     border-radius: calc(var(--radius) - 4px);
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
     color: hsl(var(--muted-foreground));
     cursor: pointer;
@@ -680,7 +680,7 @@
     border-radius: calc(var(--radius) - 3px);
     background: hsl(var(--accent-bg));
     border: 1px solid hsl(var(--border));
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 0.76rem;
     white-space: pre-wrap;
     word-break: break-word;
@@ -725,7 +725,7 @@
     overflow-y: auto;
     white-space: pre-wrap;
     word-break: break-word;
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 0.78rem;
     line-height: 1.5;
     color: hsl(var(--foreground));
@@ -785,7 +785,7 @@
     background: hsl(var(--accent-bg));
   }
   .slash-name {
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-weight: 600;
   }
   .slash-desc {

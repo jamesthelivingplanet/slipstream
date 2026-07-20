@@ -329,7 +329,7 @@
 
   onMount(() => {
     term = new Terminal({
-      fontFamily: "'Geist Mono', monospace",
+      fontFamily: "'JetBrains Mono', monospace",
       fontSize: 13,
       lineHeight: 1.0,
       cursorBlink: true,
@@ -1495,7 +1495,7 @@
   }
 
   .status-trigger {
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
     min-width: 100px;
     gap: 4px;
@@ -1536,7 +1536,7 @@
     padding: 8px 10px;
     border-radius: calc(var(--radius) - 3px);
     cursor: pointer;
-    font-family: 'Geist Mono', monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
     width: 100%;
   }
