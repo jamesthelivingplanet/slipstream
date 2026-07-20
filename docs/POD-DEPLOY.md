@@ -55,6 +55,7 @@ Optional but recommended so agents can push:
 | `TS_HOSTNAME` | Machine name on the tailnet (default `slipstream`). |
 | `GIT_USER_NAME` / `GIT_USER_EMAIL` | Commit identity. |
 | `GH_TOKEN` | GitHub token for HTTPS clone + push. |
+| `SLIPSTREAM_SANDBOX` | Optional. Set to `bwrap` to run each agent PTY in a bubblewrap sandbox that hides the data dir (tokens, DB) from a prompt-injected agent. Linux only; needs `bwrap` + unprivileged user namespaces (may require container config). Disables agent-initiated `open-mr`. |
 
 `.env` is gitignored — keep it on the pod, never commit it.
 
