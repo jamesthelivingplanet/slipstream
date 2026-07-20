@@ -74,9 +74,12 @@ doc only when the symptom matches what you're seeing.
   `{ id:'local' }`); `createRpc` filters enumerations and guards reads by `ownerId`. Don't
   add a read of a `sessions`/`repos` row without scoping it by owner. See
   [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md).
-- **Secrets at rest**: config-table secrets are `safeStorage`-encrypted on desktop but
-  **plaintext** in the daemon/headless server (`ELECTRON_RUN_AS_NODE`, no keychain) behind the
-  0700 data dir. Detail: [docs/SECURITY.md](docs/SECURITY.md) §6.
+- **Secrets at rest**: config-table secrets are `safeStorage`-encrypted (`ss1:`) on
+  desktop and AES-256-GCM-encrypted (`sk1:`, key from `SLIPSTREAM_SECRET` or a
+  file-backed `<dataDir>/secret.key`) on the daemon/headless server (FLO-145). Reads
+  are marker-transparent; a value the process can't decrypt reads as absent, never
+  raw ciphertext. Does not defend against a same-uid reader. Detail:
+  [docs/SECURITY.md](docs/SECURITY.md) §6.
 - **Session status flaps by design — never time-window dedupe a status consumer.** The
   `status` event fires on every PTY chunk (not on change), and on an idle TUI the heuristic
   status ping-pongs `needs`↔`running` every few seconds (repaints reset the idle clock).

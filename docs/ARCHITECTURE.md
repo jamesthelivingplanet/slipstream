@@ -207,6 +207,7 @@ Env vars:
 | `SLIPSTREAM_BIND` | `127.0.0.1` | Bind address (set to Tailscale IP to expose on tailnet) |
 | `SLIPSTREAM_PORT` | `7421` | Listen port |
 | `SLIPSTREAM_DATA_DIR` | platform userData | Override data directory |
+| `SLIPSTREAM_SECRET` | — (optional) | Passphrase to encrypt config secrets at rest; falls back to a file-backed key (FLO-145) |
 
 ### Renderer web boot (`src/main.ts` + `src/lib/wsApi.ts`)
 
