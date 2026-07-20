@@ -1,9 +1,9 @@
 /**
- * cliSkillDoc — single source of truth for the `slipstream` agent skill
- * (FLO-104). Written into every session worktree by promptWriter's
- * writeSlipstreamSkill at the open-standard location
- * `.agents/skills/slipstream/SKILL.md` (with a `.claude/skills/slipstream`
- * symlink for Claude Code), so all three backends discover the same file:
+ * cliSkillDoc — renders the `slipstream` agent skill markdown (FLO-104). Written
+ * into every session worktree by promptWriter's writeSlipstreamSkill at the
+ * open-standard location `.agents/skills/slipstream/SKILL.md` (with a
+ * `.claude/skills/slipstream` symlink for Claude Code), so all three backends
+ * discover the same file:
  *
  *  - pi:          reads project `.agents/skills/` natively
  *  - opencode:    reads project `.agents/skills/` and `.claude/skills/`
@@ -12,7 +12,13 @@
  * Frontmatter constraints come from pi, the strictest parser of the three:
  * `name` (lowercase/hyphens, ≤64 chars) and `description` (≤1024 chars) are
  * mandatory — pi silently skips the skill without them.
+ *
+ * The command surface (the table), the exit codes, and the single-channel claim
+ * are rendered from electron/shared/slipstreamCommands.ts so they cannot drift
+ * from the CLI's own usage text or the system prompt. Only the lifecycle
+ * narrative prose is authored here — it is tuned coaching, not a fact table.
  */
+import { renderCommandTable, renderExitCodes, SINGLE_CHANNEL_CLAIM } from './slipstreamCommands.js'
 
 export function buildSlipstreamSkillMd(): string {
   return `---
@@ -23,7 +29,7 @@ description: Report your working state to the Slipstream app (task started, need
 # Slipstream session CLI
 
 You are running inside a Slipstream-managed session. The Slipstream app learns
-your state ONLY through the \`slipstream\` CLI on your PATH — nothing else
+your state ${SINGLE_CHANNEL_CLAIM} on your PATH — nothing else
 updates the status badge, push notifications, or the durable run record.
 
 ## Lifecycle rules (every transition, the instant it happens)
@@ -48,17 +54,7 @@ updates the status badge, push notifications, or the durable run record.
 
 ## Command reference
 
-| Command | Required | Optional | Effect |
-|---|---|---|---|
-| \`slipstream task-started\` | — | \`--message\` | status → running |
-| \`slipstream request-input\` | \`--message\` | — | status → waiting on user (input) |
-| \`slipstream task-blocked\` | \`--message\` | — | status → waiting on user (blocked) |
-| \`slipstream approval-request\` | \`--message\` | — | status → waiting on user (approval) + approval event |
-| \`slipstream checkpoint\` | \`--message\` | — | records a progress milestone |
-| \`slipstream artifact publish <file>\` | file path | \`--title\` | copies the file into the session's artifact store |
-| \`slipstream task-complete\` | \`--summary\` | \`--result success\\|partial\\|failure\`, \`--details\` | records the durable outcome, then status → done |
-| \`slipstream open-mr\` | \`--title\` | \`--description\` | pushes the branch (best-effort) and opens the merge/pull request |
-| \`slipstream help [command]\` | — | — | usage |
+${renderCommandTable()}
 
 Notes:
 - \`checkpoint\` at meaningful milestones (tests passing, phase complete) —
@@ -69,7 +65,6 @@ Notes:
 - \`open-mr\` opens the MR from your current branch; commit and push with
   ordinary git first (open-mr's push is only a best-effort fallback).
   Report the printed MR URL in your final message.
-- Exit codes: 0 ok · 1 usage error · 2 not inside a Slipstream session ·
-  3 operation failed. Each success prints the next expected transition.
+- Exit codes: ${renderExitCodes(' · ')}. Each success prints the next expected transition.
 `
 }

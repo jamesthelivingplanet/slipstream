@@ -16,6 +16,14 @@ import * as path from 'node:path'
 import { execFile as _execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { GitHost, OutcomeResult, NeedsReason, AgentEventKind } from '../shared/contract.js'
+import {
+  renderUsageCommandBlock,
+  renderExitCodes,
+  EXIT_OK,
+  EXIT_USAGE,
+  EXIT_NO_SESSION,
+  EXIT_FAILED,
+} from '../shared/slipstreamCommands.js'
 import { STATUS_SENTINEL_FILE } from '../services/statusSentinel.js'
 import { OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
 import { AGENT_EVENTS_FILE } from '../services/agentEventsSentinel.js'
@@ -25,10 +33,9 @@ import type { IConfigStore } from '../services/configStore.js'
 
 const execFile = promisify(_execFile)
 
-export const EXIT_OK = 0
-export const EXIT_USAGE = 1
-export const EXIT_NO_SESSION = 2
-export const EXIT_FAILED = 3
+// Re-exported so callers (and tests) can import from './slipstream.js'; the
+// numeric values are owned by the shared spec (electron/shared/slipstreamCommands.ts).
+export { EXIT_OK, EXIT_USAGE, EXIT_NO_SESSION, EXIT_FAILED }
 
 const VALID_OUTCOME_RESULTS: OutcomeResult[] = ['success', 'partial', 'failure']
 const MAX_SUMMARY_LEN = 4000
@@ -108,18 +115,9 @@ const USAGE = `Usage: slipstream <command> [options]
 
 Report your working state to the Slipstream app. Commands:
 
-  task-started [--message <text>]        You started or resumed working.
-  request-input --message <text>         You stopped to wait on the user's reply.
-  task-blocked --message <text>          You cannot proceed (env broken, missing dep).
-  approval-request --message <text>      You need an explicit go-ahead first.
-  checkpoint --message <text>            Record a progress milestone (durable).
-  artifact publish <file> [--title <t>]  Copy a file into the session's artifact store.
-  task-complete --summary <text>         Record the final outcome, then status done.
-      [--result success|partial|failure] [--details <text>]
-  open-mr --title <t> [--description <d>] Push (best-effort) and open the merge request.
-  help [command]                         Show usage.
+${renderUsageCommandBlock()}
 
-Exit codes: 0 ok, 1 usage error, 2 not in a Slipstream session, 3 operation failed.`
+Exit codes: ${renderExitCodes(', ')}.`
 
 /** Hand-rolled flag parser: `--flag value` and `--flag=value`; the rest are positionals. */
 export function parseArgs(
