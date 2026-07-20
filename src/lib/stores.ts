@@ -524,6 +524,7 @@ export async function startAgent(
   repoId: string,
   prompt: string,
   agentKind?: BackendKind,
+  extraArgs?: string,
 ) {
   const s = get(sessions).find((x) => x.id === id)
   if (!s) return
@@ -554,6 +555,7 @@ export async function startAgent(
         agentKind,
         sessionId: id,
         src: s.src,
+        extraArgs,
       })
       patch(id, (s) => ({
         ...s,

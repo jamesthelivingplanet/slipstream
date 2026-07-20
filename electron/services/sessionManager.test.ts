@@ -305,6 +305,24 @@ describe('SessionManager — launch & lifecycle', () => {
     expect(mgr.has('s1')).toBe(true)
   })
 
+  it('prepends parsed extraArgs to the launch command args (TASK-UQF55)', () => {
+    const { mgr, spawnCalls } = setup()
+    mgr.start(
+      withCwd(makeStartInput({ sessionId: 's1', extraArgs: '--advisor --chrome' }), worktree),
+    )
+
+    expect(spawnCalls[0].args.slice(0, 2)).toEqual(['--advisor', '--chrome'])
+  })
+
+  it('throws when extraArgs has an unterminated quote (TASK-UQF55)', () => {
+    const { mgr } = setup()
+    expect(() =>
+      mgr.start(
+        withCwd(makeStartInput({ sessionId: 's2', extraArgs: '--bad "unterminated' }), worktree),
+      ),
+    ).toThrow()
+  })
+
   it('emits a data event (with monotonic seq) for each PTY chunk', () => {
     const { mgr, pties } = setup()
     const rec = attach(mgr)

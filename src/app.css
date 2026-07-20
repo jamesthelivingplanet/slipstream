@@ -833,6 +833,23 @@ textarea:focus {
   box-shadow: 0 0 0 3px hsl(var(--ring) / 0.12);
 }
 
+.config input[type='text'] {
+  width: 100%;
+  height: 38px;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--input));
+  border-radius: var(--radius);
+  color: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 0 12px;
+}
+.config input[type='text']:focus {
+  outline: none;
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.12);
+}
+
 /* ───────── primitives ───────── */
 .btn {
   display: inline-flex;

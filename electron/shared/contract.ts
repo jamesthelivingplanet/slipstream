@@ -606,6 +606,8 @@ export interface StartSessionInput {
   agentKind?: BackendKind
   opencodePort?: number
   sessionId?: string
+  /** User-supplied extra CLI args (raw string), prepended to the launch command (TASK-UQF55). */
+  extraArgs?: string
 }
 
 export interface ResumeSessionInput {
@@ -841,6 +843,8 @@ export interface SlipstreamApi {
     description?: string
     agentKind?: BackendKind
     src?: TicketSource
+    /** User-supplied extra CLI args (raw string), prepended to the launch command (TASK-UQF55). */
+    extraArgs?: string
   }): Promise<SessionDTO>
   writeSession(id: string, data: string): void
   /** Upload a clipboard image (PNG bytes, base64-encoded) for this session before

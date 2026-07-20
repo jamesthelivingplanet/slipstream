@@ -428,6 +428,7 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       repoId: string
       agentKind?: BackendKind
       src?: TicketSource
+      extraArgs?: string
     }): Promise<SessionDTO> {
       return request(IPC.startSession, [input]) as Promise<SessionDTO>
     },
