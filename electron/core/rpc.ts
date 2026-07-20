@@ -27,6 +27,7 @@ import type {
 import { GIT_PROVIDERS } from '../services/gitProviders/registry.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../shared/promptComposer.js'
+import { parseAgentArgs } from '../shared/agentCli.js'
 import { LOCAL_IDENTITY } from './auth.js'
 import { agentSessionEnv } from '../services/agentCliProvision.js'
 import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
@@ -281,9 +282,14 @@ export function createRpc(
           agentKind?: BackendKind
           sessionId?: string
           src?: TicketSource
+          extraArgs?: string
         }
         const { tid, title, prompt, repoId, description } = input
         const agentKind = input.agentKind
+
+        // TASK-UQF55: validate up front so a malformed arg string errors the
+        // start call synchronously (incl. the queued path), not later.
+        if (input.extraArgs) parseAgentArgs(input.extraArgs)
 
         const repo = await deps.repos.resolvePath(repoId)
         if (!ownedByCaller(repo)) throw new Error(`Unknown repo: ${repoId}`)
@@ -307,6 +313,7 @@ export function createRpc(
           agentKind,
           src: input.src,
           ownerId: identity.id,
+          extraArgs: input.extraArgs,
         }
 
         const session = deps.scheduler

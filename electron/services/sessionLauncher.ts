@@ -36,6 +36,8 @@ export interface LaunchRequest {
   agentKind?: BackendKind
   src?: TicketSource
   ownerId: string
+  /** Extra CLI args passthrough (TASK-UQF55). */
+  extraArgs?: string
 }
 
 export interface LaunchDeps {
@@ -52,8 +54,19 @@ export interface LaunchDeps {
  *  PTY spawn, persistence, ticket transition) and return the live session
  *  with its assigned port attached. */
 export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promise<SessionDTO> {
-  const { sessionId, tid, title, prompt, repoId, branch, systemPrompt, agentKind, src, ownerId } =
-    req
+  const {
+    sessionId,
+    tid,
+    title,
+    prompt,
+    repoId,
+    branch,
+    systemPrompt,
+    agentKind,
+    src,
+    ownerId,
+    extraArgs,
+  } = req
 
   const repo = await deps.repos.resolvePath(repoId)
   await deps.worktrees.create(repo, branch)
@@ -90,6 +103,7 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     opencodePort,
     sessionId,
     src,
+    extraArgs,
   })
 
   deps.sessionStore.upsert({

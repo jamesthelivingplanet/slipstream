@@ -70,3 +70,41 @@ export const OPENCODE_STATUS_POLL_MS = 2000
 /** Retry budget for capturing an opencode session id after the TUI launches. */
 export const OPENCODE_SESSION_CAPTURE_ATTEMPTS = 20
 export const OPENCODE_SESSION_CAPTURE_INTERVAL_MS = 500
+
+/**
+ * Split a user-supplied extra-arguments string (e.g. `--advisor --chrome`)
+ * into argv tokens for spawning an agent CLI (TASK-UQF55). Whitespace
+ * separates tokens; single or double quotes group a value into one token
+ * (the quotes are stripped; no nested-quote or backslash escaping). Returns
+ * [] for empty/whitespace-only input. Throws a human-readable Error on an
+ * unterminated quote so the caller can surface it on the agent run.
+ */
+export function parseAgentArgs(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  const tokens: string[] = []
+  let cur = ''
+  let quote: '"' | "'" | null = null
+  let hasToken = false
+  for (const ch of raw) {
+    if (quote) {
+      if (ch === quote) quote = null
+      else cur += ch
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+      hasToken = true
+    } else if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      if (hasToken) {
+        tokens.push(cur)
+        cur = ''
+        hasToken = false
+      }
+    } else {
+      cur += ch
+      hasToken = true
+    }
+  }
+  if (quote)
+    throw new Error(`Unterminated ${quote === '"' ? 'double' : 'single'} quote in agent arguments`)
+  if (hasToken) tokens.push(cur)
+  return tokens
+}

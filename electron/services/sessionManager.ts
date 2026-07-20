@@ -23,6 +23,7 @@ import type {
   SessionEvents,
   StartSessionInput,
 } from '../shared/contract.js'
+import { parseAgentArgs } from '../shared/agentCli.js'
 import { buildAgentEnv } from './agentEnv.js'
 import { StatusDetector } from './statusDetector.js'
 import { OutputBuffer } from './outputBuffer.js'
@@ -533,6 +534,12 @@ export function createSessionManager(
       opencodePort: input.opencodePort,
     })
 
+    // TASK-UQF55: user-supplied extra CLI args are prepended so they land
+    // before each backend's trailing positional prompt argument. Parsing
+    // throws on an unterminated quote → surfaces as an errored agent run.
+    const extra = parseAgentArgs(input.extraArgs)
+    const finalSpec = extra.length ? { ...spec, args: [...extra, ...spec.args] } : spec
+
     const dto: SessionDTO = {
       id,
       tid: input.tid,
@@ -554,7 +561,7 @@ export function createSessionManager(
       system,
       dto,
       backend,
-      spec,
+      spec: finalSpec,
       opencodePort: input.opencodePort,
       isInitialStart: true,
     })
