@@ -15,6 +15,7 @@
   let lastId: string | undefined = ''
 
   let agentKind: BackendKind = 'claude-code'
+  let extraArgs = ''
 
   $: if (session && session.id !== lastId) {
     lastId = session.id
@@ -22,6 +23,7 @@
     repoChoice = session.repo ?? session.suggestedRepo ?? null
     menuOpen = false
     agentKind = (session.agentKind as BackendKind) ?? 'claude-code'
+    extraArgs = session.extraArgs ?? ''
   }
 
   $: chosen = repoChoice ? repoById(repoChoice) : undefined
@@ -33,7 +35,7 @@
       return
     }
     if (!session.id) return
-    startAgent(session.id, repoChoice, prompt, agentKind)
+    startAgent(session.id, repoChoice, prompt, agentKind, extraArgs.trim() || undefined)
   }
 
   function discard() {
@@ -104,6 +106,27 @@
       <AgentSelector value={agentKind} on:select={(e) => (agentKind = e.detail)} />
       <p class="cfg-hint">{agentOption(agentKind).description}</p>
     </div>
+
+    <div>
+      <label class="lbl-f" for="cfgArgs"
+        >Extra CLI arguments <span class="muted">(optional)</span></label
+      >
+      <input
+        id="cfgArgs"
+        type="text"
+        class="cfg-args"
+        bind:value={extraArgs}
+        placeholder="--advisor --chrome"
+        spellcheck="false"
+        autocapitalize="off"
+        autocomplete="off"
+      />
+      <p class="cfg-hint">
+        Appended to the {agentOption(agentKind).label} launch command. If they cause an error, it'll show
+        on the agent run.
+      </p>
+    </div>
+
     <div class="derive">
       <div class="drow">
         <span class="k">Base branch</span><span class="v muted">{chosen?.base ?? '—'}</span>

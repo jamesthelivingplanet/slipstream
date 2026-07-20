@@ -150,6 +150,7 @@ export function startSession(input: {
   agentKind?: BackendKind
   sessionId?: string
   src?: 'jira' | 'linear'
+  extraArgs?: string
 }): Promise<SessionDTO> {
   if (!hasBackend) return Promise.reject(new Error('No backend'))
   return window.slipstream.startSession(input)

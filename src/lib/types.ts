@@ -53,6 +53,8 @@ export interface Session {
   behind: number
   ago: string
   prompt?: string
+  // user-supplied extra CLI args appended at start (TASK-UQF55)
+  extraArgs?: string
   description?: string
   port?: number
   agentKind?: BackendKind
