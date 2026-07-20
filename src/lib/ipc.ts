@@ -13,7 +13,6 @@ import type {
   RepoDTO,
   RepoSettings,
   SessionDTO,
-  TicketDTO,
   SessionStatus,
   WorkflowState,
   WorktreeInfo,
@@ -45,6 +44,8 @@ import type {
   GitProviderInfoDTO,
   GitHostConfigDTO,
   SessionChatMessageDTO,
+  AgentSkillDTO,
+  ChatQuestionDTO,
 } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY, DEFAULT_SCHEDULER_POLICY } from '../../electron/shared/contract.js'
 
@@ -534,6 +535,32 @@ export function getChatMessages(
 export function onChatMessage(cb: (id: string, msg: SessionChatMessageDTO) => void): () => void {
   if (!hasBackend) return () => {}
   return window.slipstream.onChatMessage(cb)
+}
+
+/** Registers this client as a chat subscriber for `id` — opencode messages
+ *  only arrive via server-side polling while at least one subscriber exists;
+ *  claude/pi tails don't need it, so calling it for them is harmless. Call on
+ *  ChatView mount, and unsubscribeChat on unmount. */
+export function subscribeChat(id: string): Promise<void> {
+  return hasBackend ? window.slipstream.subscribeChat(id) : Promise.resolve()
+}
+
+/** Unregisters this client as a chat subscriber for `id`. See subscribeChat. */
+export function unsubscribeChat(id: string): Promise<void> {
+  return hasBackend ? window.slipstream.unsubscribeChat(id) : Promise.resolve()
+}
+
+/** Discovered skills (SKILL.md-convention directories) available to a
+ *  session's agent, for the chat input's `/`-command menu. */
+export function listAgentSkills(id: string): Promise<AgentSkillDTO[]> {
+  return hasBackend ? window.slipstream.listAgentSkills(id) : Promise.resolve([])
+}
+
+/** What is the agent asking, for the ChatView needs-input card. null when
+ *  there's no backend, the session isn't in 'needs', or nothing is available
+ *  to show (see ChatQuestionDTO). */
+export function getChatQuestion(id: string): Promise<ChatQuestionDTO | null> {
+  return hasBackend ? window.slipstream.getChatQuestion(id) : Promise.resolve(null)
 }
 
 // ── PR / CI status (FLO-96) ───────────────────────────────────────────────

@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import {
   piSessionDirName,
   piSessionDirFor,
   selectNewestPiSessionFile,
   piStatusFromText,
   piStatusFromFileContent,
+  findNewestPiSessionFileSync,
 } from './piSessions.js'
 import { DONE_MARKER, NEEDS_INPUT_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
 
@@ -176,5 +180,41 @@ describe('piStatusFromFileContent', () => {
       }),
     ]
     expect(piStatusFromFileContent(lines.join('\n'))).toBe('done')
+  })
+})
+
+describe('findNewestPiSessionFileSync', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-pi-sync-'))
+  })
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('returns null for a missing directory', () => {
+    expect(findNewestPiSessionFileSync(path.join(dir, 'nope'))).toBeNull()
+  })
+
+  it('returns null for an empty directory', () => {
+    expect(findNewestPiSessionFileSync(dir)).toBeNull()
+  })
+
+  it('ignores non-.jsonl files', () => {
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'x')
+    expect(findNewestPiSessionFileSync(dir)).toBeNull()
+  })
+
+  it('returns the newest .jsonl file by mtime', () => {
+    const older = path.join(dir, 'older.jsonl')
+    const newer = path.join(dir, 'newer.jsonl')
+    fs.writeFileSync(older, '{}')
+    fs.writeFileSync(newer, '{}')
+    const now = Date.now()
+    fs.utimesSync(older, now / 1000, now / 1000)
+    fs.utimesSync(newer, now / 1000 + 10, now / 1000 + 10)
+    expect(findNewestPiSessionFileSync(dir)).toBe(newer)
   })
 })

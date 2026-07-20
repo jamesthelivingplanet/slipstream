@@ -14,7 +14,6 @@ import type {
   RepoDTO,
   RepoSettings,
   SessionDTO,
-  TicketDTO,
   SessionStatus,
   WorkflowState,
   WorktreeInfo,
@@ -46,6 +45,8 @@ import type {
   GitProviderInfoDTO,
   GitHostConfigDTO,
   SessionChatMessageDTO,
+  AgentSkillDTO,
+  ChatQuestionDTO,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -727,6 +728,22 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     onChatMessage(cb: ChatMessageCb): () => void {
       chatMessageListeners.add(cb)
       return () => chatMessageListeners.delete(cb)
+    },
+
+    subscribeChat(id: string): Promise<void> {
+      return request(IPC.subscribeChat, [id]) as Promise<void>
+    },
+
+    unsubscribeChat(id: string): Promise<void> {
+      return request(IPC.unsubscribeChat, [id]) as Promise<void>
+    },
+
+    listAgentSkills(id: string): Promise<AgentSkillDTO[]> {
+      return request(IPC.listAgentSkills, [id]) as Promise<AgentSkillDTO[]>
+    },
+
+    getChatQuestion(id: string): Promise<ChatQuestionDTO | null> {
+      return request(IPC.getChatQuestion, [id]) as Promise<ChatQuestionDTO | null>
     },
 
     onConnectionChange(cb: ConnectionCb): () => void {

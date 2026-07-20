@@ -8,8 +8,9 @@ import { nativeStorage } from './nativeStorage'
 export const CHAT_VIEW_PREF_KEY = 'slipstream.chatViewMode'
 
 /** Per-user preference: prefer chat view over terminal when a session
- *  supports it (TASK-FPH60). Default false — terminal remains the default. */
-export const preferChatView = writable(false)
+ *  supports it (TASK-FPH60). Default true — chat is the default view; a
+ *  stored '0' (the user explicitly switched to terminal) restores terminal. */
+export const preferChatView = writable(true)
 
 let loadPromise: Promise<void> | null = null
 

@@ -11,9 +11,7 @@
     settingsOpen,
     mobile,
     ticketsLoading,
-    ticketsTotalCount,
     ticketsPage,
-    ticketsPageSize,
     ticketsHasMore,
     ticketsQuery,
     setTicketsQuery,
@@ -44,7 +42,6 @@
   let menuOpen = false
   let draftTid = ''
   let wasOpen = false
-  let loadingTickets = false
   let agentKind: BackendKind = 'claude-code'
   let cliCheck: AgentCliCheck | null = null
   let templates: PromptTemplateDTO[] = []
@@ -121,11 +118,13 @@
   $: previewTid = picked ? picked.tid : draftTid
   $: branch = previewTid ? branchFor(previewTid, title.trim() || 'task') : ''
 
-  // Tickets pagination reactive state
+  // Tickets pagination reactive state. ticketsTotalCount/ticketsPageSize have
+  // no UI here (no total-count or page-size display), so they're left
+  // unmirrored — an unused `$:` reactive var crashes @typescript-eslint's
+  // no-unused-vars (it doesn't recognize Svelte's "ComputedVariable"
+  // definition kind), so dead ones can't just be left in place.
   $: ticketsLoadingState = $ticketsLoading
-  $: ticketsTotalCountState = $ticketsTotalCount
   $: ticketsPageState = $ticketsPage
-  $: ticketsPageSizeState = $ticketsPageSize
   $: ticketsHasMoreState = $ticketsHasMore
   $: ticketsQueryState = $ticketsQuery
 
@@ -150,10 +149,7 @@
     wasOpen = true
     runCliCheck(agentKind)
     // refresh tickets when dialog opens
-    loadingTickets = true
-    refreshTickets().finally(() => {
-      loadingTickets = false
-    })
+    void refreshTickets()
   }
   $: if (!$dialogOpen) wasOpen = false
 
@@ -220,7 +216,8 @@
           <div class="ticket-section-header path-add">
             <span class="lbl-f">From ticket</span>
             <SearchInput
-              bind:value={ticketsQueryState}
+              value={ticketsQueryState}
+              onInput={handleTicketsSearch}
               placeholder="Search tickets…"
               ariaLabel="Search tickets"
             />

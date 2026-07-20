@@ -1,8 +1,30 @@
+<script context="module" lang="ts">
+  import type { AgentSkillDTO as CachedAgentSkillDTO } from '../../../electron/shared/contract.js'
+
+  // Module-level (survives ChatView mount/destroy, e.g. toggling to Terminal
+  // and back) skills cache keyed by session id — "fetch lazily on first open,
+  // cache per session" (TASK-FPH60).
+  const skillsCache = new Map<string, CachedAgentSkillDTO[]>()
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
   import type { Session, BackendKind } from '../types'
-  import type { SessionChatMessageDTO } from '../../../electron/shared/contract.js'
-  import { getChatMessages, onChatMessage, writeSession } from '../ipc'
+  import type {
+    SessionChatMessageDTO,
+    AgentSkillDTO,
+    ChatQuestionDTO,
+  } from '../../../electron/shared/contract.js'
+  import {
+    getChatMessages,
+    onChatMessage,
+    writeSession,
+    hasBackend,
+    subscribeChat,
+    unsubscribeChat,
+    listAgentSkills,
+    getChatQuestion,
+  } from '../ipc'
   import { markSessionInput } from '../stores'
   import {
     mergeChatMessages,
@@ -12,8 +34,10 @@
     type ChatActivityRun,
     type ChatToolActivityItem,
   } from '../chat'
+  import { detectSlashToken, filterSkills, applySlashSelection } from '../chatSlash'
   import { renderMarkdown } from '../markdown'
   import { agentOption } from '../agents'
+  import { floatingAnchor } from '../floating'
 
   export let session: Session
   export let canWrite: boolean
@@ -75,6 +99,66 @@
   let expandedIds = new Set<string>()
   let draftText = ''
   let offChatMessage: (() => void) | null = null
+  let textareaEl: HTMLTextAreaElement
+  let inputBarEl: HTMLDivElement
+
+  // ── Needs-input question (TASK-FPH60) ─────────────────────────────────────
+  // What the agent is actually asking, shown inside the needs-card instead of
+  // the generic "Claude is asking something in the terminal" wording.
+  let chatQuestion: ChatQuestionDTO | null = null
+  // Bumped on every fetch start/clear so a stale in-flight response can't
+  // clobber a newer one (mirrors loadInitial's loadedFor guard).
+  let questionFetchSeq = 0
+  // needsSince is episode-scoped (stores.ts) — keying the "have we fetched
+  // for this episode" check on it (rather than just session.id) re-fetches
+  // exactly once per needs episode, including the very first render when
+  // mounting straight into an already-'needs' session.
+  let questionFetchedFor: string | null = null
+
+  async function fetchChatQuestion(sessionId: string) {
+    const seq = ++questionFetchSeq
+    let result: ChatQuestionDTO | null
+    try {
+      result = await getChatQuestion(sessionId)
+    } catch {
+      result = null
+    }
+    if (seq !== questionFetchSeq) return // superseded by a newer fetch/clear
+    chatQuestion = result
+  }
+
+  // Re-fetch once per needs episode (on mount if already 'needs', and again
+  // whenever a fresh episode starts); clear the instant the session leaves
+  // 'needs' so a stale question never lingers into the next episode. A plain
+  // function (not inline in the $: block below) — mirrors refreshChatAvailability
+  // in TerminalView.svelte, which avoids eslint-plugin-svelte flagging the
+  // synchronous state writes as a possible infinite reactive loop.
+  function syncChatQuestion(
+    id: string | undefined,
+    status: string,
+    needsSince: number | undefined,
+  ) {
+    if (id && status === 'needs') {
+      const episodeKey = `${id}:${needsSince ?? ''}`
+      if (questionFetchedFor !== episodeKey) {
+        questionFetchedFor = episodeKey
+        void fetchChatQuestion(id)
+      }
+    } else if (chatQuestion !== null || questionFetchedFor !== null) {
+      questionFetchSeq++ // invalidate any in-flight fetch from the episode just left
+      questionFetchedFor = null
+      chatQuestion = null
+    }
+  }
+
+  // ── Slash-command skills menu ─────────────────────────────────────────────
+  let skills: AgentSkillDTO[] = []
+  let skillsLoadedFor: string | null = null
+  let highlightedIndex = 0
+  // The exact draft text the menu was dismissed for (Esc) — typing further
+  // (which changes draftText) re-opens it, matching how the token itself
+  // only exists while draftText hasn't moved past it.
+  let dismissedDraft: string | null = null
 
   $: items = buildChatView(messages)
   $: renderGroups = buildRenderGroups(items)
@@ -83,6 +167,40 @@
     session.status === 'needs' &&
     (session.needsSince == null || !messages.some((m) => m.ts >= (session.needsSince as number)))
   $: writeDisabledReason = !canWrite ? 'Another client controls this session.' : ''
+  $: syncChatQuestion(session.id, session.status, session.needsSince)
+
+  $: slashToken = detectSlashToken(draftText)
+  $: if (slashToken && session.id) void ensureSkillsLoaded(session.id)
+  $: slashResults = slashToken ? filterSkills(skills, slashToken.query) : []
+  $: slashMenuOpen = !!slashToken && slashResults.length > 0 && draftText !== dismissedDraft
+  $: if (slashMenuOpen) highlightedIndex = Math.min(highlightedIndex, slashResults.length - 1)
+
+  async function ensureSkillsLoaded(sessionId: string) {
+    const cached = skillsCache.get(sessionId)
+    if (cached) {
+      skills = cached
+      skillsLoadedFor = sessionId
+      return
+    }
+    if (skillsLoadedFor === sessionId) return // fetch already in flight for this session
+    skillsLoadedFor = sessionId
+    try {
+      const result = await listAgentSkills(sessionId)
+      if (session.id !== sessionId) return // superseded by a session switch
+      skillsCache.set(sessionId, result)
+      skills = result
+    } catch {
+      if (session.id !== sessionId) return
+      skillsLoadedFor = null // allow a retry on the next '/' open
+      skills = []
+    }
+  }
+
+  function selectSkill(skill: AgentSkillDTO) {
+    if (!slashToken) return
+    draftText = applySlashSelection(draftText, slashToken, skill.name)
+    void tick().then(() => textareaEl?.focus())
+  }
 
   function scrollToBottom() {
     if (chatBody) chatBody.scrollTop = chatBody.scrollHeight
@@ -153,10 +271,17 @@
         void tick().then(scrollToBottom)
       }
     })
+    // Registers this client as a subscriber so opencode's server-side polling
+    // runs while the chat view is open (claude/pi tails don't need it — the
+    // call is harmless for them). This component is keyed/remounted per
+    // session (see TerminalView's {#key session.id}), so mount/destroy here
+    // line up 1:1 with a single session.id.
+    if (hasBackend && session.id) void subscribeChat(session.id)
   })
 
   onDestroy(() => {
     offChatMessage?.()
+    if (hasBackend && session.id) void unsubscribeChat(session.id)
   })
 
   function toggleExpanded(toolUseId: string) {
@@ -182,6 +307,28 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    if (slashMenuOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        highlightedIndex = (highlightedIndex + 1) % slashResults.length
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        highlightedIndex = (highlightedIndex - 1 + slashResults.length) % slashResults.length
+        return
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault()
+        selectSkill(slashResults[highlightedIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        dismissedDraft = draftText
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       submit()
@@ -254,7 +401,16 @@
 
       {#if showNeedsCard}
         <div class="needs-card">
-          <div class="needs-text">Claude is asking something in the terminal</div>
+          {#if chatQuestion}
+            <div class="needs-question">
+              <div class="needs-question-label">
+                {chatQuestion.source === 'agent' ? 'Claude asks:' : 'From the terminal:'}
+              </div>
+              <pre class="needs-question-text">{chatQuestion.text}</pre>
+            </div>
+          {:else}
+            <div class="needs-text">Claude is asking something in the terminal</div>
+          {/if}
           <button type="button" class="btn btn-outline btn-sm" on:click={onSwitchToTerminal}>
             Switch to terminal
           </button>
@@ -262,13 +418,46 @@
       {/if}
     </div>
 
-    <div class="chat-input-bar">
+    <div class="chat-input-bar" bind:this={inputBarEl}>
+      {#if slashMenuOpen}
+        <div
+          id="slash-listbox"
+          class="sel-menu slash-menu"
+          role="listbox"
+          aria-label="Skills"
+          use:floatingAnchor={{ to: inputBarEl, gap: 6 }}
+        >
+          {#each slashResults as skill, i (skill.name)}
+            <button
+              type="button"
+              id={`slash-opt-${i}`}
+              class="opt slash-opt"
+              class:sel={i === highlightedIndex}
+              role="option"
+              aria-selected={i === highlightedIndex}
+              on:mousedown|preventDefault
+              on:click={() => selectSkill(skill)}
+            >
+              <span class="slash-name">/{skill.name}</span>
+              <span class="slash-desc">{skill.description}</span>
+              {#if skill.source === 'user'}
+                <span class="slash-src">user</span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
       <textarea
+        bind:this={textareaEl}
         bind:value={draftText}
         on:keydown={onKeydown}
         disabled={!canWrite || !session.id}
         placeholder={writeDisabledReason || 'Message the agent…'}
         rows="2"
+        role="combobox"
+        aria-expanded={slashMenuOpen}
+        aria-controls="slash-listbox"
+        aria-activedescendant={slashMenuOpen ? `slash-opt-${highlightedIndex}` : undefined}
       ></textarea>
       <button
         type="button"
@@ -458,8 +647,9 @@
   /* ── needs-input fallback card ── */
   .needs-card {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
     margin-top: 0.6rem;
     padding: 0.7rem 0.85rem;
     border-radius: var(--radius);
@@ -468,8 +658,34 @@
     background: hsl(var(--st-needs) / 0.08);
     font-size: 0.82rem;
   }
+  .needs-card > .btn {
+    align-self: flex-start;
+  }
   .needs-text {
     flex: 1;
+  }
+  .needs-question {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .needs-question-label {
+    font-weight: 600;
+  }
+  .needs-question-text {
+    margin: 0;
+    max-height: 14rem;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: hsl(var(--foreground));
+    padding: 0.5rem 0.6rem;
+    border-radius: calc(var(--radius) - 3px);
+    background: hsl(var(--accent-bg));
+    border: 1px solid hsl(var(--st-needs) / 0.25);
   }
 
   /* ── input bar ── */
@@ -509,6 +725,38 @@
     padding: 0 1rem 0.6rem;
     font-size: 0.75rem;
     color: hsl(var(--muted-foreground));
+  }
+
+  /* ── slash-command skills menu ── */
+  .slash-opt {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    position: relative;
+  }
+  .slash-opt.sel {
+    background: hsl(var(--accent-bg));
+  }
+  .slash-name {
+    font-family: 'Geist Mono', monospace;
+    font-weight: 600;
+  }
+  .slash-desc {
+    font-size: 0.75rem;
+    color: hsl(var(--muted-foreground));
+    white-space: normal;
+  }
+  .slash-src {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: hsl(var(--muted-foreground));
+    border: 1px solid hsl(var(--border));
+    border-radius: calc(var(--radius) - 4px);
+    padding: 1px 5px;
   }
 
   :focus-visible {

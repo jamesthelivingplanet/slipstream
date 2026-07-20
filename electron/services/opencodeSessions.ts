@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 
-import type { SessionStatus } from '../shared/contract.js'
+import type { ChatBlock, SessionChatMessageDTO, SessionStatus } from '../shared/contract.js'
 import { NEEDS_INPUT_MARKER, DONE_MARKER, IN_PROGRESS_MARKER } from '../shared/promptComposer.js'
 import {
   OPENCODE_FLAGS,
@@ -24,13 +24,30 @@ export interface OpencodeSession {
   title?: string
 }
 
-/** Minimal shape of an opencode message we read to classify status. */
+/** Minimal shape of an opencode message we read to classify status / render
+ *  chat (TASK-FPH60). `id`/`time.created` and the tool-part fields are only
+ *  used by the chat mapping below — status classification ignores them. */
 export interface OpencodeMessagePart {
   type: string
   text?: string
+  /** Present on `type: 'tool'` parts — opencode's own part id, or the
+   *  provider's tool-call id when different. Either identifies the call. */
+  id?: string
+  callID?: string
+  tool?: string
+  state?: {
+    status?: string
+    input?: unknown
+    output?: unknown
+  }
+}
+export interface OpencodeMessageInfo {
+  id?: string
+  role?: string
+  time?: { created?: number }
 }
 export interface OpencodeMessage {
-  info?: { role?: string }
+  info?: OpencodeMessageInfo
   parts?: OpencodeMessagePart[]
 }
 
@@ -208,4 +225,87 @@ export function opencodeStatusFromMessages(messages: OpencodeMessage[]): Session
     }
   }
   return opencodeStatusFromText(text)
+}
+
+/* ───────── Chat mapping (TASK-FPH60 opencode extension) ─────────
+ * opencode has no transcript file to tail — messages come from its embedded
+ * server (fetchOpencodeMessages above), polled by sessionManager. These pure
+ * functions map that response shape to SessionChatMessageDTO, mirroring
+ * transcriptMessages.ts / piChatMessages.ts. */
+
+/** Best-effort stringify of a tool part's output for display: pass strings
+ *  through, JSON-stringify anything else, '' for null/undefined/unstringifiable. */
+function stringifyToolOutput(output: unknown): string {
+  if (typeof output === 'string') return output
+  if (output === undefined || output === null) return ''
+  try {
+    return JSON.stringify(output)
+  } catch {
+    return ''
+  }
+}
+
+/** A `type: 'tool'` part carries both the call and (once resolved) its
+ *  result in one object — unlike Claude Code's separate tool_use/tool_result
+ *  transcript lines. Split it into a tool_use block, plus a tool_result block
+ *  once `state.status` indicates the call finished (completed or errored);
+ *  a still-pending/running call renders as just the tool_use. Returns []
+ *  when the part lacks enough identity to render (no id, no tool name). */
+function blocksFromToolPart(part: OpencodeMessagePart): ChatBlock[] {
+  const id = part.callID ?? part.id
+  const name = part.tool
+  if (typeof id !== 'string' || !id || typeof name !== 'string' || !name) return []
+
+  const blocks: ChatBlock[] = [{ type: 'tool_use', id, name, input: part.state?.input ?? {} }]
+  const status = part.state?.status
+  if (status === 'completed' || status === 'error') {
+    const block: ChatBlock = {
+      type: 'tool_result',
+      toolUseId: id,
+      content: stringifyToolOutput(part.state?.output),
+    }
+    if (status === 'error') block.isError = true
+    blocks.push(block)
+  }
+  return blocks
+}
+
+function blocksFromParts(parts: OpencodeMessagePart[] | undefined): ChatBlock[] {
+  const blocks: ChatBlock[] = []
+  for (const part of parts ?? []) {
+    if (part.type === 'text') {
+      if (typeof part.text === 'string' && part.text.length > 0) {
+        blocks.push({ type: 'text', text: part.text })
+      }
+    } else if (part.type === 'tool') {
+      blocks.push(...blocksFromToolPart(part))
+    }
+    // other part kinds (reasoning, step-start/finish, file, ...) aren't
+    // rendered yet — skipped leniently.
+  }
+  return blocks
+}
+
+/** Pure: map one opencode message to a chat DTO, or null when it's not a
+ *  user/assistant turn, has no stable id, or has nothing renderable. */
+export function opencodeMessageToChat(msg: OpencodeMessage): SessionChatMessageDTO | null {
+  const role = msg.info?.role
+  if (role !== 'user' && role !== 'assistant') return null
+  const uuid = msg.info?.id
+  if (typeof uuid !== 'string' || !uuid) return null
+  const blocks = blocksFromParts(msg.parts)
+  if (blocks.length === 0) return null
+  const created = msg.info?.time?.created
+  return { uuid, role, blocks, ts: typeof created === 'number' ? created : 0 }
+}
+
+/** Pure: map + filter a full message list, in order (oldest first, matching
+ *  the server's response order). */
+export function opencodeMessagesToChat(messages: OpencodeMessage[]): SessionChatMessageDTO[] {
+  const out: SessionChatMessageDTO[] = []
+  for (const m of messages) {
+    const dto = opencodeMessageToChat(m)
+    if (dto) out.push(dto)
+  }
+  return out
 }
