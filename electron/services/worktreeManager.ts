@@ -177,6 +177,10 @@ async function gitNoIndexDiff(wt: string, file: string): Promise<string> {
       wt,
       '-c',
       'core.quotepath=false',
+      // Force canonical a// b/ prefixes; a user-set diff.mnemonicprefix=true
+      // would otherwise emit c// w// etc. and break the parser's path stripping.
+      '-c',
+      'diff.mnemonicprefix=false',
       'diff',
       '--no-color',
       '--no-ext-diff',
@@ -568,6 +572,10 @@ export function createWorktreeManager(root: string): IWorktreeManager {
             wt,
             '-c',
             'core.quotepath=false',
+            // Force canonical a// b/ prefixes; a user-set diff.mnemonicprefix=true
+            // would otherwise emit c// w// etc. and break the parser's path stripping.
+            '-c',
+            'diff.mnemonicprefix=false',
             'diff',
             '--no-color',
             '--no-ext-diff',
