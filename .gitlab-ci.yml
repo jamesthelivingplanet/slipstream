@@ -110,6 +110,32 @@ e2e-smoke:
     - pnpm build
     - xvfb-run -a node scripts/e2e/smoke-add-repo.mjs
 
+# Headless restart/crash-recovery e2e (FLO-135): the only CI path that
+# exercises reconnect/replay/restart. Drives the daemon in web mode with
+# Playwright chromium (no Electron, no xvfb): stub `claude` → SIGKILL daemon
+# → restart against the same data dir → assert the orphaned session is marked
+# `interrupted` (restoreInterruptedSessions on boot) and its scrollback replays
+# (sessionManager.getBuffer's not-live fallback). Scheduled + manual like
+# e2e-smoke so it never blocks a merge; shares the Playwright image (chromium
+# + system libs are preinstalled there). See scripts/e2e/restart-recovery-flow.mjs.
+e2e-restart:
+  stage: verify
+  image: mcr.microsoft.com/playwright:v1.60.0-jammy
+  interruptible: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: manual
+      allow_failure: true
+  before_script: []
+  script:
+    - corepack enable
+    - pnpm config set store-dir "$PNPM_STORE_DIR"
+    - pnpm install --frozen-lockfile
+    - pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty
+    - pnpm build
+    - node scripts/e2e/restart-recovery-flow.mjs
+
 # Publish the production server image to the GitLab Container Registry on every
 # merge to the default branch, as an alternative deploy path to the systemd/
 # launchd flow (pnpm deploy) and the Tailscale-sidecar pod (docker-compose.yml).
