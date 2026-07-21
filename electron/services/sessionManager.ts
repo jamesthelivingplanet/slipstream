@@ -9,7 +9,6 @@
 
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as pty from 'node-pty'
 
@@ -38,9 +37,7 @@ import {
   type StatusHandle,
 } from './agentBackend.js'
 import type { RunLogger } from './runLogger.js'
-import { parseStatusSentinel, STATUS_SENTINEL_FILE } from './statusSentinel.js'
-import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from './outcomeSentinel.js'
-import { eventsAfter, AGENT_EVENTS_FILE } from './agentEventsSentinel.js'
+import { createSentinelWatcher, type SentinelWatcher } from './sentinelWatcher.js'
 import { writeSlipstreamSkill } from './promptWriter.js'
 import { transcriptPathFor } from './transcripts.js'
 import { parseTranscriptMessages } from './transcriptMessages.js'
@@ -122,7 +119,7 @@ interface SessionRecord {
   opencodePort?: number
   opencodeSid?: string
   pollTimer?: ReturnType<typeof setInterval>
-  watcher?: ReturnType<typeof fs.watch>
+  watcher?: SentinelWatcher
   // Chat tail (TASK-FPH60, claude-code + pi): fs.watch-backed tail on the
   // resolved transcript/session file. Undefined for backends with no file
   // tail (opencode uses the poller below; antigravity/grok/kilo have none).
@@ -400,120 +397,29 @@ export function createSessionManager(
     }
     sessions.set(id, rec)
 
-    // Set up fs.watch for pr.json sentinel if root is provided
+    // Watch pr.json/status.json/outcome.json/events.ndjson under this
+    // session's sentinel dir (see sentinelWatcher.ts for the fs.watch
+    // multiplexer, dedupe cursors, and the pty-vs-poll status merge).
     if (root) {
       const sentinelDir = path.join(root, 'sessions', id)
-      void fs.promises
-        .mkdir(sentinelDir, { recursive: true })
-        .then(() => {
-          const emittedPrUrl = new Set<string>()
-          let lastStatusTs = 0
-          let lastOutcomeTs = 0
-          // Deliberately starts at 0: after a daemon restart the whole
-          // events.ndjson history is re-emitted; the DB layer's INSERT OR
-          // IGNORE (unique on sessionId/kind/ts) makes the replay idempotent.
-          let lastAgentEventTs = 0
-          try {
-            const watcher = fs.watch(sentinelDir, { persistent: false }, (_event, filename) => {
-              if (
-                filename !== 'pr.json' &&
-                filename !== STATUS_SENTINEL_FILE &&
-                filename !== OUTCOME_SENTINEL_FILE &&
-                filename !== AGENT_EVENTS_FILE
-              )
-                return
-
-              if (filename === 'pr.json') {
-                const filePath = path.join(sentinelDir, 'pr.json')
-                try {
-                  const content = fs.readFileSync(filePath, 'utf8')
-                  const parsed = JSON.parse(content) as { url?: string }
-                  if (parsed.url && !emittedPrUrl.has(parsed.url)) {
-                    emittedPrUrl.add(parsed.url)
-                    emit('pr', id, parsed.url)
-                  }
-                } catch {
-                  // Ignore read/parse errors (file may be partially written)
-                }
-                return
-              }
-
-              if (filename === OUTCOME_SENTINEL_FILE) {
-                const filePath = path.join(sentinelDir, OUTCOME_SENTINEL_FILE)
-                try {
-                  const content = fs.readFileSync(filePath, 'utf8')
-                  const parsed = parseOutcomeSentinel(content)
-                  if (parsed && parsed.ts > lastOutcomeTs) {
-                    lastOutcomeTs = parsed.ts
-                    emit('outcome', id, {
-                      sessionId: id,
-                      result: parsed.result,
-                      summary: parsed.summary,
-                      details: parsed.details,
-                      reportedAt: parsed.ts,
-                    })
-                  }
-                } catch {
-                  // Ignore read/parse errors (file may be partially written)
-                }
-                return
-              }
-
-              if (filename === AGENT_EVENTS_FILE) {
-                const filePath = path.join(sentinelDir, AGENT_EVENTS_FILE)
-                try {
-                  const content = fs.readFileSync(filePath, 'utf8')
-                  for (const event of eventsAfter(content, lastAgentEventTs, id)) {
-                    lastAgentEventTs = event.ts
-                    emit('agentEvent', id, event)
-                  }
-                } catch {
-                  // Ignore read/parse errors (file may be partially written)
-                }
-                return
-              }
-
-              // filename === STATUS_SENTINEL_FILE
-              const filePath = path.join(sentinelDir, STATUS_SENTINEL_FILE)
-              try {
-                const content = fs.readFileSync(filePath, 'utf8')
-                const parsed = parseStatusSentinel(content)
-                if (parsed && parsed.ts > lastStatusTs) {
-                  lastStatusTs = parsed.ts
-                  // reason/message ride along as meta so status consumers
-                  // (detector, reaper, badges) stay reason-blind.
-                  const meta =
-                    parsed.reason !== undefined || parsed.message !== undefined
-                      ? { reason: parsed.reason, message: parsed.message }
-                      : undefined
-                  const ptyDriven = rec.backend.statusSource === 'pty'
-                  if (ptyDriven) {
-                    detector.applySignal(parsed.state)
-                    const s = detector.status()
-                    rec.dto.status = s
-                    rec.activityMessage = s === 'needs' ? meta?.message : undefined
-                    emit('status', id, s, meta)
-                  } else {
-                    rec.dto.status = parsed.state
-                    rec.activityMessage = parsed.state === 'needs' ? meta?.message : undefined
-                    emit('status', id, parsed.state, meta)
-                  }
-                }
-              } catch {
-                // Ignore read/parse errors (file may be partially written)
-              }
-            })
-            watcher.on('error', () => {
-              /* ignore */
-            })
-            rec.watcher = watcher
-          } catch {
-            // Ignore watch errors
-          }
-        })
-        .catch(() => {
-          /* ignore mkdir errors */
-        })
+      const ptyDriven = backend.statusSource === 'pty'
+      rec.watcher = createSentinelWatcher(sentinelDir, detector, ptyDriven, {
+        onPr: (url) => emit('pr', id, url),
+        onOutcome: (outcome) =>
+          emit('outcome', id, {
+            sessionId: id,
+            result: outcome.result,
+            summary: outcome.summary,
+            details: outcome.details,
+            reportedAt: outcome.ts,
+          }),
+        onAgentEvent: (event) => emit('agentEvent', id, { sessionId: id, ...event }),
+        onStatus: (status, meta, activityMessage) => {
+          rec.dto.status = status
+          rec.activityMessage = activityMessage
+          emit('status', id, status, meta)
+        },
+      })
     }
 
     wire(id, rec)
