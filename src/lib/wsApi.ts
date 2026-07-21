@@ -89,13 +89,25 @@ type DataCb = (id: string, data: string, seq: number) => void
 type StatusCb = (id: string, status: SessionStatus, meta?: StatusMeta) => void
 type ExitCb = (id: string, code: number) => void
 
-export function createWsApi(opts: WsApiOpts): SlipstreamApi {
+export type WsApi = SlipstreamApi & {
+  /**
+   * Tear down this instance: stop reconnecting, remove the module-level
+   * visibilitychange/online/pageshow listeners, stop the heartbeat, close the
+   * socket, and reject any in-flight/queued requests. Required whenever a new
+   * createWsApi() instance replaces this one (e.g. token-gate retry after an
+   * auth error) — otherwise the old instance's global listeners and timers
+   * live forever, holding a closure over the stale token.
+   */
+  destroy(): void
+}
+
+export function createWsApi(opts: WsApiOpts): WsApi {
   const WS = opts.WebSocketCtor ?? WebSocket
   const fullUrl = `${opts.url}?token=${encodeURIComponent(opts.token)}`
 
   let ws: WebSocket | null = null
   let open = false
-  const destroyed = false
+  let destroyed = false
   let reconnectAttempt = 0
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined
   let pongTimeout: ReturnType<typeof setTimeout> | undefined
@@ -323,14 +335,43 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
     }
   }
 
+  function onVisibilityChange() {
+    if (document.visibilityState === 'visible') onForeground()
+  }
+
   if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') onForeground()
-    })
+    document.addEventListener('visibilitychange', onVisibilityChange)
   }
   if (typeof window !== 'undefined') {
     window.addEventListener('online', onForeground)
     window.addEventListener('pageshow', onForeground)
+  }
+
+  function destroy() {
+    if (destroyed) return
+    destroyed = true
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', onForeground)
+      window.removeEventListener('pageshow', onForeground)
+    }
+    stopHeartbeat()
+    if (reconnectTimer !== undefined) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = undefined
+    }
+    open = false
+    for (const [, p] of pending) {
+      if (p.timer !== undefined) clearTimeout(p.timer)
+      p.reject(new Error('WebSocket destroyed'))
+    }
+    pending.clear()
+    queue.length = 0
+    const socket = ws
+    ws = null
+    socket?.close()
   }
 
   function send(req: WireReq): void {
@@ -752,5 +793,7 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
       connectionListeners.add(cb)
       return () => connectionListeners.delete(cb)
     },
+
+    destroy,
   }
 }
