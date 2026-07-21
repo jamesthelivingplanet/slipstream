@@ -1,3 +1,12 @@
+// Aliased from the contract (the seam's source of truth) instead of
+// re-declared, so these can't silently drift out of sync (FLO-121).
+import type {
+  BackendKind,
+  TicketSource as Source,
+  WorkflowState,
+} from '../../electron/shared/contract.js'
+export type { BackendKind, Source, WorkflowState }
+
 export type Status =
   | 'idle'
   | 'running'
@@ -12,8 +21,6 @@ export type Status =
   // confirmed, cleared when the session is removed. Never persisted or sent by
   // the backend — it's the "this agent is going away" loading state.
   | 'tearing-down'
-export type Source = 'jira' | 'linear'
-export type BackendKind = 'claude-code' | 'opencode' | 'pi' | 'antigravity' | 'grok' | 'kilo'
 export type Filter = 'all' | 'needs' | 'running' | 'done'
 
 export interface Repo {
@@ -21,12 +28,6 @@ export interface Repo {
   org: string
   name: string
   base: string
-}
-
-export interface WorkflowState {
-  id: string
-  name: string
-  type?: string
 }
 
 export interface Ticket {
