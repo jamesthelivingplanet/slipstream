@@ -1527,6 +1527,18 @@ describe('createRpc', () => {
     expect(deps.tickets.resetTicket).toHaveBeenCalledWith('T-1', undefined)
   })
 
+  it('cleanupSession does not reset the ticket when the session is done (TASK-5PVBM)', async () => {
+    await rpc.handle(IPC.startSession, [
+      { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+    ])
+    // The agent finished: persist the session in the 'done' state.
+    const persisted = deps.sessionStore.get('s1')!
+    deps.sessionStore.upsert({ ...persisted, status: 'done' })
+    const result = await rpc.handle(IPC.cleanupSession, ['s1'])
+    expect(result).toEqual({ removed: true })
+    expect(deps.tickets.resetTicket).not.toHaveBeenCalled()
+  })
+
   it('cleanupSession still succeeds when resetTicket rejects', async () => {
     ;(deps.tickets.resetTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('linear down'),
