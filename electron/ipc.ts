@@ -70,4 +70,8 @@ export interface IpcDeps {
   prStatus?: import('./services/prStatus.js').IPrStatusService
   /** Session-start scheduler (FLO-95). Optional so tests without one fall back to immediate launch. */
   scheduler?: import('./services/sessionScheduler.js').ISessionScheduler
+  /** Per-device/per-user token store (FLO-143) — the credential source behind
+   *  resolveIdentity's multi-user seam. Optional so tests without one fall
+   *  back to the static-token-only (single-user) auth path. */
+  deviceTokens?: import('./services/deviceTokenStore.js').IDeviceTokenStore
 }

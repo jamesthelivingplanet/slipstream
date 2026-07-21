@@ -328,3 +328,53 @@ export function allFcmTokens(db: Database.Database): FcmTokenRow[] {
 export function deleteFcmToken(db: Database.Database, token: string, ownerId: string): void {
   db.prepare('DELETE FROM push_fcm_tokens WHERE token = ? AND ownerId = ?').run(token, ownerId)
 }
+
+// ── Per-device/per-user auth tokens (FLO-143) ────────────────────────────────
+//
+// Only tokenHash (SHA-256 of the plaintext credential) is ever persisted —
+// see electron/services/deviceTokenStore.ts, the module that owns hashing and
+// is the only writer of this table.
+
+export interface DeviceTokenRow {
+  id: string
+  ownerId: string
+  tokenHash: string
+  label: string
+  createdAt: number
+  revokedAt: number | null
+}
+
+export function insertDeviceToken(db: Database.Database, row: DeviceTokenRow): void {
+  db.prepare(
+    `
+    INSERT INTO device_tokens (id, ownerId, tokenHash, label, createdAt, revokedAt)
+    VALUES (@id, @ownerId, @tokenHash, @label, @createdAt, @revokedAt)
+  `,
+  ).run(row)
+}
+
+export function getDeviceTokenByHash(
+  db: Database.Database,
+  tokenHash: string,
+): DeviceTokenRow | undefined {
+  return db.prepare('SELECT * FROM device_tokens WHERE tokenHash = ?').get(tokenHash) as
+    DeviceTokenRow | undefined
+}
+
+export function getDeviceToken(db: Database.Database, id: string): DeviceTokenRow | undefined {
+  return db.prepare('SELECT * FROM device_tokens WHERE id = ?').get(id) as
+    DeviceTokenRow | undefined
+}
+
+export function allDeviceTokens(db: Database.Database): DeviceTokenRow[] {
+  return db.prepare('SELECT * FROM device_tokens ORDER BY createdAt').all() as DeviceTokenRow[]
+}
+
+/** Revocation is final, not a toggle: only ever sets revokedAt from NULL, and
+ *  a missing/already-revoked id is a silent no-op (idempotent). */
+export function revokeDeviceToken(db: Database.Database, id: string, revokedAt: number): void {
+  db.prepare('UPDATE device_tokens SET revokedAt = ? WHERE id = ? AND revokedAt IS NULL').run(
+    revokedAt,
+    id,
+  )
+}
