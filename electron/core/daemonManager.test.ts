@@ -119,6 +119,18 @@ describe('loadOrCreateLocalIdentity', () => {
     const mode = fs.statSync(path.join(tmpDir, 'daemon.json')).mode & 0o777
     expect(mode).toBe(0o600)
   })
+
+  it('creates a fresh data dir with mode 0700 (FLO-130)', async () => {
+    // beforeEach pre-creates tmpDir, so use a not-yet-existing subdirectory to
+    // actually exercise the mkdir path. Locking the dir to 0700 in the same
+    // call that creates it closes the first-boot window where the dir would
+    // otherwise sit at default (umask-dependent) perms until the spawned
+    // daemon child's own chmod in services.ts runs. See docs/SECURITY.md §7.
+    const freshDir = path.join(tmpDir, 'sub')
+    await loadOrCreateLocalIdentity(freshDir, {}, { pickPort: async () => 9999 })
+    const mode = fs.statSync(freshDir).mode & 0o777
+    expect(mode).toBe(0o700)
+  })
 })
 
 // ── pickPort ──────────────────────────────────────────────────────────────────
