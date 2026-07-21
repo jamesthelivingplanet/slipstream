@@ -1,6 +1,8 @@
 import type { BackendKind } from './contract.js'
 import { SINGLE_CHANNEL_CLAIM } from './slipstreamCommands.js'
 
+export { AGENT_LABELS } from './agents.js'
+
 export interface TicketContext {
   tid: string
   title: string
@@ -71,16 +73,6 @@ When the ticket is complete, commit and push your changes yourself using ordinar
 2. Report the URL it prints in your final message.
 
 Do not skip this step — it is how the work gets reviewed.`
-}
-
-/** Human-readable labels for handoff prompts (keep in sync with src/lib/agents.ts). */
-export const AGENT_LABELS: Record<BackendKind, string> = {
-  'claude-code': 'Claude Code',
-  opencode: 'OpenCode',
-  pi: 'Pi',
-  antigravity: 'Antigravity',
-  grok: 'Grok',
-  kilo: 'Kilo Code',
 }
 
 export interface HandoffContext {

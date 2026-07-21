@@ -1,56 +1,10 @@
 import type { BackendKind } from './types'
+import { AGENT_META, type AgentMeta } from '../../electron/shared/agents.js'
 
-export interface AgentOption {
-  kind: BackendKind
-  label: string
-  /** Short description shown beneath the selector. */
-  description: string
-  /** Path (under public/) to the agent's brand icon. */
-  icon: string
-}
+export type AgentOption = AgentMeta
 
-/** The agents surfaced in the UI selector. Add new backends here. */
-export const AGENTS: AgentOption[] = [
-  {
-    kind: 'claude-code',
-    label: 'Claude Code',
-    description: 'Uses claude --dangerously-skip-permissions in a git worktree.',
-    icon: '/icons/agents/claude-code.svg',
-  },
-  {
-    kind: 'opencode',
-    label: 'OpenCode',
-    description:
-      'Uses opencode in a git worktree with auto-discovered AGENTS.md and permissions set to allow.',
-    icon: '/icons/agents/opencode.svg',
-  },
-  {
-    kind: 'pi',
-    label: 'Pi',
-    description: 'Uses pi --approve in a git worktree with an appended system prompt.',
-    icon: '/icons/agents/pi.svg',
-  },
-  {
-    kind: 'antigravity',
-    label: 'Antigravity',
-    description:
-      'Uses agy --dangerously-skip-permissions in a git worktree with auto-discovered AGENTS.md.',
-    icon: '/icons/agents/antigravity.svg',
-  },
-  {
-    kind: 'grok',
-    label: 'Grok',
-    description: 'Uses grok in a git worktree with auto-discovered AGENTS.md.',
-    icon: '/icons/agents/grok.svg',
-  },
-  {
-    kind: 'kilo',
-    label: 'Kilo Code',
-    description:
-      'Uses kilo in a git worktree with auto-discovered AGENTS.md and permissions set to allow.',
-    icon: '/icons/agents/kilo.svg',
-  },
-]
+/** The agents surfaced in the UI selector. Add new backends in electron/shared/agents.ts. */
+export const AGENTS: AgentOption[] = [...AGENT_META]
 
 /** Look up the option for a kind, falling back to the first agent. */
 export function agentOption(kind: BackendKind): AgentOption {
