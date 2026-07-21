@@ -369,11 +369,11 @@ function closeServer(server: http.Server): Promise<void> {
   return new Promise((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())))
 }
 
-function wsConnect(port: number, token?: string): WebSocket {
+function wsConnect(port: number, token?: string, origin?: string): WebSocket {
   const url = token
     ? `ws://127.0.0.1:${port}/rpc?token=${encodeURIComponent(token)}`
     : `ws://127.0.0.1:${port}/rpc`
-  return new WebSocket(url)
+  return new WebSocket(url, origin ? { origin } : undefined)
 }
 
 function sendReq(ws: WebSocket, channel: string, args: unknown[] = []): Promise<WireRes> {
@@ -462,6 +462,80 @@ describe('createServer', () => {
       ws.once('close', (c) => resolve(c))
     })
     expect(code).toBe(4001)
+  })
+
+  it('rejects a browser Origin not in the allowlist', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, {
+      token: 'secret',
+      port: 0,
+      allowedOrigins: ['http://good.example'],
+    })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const ws = wsConnect(port, 'secret', 'http://evil.example')
+    const code = await new Promise<number | undefined>((resolve) => {
+      ws.once('close', (c) => resolve(c))
+      ws.once('error', () => resolve(undefined))
+    })
+    expect(ws.readyState).toBe(WebSocket.CLOSED)
+    // Rejected before the handshake — a raw socket destroy, not a clean 4001 close.
+    expect(code).not.toBe(4001)
+  })
+
+  it('accepts a browser Origin in the allowlist (with token)', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, {
+      token: 'secret',
+      port: 0,
+      allowedOrigins: ['http://good.example'],
+    })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const ws = wsConnect(port, 'secret', 'http://good.example')
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', resolve)
+      ws.once('error', reject)
+    })
+    ws.close()
+  })
+
+  it('allows header clients (no Origin) even when an allowlist is set', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, {
+      token: 'secret',
+      port: 0,
+      allowedOrigins: ['http://good.example'],
+    })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const ws = wsConnect(port, 'secret') // no Origin header (header-capable client)
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', resolve)
+      ws.once('error', reject)
+    })
+    ws.close()
+  })
+
+  it('accepts any Origin when no allowlist is configured', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const ws = wsConnect(port, 'secret', 'http://anything.example')
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', resolve)
+      ws.once('error', reject)
+    })
+    ws.close()
   })
 
   it('accepts a connection with the correct token', async () => {

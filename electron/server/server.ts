@@ -27,10 +27,23 @@ function tokensMatch(provided: string | undefined, expected: string): boolean {
 // clean TCP close).
 const HEARTBEAT_INTERVAL_MS = 30_000
 
+// Optional Origin allowlist for browser clients (defense-in-depth). Only
+// browsers attach an `Origin` header to a WebSocket upgrade; header-capable
+// clients (the desktop daemon's Bearer connection, e2e drivers) send none, so
+// the check never applies to them. When no allowlist is configured the feature
+// is off and every origin is accepted, preserving existing behavior.
+function originAllowed(origin: string | undefined, allowlist: string[] | undefined): boolean {
+  if (!allowlist || allowlist.length === 0) return true
+  if (origin === undefined) return true
+  return allowlist.includes(origin)
+}
+
 export interface ServerOptions {
   token: string
   bind?: string
   port?: number
+  /** Optional Origin allowlist enforced only for browser clients that send an Origin header. */
+  allowedOrigins?: string[]
 }
 
 /**
@@ -39,7 +52,7 @@ export interface ServerOptions {
  * Returns the underlying http.Server (useful for obtaining the bound port in tests).
  */
 export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
-  const { token, bind = '127.0.0.1', port = 7421 } = opts
+  const { token, bind = '127.0.0.1', port = 7421, allowedOrigins } = opts
 
   // dist/ is the sibling of dist-electron/ (where this server.js runs from)
   const distDir = path.resolve(__dirname, '..', 'dist')
@@ -167,6 +180,18 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
       return
     }
 
+    // Reject disallowed browser origins BEFORE completing the handshake. This
+    // is intentionally placed ahead of handleUpgrade (unlike the token check
+    // below): a cross-site / DNS-rebind browser connection is never a
+    // legitimate client that needs the clean 4001 signal, and rejecting here
+    // avoids opening a socket for it at all, trimming pre-auth churn. Only
+    // enforced when an allowlist is configured and the request carries an
+    // Origin header (i.e. a browser).
+    if (!originAllowed(req.headers.origin, allowedOrigins)) {
+      socket.destroy()
+      return
+    }
+
     const authHeader = req.headers['authorization']
     const bearerToken = authHeader?.startsWith('Bearer ')
       ? authHeader.slice('Bearer '.length)
@@ -278,10 +303,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     console.error('[slipstream-server] unhandledRejection:', reason)
   })
 
+  const allowedOrigins = (process.env.SLIPSTREAM_ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0)
+
   createServer(deps, {
     token,
     bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1',
     port: process.env.SLIPSTREAM_PORT ? Number(process.env.SLIPSTREAM_PORT) : 7421,
+    allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : undefined,
   })
   logger?.server('info', 'server listening', {
     bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1',
