@@ -158,6 +158,9 @@ export const getEditorConfig = call('getEditorConfig', () =>
 
 export const setEditorConfig = call('setEditorConfig', NO_BACKEND)
 
+export const getAgentArgs = call('getAgentArgs', () => Promise.resolve({}))
+export const setAgentArgs = call('setAgentArgs', NO_BACKEND)
+
 export const openInEditor = call('openInEditor', NO_BACKEND)
 
 export const getRepoSettings = call('getRepoSettings', () =>

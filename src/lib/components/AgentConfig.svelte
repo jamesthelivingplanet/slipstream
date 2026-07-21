@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import { repos, repoById, startAgent, discardDraft } from '../stores'
   import { branchFor } from '../branch'
   import AgentSelector from './AgentSelector.svelte'
   import { floatingAnchor } from '../floating'
   import { icons } from '../icons'
   import { agentOption } from '../agents'
+  import { getAgentArgs } from '../ipc'
   import type { Session, BackendKind } from '../types'
 
   export let session: Session
@@ -16,6 +18,15 @@
 
   let agentKind: BackendKind = 'claude-code'
   let extraArgs = ''
+  let agentArgsDefaults: Record<string, string> = {}
+
+  onMount(() => {
+    getAgentArgs()
+      .then((c) => (agentArgsDefaults = c))
+      .catch(() => {})
+  })
+
+  $: savedDefault = (agentArgsDefaults[agentKind] ?? '').trim()
 
   $: if (session && session.id !== lastId) {
     lastId = session.id
@@ -122,8 +133,13 @@
         autocomplete="off"
       />
       <p class="cfg-hint">
-        Appended to the {agentOption(agentKind).label} launch command. If they cause an error, it'll show
-        on the agent run.
+        {#if !extraArgs.trim() && savedDefault}
+          Blank uses your saved default for {agentOption(agentKind).label}:
+          <code>{savedDefault}</code>.
+        {:else}
+          Appended to the {agentOption(agentKind).label} launch command. If they cause an error, it'll
+          show on the agent run.
+        {/if}
       </p>
     </div>
 

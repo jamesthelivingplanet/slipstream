@@ -11,6 +11,7 @@ import type {
   SessionOutcomeDTO,
   Identity,
   EditorConfig,
+  AgentArgsConfig,
   RepoSettings,
   NotifyPrefs,
   PushSubscriptionDTO,
@@ -285,9 +286,16 @@ export function createRpc(
         const { tid, title, prompt, repoId, description } = input
         const agentKind = input.agentKind
 
+        // TASK-CMZUG: a blank per-run extraArgs falls back to the saved per-agent
+        // default (config key agentArgs.<kind>); a non-blank run value overrides it.
+        const effectiveExtraArgs =
+          input.extraArgs && input.extraArgs.trim()
+            ? input.extraArgs
+            : deps.config.get(`agentArgs.${agentKind ?? 'claude-code'}`) || undefined
+
         // TASK-UQF55: validate up front so a malformed arg string errors the
         // start call synchronously (incl. the queued path), not later.
-        if (input.extraArgs) parseAgentArgs(input.extraArgs)
+        if (effectiveExtraArgs) parseAgentArgs(effectiveExtraArgs)
 
         const repo = await deps.repos.resolvePath(repoId)
         if (!ownedByCaller(repo)) throw new Error(`Unknown repo: ${repoId}`)
@@ -311,7 +319,7 @@ export function createRpc(
           agentKind,
           src: input.src,
           ownerId: identity.id,
-          extraArgs: input.extraArgs,
+          extraArgs: effectiveExtraArgs,
         }
 
         const session = deps.scheduler
@@ -672,6 +680,29 @@ export function createRpc(
         const cfg = args[0] as EditorConfig
         deps.config.set('editor.command', cfg.command ?? '')
         deps.config.set('editor.mobileCommand', cfg.mobileCommand ?? '')
+        return undefined
+      }
+
+      case IPC.getAgentArgs: {
+        const cfg: AgentArgsConfig = {}
+        for (const kind of BACKEND_KINDS) {
+          const v = deps.config.get(`agentArgs.${kind}`)
+          if (v && v.trim()) cfg[kind] = v
+        }
+        return cfg
+      }
+
+      case IPC.setAgentArgs: {
+        const cfg = (args[0] ?? {}) as AgentArgsConfig
+        const next: Array<[string, string]> = []
+        for (const kind of BACKEND_KINDS) {
+          const raw = (cfg[kind] ?? '').trim()
+          // Validate every value before writing any, so a malformed entry rejects
+          // the whole save (same guard startSession applies) without a partial write.
+          if (raw) parseAgentArgs(raw)
+          next.push([`agentArgs.${kind}`, raw])
+        }
+        for (const [key, raw] of next) deps.config.set(key, raw)
         return undefined
       }
 

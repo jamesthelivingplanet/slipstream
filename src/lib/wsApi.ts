@@ -468,6 +468,10 @@ export function createWsApi(opts: WsApiOpts): WsApi {
 
     setEditorConfig: wire<'setEditorConfig'>(IPC.setEditorConfig),
 
+    getAgentArgs: wire<'getAgentArgs'>(IPC.getAgentArgs),
+
+    setAgentArgs: wire<'setAgentArgs'>(IPC.setAgentArgs),
+
     openInEditor: wire<'openInEditor'>(IPC.openInEditor),
 
     startSession: wire<'startSession'>(IPC.startSession),

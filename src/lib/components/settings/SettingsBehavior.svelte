@@ -4,6 +4,8 @@
     hasBackend,
     getEditorConfig,
     setEditorConfig,
+    getAgentArgs,
+    setAgentArgs,
     getGcPolicy,
     setGcPolicy,
     getSchedulerPolicy,
@@ -20,7 +22,12 @@
   } from '../../fabPrefs'
   import { replayOnboarding } from '../../onboarding'
   import SettingsSection from './SettingsSection.svelte'
-  import type { GcPolicy, SchedulerPolicy } from '../../../../electron/shared/contract.js'
+  import { AGENT_META } from '../../../../electron/shared/agents.js'
+  import type {
+    GcPolicy,
+    SchedulerPolicy,
+    AgentArgsConfig,
+  } from '../../../../electron/shared/contract.js'
   import {
     DEFAULT_GC_POLICY,
     DEFAULT_SCHEDULER_POLICY,
@@ -53,6 +60,30 @@
       pushToast('error', e instanceof Error ? e.message : 'Failed to save editor settings')
     } finally {
       editorPending = false
+    }
+  }
+
+  let agentArgs: AgentArgsConfig = {}
+  let agentArgsPending = false
+
+  async function loadAgentArgs() {
+    if (!hasBackend) return
+    try {
+      agentArgs = await getAgentArgs()
+    } catch {
+      /* ignore */
+    }
+  }
+  async function saveAgentArgs() {
+    if (!hasBackend) return
+    agentArgsPending = true
+    try {
+      await setAgentArgs(agentArgs)
+      pushToast('success', 'Agent CLI arguments saved')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save agent CLI arguments')
+    } finally {
+      agentArgsPending = false
     }
   }
 
@@ -138,6 +169,7 @@
 
   onMount(() => {
     loadEditorConfig()
+    loadAgentArgs()
     loadGcPolicy()
     loadSchedulerPolicy()
     initFabPrefs()
@@ -190,6 +222,38 @@
       {/if}
     </div>
   </div>
+</SettingsSection>
+
+<SettingsSection title="Agent CLI arguments">
+  <p class="integration-hint">
+    Extra arguments appended to each agent's launch command for every run of that type. Leave a
+    run's own field blank to use these; fill it to override for that run.
+  </p>
+  {#each AGENT_META as a (a.kind)}
+    <div class="repo-settings-field">
+      <label class="lbl-f" for={`args-${a.kind}`}>{a.label}</label>
+      <input
+        id={`args-${a.kind}`}
+        type="text"
+        class="path-input"
+        placeholder="--advisor --chrome"
+        spellcheck="false"
+        autocapitalize="off"
+        autocomplete="off"
+        bind:value={agentArgs[a.kind]}
+        disabled={agentArgsPending || !hasBackend}
+      />
+    </div>
+  {/each}
+  <button
+    class="btn btn-outline btn-sm"
+    style="margin-top:8px"
+    on:click={saveAgentArgs}
+    disabled={agentArgsPending || !hasBackend}>Save</button
+  >
+  {#if !hasBackend}
+    <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+  {/if}
 </SettingsSection>
 
 <SettingsSection title="Tour">
