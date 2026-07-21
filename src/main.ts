@@ -86,18 +86,40 @@ async function bootWeb() {
   await connectWithToken(wsUrl, storedToken, createWsApi, serverOrigin)
 }
 
+/**
+ * Ask the server (via the unauthenticated /healthz endpoint) whether it wants
+ * browser clients to use the one-time WS ticket flow (docs/SECURITY.md §3) —
+ * only reverse-proxy-fronted deployments opt in (SLIPSTREAM_WS_TICKETS=1).
+ * Electron never calls this (bootElectron always uses ?token=). Any failure
+ * (offline, old server without the field) defaults to false — falling back
+ * to the legacy ?token= URL rather than blocking boot.
+ */
+async function wsTicketsEnabled(serverOrigin: string): Promise<boolean> {
+  try {
+    const res = await fetch(new URL('/healthz', serverOrigin))
+    if (!res.ok) return false
+    const body = (await res.json()) as { wsTickets?: boolean }
+    return body.wsTickets === true
+  } catch {
+    return false
+  }
+}
+
 async function connectWithToken(
   wsUrl: string,
   token: string,
   createWsApi: typeof import('./lib/wsApi.js').createWsApi,
   serverOrigin: string,
 ): Promise<void> {
+  const useTickets = await wsTicketsEnabled(serverOrigin)
+
   return new Promise<void>((resolve) => {
     let authFailed = false
 
     const api = createWsApi({
       url: wsUrl,
       token,
+      ticketUrl: useTickets ? new URL('/rpc-ticket', serverOrigin).toString() : undefined,
       onAuthError: async () => {
         if (authFailed) return
         authFailed = true

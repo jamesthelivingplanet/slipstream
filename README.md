@@ -106,6 +106,11 @@ This is idempotent — safe to re-run. It will:
 - To reach it from a phone (PWA install + push need an HTTPS origin), bring your own:
   a Cloudflare Tunnel, or a reverse proxy (Caddy/nginx) with a Let's Encrypt cert in
   front of `http://127.0.0.1:7421`.
+- If you do put a reverse proxy in front, also set `SLIPSTREAM_WS_TICKETS=1` in
+  `server.env`: without it, the browser client authenticates the WebSocket by putting
+  the long-lived token in the URL (`?token=`), which lands in every line of your
+  proxy's access log. With it set, the client exchanges the token for a single-use,
+  ~10s-TTL ticket over a header instead — see [docs/SECURITY.md](docs/SECURITY.md) §3.
 
 ### Run the published image directly
 
