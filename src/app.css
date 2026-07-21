@@ -517,6 +517,11 @@ html[data-mode='light'] .seg.on {
   flex-direction: column;
   overflow: hidden;
   background: hsl(var(--background));
+  /* Header layout (title/chips/action buttons) responds to the pane's own
+     rendered width, not the window's — the pane narrows whenever the agent
+     list sidebar is open even on a wide window, which a `@media` breakpoint
+     can't see (FLO-141). */
+  container-type: inline-size;
 }
 .term-head {
   height: 56px;
@@ -529,6 +534,7 @@ html[data-mode='light'] .seg.on {
 }
 .th-title {
   min-width: 0;
+  flex: 1 1 auto;
 }
 .th-title .t {
   font-family: 'Chakra Petch', sans-serif;
@@ -537,14 +543,49 @@ html[data-mode='light'] .seg.on {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+.th-title .t .tt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .th-title .m {
   display: flex;
+  align-items: center;
   gap: 6px;
   margin-top: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.th-title .m .badge {
+  flex-shrink: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.th-title .m .badge svg {
+  flex-shrink: 0;
 }
 .term-head .spacer {
   flex: 1;
+}
+
+/* Narrow pane (e.g. the agent-list sidebar open on a modest window, FLO-141):
+   drop action-button labels to icon-only so the row fits without wrapping or
+   pushing the title/chips into overlap. Keyed to the pane's own width via
+   container query, not the window's — @media can't see a sidebar-narrowed
+   pane on an otherwise-wide window. */
+@container (max-width: 1100px) {
+  .term-head .btn-label {
+    display: none;
+  }
+  .term-head .btn {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
 }
 
 .term-wrap {
