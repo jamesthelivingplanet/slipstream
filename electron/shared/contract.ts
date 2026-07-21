@@ -284,6 +284,12 @@ export interface EditorConfig {
   mobileCommand: string // optional mobile editor command; "" when unset
 }
 
+/** Persisted per-agent-type default extra CLI args (TASK-CMZUG). Keyed by
+ *  BackendKind; an absent key or '' means no default for that agent. A run's
+ *  own extraArgs overrides its agent type's default; a blank run field falls
+ *  back to it. */
+export type AgentArgsConfig = Partial<Record<BackendKind, string>>
+
 export interface WriteLockState {
   sessionId: string
   canWrite: boolean // does THIS client currently hold the write lock
@@ -835,6 +841,10 @@ export interface SlipstreamApi {
   listTicketScopes(src: TicketSource): Promise<ScopeOption[]>
   getEditorConfig(): Promise<EditorConfig>
   setEditorConfig(cfg: EditorConfig): Promise<void>
+  /** Per-agent-type default extra CLI args (TASK-CMZUG). getAgentArgs returns a
+   *  map keyed by BackendKind (empties omitted); setAgentArgs replaces it. */
+  getAgentArgs(): Promise<AgentArgsConfig>
+  setAgentArgs(cfg: AgentArgsConfig): Promise<void>
   /** Launch the configured editor on the session's worktree. mobile=true uses the mobile command when set. Rejects with a descriptive Error on failure. */
   openInEditor(input: { repoId: string; branch: string; mobile?: boolean }): Promise<void>
 
@@ -850,7 +860,7 @@ export interface SlipstreamApi {
     description?: string
     agentKind?: BackendKind
     src?: TicketSource
-    /** User-supplied extra CLI args (raw string), prepended to the launch command (TASK-UQF55). */
+    /** User-supplied extra CLI args (raw string). Overrides the saved per-agent-type default; when blank the default applies (TASK-UQF55, TASK-CMZUG). */
     extraArgs?: string
     /** Caller-supplied session id, e.g. stores.ts's optimistic local session row —
      *  lets the client's pre-existing id become the real session id instead of
@@ -1074,6 +1084,8 @@ export const IPC = {
   setLinearKey: 'config:setLinearKey',
   getEditorConfig: 'config:getEditorConfig',
   setEditorConfig: 'config:setEditorConfig',
+  getAgentArgs: 'config:getAgentArgs',
+  setAgentArgs: 'config:setAgentArgs',
   openInEditor: 'editor:open',
   getRepoSettings: 'repos:getSettings',
   setRepoSettings: 'repos:setSettings',
