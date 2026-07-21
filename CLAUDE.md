@@ -87,10 +87,17 @@ doc only when the symptom matches what you're seeing.
   over. React **once per episode**, re-armed by the `input` event (real user keystrokes) —
   `pushService.ts` is the reference. Pipeline + producer rules:
   [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §Session status pipeline.
-- **The agent status contract lives in three places** that must change together:
-  `promptComposer.ts` + `cliSkillDoc.ts` (system prompt + the `slipstream` worktree skill),
-  `electron/cli/slipstream.ts` (command set + per-command stdout nudges), and
-  `statusDetector.ts`/`statusSentinel.ts`/`agentEventsSentinel.ts` (consumption). Tests
-  assert on the prompt and output wording, so string tweaks ripple into
-  `promptComposer.test.ts`/`slipstream.test.ts`/`cliSkillDoc.test.ts`.
+- **The agent status contract's factual surface is single-sourced in
+  `electron/shared/slipstreamCommands.ts`** — the command list, exit codes, and the
+  "state is reported ONLY through the `slipstream` CLI" claim live there once, and the
+  three doc surfaces render from it: `promptComposer.ts` (system prompt) +
+  `cliSkillDoc.ts` (the `slipstream` worktree skill) + `electron/cli/slipstream.ts`
+  (usage text + per-command stdout nudges). Adding/renaming a command or changing an
+  exit code is a one-line edit to `SLIPSTREAM_COMMANDS`/`EXIT_CODES` and every surface
+  (and the tests that iterate them) updates. What is NOT unified — and still ripples —
+  is the persuasive per-audience *prose* (the resume-from-waiting coaching, etc.),
+  which is hand-written in each file and pinned by substring in
+  `promptComposer.test.ts`/`slipstream.test.ts`/`cliSkillDoc.test.ts` (+ the spec's own
+  `slipstreamCommands.test.ts` cross-surface agreement tests). The sentinel consumers
+  (`statusDetector.ts`/`statusSentinel.ts`/`agentEventsSentinel.ts`) are unchanged.
   Detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §Session status pipeline.
