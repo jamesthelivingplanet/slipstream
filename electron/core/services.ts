@@ -17,7 +17,6 @@ import { createJiraProvider } from '../tickets/jiraProvider.js'
 import { createCompositeProvider } from '../tickets/compositeProvider.js'
 import { createSessionStore, restoreInterruptedSessions } from '../services/sessionStore.js'
 import { createPromptTemplateStore } from '../services/promptTemplates.js'
-import { createTicketWriteback } from '../services/ticketWriteback.js'
 import { createOutcomeStore } from '../services/outcomeStore.js'
 import { createAgentEventStore } from '../services/agentEventStore.js'
 import { createClipboardStore } from '../services/clipboardStore.js'
@@ -31,9 +30,9 @@ import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import { createSessionReaper } from '../services/sessionReaper.js'
 import { createSessionScheduler } from '../services/sessionScheduler.js'
 import { launchSession } from '../services/sessionLauncher.js'
-import { createSessionPersistence } from '../services/sessionPersistence.js'
 import { createPrStatusService } from '../services/prStatus.js'
 import { createDeviceTokenStore } from '../services/deviceTokenStore.js'
+import { wirePrEventListeners } from './wirePrEventListeners.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -83,23 +82,16 @@ export function createServices(root: string): IpcDeps {
   const linear = createLinearProvider(configStore)
   const jira = createJiraProvider(configStore)
   const tickets = createCompositeProvider([linear, jira])
-  // FLO-98: post the PR link back to the ticket on the session's `pr` event.
-  // ORDERING: must be registered BEFORE createSessionPersistence — both listen
-  // to 'pr', and the write-back's `persisted.prUrl === url` restart-dedupe must
-  // read the value from *before* persistence records the new URL (EventEmitter
-  // invokes listeners in registration order).
-  createTicketWriteback({ sessions, store: sessionStore, tickets, logger: runLogger })
-  // FLO-69: persist session status/PR changes at the daemon level (once per
-  // process), not per connected client. This is what lets an agent that
-  // finishes with no UI attached still write its final state to SQLite.
-  // FLO-97: also persists structured session outcomes reported via the app
-  // MCP's report_outcome tool.
-  // FLO-104: also persists checkpoint/artifact/approval events from events.ndjson.
-  createSessionPersistence({
+  // FLO-98/FLO-69/FLO-97/FLO-104: wires the ticket write-back and session
+  // persistence `pr`-event listeners in the one order that keeps the
+  // write-back's restart-dedupe correct — see wirePrEventListeners.ts.
+  wirePrEventListeners({
     sessions,
     store: sessionStore,
+    tickets,
     outcomes: outcomeStore,
     agentEvents: agentEventStore,
+    logger: runLogger,
   })
   const push = createPushService({
     config: configStore,
