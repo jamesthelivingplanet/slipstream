@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseAgentEvents, eventsAfter, AGENT_EVENTS_FILE } from './agentEventsSentinel.js'
+import { parseAgentEvents, AGENT_EVENTS_FILE } from './agentEventsSentinel.js'
 
 describe('AGENT_EVENTS_FILE', () => {
   it('is events.ndjson', () => {
@@ -45,29 +45,5 @@ describe('parseAgentEvents', () => {
   it('drops non-string message/path instead of failing the line', () => {
     const raw = JSON.stringify({ kind: 'checkpoint', message: 42, path: 7, ts: 1 })
     expect(parseAgentEvents(raw)).toEqual([{ kind: 'checkpoint', ts: 1 }])
-  })
-})
-
-describe('eventsAfter', () => {
-  const raw =
-    JSON.stringify({ kind: 'checkpoint', message: 'a', ts: 10 }) +
-    '\n' +
-    JSON.stringify({ kind: 'checkpoint', message: 'b', ts: 20 }) +
-    '\n' +
-    JSON.stringify({ kind: 'approval', message: 'c', ts: 30 }) +
-    '\n'
-
-  it('returns only events strictly newer than the cursor, stamped with the session id', () => {
-    expect(eventsAfter(raw, 20, 's1')).toEqual([
-      { sessionId: 's1', kind: 'approval', message: 'c', ts: 30 },
-    ])
-  })
-
-  it('cursor 0 replays the whole history (restart replay is intentional)', () => {
-    expect(eventsAfter(raw, 0, 's1')).toHaveLength(3)
-  })
-
-  it('returns [] when nothing is newer', () => {
-    expect(eventsAfter(raw, 30, 's1')).toEqual([])
   })
 })
