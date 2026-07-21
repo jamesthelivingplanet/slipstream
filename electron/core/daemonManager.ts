@@ -120,7 +120,15 @@ export async function loadOrCreateLocalIdentity(
   const mkdir =
     deps?.mkdir ??
     ((p: string) => {
+      // FLO-130: chmod immediately (not just mode on mkdir, which is umask-filtered
+      // and would also hit newly-created parents) to close the cross-process window
+      // between this mkdir and the spawned daemon child's own chmod in services.ts.
       fs.mkdirSync(p, { recursive: true })
+      try {
+        fs.chmodSync(p, 0o700)
+      } catch {
+        // best-effort: non-POSIX filesystems / Windows may not support chmod
+      }
     })
   const pick = deps?.pickPort ?? pickPort
 

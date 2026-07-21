@@ -312,6 +312,17 @@ privilege boundary being crossed.
 already gated it — but a file holding a bearer token should not be
 world/group-readable as a matter of course.
 
+**Hygiene applied now (FLO-130):** the data dir is `chmod 0700`'d in the same
+process/call that creates it, rather than relying solely on a later `chmod`
+that used to run only in the spawned daemon child. On a fresh install this
+closes a brief first-boot window where the dir (not the file) sat at default,
+umask-dependent perms — a directory-listing/metadata exposure, not a
+token-content leak: `daemon.json`'s own `0600` mode (FLO-126, above) already
+made the token unreadable by non-owners the instant the file was written,
+independent of the directory's mode. The child's chmod in `services.ts` still
+runs too, as a backstop for pre-existing installs whose data dir predates
+this fix.
+
 ### Opt-in bwrap sandbox (FLO-146)
 
 Shipped, off by default. Set `SLIPSTREAM_SANDBOX=bwrap` to contain each agent
