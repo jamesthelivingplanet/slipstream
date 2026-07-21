@@ -681,6 +681,115 @@ describe('wsApi', () => {
     })
   })
 
+  describe('destroy', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+      delete (globalThis as { document?: unknown }).document
+      delete (globalThis as { window?: unknown }).window
+    })
+
+    it('closes the socket and rejects in-flight requests', async () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      const promise = api.listRepos()
+      api.destroy()
+
+      await expect(promise).rejects.toThrow('WebSocket destroyed')
+      expect(ws.readyState).toBe(3) // CLOSED
+    })
+
+    it('rejects queued (not yet sent) requests too', async () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      // Socket never opened — request sits in the queue.
+      const promise = api.listRepos()
+      api.destroy()
+      await expect(promise).rejects.toThrow('WebSocket destroyed')
+    })
+
+    it('stops the heartbeat so no further pings are sent', async () => {
+      vi.useFakeTimers()
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+      api.destroy()
+      ws.sentMessages.length = 0
+
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS + PONG_TIMEOUT_MS)
+      expect(ws.sentMessages.length).toBe(0)
+    })
+
+    it('cancels a pending reconnect backoff and does not create a new socket', async () => {
+      vi.useFakeTimers()
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws1 = openWs()
+      ws1.simulateClose(1006) // schedules a reconnect
+      api.destroy()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(getWs()).toBe(ws1) // no new FakeWebSocket was constructed
+    })
+
+    it('removes the visibilitychange/online/pageshow listeners', () => {
+      const listeners: Record<string, Array<() => void>> = {}
+      const fakeDoc = {
+        visibilityState: 'visible' as const,
+        addEventListener: (type: string, cb: () => void) => {
+          ;(listeners[type] ??= []).push(cb)
+        },
+        removeEventListener: (type: string, cb: () => void) => {
+          listeners[type] = (listeners[type] ?? []).filter((l) => l !== cb)
+        },
+      }
+      const fakeWin = {
+        addEventListener: (type: string, cb: () => void) => {
+          ;(listeners[type] ??= []).push(cb)
+        },
+        removeEventListener: (type: string, cb: () => void) => {
+          listeners[type] = (listeners[type] ?? []).filter((l) => l !== cb)
+        },
+      }
+      ;(globalThis as { document?: unknown }).document = fakeDoc
+      ;(globalThis as { window?: unknown }).window = fakeWin
+
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      expect(listeners['visibilitychange']?.length).toBe(1)
+      expect(listeners['online']?.length).toBe(1)
+      expect(listeners['pageshow']?.length).toBe(1)
+
+      api.destroy()
+      expect(listeners['visibilitychange']?.length).toBe(0)
+      expect(listeners['online']?.length).toBe(0)
+      expect(listeners['pageshow']?.length).toBe(0)
+    })
+
+    it('is idempotent when called more than once', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      openWs()
+      expect(() => {
+        api.destroy()
+        api.destroy()
+      }).not.toThrow()
+    })
+
+    it('calling destroy() from within onAuthError (the real FLO-120 call site) does not re-enter or reconnect', async () => {
+      vi.useFakeTimers()
+      const onAuthError = vi.fn(() => api.destroy())
+      const api = createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 'bad',
+        WebSocketCtor: FakeWS,
+        onAuthError,
+      })
+      const ws = openWs()
+      ws.simulateClose(4001) // auth error -> onAuthError -> api.destroy(), re-entrant within onclose
+
+      expect(onAuthError).toHaveBeenCalledOnce()
+
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(getWs()).toBe(ws) // no reconnect attempted, no zombie socket created
+    })
+  })
+
   describe('heartbeat', () => {
     afterEach(() => {
       vi.useRealTimers()

@@ -101,6 +101,9 @@ async function connectWithToken(
       onAuthError: async () => {
         if (authFailed) return
         authFailed = true
+        // This instance is being replaced by the gate's retry — tear it down so its
+        // visibilitychange/online/pageshow listeners and heartbeat don't leak.
+        api.destroy()
         const { nativeStorage, TOKEN_KEY } = await import('./lib/nativeStorage.js')
         // Only the token is removed — keep the stored server override (if
         // any) so the gate comes back prefilled with the same server.
@@ -111,7 +114,7 @@ async function connectWithToken(
     })
 
     // Assign before any import of App/ipc.ts
-    ;(window as Window & { slipstream?: typeof api }).slipstream = api
+    ;(window as unknown as { slipstream?: typeof api }).slipstream = api
     // Mark as web mode so components can distinguish from Electron
     ;(window as unknown as { __slipstreamWeb?: boolean }).__slipstreamWeb = true
     // Web mode only, and only after window.slipstream is assigned (see above).
