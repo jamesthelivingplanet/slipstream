@@ -131,4 +131,25 @@ describe('runMigrations', () => {
       expect(f.execLog[0]).toContain('ALTER TABLE push_fcm_tokens ADD COLUMN origin TEXT')
     })
   })
+
+  describe('migration 8 (FLO-143 device_tokens)', () => {
+    it('creates the device_tokens table with a unique index on tokenHash', () => {
+      const f = makeFakeDb({ userVersion: 0 })
+      runMigrations(f.db)
+      const sql = f.execLog.find((s) => s.includes('CREATE TABLE device_tokens'))
+      expect(sql).toContain('tokenHash TEXT NOT NULL')
+      expect(sql).toContain('revokedAt INTEGER')
+      expect(sql).toContain(
+        'CREATE UNIQUE INDEX idx_device_tokens_hash ON device_tokens (tokenHash)',
+      )
+    })
+
+    it('runs only the new migration for a DB already at version 7', () => {
+      const f = makeFakeDb({ userVersion: 7 })
+      runMigrations(f.db)
+      expect(f.version).toBe(MIGRATIONS.length)
+      expect(f.execLog).toHaveLength(MIGRATIONS.length - 7)
+      expect(f.execLog[0]).toContain('CREATE TABLE device_tokens')
+    })
+  })
 })

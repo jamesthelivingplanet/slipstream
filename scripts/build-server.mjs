@@ -39,3 +39,15 @@ await build({
 })
 
 console.log('Built dist-electron/slipstream-cli.js')
+
+await build({
+  entryPoints: ['electron/cli/manageTokens.ts'],
+  outfile: 'dist-electron/manage-tokens.js',
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  external,
+  sourcemap: true,
+})
+
+console.log('Built dist-electron/manage-tokens.js')

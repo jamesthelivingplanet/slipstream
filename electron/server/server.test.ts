@@ -22,6 +22,7 @@ import { WebSocket } from 'ws'
 import type { WireReq, WireRes } from '../shared/wire.js'
 import type { IConfigStore } from '../services/configStore.js'
 import type { IPushService } from '../services/pushService.js'
+import type { IDeviceTokenStore, DeviceTokenDTO } from '../services/deviceTokenStore.js'
 import { OutputBuffer } from '../services/outputBuffer.js'
 
 // ── Fake deps (no native modules) ────────────────────────────────────────────
@@ -36,6 +37,45 @@ function makeFakePromptTemplates(): IPromptTemplateStore {
     get: vi.fn().mockReturnValue(undefined),
     upsert: vi.fn(),
     delete: vi.fn(),
+  }
+}
+
+/** In-memory fake for IDeviceTokenStore (FLO-143) — real better-sqlite3 can't
+ *  load under Node vitest (see docs/NATIVE-MODULES.md), so this mirrors
+ *  createDeviceTokenStore's behavior (issue/list/get/revoke/resolveToken)
+ *  without touching the DB. */
+function makeFakeDeviceTokenStore(): IDeviceTokenStore {
+  const rows = new Map<string, DeviceTokenDTO>()
+  const tokensById = new Map<string, string>()
+  let counter = 0
+  return {
+    issue(ownerId, label) {
+      const id = `dt${++counter}`
+      const token = `dt-token-${id}`
+      const dto: DeviceTokenDTO = { id, ownerId, label, createdAt: Date.now(), revokedAt: null }
+      rows.set(id, dto)
+      tokensById.set(id, token)
+      return { token, dto }
+    },
+    list() {
+      return Array.from(rows.values())
+    },
+    get(id) {
+      return rows.get(id)
+    },
+    revoke(id) {
+      const row = rows.get(id)
+      if (row && row.revokedAt === null) row.revokedAt = Date.now()
+    },
+    resolveToken(token) {
+      for (const [id, t] of tokensById) {
+        if (t === token) {
+          const row = rows.get(id)
+          return row && row.revokedAt === null ? { id: row.ownerId } : undefined
+        }
+      }
+      return undefined
+    },
   }
 }
 
@@ -462,6 +502,108 @@ describe('createServer', () => {
       ws.once('close', (c) => resolve(c))
     })
     expect(code).toBe(4001)
+  })
+
+  describe('per-device/per-user tokens (FLO-143)', () => {
+    function makeSession(id: string, ownerId: string) {
+      return {
+        id,
+        tid: 'T-1',
+        title: 'seeded',
+        prompt: '',
+        repoId: 'r1',
+        branch: 'b',
+        status: 'idle' as const,
+        createdAt: Date.now(),
+        ownerId,
+      }
+    }
+
+    it('authenticates distinct devices to distinct owners, each seeing only its own sessions', async () => {
+      const deviceTokens = makeFakeDeviceTokenStore()
+      const { token: aliceToken } = deviceTokens.issue('alice', 'alice-phone')
+      const { token: bobToken } = deviceTokens.issue('bob', 'bob-laptop')
+
+      const deps = makeFakeDeps()
+      deps.deviceTokens = deviceTokens
+      deps.sessionStore.upsert(makeSession('s-alice', 'alice'))
+      deps.sessionStore.upsert(makeSession('s-bob', 'bob'))
+
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const aliceWs = wsConnect(port, aliceToken)
+      await new Promise<void>((resolve, reject) => {
+        aliceWs.once('open', resolve)
+        aliceWs.once('error', reject)
+      })
+      const aliceRes = await sendReq(aliceWs, IPC.listSessions)
+      expect(aliceRes.ok).toBe(true)
+      if (aliceRes.ok) {
+        expect((aliceRes.result as { id: string }[]).map((s) => s.id)).toEqual(['s-alice'])
+      }
+      aliceWs.close()
+
+      const bobWs = wsConnect(port, bobToken)
+      await new Promise<void>((resolve, reject) => {
+        bobWs.once('open', resolve)
+        bobWs.once('error', reject)
+      })
+      const bobRes = await sendReq(bobWs, IPC.listSessions)
+      expect(bobRes.ok).toBe(true)
+      if (bobRes.ok) {
+        expect((bobRes.result as { id: string }[]).map((s) => s.id)).toEqual(['s-bob'])
+      }
+      bobWs.close()
+    })
+
+    it('revoking one device credential rejects only that device, not others', async () => {
+      const deviceTokens = makeFakeDeviceTokenStore()
+      const { token: aliceToken, dto: aliceDto } = deviceTokens.issue('alice', 'alice-phone')
+      const { token: bobToken } = deviceTokens.issue('bob', 'bob-laptop')
+
+      const deps = makeFakeDeps()
+      deps.deviceTokens = deviceTokens
+
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      deviceTokens.revoke(aliceDto.id)
+
+      const aliceWs = wsConnect(port, aliceToken)
+      const aliceCode = await new Promise<number>((resolve) => {
+        aliceWs.once('close', (c) => resolve(c))
+      })
+      expect(aliceCode).toBe(4001)
+
+      const bobWs = wsConnect(port, bobToken)
+      await new Promise<void>((resolve, reject) => {
+        bobWs.once('open', resolve)
+        bobWs.once('error', reject)
+      })
+      bobWs.close()
+    })
+
+    it('still authenticates the static SLIPSTREAM_TOKEN to the local owner when a device token store is wired up', async () => {
+      const deps = makeFakeDeps()
+      deps.deviceTokens = makeFakeDeviceTokenStore()
+
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const ws = wsConnect(port, 'secret')
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', resolve)
+        ws.once('error', reject)
+      })
+      ws.close()
+    })
   })
 
   it('rejects a browser Origin not in the allowlist', async () => {

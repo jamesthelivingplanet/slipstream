@@ -133,16 +133,45 @@ network round-trip to every reconnect for zero security benefit there.
       (`electron/server/server.test.ts`), reconnect-refetches-ticket
       (`src/lib/wsApi.test.ts` if/when one exists).
 
-## 4. Single static token, no revocation granularity
+## 4. Per-device/per-user tokens (FLO-143)
 
-Today one token authenticates every device, forever. Rotating it means editing
-`server.env` and re-onboarding every device that holds the old value — there's
-no way to revoke a single compromised device's access without also breaking
-every other device. This is an acceptable trade for the single-user tier; it's
-the first thing that needs to change for a multi-user tier, and the
-`resolveIdentity` seam in `electron/core/auth.ts` (see IDENTITY-SEAM.md) is
-already positioned so that a per-device/per-user token store slots in without
-touching any downstream call site.
+The single static `SLIPSTREAM_TOKEN` still authenticates as `LOCAL_IDENTITY` —
+unchanged, and still the only credential the local/single-user tier needs. On
+top of it, `electron/services/deviceTokenStore.ts` (DB-backed, `device_tokens`
+table) issues distinct, individually-revocable credentials mapping to distinct
+owners:
+
+- **Issuance**: a random 256-bit token is minted and returned once; only its
+  SHA-256 hash is ever persisted (`tokenHash`, unique-indexed). The plaintext
+  is unrecoverable from the DB — same posture as the config-table secrets in
+  §6, but via hashing rather than reversible encryption, since a token only
+  ever needs to be *matched*, never decrypted back out.
+- **Revocation**: `revoke(id)` sets `revokedAt` once (`WHERE revokedAt IS
+  NULL`) — final, not a toggle, and idempotent for a missing/already-revoked
+  id. A revoked token resolves identically to an unknown one (`undefined` →
+  the WS upgrade closes with the same `4001`), so revoking one device gives no
+  attacker-visible signal distinguishing "revoked" from "never existed" — and,
+  critically, does not touch any other credential's `tokenHash` row, so no
+  other device or owner is affected.
+- **Resolution**: `electron/core/auth.ts`'s `resolveIdentity(token, opts)`
+  checks the static token first (constant-time, as before), then falls back to
+  `opts.deviceTokens.resolveToken(token)` — this is the `resolveIdentity` seam
+  IDENTITY-SEAM.md describes, now with a real multi-owner backing store
+  instead of a hard-coded `LOCAL_IDENTITY`. Device tokens are presented via
+  the exact same `?token=`/`Authorization: Bearer` paths as the static token
+  (see §1) — no new transport, no client-side change required.
+
+**Issuing/listing/revoking a token**: `electron/cli/manageTokens.ts`, an
+operator-only admin CLI (`pnpm tokens -- issue <ownerId> <label> | list |
+revoke <id>`, run under `ELECTRON_RUN_AS_NODE=1` like `pnpm serve` — see
+docs/NATIVE-MODULES.md). There is no self-service RPC/UI yet for an
+already-authenticated user to mint their own second-device token, and no
+onboarding flow beyond manually copying the printed token onto the new device
+(see IDENTITY-SEAM.md's "What's still open" list, item 2).
+
+**What this doesn't yet include**: per-owner data isolation beyond the
+existing row-level `ownerId` scoping (see IDENTITY-SEAM.md item 5, the
+per-owner-data-dir question).
 
 ## 5. `sandbox: false` on the BrowserWindow — Sandbox experiment (FLO-84)
 
