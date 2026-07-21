@@ -9,45 +9,12 @@
 
 import type {
   SlipstreamApi,
-  BranchMergedDTO,
-  PaginatedTickets,
   RepoDTO,
-  RepoSettings,
-  SessionDTO,
   SessionStatus,
   StatusMeta,
-  WorkflowState,
-  WorktreeInfo,
-  WorktreeDiffDTO,
-  WorktreeUpdateMode,
-  WorktreeUpdateResultDTO,
-  EditorConfig,
-  NotifyPrefs,
-  PushSubscriptionDTO,
-  FcmTokenDTO,
-  BackendKind,
-  GitHost,
   WriteLockState,
-  GcPolicy,
-  SchedulerPolicy,
-  CliStatusDTO,
-  DiagnosticsDTO,
-  TicketSource,
-  AgentCliCheck,
-  ScopeOption,
-  TicketSourceSettings,
-  SessionUsage,
-  UsageSummary,
-  PromptTemplateDTO,
-  SessionOutcomeDTO,
-  SessionHistoryEntry,
   SessionAgentEventDTO,
-  PrStatusDTO,
-  GitProviderInfoDTO,
-  GitHostConfigDTO,
   SessionChatMessageDTO,
-  AgentSkillDTO,
-  ChatQuestionDTO,
 } from '../../electron/shared/contract.js'
 import type { WireReq, WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
@@ -399,81 +366,59 @@ export function createWsApi(opts: WsApiOpts): WsApi {
 
   // ── SlipstreamApi implementation ────────────────────────────────────────────
 
-  return {
-    listRepos(): Promise<RepoDTO[]> {
-      return request(IPC.listRepos, []) as Promise<RepoDTO[]>
-    },
+  // Generic request-forwarding factory: most SlipstreamApi methods are just
+  // `(...args) => request(channel, args)`. `K` pins the return type to the
+  // exact method being implemented (explicit at each call site below) so a
+  // typo'd channel or a mismatched method still fails `api: SlipstreamApi`'s
+  // structural check — the object literal below is what gives us the
+  // compile-time completeness guarantee (every SlipstreamApi member must be
+  // present with the right signature), not just a convenient shorthand.
+  function wire<K extends keyof SlipstreamApi>(channel: string): SlipstreamApi[K] {
+    return ((...args: unknown[]) => request(channel, args)) as SlipstreamApi[K]
+  }
 
-    registerRepo(absPath: string): Promise<RepoDTO> {
-      return request(IPC.registerRepo, [absPath]) as Promise<RepoDTO>
-    },
+  // Every member of SlipstreamApi must appear here — TS enforces it via this
+  // annotation. Plain request/response methods are one-liners via wire();
+  // push subscriptions, fire-and-forget writes, and pickAndRegisterRepo need
+  // real bodies (listener sets, drop-not-queue semantics, no wire call) and
+  // are written out in full.
+  const api: SlipstreamApi = {
+    listRepos: wire<'listRepos'>(IPC.listRepos),
 
-    registerRepoByUrl(remoteUrl: string): Promise<RepoDTO> {
-      return request(IPC.registerRepoByUrl, [remoteUrl]) as Promise<RepoDTO>
-    },
+    registerRepo: wire<'registerRepo'>(IPC.registerRepo),
+
+    registerRepoByUrl: wire<'registerRepoByUrl'>(IPC.registerRepoByUrl),
 
     /** Not supported on web — resolve null. Path-input fallback in SettingsModal handles repo adding. */
     pickAndRegisterRepo(): Promise<RepoDTO | null> {
       return Promise.resolve(null)
     },
 
-    removeRepo(id: string): Promise<void> {
-      return request(IPC.removeRepo, [id]) as Promise<void>
-    },
+    removeRepo: wire<'removeRepo'>(IPC.removeRepo),
 
-    listTickets(opts?: {
-      page?: number
-      pageSize?: number
-      query?: string
-    }): Promise<PaginatedTickets> {
-      return request(IPC.listTickets, [opts]) as Promise<PaginatedTickets>
-    },
+    listTickets: wire<'listTickets'>(IPC.listTickets),
 
-    getTicketStatus(
-      tid: string,
-      src?: TicketSource,
-    ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
-      return request(IPC.getTicketStatus, [tid, src]) as Promise<{
-        current: WorkflowState | null
-        available: WorkflowState[]
-      }>
-    },
+    getTicketStatus: wire<'getTicketStatus'>(IPC.getTicketStatus),
 
-    setTicketStatus(tid: string, stateId: string, src?: TicketSource): Promise<WorkflowState> {
-      return request(IPC.setTicketStatus, [tid, stateId, src]) as Promise<WorkflowState>
-    },
+    setTicketStatus: wire<'setTicketStatus'>(IPC.setTicketStatus),
 
-    getLinearKey(): Promise<string | null> {
-      return request(IPC.getLinearKey, []) as Promise<string | null>
-    },
+    getLinearKey: wire<'getLinearKey'>(IPC.getLinearKey),
 
-    setLinearKey(key: string): Promise<void> {
-      return request(IPC.setLinearKey, [key]) as Promise<void>
-    },
+    setLinearKey: wire<'setLinearKey'>(IPC.setLinearKey),
 
-    getTicketSettings(src: TicketSource): Promise<TicketSourceSettings> {
-      return request(IPC.getTicketSettings, [src]) as Promise<TicketSourceSettings>
-    },
+    getTicketSettings: wire<'getTicketSettings'>(IPC.getTicketSettings),
 
-    setTicketSettings(src: TicketSource, cfg: TicketSourceSettings): Promise<void> {
-      return request(IPC.setTicketSettings, [src, cfg]) as Promise<void>
-    },
+    setTicketSettings: wire<'setTicketSettings'>(IPC.setTicketSettings),
 
-    listTicketScopes(src: TicketSource): Promise<ScopeOption[]> {
-      return request(IPC.listTicketScopes, [src]) as Promise<ScopeOption[]>
-    },
+    listTicketScopes: wire<'listTicketScopes'>(IPC.listTicketScopes),
 
-    startSession(input: {
-      tid: string
-      title: string
-      prompt: string
-      repoId: string
-      agentKind?: BackendKind
-      src?: TicketSource
-      extraArgs?: string
-    }): Promise<SessionDTO> {
-      return request(IPC.startSession, [input]) as Promise<SessionDTO>
-    },
+    getEditorConfig: wire<'getEditorConfig'>(IPC.getEditorConfig),
+
+    setEditorConfig: wire<'setEditorConfig'>(IPC.setEditorConfig),
+
+    openInEditor: wire<'openInEditor'>(IPC.openInEditor),
+
+    startSession: wire<'startSession'>(IPC.startSession),
 
     writeSession(id: string, data: string): void {
       // Fire-and-forget: drop the frame while the socket is down instead of queuing
@@ -484,9 +429,7 @@ export function createWsApi(opts: WsApiOpts): WsApi {
       send(req)
     },
 
-    syncClipboardImage(id: string, dataBase64: string): Promise<void> {
-      return request(IPC.syncClipboardImage, [id, dataBase64]) as Promise<void>
-    },
+    syncClipboardImage: wire<'syncClipboardImage'>(IPC.syncClipboardImage),
 
     resizeSession(id: string, cols: number, rows: number): void {
       // Fire-and-forget: drop the frame while the socket is down instead of queuing
@@ -502,75 +445,27 @@ export function createWsApi(opts: WsApiOpts): WsApi {
       send(req)
     },
 
-    killSession(id: string): Promise<void> {
-      return request(IPC.killSession, [id]) as Promise<void>
-    },
+    killSession: wire<'killSession'>(IPC.killSession),
 
-    cleanupSession(
-      id: string,
-      opts?: { force?: boolean },
-    ): Promise<{ removed: boolean; reason?: string }> {
-      return request(IPC.cleanupSession, [id, opts]) as Promise<{
-        removed: boolean
-        reason?: string
-      }>
-    },
+    cleanupSession: wire<'cleanupSession'>(IPC.cleanupSession),
 
-    sessionMerged(id: string): Promise<BranchMergedDTO> {
-      return request(IPC.sessionMerged, [id]) as Promise<BranchMergedDTO>
-    },
+    sessionMerged: wire<'sessionMerged'>(IPC.sessionMerged),
 
-    listSessions(): Promise<SessionDTO[]> {
-      return request(IPC.listSessions, []) as Promise<SessionDTO[]>
-    },
+    listSessions: wire<'listSessions'>(IPC.listSessions),
 
-    resumeSession(id: string): Promise<SessionDTO> {
-      return request(IPC.resumeSession, [id]) as Promise<SessionDTO>
-    },
+    resumeSession: wire<'resumeSession'>(IPC.resumeSession),
 
-    attachRemoteControl(id: string): Promise<SessionDTO> {
-      return request(IPC.attachRemoteControl, [id]) as Promise<SessionDTO>
-    },
+    attachRemoteControl: wire<'attachRemoteControl'>(IPC.attachRemoteControl),
 
-    handoffSession(id: string, agentKind: BackendKind): Promise<SessionDTO> {
-      return request(IPC.handoffSession, [id, agentKind]) as Promise<SessionDTO>
-    },
+    handoffSession: wire<'handoffSession'>(IPC.handoffSession),
 
-    worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo> {
-      return request(IPC.worktreeStatus, [repoId, branch]) as Promise<WorktreeInfo>
-    },
+    worktreeStatus: wire<'worktreeStatus'>(IPC.worktreeStatus),
 
-    worktreeDiff(repoId: string, branch: string): Promise<WorktreeDiffDTO> {
-      return request(IPC.worktreeDiff, [repoId, branch]) as Promise<WorktreeDiffDTO>
-    },
+    worktreeDiff: wire<'worktreeDiff'>(IPC.worktreeDiff),
 
-    worktreeUpdateFromBase(
-      repoId: string,
-      branch: string,
-      mode: WorktreeUpdateMode,
-    ): Promise<WorktreeUpdateResultDTO> {
-      return request(IPC.worktreeUpdateFromBase, [
-        repoId,
-        branch,
-        mode,
-      ]) as Promise<WorktreeUpdateResultDTO>
-    },
+    worktreeUpdateFromBase: wire<'worktreeUpdateFromBase'>(IPC.worktreeUpdateFromBase),
 
-    getEditorConfig(): Promise<EditorConfig> {
-      return request(IPC.getEditorConfig, []) as Promise<EditorConfig>
-    },
-
-    setEditorConfig(cfg: EditorConfig): Promise<void> {
-      return request(IPC.setEditorConfig, [cfg]) as Promise<void>
-    },
-
-    openInEditor(input: { repoId: string; branch: string; mobile?: boolean }): Promise<void> {
-      return request(IPC.openInEditor, [input]) as Promise<void>
-    },
-
-    getSessionBuffer(id: string): Promise<{ data: string; seq: number }> {
-      return request(IPC.getSessionBuffer, [id]) as Promise<{ data: string; seq: number }>
-    },
+    getSessionBuffer: wire<'getSessionBuffer'>(IPC.getSessionBuffer),
 
     onSessionData(cb: DataCb): () => void {
       dataListeners.add(cb)
@@ -581,90 +476,50 @@ export function createWsApi(opts: WsApiOpts): WsApi {
       statusListeners.add(cb)
       return () => statusListeners.delete(cb)
     },
+
     onSessionExit(cb: ExitCb): () => void {
       exitListeners.add(cb)
       return () => exitListeners.delete(cb)
     },
-    getRepoSettings(id: string): Promise<RepoSettings> {
-      return request(IPC.getRepoSettings, [id]) as Promise<RepoSettings>
-    },
-    setRepoSettings(id: string, settings: RepoSettings): Promise<void> {
-      return request(IPC.setRepoSettings, [id, settings]) as Promise<void>
-    },
-    runApp(input: { repoId: string; branch: string }): Promise<{
-      started: boolean
-      reason?: string
-      port?: number
-      pid?: number
-      reused?: boolean
-      url?: string
-    }> {
-      return request(IPC.runApp, [input]) as Promise<{
-        started: boolean
-        reason?: string
-        port?: number
-        pid?: number
-        reused?: boolean
-        url?: string
-      }>
-    },
-    stopApp(input: { repoId: string; branch: string }): Promise<{ stopped: boolean }> {
-      return request(IPC.stopApp, [input]) as Promise<{ stopped: boolean }>
-    },
-    appStatus(input: {
-      repoId: string
-      branch: string
-    }): Promise<{ running: boolean; url?: string }> {
-      return request(IPC.appStatus, [input]) as Promise<{ running: boolean; url?: string }>
-    },
-    getVapidPublicKey(): Promise<string> {
-      return request(IPC.getVapidPublicKey, []) as Promise<string>
-    },
-    savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void> {
-      return request(IPC.savePushSubscription, [sub, prefs]) as Promise<void>
-    },
-    deletePushSubscription(endpoint: string): Promise<void> {
-      return request(IPC.deletePushSubscription, [endpoint]) as Promise<void>
-    },
-    getPushPrefs(
-      endpoint: string,
-    ): Promise<import('../../electron/shared/contract.js').NotifyPrefs | null> {
-      return request(IPC.getPushPrefs, [endpoint]) as Promise<
-        import('../../electron/shared/contract.js').NotifyPrefs | null
-      >
-    },
-    saveFcmToken(token: FcmTokenDTO): Promise<void> {
-      return request(IPC.saveFcmToken, [token]) as Promise<void>
-    },
-    deleteFcmToken(token: string): Promise<void> {
-      return request(IPC.deleteFcmToken, [token]) as Promise<void>
-    },
-    getGitToken(host: GitHost): Promise<string | null> {
-      return request(IPC.getGitToken, [host]) as Promise<string | null>
-    },
-    setGitToken(host: GitHost, token: string): Promise<void> {
-      return request(IPC.setGitToken, [host, token]) as Promise<void>
-    },
-    listGitProviders(): Promise<GitProviderInfoDTO[]> {
-      return request(IPC.listGitProviders, []) as Promise<GitProviderInfoDTO[]>
-    },
-    getGitHostConfig(host: GitHost): Promise<GitHostConfigDTO> {
-      return request(IPC.getGitHostConfig, [host]) as Promise<GitHostConfigDTO>
-    },
-    setGitHostConfig(
-      host: GitHost,
-      cfg: { token?: string; username?: string; baseUrl?: string },
-    ): Promise<void> {
-      return request(IPC.setGitHostConfig, [host, cfg]) as Promise<void>
-    },
+
+    getRepoSettings: wire<'getRepoSettings'>(IPC.getRepoSettings),
+
+    setRepoSettings: wire<'setRepoSettings'>(IPC.setRepoSettings),
+
+    runApp: wire<'runApp'>(IPC.runApp),
+
+    stopApp: wire<'stopApp'>(IPC.stopApp),
+
+    appStatus: wire<'appStatus'>(IPC.appStatus),
+
+    getVapidPublicKey: wire<'getVapidPublicKey'>(IPC.getVapidPublicKey),
+
+    savePushSubscription: wire<'savePushSubscription'>(IPC.savePushSubscription),
+
+    deletePushSubscription: wire<'deletePushSubscription'>(IPC.deletePushSubscription),
+
+    getPushPrefs: wire<'getPushPrefs'>(IPC.getPushPrefs),
+
+    saveFcmToken: wire<'saveFcmToken'>(IPC.saveFcmToken),
+
+    deleteFcmToken: wire<'deleteFcmToken'>(IPC.deleteFcmToken),
+
+    getGitToken: wire<'getGitToken'>(IPC.getGitToken),
+
+    setGitToken: wire<'setGitToken'>(IPC.setGitToken),
+
+    listGitProviders: wire<'listGitProviders'>(IPC.listGitProviders),
+
+    getGitHostConfig: wire<'getGitHostConfig'>(IPC.getGitHostConfig),
+
+    setGitHostConfig: wire<'setGitHostConfig'>(IPC.setGitHostConfig),
+
     onSessionPr(cb: (id: string, prUrl: string) => void): () => void {
       prListeners.add(cb)
       return () => prListeners.delete(cb)
     },
 
-    attachSession(id: string): Promise<WriteLockState> {
-      return request(IPC.attachSession, [id]) as Promise<WriteLockState>
-    },
+    attachSession: wire<'attachSession'>(IPC.attachSession),
 
     detachSession(id: string): void {
       // Fire-and-forget: drop the frame while the socket is down instead of queuing
@@ -675,125 +530,72 @@ export function createWsApi(opts: WsApiOpts): WsApi {
       send(req)
     },
 
-    takeWrite(id: string): Promise<WriteLockState> {
-      return request(IPC.takeWrite, [id]) as Promise<WriteLockState>
-    },
+    takeWrite: wire<'takeWrite'>(IPC.takeWrite),
 
     onSessionWriteLock(cb: WriteLockCb): () => void {
       writeLockListeners.add(cb)
       return () => writeLockListeners.delete(cb)
     },
 
-    getGcPolicy(): Promise<GcPolicy> {
-      return request(IPC.getGcPolicy, []) as Promise<GcPolicy>
-    },
+    getGcPolicy: wire<'getGcPolicy'>(IPC.getGcPolicy),
 
-    setGcPolicy(policy: GcPolicy): Promise<void> {
-      return request(IPC.setGcPolicy, [policy]) as Promise<void>
-    },
+    setGcPolicy: wire<'setGcPolicy'>(IPC.setGcPolicy),
 
-    getSchedulerPolicy(): Promise<SchedulerPolicy> {
-      return request(IPC.getSchedulerPolicy, []) as Promise<SchedulerPolicy>
-    },
+    getSchedulerPolicy: wire<'getSchedulerPolicy'>(IPC.getSchedulerPolicy),
 
-    setSchedulerPolicy(policy: SchedulerPolicy): Promise<void> {
-      return request(IPC.setSchedulerPolicy, [policy]) as Promise<void>
-    },
+    setSchedulerPolicy: wire<'setSchedulerPolicy'>(IPC.setSchedulerPolicy),
 
-    getCliStatus(): Promise<CliStatusDTO> {
-      return request(IPC.getCliStatus, []) as Promise<CliStatusDTO>
-    },
+    getCliStatus: wire<'getCliStatus'>(IPC.getCliStatus),
 
-    getDiagnostics(): Promise<DiagnosticsDTO> {
-      return request(IPC.getDiagnostics, []) as Promise<DiagnosticsDTO>
-    },
+    getDiagnostics: wire<'getDiagnostics'>(IPC.getDiagnostics),
 
-    checkAgentCli(kind): Promise<AgentCliCheck> {
-      return request(IPC.checkAgentCli, [kind]) as Promise<AgentCliCheck>
-    },
+    checkAgentCli: wire<'checkAgentCli'>(IPC.checkAgentCli),
 
-    getSessionUsage(sessionId: string): Promise<SessionUsage> {
-      return request(IPC.sessionUsage, [sessionId]) as Promise<SessionUsage>
-    },
+    // Wire channel names historically diverge from their SlipstreamApi method
+    // name for these three — the override lives in the explicit IPC.x argument.
+    getSessionUsage: wire<'getSessionUsage'>(IPC.sessionUsage),
 
-    getUsageSummary(): Promise<UsageSummary> {
-      return request(IPC.usageSummary, []) as Promise<UsageSummary>
-    },
+    getUsageSummary: wire<'getUsageSummary'>(IPC.usageSummary),
 
-    listPromptTemplates(repoId: string): Promise<PromptTemplateDTO[]> {
-      return request(IPC.listPromptTemplates, [repoId]) as Promise<PromptTemplateDTO[]>
-    },
+    listPromptTemplates: wire<'listPromptTemplates'>(IPC.listPromptTemplates),
 
-    savePromptTemplate(input: {
-      id?: string
-      repoId: string
-      name: string
-      body: string
-    }): Promise<PromptTemplateDTO> {
-      return request(IPC.savePromptTemplate, [input]) as Promise<PromptTemplateDTO>
-    },
+    savePromptTemplate: wire<'savePromptTemplate'>(IPC.savePromptTemplate),
 
-    deletePromptTemplate(id: string): Promise<void> {
-      return request(IPC.deletePromptTemplate, [id]) as Promise<void>
-    },
+    deletePromptTemplate: wire<'deletePromptTemplate'>(IPC.deletePromptTemplate),
 
-    getSessionOutcome(sessionId: string): Promise<SessionOutcomeDTO | null> {
-      return request(IPC.getSessionOutcome, [sessionId]) as Promise<SessionOutcomeDTO | null>
-    },
+    getSessionOutcome: wire<'getSessionOutcome'>(IPC.getSessionOutcome),
 
-    listSessionHistory(): Promise<SessionHistoryEntry[]> {
-      return request(IPC.listSessionHistory, []) as Promise<SessionHistoryEntry[]>
-    },
+    listSessionHistory: wire<'listSessionHistory'>(IPC.listSessionHistory),
 
-    getPrStatus(sessionId: string): Promise<PrStatusDTO | null> {
-      return request(IPC.sessionPrStatus, [sessionId]) as Promise<PrStatusDTO | null>
-    },
+    getPrStatus: wire<'getPrStatus'>(IPC.sessionPrStatus),
 
-    listSessionAgentEvents(sessionId: string): Promise<SessionAgentEventDTO[]> {
-      return request(IPC.listSessionAgentEvents, [sessionId]) as Promise<SessionAgentEventDTO[]>
-    },
+    listSessionAgentEvents: wire<'listSessionAgentEvents'>(IPC.listSessionAgentEvents),
 
     onSessionAgentEvent(cb: AgentEventCb): () => void {
       agentEventListeners.add(cb)
       return () => agentEventListeners.delete(cb)
     },
 
-    getChatMessages(
-      id: string,
-      opts?: { beforeTs?: number; limit?: number },
-    ): Promise<{ available: boolean; messages: SessionChatMessageDTO[] }> {
-      return request(IPC.getChatMessages, [id, opts]) as Promise<{
-        available: boolean
-        messages: SessionChatMessageDTO[]
-      }>
-    },
+    getChatMessages: wire<'getChatMessages'>(IPC.getChatMessages),
 
     onChatMessage(cb: ChatMessageCb): () => void {
       chatMessageListeners.add(cb)
       return () => chatMessageListeners.delete(cb)
     },
 
-    subscribeChat(id: string): Promise<void> {
-      return request(IPC.subscribeChat, [id]) as Promise<void>
-    },
+    subscribeChat: wire<'subscribeChat'>(IPC.subscribeChat),
 
-    unsubscribeChat(id: string): Promise<void> {
-      return request(IPC.unsubscribeChat, [id]) as Promise<void>
-    },
+    unsubscribeChat: wire<'unsubscribeChat'>(IPC.unsubscribeChat),
 
-    listAgentSkills(id: string): Promise<AgentSkillDTO[]> {
-      return request(IPC.listAgentSkills, [id]) as Promise<AgentSkillDTO[]>
-    },
+    listAgentSkills: wire<'listAgentSkills'>(IPC.listAgentSkills),
 
-    getChatQuestion(id: string): Promise<ChatQuestionDTO | null> {
-      return request(IPC.getChatQuestion, [id]) as Promise<ChatQuestionDTO | null>
-    },
+    getChatQuestion: wire<'getChatQuestion'>(IPC.getChatQuestion),
 
     onConnectionChange(cb: ConnectionCb): () => void {
       connectionListeners.add(cb)
       return () => connectionListeners.delete(cb)
     },
-
-    destroy,
   }
+
+  return { ...api, destroy }
 }

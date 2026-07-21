@@ -8,65 +8,47 @@
  */
 import type {
   BackendKind,
-  BranchMergedDTO,
-  PaginatedTickets,
   RepoDTO,
-  RepoSettings,
-  SessionDTO,
-  SessionStatus,
-  StatusMeta,
-  WorkflowState,
-  WorktreeInfo,
-  WorktreeDiffDTO,
-  WorktreeUpdateMode,
-  WorktreeUpdateResultDTO,
-  EditorConfig,
-  NotifyPrefs,
-  PushSubscriptionDTO,
-  FcmTokenDTO,
-  GitHost,
-  WriteLockState,
-  GcPolicy,
-  SchedulerPolicy,
-  CliStatusDTO,
-  DiagnosticsDTO,
-  AgentCliCheck,
-  TicketSource,
-  ScopeOption,
   TicketSourceSettings,
-  SessionUsage,
-  UsageSummary,
   UsageTokens,
-  PromptTemplateDTO,
-  SessionOutcomeDTO,
-  SessionHistoryEntry,
-  SessionAgentEventDTO,
-  PrStatusDTO,
-  GitProviderInfoDTO,
-  GitHostConfigDTO,
-  SessionChatMessageDTO,
-  AgentSkillDTO,
-  ChatQuestionDTO,
 } from '../../electron/shared/contract.js'
+import type { SlipstreamApi } from '../../electron/shared/contract.js'
 import { DEFAULT_GC_POLICY, DEFAULT_SCHEDULER_POLICY } from '../../electron/shared/contract.js'
 
 export const hasBackend = typeof window !== 'undefined' && !!window.slipstream
 
+// Generic dispatch: call the real backend method when present, otherwise run
+// `fallback` with the same arguments. Every named export below is one call to
+// this — `K` pins argument/return types to the exact SlipstreamApi member
+// being wrapped, so a mismatched fallback shape is a type error, not a
+// runtime surprise the first time the no-backend path is exercised.
+function call<K extends keyof SlipstreamApi>(
+  name: K,
+  fallback: (...args: Parameters<SlipstreamApi[K]>) => ReturnType<SlipstreamApi[K]>,
+): SlipstreamApi[K] {
+  // The indexed access `window.slipstream[name]` is typed as the union of every
+  // SlipstreamApi member's signature, so TS can't confirm `args` (typed to the
+  // one specific K this call site pins) matches whichever union member it
+  // picks — a known TS limitation with generic indexed-access calls, not a
+  // real type hole (name and args are both pinned to the same K by the caller).
+  type Fn = (...args: Parameters<SlipstreamApi[K]>) => ReturnType<SlipstreamApi[K]>
+  return ((...args: Parameters<SlipstreamApi[K]>) =>
+    hasBackend ? (window.slipstream[name] as Fn)(...args) : fallback(...args)) as SlipstreamApi[K]
+}
+
+// Reused fallback shapes, so common no-backend behaviors aren't rewritten at
+// every call site.
+const NO_BACKEND = (): Promise<never> => Promise.reject(new Error('No backend'))
+const NOOP = (): void => {}
+const NOOP_UNSUBSCRIBE = (): (() => void) => NOOP
+
 // ── Repos ──────────────────────────────────────────────────────────────────
 
-export function listRepos(): Promise<RepoDTO[]> {
-  return hasBackend ? window.slipstream.listRepos() : Promise.resolve([])
-}
+export const listRepos = call('listRepos', () => Promise.resolve([]))
 
-export function registerRepo(absPath: string): Promise<RepoDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.registerRepo(absPath)
-}
+export const registerRepo = call('registerRepo', NO_BACKEND)
 
-export function registerRepoByUrl(remoteUrl: string): Promise<RepoDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.registerRepoByUrl(remoteUrl)
-}
+export const registerRepoByUrl = call('registerRepoByUrl', NO_BACKEND)
 
 /** Opens a native folder picker and registers the chosen repo. Resolves null if cancelled or no backend. */
 export function pickAndRegisterRepo(): Promise<RepoDTO | null> {
@@ -79,39 +61,19 @@ export function pickAndRegisterRepo(): Promise<RepoDTO | null> {
   return hasBackend ? window.slipstream.pickAndRegisterRepo() : Promise.resolve(null)
 }
 
-export function removeRepo(id: string): Promise<void> {
-  return hasBackend ? window.slipstream.removeRepo(id) : Promise.resolve()
-}
+export const removeRepo = call('removeRepo', () => Promise.resolve())
 
 // ── Tickets ────────────────────────────────────────────────────────────────
 
-export function listTickets(opts?: {
-  page?: number
-  pageSize?: number
-  query?: string
-}): Promise<PaginatedTickets> {
-  return hasBackend
-    ? window.slipstream.listTickets(opts)
-    : Promise.resolve({ tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false })
-}
+export const listTickets = call('listTickets', () =>
+  Promise.resolve({ tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false }),
+)
 
-export function getTicketStatus(
-  tid: string,
-  src?: TicketSource,
-): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
-  return hasBackend
-    ? window.slipstream.getTicketStatus(tid, src)
-    : Promise.resolve({ current: null, available: [] })
-}
+export const getTicketStatus = call('getTicketStatus', () =>
+  Promise.resolve({ current: null, available: [] }),
+)
 
-export function setTicketStatus(
-  tid: string,
-  stateId: string,
-  src?: TicketSource,
-): Promise<WorkflowState> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.setTicketStatus(tid, stateId, src)
-}
+export const setTicketStatus = call('setTicketStatus', NO_BACKEND)
 
 // ── Ticket source settings (Linear / Jira credentials + scoping) ───────────
 
@@ -125,335 +87,164 @@ const EMPTY_TICKET_SETTINGS: TicketSourceSettings = {
   apiToken: '',
 }
 
-export function getTicketSettings(src: TicketSource): Promise<TicketSourceSettings> {
-  return hasBackend
-    ? window.slipstream.getTicketSettings(src)
-    : Promise.resolve({ ...EMPTY_TICKET_SETTINGS })
-}
+export const getTicketSettings = call('getTicketSettings', () =>
+  Promise.resolve({ ...EMPTY_TICKET_SETTINGS }),
+)
 
-export function setTicketSettings(src: TicketSource, cfg: TicketSourceSettings): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.setTicketSettings(src, cfg)
-}
+export const setTicketSettings = call('setTicketSettings', NO_BACKEND)
 
-export function listTicketScopes(src: TicketSource): Promise<ScopeOption[]> {
-  return hasBackend ? window.slipstream.listTicketScopes(src) : Promise.resolve([])
-}
+export const listTicketScopes = call('listTicketScopes', () => Promise.resolve([]))
 
 // ── Sessions ───────────────────────────────────────────────────────────────
 
-export function startSession(input: {
-  tid: string
-  title: string
-  prompt: string
-  repoId: string
-  description?: string
-  agentKind?: BackendKind
-  sessionId?: string
-  src?: 'jira' | 'linear'
-  extraArgs?: string
-}): Promise<SessionDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.startSession(input)
-}
+export const startSession = call('startSession', NO_BACKEND)
 
-export function writeSession(id: string, data: string): void {
-  if (hasBackend) window.slipstream.writeSession(id, data)
-}
+export const writeSession = call('writeSession', NOOP)
 
-export function resizeSession(id: string, cols: number, rows: number): void {
-  if (hasBackend) window.slipstream.resizeSession(id, cols, rows)
-}
+export const resizeSession = call('resizeSession', NOOP)
 
 /** Uploads a clipboard image to the daemon's per-session virtual clipboard. */
-export function syncClipboardImage(id: string, dataBase64: string): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.syncClipboardImage(id, dataBase64)
-}
+export const syncClipboardImage = call('syncClipboardImage', NO_BACKEND)
 
-export function killSession(id: string): Promise<void> {
-  return hasBackend ? window.slipstream.killSession(id) : Promise.resolve()
-}
+export const killSession = call('killSession', () => Promise.resolve())
 
-export function cleanupSession(
-  id: string,
-  opts?: { force?: boolean },
-): Promise<{ removed: boolean; reason?: string }> {
-  return hasBackend
-    ? window.slipstream.cleanupSession(id, opts)
-    : Promise.resolve({ removed: false, reason: 'no backend' })
-}
+export const cleanupSession = call('cleanupSession', () =>
+  Promise.resolve({ removed: false, reason: 'no backend' }),
+)
 
-export function sessionMerged(id: string): Promise<BranchMergedDTO> {
-  return hasBackend ? window.slipstream.sessionMerged(id) : Promise.resolve({ merged: false })
-}
+export const sessionMerged = call('sessionMerged', () => Promise.resolve({ merged: false }))
 
 // ── Push event subscriptions ───────────────────────────────────────────────
 
 /** Subscribe to PTY data chunks. Returns an unsubscribe fn. */
-export function onSessionData(cb: (id: string, data: string, seq: number) => void): () => void {
-  if (!hasBackend) return () => {}
-  return window.slipstream.onSessionData(cb)
-}
+export const onSessionData = call('onSessionData', NOOP_UNSUBSCRIBE)
 
 /** Fetch the buffered output snapshot for a session. */
-export function getSessionBuffer(id: string): Promise<{ data: string; seq: number }> {
-  return hasBackend ? window.slipstream.getSessionBuffer(id) : Promise.resolve({ data: '', seq: 0 })
-}
+export const getSessionBuffer = call('getSessionBuffer', () =>
+  Promise.resolve({ data: '', seq: 0 }),
+)
 
 /** Subscribe to session status transitions. Returns an unsubscribe fn. */
-export function onSessionStatus(
-  cb: (id: string, status: SessionStatus, meta?: StatusMeta) => void,
-): () => void {
-  if (!hasBackend) return () => {}
-  return window.slipstream.onSessionStatus(cb)
-}
+export const onSessionStatus = call('onSessionStatus', NOOP_UNSUBSCRIBE)
 
 /** Subscribe to a session's agent process exiting on its own (not on kill/reap).
  *  Returns an unsubscribe fn. */
-export function onSessionExit(cb: (id: string, code: number) => void): () => void {
-  if (!hasBackend) return () => {}
-  return window.slipstream.onSessionExit(cb)
-}
+export const onSessionExit = call('onSessionExit', NOOP_UNSUBSCRIBE)
 
-export function listSessions(): Promise<SessionDTO[]> {
-  return hasBackend ? window.slipstream.listSessions() : Promise.resolve([])
-}
+export const listSessions = call('listSessions', () => Promise.resolve([]))
 
-export function resumeSession(id: string): Promise<SessionDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.resumeSession(id)
-}
+export const resumeSession = call('resumeSession', NO_BACKEND)
 
-export function attachRemoteControl(id: string): Promise<SessionDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.attachRemoteControl(id)
-}
+export const attachRemoteControl = call('attachRemoteControl', NO_BACKEND)
 
 /** Continue an existing run with a different agent in the same worktree (FLO-102). */
-export function handoffSession(id: string, agentKind: BackendKind): Promise<SessionDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.handoffSession(id, agentKind)
-}
+export const handoffSession = call('handoffSession', NO_BACKEND)
 
-export function worktreeStatus(repoId: string, branch: string): Promise<WorktreeInfo> {
-  return hasBackend
-    ? window.slipstream.worktreeStatus(repoId, branch)
-    : Promise.resolve({ branch, path: '', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 })
-}
+export const worktreeStatus = call('worktreeStatus', (_repoId, branch) =>
+  Promise.resolve({ branch, path: '', dirty: false, ahead: 0, behind: 0, added: 0, deleted: 0 }),
+)
 
-export function worktreeDiff(repoId: string, branch: string): Promise<WorktreeDiffDTO> {
-  return hasBackend
-    ? window.slipstream.worktreeDiff(repoId, branch)
-    : Promise.resolve({ branch: '', base: '', mergeBase: '', files: [], truncated: false })
-}
+export const worktreeDiff = call('worktreeDiff', () =>
+  Promise.resolve({ branch: '', base: '', mergeBase: '', files: [], truncated: false }),
+)
 
-export function worktreeUpdateFromBase(
-  repoId: string,
-  branch: string,
-  mode: WorktreeUpdateMode,
-): Promise<WorktreeUpdateResultDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.worktreeUpdateFromBase(repoId, branch, mode)
-}
+export const worktreeUpdateFromBase = call('worktreeUpdateFromBase', NO_BACKEND)
 
 // ── Editor ─────────────────────────────────────────────────────────────────
 
-export function getEditorConfig(): Promise<EditorConfig> {
-  return hasBackend
-    ? window.slipstream.getEditorConfig()
-    : Promise.resolve({ command: '', mobileCommand: '' })
-}
+export const getEditorConfig = call('getEditorConfig', () =>
+  Promise.resolve({ command: '', mobileCommand: '' }),
+)
 
-export function setEditorConfig(cfg: EditorConfig): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.setEditorConfig(cfg)
-}
+export const setEditorConfig = call('setEditorConfig', NO_BACKEND)
 
-export function openInEditor(input: {
-  repoId: string
-  branch: string
-  mobile?: boolean
-}): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.openInEditor(input)
-}
+export const openInEditor = call('openInEditor', NO_BACKEND)
 
-export function getRepoSettings(id: string): Promise<RepoSettings> {
-  return hasBackend
-    ? window.slipstream.getRepoSettings(id)
-    : Promise.resolve({ installCmd: '', startCmd: '' })
-}
-export function setRepoSettings(id: string, settings: RepoSettings): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.setRepoSettings(id, settings)
-}
-export function runApp(input: { repoId: string; branch: string }): Promise<{
-  started: boolean
-  reason?: string
-  port?: number
-  pid?: number
-  reused?: boolean
-  url?: string
-}> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.runApp(input)
-}
+export const getRepoSettings = call('getRepoSettings', () =>
+  Promise.resolve({ installCmd: '', startCmd: '' }),
+)
+export const setRepoSettings = call('setRepoSettings', NO_BACKEND)
 
-export function stopApp(input: { repoId: string; branch: string }): Promise<{ stopped: boolean }> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.stopApp(input)
-}
+export const runApp = call('runApp', NO_BACKEND)
 
-export function appStatus(input: {
-  repoId: string
-  branch: string
-}): Promise<{ running: boolean; url?: string }> {
-  if (!hasBackend) return Promise.resolve({ running: false })
-  return window.slipstream.appStatus(input)
-}
+export const stopApp = call('stopApp', NO_BACKEND)
+
+export const appStatus = call('appStatus', () => Promise.resolve({ running: false }))
 
 // ── Push notifications ─────────────────────────────────────────────────────
 
-export function getVapidPublicKey(): Promise<string> {
-  return hasBackend ? window.slipstream.getVapidPublicKey() : Promise.resolve('')
-}
+export const getVapidPublicKey = call('getVapidPublicKey', () => Promise.resolve(''))
 
-export function savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void> {
-  return hasBackend ? window.slipstream.savePushSubscription(sub, prefs) : Promise.resolve()
-}
+export const savePushSubscription = call('savePushSubscription', () => Promise.resolve())
 
-export function deletePushSubscription(endpoint: string): Promise<void> {
-  return hasBackend ? window.slipstream.deletePushSubscription(endpoint) : Promise.resolve()
-}
+export const deletePushSubscription = call('deletePushSubscription', () => Promise.resolve())
 
-export function getPushPrefs(endpoint: string): Promise<NotifyPrefs | null> {
-  return hasBackend ? window.slipstream.getPushPrefs(endpoint) : Promise.resolve(null)
-}
+export const getPushPrefs = call('getPushPrefs', () => Promise.resolve(null))
 
-export function saveFcmToken(token: FcmTokenDTO): Promise<void> {
-  return hasBackend ? window.slipstream.saveFcmToken(token) : Promise.resolve()
-}
+export const saveFcmToken = call('saveFcmToken', () => Promise.resolve())
 
-export function deleteFcmToken(token: string): Promise<void> {
-  return hasBackend ? window.slipstream.deleteFcmToken(token) : Promise.resolve()
-}
+export const deleteFcmToken = call('deleteFcmToken', () => Promise.resolve())
 
 // ── Git host tokens / PR push ───────────────────────────────────────────────
 
-export function getGitToken(host: GitHost): Promise<string | null> {
-  return hasBackend ? window.slipstream.getGitToken(host) : Promise.resolve(null)
-}
+export const getGitToken = call('getGitToken', () => Promise.resolve(null))
 
-export function setGitToken(host: GitHost, token: string): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.setGitToken(host, token)
-}
+export const setGitToken = call('setGitToken', NO_BACKEND)
 
-export function listGitProviders(): Promise<GitProviderInfoDTO[]> {
-  return hasBackend ? window.slipstream.listGitProviders() : Promise.resolve([])
-}
+export const listGitProviders = call('listGitProviders', () => Promise.resolve([]))
 
-export function getGitHostConfig(host: GitHost): Promise<GitHostConfigDTO> {
-  return hasBackend
-    ? window.slipstream.getGitHostConfig(host)
-    : Promise.resolve({ token: null, username: null, baseUrl: null })
-}
+export const getGitHostConfig = call('getGitHostConfig', () =>
+  Promise.resolve({ token: null, username: null, baseUrl: null }),
+)
 
-export function setGitHostConfig(
-  host: GitHost,
-  cfg: { token?: string; username?: string; baseUrl?: string },
-): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.setGitHostConfig(host, cfg)
-}
+export const setGitHostConfig = call('setGitHostConfig', NO_BACKEND)
 
 /** Subscribe to session PR/MR-opened events. Returns an unsubscribe fn. */
-export function onSessionPr(cb: (id: string, prUrl: string) => void): () => void {
-  if (!hasBackend) return () => {}
-  return window.slipstream.onSessionPr(cb)
-}
+export const onSessionPr = call('onSessionPr', NOOP_UNSUBSCRIBE)
 
 // ── Multi-client write lock ────────────────────────────────────────────────
 
-export function attachSession(id: string): Promise<WriteLockState> {
-  return hasBackend
-    ? window.slipstream.attachSession(id)
-    : Promise.resolve({ sessionId: id, canWrite: true, viewers: 1 })
-}
+export const attachSession = call('attachSession', (id) =>
+  Promise.resolve({ sessionId: id, canWrite: true, viewers: 1 }),
+)
 
-export function detachSession(id: string): void {
-  if (hasBackend) window.slipstream.detachSession(id)
-}
+export const detachSession = call('detachSession', NOOP)
 
-export function takeWrite(id: string): Promise<WriteLockState> {
-  if (!hasBackend) return Promise.resolve({ sessionId: id, canWrite: true, viewers: 1 })
-  return window.slipstream.takeWrite(id)
-}
+export const takeWrite = call('takeWrite', (id) =>
+  Promise.resolve({ sessionId: id, canWrite: true, viewers: 1 }),
+)
 
-export function onSessionWriteLock(cb: (state: WriteLockState) => void): () => void {
-  if (!hasBackend) return () => {}
-  return window.slipstream.onSessionWriteLock(cb)
-}
+export const onSessionWriteLock = call('onSessionWriteLock', NOOP_UNSUBSCRIBE)
 
 // ── Session GC / cost guard policy ──────────────────────────────────────────
 
-export function getGcPolicy(): Promise<GcPolicy> {
-  return hasBackend ? window.slipstream.getGcPolicy() : Promise.resolve({ ...DEFAULT_GC_POLICY })
-}
+export const getGcPolicy = call('getGcPolicy', () => Promise.resolve({ ...DEFAULT_GC_POLICY }))
 
-export function setGcPolicy(policy: GcPolicy): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.setGcPolicy(policy)
-}
+export const setGcPolicy = call('setGcPolicy', NO_BACKEND)
 
 // ── Scheduler concurrency policy ────────────────────────────────────────────
 
-export function getSchedulerPolicy(): Promise<SchedulerPolicy> {
-  return hasBackend
-    ? window.slipstream.getSchedulerPolicy()
-    : Promise.resolve({ ...DEFAULT_SCHEDULER_POLICY })
-}
+export const getSchedulerPolicy = call('getSchedulerPolicy', () =>
+  Promise.resolve({ ...DEFAULT_SCHEDULER_POLICY }),
+)
 
-export function setSchedulerPolicy(policy: SchedulerPolicy): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.setSchedulerPolicy(policy)
-}
+export const setSchedulerPolicy = call('setSchedulerPolicy', NO_BACKEND)
 
 // ── MCP status ───────────────────────────────────────────────────────────
 
-export function getCliStatus(): Promise<CliStatusDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.getCliStatus()
-}
+export const getCliStatus = call('getCliStatus', NO_BACKEND)
 
 // ── Diagnostics ──────────────────────────────────────────────────────────
 
-export function getDiagnostics(): Promise<DiagnosticsDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.getDiagnostics()
-}
+export const getDiagnostics = call('getDiagnostics', NO_BACKEND)
 
 // ── Prompt templates (FLO-98) ────────────────────────────────────────────
 
-export function listPromptTemplates(repoId: string): Promise<PromptTemplateDTO[]> {
-  return hasBackend ? window.slipstream.listPromptTemplates(repoId) : Promise.resolve([])
-}
+export const listPromptTemplates = call('listPromptTemplates', () => Promise.resolve([]))
 
-export function savePromptTemplate(input: {
-  id?: string
-  repoId: string
-  name: string
-  body: string
-}): Promise<PromptTemplateDTO> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.savePromptTemplate(input)
-}
+export const savePromptTemplate = call('savePromptTemplate', NO_BACKEND)
 
-export function deletePromptTemplate(id: string): Promise<void> {
-  if (!hasBackend) return Promise.reject(new Error('No backend'))
-  return window.slipstream.deletePromptTemplate(id)
-}
+export const deletePromptTemplate = call('deletePromptTemplate', NO_BACKEND)
 
 // ── Agent CLI preflight ──────────────────────────────────────────────────
 
@@ -464,125 +255,89 @@ export function deletePromptTemplate(id: string): Promise<void> {
  *  rejected value), there is no real check to honestly report the absence of
  *  here, and the UI must not nag about a missing CLI when there's no daemon
  *  to check against. This is intentional, not an oversight. */
-export function checkAgentCli(kind: BackendKind): Promise<AgentCliCheck> {
-  return hasBackend
-    ? window.slipstream.checkAgentCli(kind)
-    : Promise.resolve({ kind, bin: '', found: true })
-}
+export const checkAgentCli = call('checkAgentCli', (kind: BackendKind) =>
+  Promise.resolve({ kind, bin: '', found: true }),
+)
 
 // ── Usage (token/cost) ─────────────────────────────────────────────────────
 
 const ZERO_TOKENS: UsageTokens = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }
 
 /** Per-session token/cost usage parsed from the session's transcript JSONL. */
-export function getSessionUsage(sessionId: string): Promise<SessionUsage> {
-  return hasBackend
-    ? window.slipstream.getSessionUsage(sessionId)
-    : Promise.resolve({
-        sessionId,
-        exists: false,
-        tokens: { ...ZERO_TOKENS },
-        costUsd: 0,
-        turns: 0,
-      })
-}
+export const getSessionUsage = call('getSessionUsage', (sessionId) =>
+  Promise.resolve({
+    sessionId,
+    exists: false,
+    tokens: { ...ZERO_TOKENS },
+    costUsd: 0,
+    turns: 0,
+  }),
+)
 
 /** Total + by-repo + by-day usage rollup for mission control. */
-export function getUsageSummary(): Promise<UsageSummary> {
-  return hasBackend
-    ? window.slipstream.getUsageSummary()
-    : Promise.resolve({
-        total: { ...ZERO_TOKENS },
-        costUsd: 0,
-        byRepo: [],
-        byDay: [],
-        sessions: [],
-      })
-}
+export const getUsageSummary = call('getUsageSummary', () =>
+  Promise.resolve({
+    total: { ...ZERO_TOKENS },
+    costUsd: 0,
+    byRepo: [],
+    byDay: [],
+    sessions: [],
+  }),
+)
 
 // ── Session outcomes / history (FLO-97) ─────────────────────────────────────
 
 /** Structured final summary reported by the agent, or null if none reported yet. */
-export function getSessionOutcome(sessionId: string): Promise<SessionOutcomeDTO | null> {
-  return hasBackend ? window.slipstream.getSessionOutcome(sessionId) : Promise.resolve(null)
-}
+export const getSessionOutcome = call('getSessionOutcome', () => Promise.resolve(null))
 
 /** Owner-scoped history of all persisted sessions joined with outcomes + usage,
  *  most recent first; powers the History view. */
-export function listSessionHistory(): Promise<SessionHistoryEntry[]> {
-  return hasBackend ? window.slipstream.listSessionHistory() : Promise.resolve([])
-}
+export const listSessionHistory = call('listSessionHistory', () => Promise.resolve([]))
 
 // ── Agent CLI events (FLO-104) ───────────────────────────────────────────────
 
 /** Persisted checkpoint/artifact/approval events for a session, oldest first. */
-export function listSessionAgentEvents(sessionId: string): Promise<SessionAgentEventDTO[]> {
-  return hasBackend ? window.slipstream.listSessionAgentEvents(sessionId) : Promise.resolve([])
-}
+export const listSessionAgentEvents = call('listSessionAgentEvents', () => Promise.resolve([]))
 
 /** Subscribe to live agent events. Returns an unsubscribe fn. */
-export function onSessionAgentEvent(cb: (event: SessionAgentEventDTO) => void): () => void {
-  if (!hasBackend) return () => {}
-  return window.slipstream.onSessionAgentEvent(cb)
-}
+export const onSessionAgentEvent = call('onSessionAgentEvent', NOOP_UNSUBSCRIBE)
 
 // ── Chat transcript (TASK-FPH60) ────────────────────────────────────────────
 
 /** Claude Code transcript tailed as chat. `available` is false when there's no
  *  backend, the session isn't claude-code, or it has no transcript file yet. */
-export function getChatMessages(
-  id: string,
-  opts?: { beforeTs?: number; limit?: number },
-): Promise<{ available: boolean; messages: SessionChatMessageDTO[] }> {
-  return hasBackend
-    ? window.slipstream.getChatMessages(id, opts)
-    : Promise.resolve({ available: false, messages: [] })
-}
+export const getChatMessages = call('getChatMessages', () =>
+  Promise.resolve({ available: false, messages: [] }),
+)
 
 /** Subscribe to live chat-message push. Returns an unsubscribe fn. */
-export function onChatMessage(cb: (id: string, msg: SessionChatMessageDTO) => void): () => void {
-  if (!hasBackend) return () => {}
-  return window.slipstream.onChatMessage(cb)
-}
+export const onChatMessage = call('onChatMessage', NOOP_UNSUBSCRIBE)
 
 /** Registers this client as a chat subscriber for `id` — opencode messages
  *  only arrive via server-side polling while at least one subscriber exists;
  *  claude/pi tails don't need it, so calling it for them is harmless. Call on
  *  ChatView mount, and unsubscribeChat on unmount. */
-export function subscribeChat(id: string): Promise<void> {
-  return hasBackend ? window.slipstream.subscribeChat(id) : Promise.resolve()
-}
+export const subscribeChat = call('subscribeChat', () => Promise.resolve())
 
 /** Unregisters this client as a chat subscriber for `id`. See subscribeChat. */
-export function unsubscribeChat(id: string): Promise<void> {
-  return hasBackend ? window.slipstream.unsubscribeChat(id) : Promise.resolve()
-}
+export const unsubscribeChat = call('unsubscribeChat', () => Promise.resolve())
 
 /** Discovered skills (SKILL.md-convention directories) available to a
  *  session's agent, for the chat input's `/`-command menu. */
-export function listAgentSkills(id: string): Promise<AgentSkillDTO[]> {
-  return hasBackend ? window.slipstream.listAgentSkills(id) : Promise.resolve([])
-}
+export const listAgentSkills = call('listAgentSkills', () => Promise.resolve([]))
 
 /** What is the agent asking, for the ChatView needs-input card. null when
  *  there's no backend, the session isn't in 'needs', or nothing is available
  *  to show (see ChatQuestionDTO). */
-export function getChatQuestion(id: string): Promise<ChatQuestionDTO | null> {
-  return hasBackend ? window.slipstream.getChatQuestion(id) : Promise.resolve(null)
-}
+export const getChatQuestion = call('getChatQuestion', () => Promise.resolve(null))
 
 // ── PR / CI status (FLO-96) ───────────────────────────────────────────────
 
 /** Post-handoff PR/MR merge/CI/review state for a session. null when there's
  *  no backend or the session has no prUrl yet. */
-export function getPrStatus(sessionId: string): Promise<PrStatusDTO | null> {
-  return hasBackend ? window.slipstream.getPrStatus(sessionId) : Promise.resolve(null)
-}
+export const getPrStatus = call('getPrStatus', () => Promise.resolve(null))
 
 // ── Transport connectivity ──────────────────────────────────────────────────
 
 /** Subscribe to backend transport connectivity (reconnects). Returns an unsubscribe fn. */
-export function onConnectionChange(cb: (connected: boolean) => void): () => void {
-  if (!hasBackend) return () => {}
-  return window.slipstream.onConnectionChange(cb)
-}
+export const onConnectionChange = call('onConnectionChange', NOOP_UNSUBSCRIBE)
