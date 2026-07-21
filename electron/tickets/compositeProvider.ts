@@ -4,6 +4,7 @@ import type {
   TicketSource,
   WorkflowState,
   PaginatedTickets,
+  TicketSourceSettings,
 } from '../shared/contract.js'
 
 /** Merges multiple ticket providers into a single ITicketProvider. Per-ticket
@@ -105,6 +106,25 @@ export function createCompositeProvider(providers: ITicketProvider[]): ITicketPr
 
     async postComment(tid: string, body: string, src?: TicketSource): Promise<boolean> {
       return resolve(tid, src).postComment(tid, body)
+    },
+
+    // getSettings/setSettings take no tid/src to route by, unlike every other
+    // method here — rpc.ts calls deps.ticketProviders?.[src] directly for
+    // settings (see IPC.getTicketSettings/setTicketSettings), never through
+    // the composite. These exist only so the composite still satisfies
+    // ITicketProvider; the single-provider case is a reasonable fallback,
+    // otherwise there's no way to pick a source without one.
+    getSettings(): TicketSourceSettings {
+      if (providers.length === 1) return providers[0].getSettings()
+      throw new Error('getSettings is ambiguous on a composite ticket provider')
+    },
+
+    setSettings(_cfg: TicketSourceSettings): void {
+      if (providers.length === 1) {
+        providers[0].setSettings(_cfg)
+        return
+      }
+      throw new Error('setSettings is ambiguous on a composite ticket provider')
     },
   }
 }

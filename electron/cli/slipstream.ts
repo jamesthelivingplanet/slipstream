@@ -27,8 +27,9 @@ import {
 import { STATUS_SENTINEL_FILE } from '../services/statusSentinel.js'
 import { OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
 import { AGENT_EVENTS_FILE } from '../services/agentEventsSentinel.js'
-import { resolveRemote, createGitDriver } from '../services/gitDriver.js'
-import type { GitHostConfig } from '../services/gitDriver.js'
+import { createGitDriver } from '../services/gitDriver.js'
+import { resolveRemote } from '../services/gitProviders/registry.js'
+import type { GitHostConfig } from '../services/gitProviders/types.js'
 import type { IConfigStore } from '../services/configStore.js'
 
 const execFile = promisify(_execFile)

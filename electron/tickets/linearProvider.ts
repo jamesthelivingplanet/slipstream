@@ -4,6 +4,7 @@ import type {
   TicketDTO,
   WorkflowState,
   PaginatedTickets,
+  TicketSourceSettings,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 
@@ -388,6 +389,25 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
       const result = data.commentCreate as { success: boolean } | undefined
       if (!result?.success) throw new Error('Failed to post comment')
       return true
+    },
+
+    getSettings(): TicketSourceSettings {
+      const apiKey = config.get('linear.apiKey') ?? ''
+      return {
+        configured: !!apiKey,
+        scopeKeys: parseTeamKeys(config.get('linear.teamKeys')),
+        onlyMine: config.get('linear.onlyMine') !== '0',
+        apiKey,
+        baseUrl: '',
+        email: '',
+        apiToken: '',
+      }
+    },
+
+    setSettings(cfg: TicketSourceSettings): void {
+      config.set('linear.apiKey', cfg.apiKey ?? '')
+      config.set('linear.teamKeys', (cfg.scopeKeys ?? []).join(','))
+      config.set('linear.onlyMine', cfg.onlyMine === false ? '0' : '1')
     },
   }
 }

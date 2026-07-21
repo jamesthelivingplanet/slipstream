@@ -175,6 +175,16 @@ function makeFakeDeps(): IpcDeps {
     startTicket: vi.fn().mockResolvedValue(null),
     resetTicket: vi.fn().mockResolvedValue(null),
     postComment: vi.fn().mockResolvedValue(false),
+    getSettings: vi.fn().mockReturnValue({
+      configured: false,
+      scopeKeys: [],
+      onlyMine: true,
+      apiKey: '',
+      baseUrl: '',
+      email: '',
+      apiToken: '',
+    }),
+    setSettings: vi.fn(),
   }
 
   const config: IConfigStore = {
@@ -325,6 +335,16 @@ function makeSurvivalDeps(): {
     startTicket: vi.fn().mockResolvedValue(null),
     resetTicket: vi.fn().mockResolvedValue(null),
     postComment: vi.fn().mockResolvedValue(false),
+    getSettings: vi.fn().mockReturnValue({
+      configured: false,
+      scopeKeys: [],
+      onlyMine: true,
+      apiKey: '',
+      baseUrl: '',
+      email: '',
+      apiToken: '',
+    }),
+    setSettings: vi.fn(),
   }
 
   const config: IConfigStore = {

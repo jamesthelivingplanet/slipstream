@@ -114,6 +114,22 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
           webmanifest: 'application/manifest+json',
           woff2: 'font/woff2',
           woff: 'font/woff',
+          wasm: 'application/wasm',
+          map: 'application/json',
+          mp4: 'video/mp4',
+          webp: 'image/webp',
+          avif: 'image/avif',
+          gif: 'image/gif',
+          jpg: 'image/jpeg',
+          jpeg: 'image/jpeg',
+          txt: 'text/plain',
+          xml: 'application/xml',
+          mp3: 'audio/mpeg',
+          wav: 'audio/wav',
+          ttf: 'font/ttf',
+          otf: 'font/otf',
+          eot: 'application/vnd.ms-fontobject',
+          pdf: 'application/pdf',
         }
         // Cache policy:
         //  - index.html and other non-asset files: no-cache (always revalidate)

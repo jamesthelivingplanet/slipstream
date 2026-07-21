@@ -22,6 +22,7 @@ import type {
   IOutcomeStore,
   IClipboardStore,
   SessionStatus,
+  StatusMeta,
   WriteLockState,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
@@ -149,6 +150,16 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     startTicket: vi.fn().mockResolvedValue(null),
     resetTicket: vi.fn().mockResolvedValue(null),
     postComment: vi.fn().mockResolvedValue(false),
+    getSettings: vi.fn().mockReturnValue({
+      configured: false,
+      scopeKeys: [],
+      onlyMine: true,
+      apiKey: '',
+      baseUrl: '',
+      email: '',
+      apiToken: '',
+    }),
+    setSettings: vi.fn(),
   }
 
   const config: IConfigStore = {
@@ -1129,6 +1140,12 @@ describe('createRpc', () => {
   it('forwards session status events to emit', () => {
     deps._emit('status', 's1', 'done' satisfies SessionStatus)
     expect(emitted).toEqual([[IPC.sessionStatus, 's1', 'done']])
+  })
+
+  it('forwards session status events with meta to emit as a 4th arg (FLO-104)', () => {
+    const meta = { reason: 'input', message: 'needs a decision' } satisfies StatusMeta
+    deps._emit('status', 's1', 'needs' satisfies SessionStatus, meta)
+    expect(emitted).toEqual([[IPC.sessionStatus, 's1', 'needs', meta]])
   })
 
   it('forwards session exit events to emit (FLO-101)', () => {

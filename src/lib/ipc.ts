@@ -14,6 +14,7 @@ import type {
   RepoSettings,
   SessionDTO,
   SessionStatus,
+  StatusMeta,
   WorkflowState,
   WorktreeInfo,
   WorktreeDiffDTO,
@@ -201,7 +202,9 @@ export function getSessionBuffer(id: string): Promise<{ data: string; seq: numbe
 }
 
 /** Subscribe to session status transitions. Returns an unsubscribe fn. */
-export function onSessionStatus(cb: (id: string, status: SessionStatus) => void): () => void {
+export function onSessionStatus(
+  cb: (id: string, status: SessionStatus, meta?: StatusMeta) => void,
+): () => void {
   if (!hasBackend) return () => {}
   return window.slipstream.onSessionStatus(cb)
 }
@@ -454,9 +457,13 @@ export function deletePromptTemplate(id: string): Promise<void> {
 
 // ── Agent CLI preflight ──────────────────────────────────────────────────
 
-/** Checks whether `kind`'s CLI binary is on the daemon's PATH. In design
- *  mode (no backend), resolves `found: true` so the UI doesn't nag when
- *  there's no real daemon to check against. */
+/** Checks whether `kind`'s CLI binary is on the daemon's PATH.
+ *
+ *  DESIGN-MODE FALLBACK: deliberately fabricates `found: true` — unlike every
+ *  other hasBackend guard in this file (which return an honest empty/null/
+ *  rejected value), there is no real check to honestly report the absence of
+ *  here, and the UI must not nag about a missing CLI when there's no daemon
+ *  to check against. This is intentional, not an oversight. */
 export function checkAgentCli(kind: BackendKind): Promise<AgentCliCheck> {
   return hasBackend
     ? window.slipstream.checkAgentCli(kind)
