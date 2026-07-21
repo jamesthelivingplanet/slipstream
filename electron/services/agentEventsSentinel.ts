@@ -5,10 +5,10 @@
  *
  * Dependency-free (usable from both the CLI process and sessionManager) and
  * lenient: malformed or partially-written trailing lines are skipped, not
- * fatal — the watcher re-reads the whole file on the next fs event and the
- * ts-cursor (`eventsAfter`) dedupes what was already delivered.
+ * fatal — the watcher (sentinelWatcher.ts) re-reads the whole file on the
+ * next fs event and its own ts-cursor dedupes what was already delivered.
  */
-import type { AgentEventKind, SessionAgentEventDTO } from '../shared/contract.js'
+import type { AgentEventKind } from '../shared/contract.js'
 
 export const AGENT_EVENTS_FILE = 'events.ndjson'
 
@@ -55,15 +55,4 @@ export function parseAgentEvents(raw: string): AgentEventLine[] {
     if (parsed) events.push(parsed)
   }
   return events
-}
-
-/** Events strictly newer than `afterTs`, stamped with the session id. */
-export function eventsAfter(
-  raw: string,
-  afterTs: number,
-  sessionId: string,
-): SessionAgentEventDTO[] {
-  return parseAgentEvents(raw)
-    .filter((e) => e.ts > afterTs)
-    .map((e) => ({ sessionId, ...e }))
 }
