@@ -349,3 +349,29 @@ and hands the credential to that origin.
 Same-origin SPA route changes are history/hash mutations, not navigations, so a
 real `will-navigate` off the origin is never legitimate app behavior — blocking
 it cannot regress normal routing.
+
+## 9. Optional Origin allowlist for browser clients (FLO-131)
+
+The `/rpc` WebSocket upgrade authenticates purely by token. Token-gating already
+means a cross-site page or a DNS-rebind attacker cannot authenticate, so this is
+**defense-in-depth only** — but an optional `Origin` allowlist hardens the
+browser attack surface further and lets a disallowed cross-origin connection be
+rejected *before* the handshake completes (trimming pre-auth socket churn).
+
+**Config:** `SLIPSTREAM_ALLOWED_ORIGINS` (comma-separated origins, e.g.
+`https://host.tailnet.ts.net,http://127.0.0.1:7421`). Unset/empty ⇒ feature off,
+every origin accepted (unchanged behavior).
+
+**Semantics** (`originAllowed()` in `server.ts`):
+
+- Enforced **only when a browser sends an `Origin` header**. Header-capable
+  clients — the Electron desktop daemon's `Authorization: Bearer` connection and
+  the `scripts/e2e/*` drivers — send no `Origin`, so they are never affected.
+- A present `Origin` not in the allowlist is rejected with a raw `socket.destroy()`
+  **before `handleUpgrade`**. This is deliberately unlike the token path (which
+  completes the handshake first to emit a clean `4001` — see §1 and the comment
+  at the token check): a cross-origin browser is not a legitimate client that
+  needs a distinguishable auth-failure signal, and rejecting pre-handshake avoids
+  opening a socket for it at all.
+- The `?token=` / `Authorization: Bearer` token check is unchanged and still runs
+  after a same-origin (or headerless) upgrade completes.
