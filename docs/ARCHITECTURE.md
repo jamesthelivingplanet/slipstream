@@ -128,8 +128,14 @@ copy) tell the agent when to run the status commands; the per-command stdout nud
 `electron/cli/slipstream.ts` reinforce the next expected transition (agents read command
 output — the resume-from-waiting→`task-started` call is the one they drop most);
 `statusDetector.ts`/`statusSentinel.ts`/`agentEventsSentinel.ts` consume the sentinels.
-Tests assert on prompt and output substrings (`promptComposer.test.ts`,
-`slipstream.test.ts`, `cliSkillDoc.test.ts`), so wording changes ripple there.
+The factual surface those three doc places share — the command set, the exit codes, and
+the "ONLY through the `slipstream` CLI" claim — is single-sourced in
+`electron/shared/slipstreamCommands.ts`, which each surface renders from
+(`renderUsageCommandBlock`/`renderCommandTable`/`renderExitCodes` + `SINGLE_CHANNEL_CLAIM`);
+the persuasive, per-audience prose is still authored per file. Tests assert on prompt and
+output substrings (`promptComposer.test.ts`, `slipstream.test.ts`, `cliSkillDoc.test.ts`,
+plus `slipstreamCommands.test.ts`'s cross-surface agreement checks), so prose wording
+changes ripple there — but command/exit-code facts no longer do.
 
 ## Renderer
 

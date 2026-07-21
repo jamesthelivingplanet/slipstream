@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { runCli, parseArgs, EXIT_OK, EXIT_USAGE, EXIT_FAILED } from './slipstream.js'
 import type { CliDeps } from './slipstream.js'
+import { SLIPSTREAM_COMMANDS, renderExitCodes } from '../shared/slipstreamCommands.js'
 
 function makeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
   return {
@@ -53,18 +54,14 @@ describe('runCli', () => {
       const deps = makeDeps()
       expect(await runCli(['help'], deps)).toBe(EXIT_OK)
       const out = stdoutText(deps)
-      for (const cmd of [
-        'task-started',
-        'request-input',
-        'task-blocked',
-        'approval-request',
-        'checkpoint',
-        'artifact publish',
-        'task-complete',
-        'open-mr',
-      ]) {
+      // Every command the spec declares must appear in the rendered usage.
+      for (const cmd of SLIPSTREAM_COMMANDS.map((c) => c.command)) {
         expect(out).toContain(cmd)
       }
+      // The exit-code line is rendered from the shared spec too — and must say
+      // "not inside" (regression guard for the drift this consolidation fixed).
+      expect(out).toContain(renderExitCodes(', '))
+      expect(out).toContain('not inside a Slipstream session')
     })
 
     it('prints usage when invoked with no command', async () => {

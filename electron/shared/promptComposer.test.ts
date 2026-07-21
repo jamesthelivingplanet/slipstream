@@ -7,6 +7,7 @@ import {
   buildHandoffPrompt,
   AGENT_LABELS,
 } from './promptComposer.js'
+import { LIFECYCLE_INVOCATIONS } from './slipstreamCommands.js'
 
 describe('defaultUserPrompt', () => {
   it('returns "Begin implementing <tid>."', () => {
@@ -87,13 +88,8 @@ describe('buildSystemPrompt', () => {
 
   it('covers the full lifecycle command set', () => {
     const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
-    for (const cmd of [
-      'slipstream task-started',
-      'slipstream request-input',
-      'slipstream task-blocked',
-      'slipstream approval-request',
-      'slipstream task-complete',
-    ]) {
+    // Derived from the shared spec so the lifecycle subset can't drift from it.
+    for (const cmd of LIFECYCLE_INVOCATIONS) {
       expect(result).toContain(cmd)
     }
   })

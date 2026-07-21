@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildSlipstreamSkillMd } from './cliSkillDoc.js'
+import { SLIPSTREAM_COMMANDS } from './slipstreamCommands.js'
 
 describe('buildSlipstreamSkillMd', () => {
   const md = buildSlipstreamSkillMd()
@@ -26,17 +27,9 @@ describe('buildSlipstreamSkillMd', () => {
   })
 
   it('documents every command', () => {
-    for (const cmd of [
-      'slipstream task-started',
-      'slipstream request-input',
-      'slipstream task-blocked',
-      'slipstream approval-request',
-      'slipstream checkpoint',
-      'slipstream artifact publish',
-      'slipstream task-complete',
-      'slipstream open-mr',
-      'slipstream help',
-    ]) {
+    // Derived from the shared spec so a new/renamed command can't be silently
+    // dropped from the skill doc.
+    for (const cmd of SLIPSTREAM_COMMANDS.map((c) => c.invocation)) {
       expect(md).toContain(cmd)
     }
   })

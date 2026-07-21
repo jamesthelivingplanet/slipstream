@@ -1,4 +1,5 @@
 import type { BackendKind } from './contract.js'
+import { SINGLE_CHANNEL_CLAIM } from './slipstreamCommands.js'
 
 export interface TicketContext {
   tid: string
@@ -47,7 +48,7 @@ Note: CLAUDE.md already covers repo conventions \u2014 follow it but do not dupl
 
 ## Signaling your state to the app
 
-The app learns your state ONLY through the \`slipstream\` CLI on your PATH — there is no other channel. Your working state is a lifecycle, and every transition MUST be reported the instant it happens:
+The app learns your state ${SINGLE_CHANNEL_CLAIM} on your PATH — there is no other channel. Your working state is a lifecycle, and every transition MUST be reported the instant it happens:
 
 1. **\`slipstream task-started\`** — run this FIRST, before anything else (before investigating, before replying), whenever you begin working AND every time you resume after waiting on the user. This includes: starting the ticket, and — most importantly — the instant the user sends a new message while you were waiting. Do not investigate, do not reply, do not think out loud first: run \`slipstream task-started\`, then act.
 2. **\`slipstream request-input --message "..."\`** — run this the moment you stop and are waiting on the user (a question, a decision, missing input) and cannot proceed without their reply. Run it right before you stop, not after. Use \`slipstream task-blocked --message "..."\` when you cannot proceed at all, and \`slipstream approval-request --message "..."\` when you need an explicit go-ahead for a risky action.
