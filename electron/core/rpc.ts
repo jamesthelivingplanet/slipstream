@@ -410,10 +410,13 @@ export function createRpc(
           // FLO-35: move the linked ticket back to "To Do" when the agent run
           // is deleted, so the next agent can pick it up. Best-effort — a
           // ticket-API failure must not break the cleanup.
-          const tid = persisted?.tid
-          if (tid) {
+          // TASK-5PVBM: but a run that reached 'done' finished its work — leave
+          // the ticket where the agent left it rather than bouncing it back to
+          // To Do.
+          const tid = persisted.tid
+          if (tid && persisted.status !== 'done') {
             try {
-              await deps.tickets.resetTicket(tid, persisted?.src)
+              await deps.tickets.resetTicket(tid, persisted.src)
             } catch {
               // ignore: ticket provider unavailable or transition not applicable
             }
