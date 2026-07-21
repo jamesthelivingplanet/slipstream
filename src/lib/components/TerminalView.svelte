@@ -982,7 +982,8 @@
   </button>
   <div class="th-title">
     <div class="t">
-      <span class="stat-dot" style="background:{dot}"></span>{session.tid} · {session.title}
+      <span class="stat-dot" style="background:{dot}"></span>
+      <span class="tt">{session.tid} · {session.title}</span>
     </div>
     <div class="m">
       <span class="badge mono">{@html icons.folder} {r?.org}/{r?.name}</span>
