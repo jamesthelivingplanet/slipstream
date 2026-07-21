@@ -416,6 +416,8 @@ html[data-mode='light'] .seg.on {
 }
 .errored .stat-dot {
   background: hsl(var(--st-error));
+  box-shadow: 0 0 0 0 hsl(var(--st-error));
+  animation: pulse-error 1.9s infinite;
 }
 .errored .a-status {
   color: hsl(var(--st-error));
@@ -1243,6 +1245,17 @@ html[data-mode='light'] .mode-toggle .mt.on {
   }
   100% {
     box-shadow: 0 0 0 0 hsl(var(--st-needs) / 0);
+  }
+}
+@keyframes pulse-error {
+  0% {
+    box-shadow: 0 0 0 0 hsl(var(--st-error) / 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px hsl(var(--st-error) / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--st-error) / 0);
   }
 }
 @keyframes breathe {

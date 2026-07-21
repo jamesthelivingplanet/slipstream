@@ -71,6 +71,10 @@ import {
   addReviewComment,
   removeReviewComment,
   clearReviewComments,
+  counts,
+  visible,
+  filter,
+  query,
 } from './stores.js'
 import { toasts } from './toast.js'
 import type { Ticket, Session, Status } from './types.js'
@@ -766,6 +770,81 @@ describe('dtoToSession (FLO-83 src round-trip)', () => {
     const s = dtoToSession(dto)
     expect(s.status).toBe('queued')
     expect(s.activity.text).toBe('Queued — will start when an agent slot frees.')
+  })
+})
+
+describe('counts/visible bucket agreement with Mission Control (FLO-113)', () => {
+  function mkSession(id: string, status: Status): Session {
+    return {
+      id,
+      tid: id,
+      src: 'jira',
+      status,
+      title: id,
+      repo: 'r',
+      branch: 'b',
+      add: 0,
+      del: 0,
+      behind: 0,
+      ago: '',
+      activity: { text: '' },
+    }
+  }
+
+  beforeEach(() => {
+    filter.set('all')
+    query.set('')
+    sessions.set([
+      mkSession('needs', 'needs'),
+      mkSession('errored', 'errored'),
+      mkSession('running', 'running'),
+      mkSession('detached', 'detached'),
+      mkSession('queued', 'queued'),
+      mkSession('done', 'done'),
+      mkSession('idle', 'idle'),
+      mkSession('interrupted', 'interrupted'),
+      mkSession('reaped', 'reaped'),
+    ])
+  })
+
+  it('counts errored under needs and detached/queued under running, matching Mission Control', () => {
+    const c = get(counts)
+    expect(c.all).toBe(9)
+    expect(c.needs).toBe(2) // needs + errored
+    expect(c.running).toBe(3) // running + detached + queued
+    expect(c.done).toBe(1)
+  })
+
+  it('the "Needs you" filter surfaces errored sessions', () => {
+    filter.set('needs')
+    const ids = get(visible).map((s) => s.id)
+    expect(ids).toEqual(expect.arrayContaining(['needs', 'errored']))
+    expect(ids).not.toContain('running')
+  })
+
+  it('the "Running" filter surfaces detached and queued sessions', () => {
+    filter.set('running')
+    const ids = get(visible).map((s) => s.id)
+    expect(ids).toEqual(expect.arrayContaining(['running', 'detached', 'queued']))
+  })
+
+  it('idle/interrupted/reaped sessions are only reachable via "All"', () => {
+    filter.set('needs')
+    expect(get(visible).map((s) => s.id)).not.toEqual(
+      expect.arrayContaining(['idle', 'interrupted', 'reaped']),
+    )
+    filter.set('running')
+    expect(get(visible).map((s) => s.id)).not.toEqual(
+      expect.arrayContaining(['idle', 'interrupted', 'reaped']),
+    )
+    filter.set('done')
+    expect(get(visible).map((s) => s.id)).not.toEqual(
+      expect.arrayContaining(['idle', 'interrupted', 'reaped']),
+    )
+    filter.set('all')
+    expect(get(visible).map((s) => s.id)).toEqual(
+      expect.arrayContaining(['idle', 'interrupted', 'reaped']),
+    )
   })
 })
 
