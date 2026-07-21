@@ -6,6 +6,44 @@ import type { RepoDTO } from '../shared/contract.js'
 
 const execFileAsync = promisify(execFile)
 
+/** Git transports we allow `cloneRepo` to invoke. Everything else — most
+ *  importantly the `ext::` remote helper, which runs an arbitrary shell
+ *  command as its "transport" — is rejected before git ever sees the URL.
+ *  `file:` stays allowed because bare local filesystem paths (no scheme,
+ *  used by our own tests and legitimate local remotes) resolve to it. */
+const ALLOWED_CLONE_PROTOCOLS = 'https:ssh:file'
+
+/**
+ * Reject git remote "URLs" that aren't a plain https/ssh address or a bare
+ * local filesystem path. Git treats any `<scheme>::<data>` or
+ * `<scheme>://<data>` prefix as a request to invoke `git-remote-<scheme>`,
+ * so an unvalidated string handed to `git clone` is command execution via
+ * `ext::sh -c '<anything>'`. `GIT_ALLOW_PROTOCOL` (set in `cloneRepo`) is a
+ * second, independent layer against the same class of bypass.
+ */
+export function assertAllowedRemoteUrl(remoteUrl: string): void {
+  if (!remoteUrl || remoteUrl.startsWith('-')) {
+    throw new Error(`Unsupported git remote URL: ${remoteUrl}`)
+  }
+  // scp-like syntax, e.g. git@github.com:org/repo.git — a single colon not
+  // followed by another colon, with a user@host in front. Git treats this
+  // as ssh.
+  if (/^[\w.-]+@[\w.-]+:(?!:)/.test(remoteUrl)) return
+
+  const schemeMatch = remoteUrl.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/)
+  if (schemeMatch) {
+    const scheme = schemeMatch[1].toLowerCase()
+    const rest = remoteUrl.slice(schemeMatch[0].length)
+    if ((scheme === 'https' || scheme === 'ssh') && rest.startsWith('//')) return
+    throw new Error(
+      `Unsupported git remote URL scheme "${scheme}:" — only https and ssh are allowed.`,
+    )
+  }
+
+  // No scheme at all: a bare local filesystem path. Allowed (matches
+  // git's own default behavior, and used by local/test clones).
+}
+
 /** Get the origin remote URL for a checkout, or null when unset / not a git repo / path gone. */
 export function getRemoteUrl(absPath: string): string | null {
   try {
@@ -23,8 +61,12 @@ export function getRemoteUrl(absPath: string): string | null {
  *  already exist. Async: a clone can take minutes over a slow link, and a
  *  synchronous spawn would freeze every live agent PTY for the duration. */
 export async function cloneRepo(remoteUrl: string, dest: string): Promise<void> {
+  assertAllowedRemoteUrl(remoteUrl)
   try {
-    await execFileAsync('git', ['clone', remoteUrl, dest], { encoding: 'utf8' })
+    await execFileAsync('git', ['clone', remoteUrl, dest], {
+      encoding: 'utf8',
+      env: { ...process.env, GIT_ALLOW_PROTOCOL: ALLOWED_CLONE_PROTOCOLS },
+    })
   } catch (err: unknown) {
     const e = err as { stderr?: string; message?: string }
     throw new Error(

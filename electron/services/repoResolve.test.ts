@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, renameSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, renameSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -9,6 +9,7 @@ import {
   isWorkTree,
   findSiblingCheckout,
   cloneRepo,
+  assertAllowedRemoteUrl,
 } from './repoResolve.js'
 import type { RepoDTO } from '../shared/contract.js'
 
@@ -136,5 +137,67 @@ describe('cloneRepo', () => {
     const bad = join(root, 'does-not-exist-at-all')
     const dest = join(root, 'clone-bad-dest')
     await expect(cloneRepo(bad, dest)).rejects.toThrow(/Failed to clone/)
+  })
+
+  it('rejects ext:: without ever invoking the shell command', async () => {
+    const marker = join(root, 'pwned-marker')
+    const dest = join(root, 'clone-ext-dest')
+    await expect(cloneRepo(`ext::sh -c "touch ${marker}"`, dest)).rejects.toThrow(
+      /Unsupported git remote URL scheme "ext:"/,
+    )
+    expect(existsSync(marker)).toBe(false)
+    expect(existsSync(dest)).toBe(false)
+  })
+
+  it('rejects file:// URLs', async () => {
+    const dest = join(root, 'clone-file-dest')
+    await expect(cloneRepo(`file://${root}/clone-src`, dest)).rejects.toThrow(
+      /Unsupported git remote URL scheme "file:"/,
+    )
+  })
+})
+
+describe('assertAllowedRemoteUrl', () => {
+  it('allows https and ssh URLs', () => {
+    expect(() => assertAllowedRemoteUrl('https://github.com/acme/api.git')).not.toThrow()
+    expect(() => assertAllowedRemoteUrl('ssh://git@github.com/acme/api.git')).not.toThrow()
+  })
+
+  it('allows scp-like ssh syntax', () => {
+    expect(() => assertAllowedRemoteUrl('git@github.com:acme/api.git')).not.toThrow()
+  })
+
+  it('allows a bare local filesystem path', () => {
+    expect(() => assertAllowedRemoteUrl('/tmp/some/repo.git')).not.toThrow()
+  })
+
+  it('rejects ext:: (arbitrary command execution via the remote helper)', () => {
+    expect(() => assertAllowedRemoteUrl('ext::sh -c "touch /tmp/pwned"')).toThrow(
+      /Unsupported git remote URL scheme "ext:"/,
+    )
+  })
+
+  it('rejects file:// URLs', () => {
+    expect(() => assertAllowedRemoteUrl('file:///etc/passwd')).toThrow(
+      /Unsupported git remote URL scheme "file:"/,
+    )
+  })
+
+  it('rejects other unlisted schemes', () => {
+    expect(() => assertAllowedRemoteUrl('git://github.com/acme/api.git')).toThrow(
+      /Unsupported git remote URL scheme "git:"/,
+    )
+  })
+
+  it('rejects a leading dash (option/flag injection)', () => {
+    expect(() => assertAllowedRemoteUrl('-oProxyCommand=touch /tmp/pwned')).toThrow(
+      /Unsupported git remote URL/,
+    )
+  })
+
+  it('rejects an allowed scheme name used with double-colon remote-helper syntax', () => {
+    expect(() => assertAllowedRemoteUrl('https::sh -c "touch /tmp/pwned"')).toThrow(
+      /Unsupported git remote URL scheme "https:"/,
+    )
   })
 })
