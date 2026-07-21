@@ -852,6 +852,11 @@ export interface SlipstreamApi {
     src?: TicketSource
     /** User-supplied extra CLI args (raw string), prepended to the launch command (TASK-UQF55). */
     extraArgs?: string
+    /** Caller-supplied session id, e.g. stores.ts's optimistic local session row —
+     *  lets the client's pre-existing id become the real session id instead of
+     *  the server always minting a fresh one. Passed through to rpc.ts's
+     *  LaunchRequest.sessionId, falling back to a random UUID when omitted. */
+    sessionId?: string
   }): Promise<SessionDTO>
   writeSession(id: string, data: string): void
   /** Upload a clipboard image (PNG bytes, base64-encoded) for this session before
