@@ -1650,6 +1650,98 @@ describe('createRpc', () => {
     })
   })
 
+  describe('agent args (TASK-CMZUG)', () => {
+    it('getAgentArgs/setAgentArgs round-trip; unset kinds are omitted', async () => {
+      const store = new Map<string, string>()
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) =>
+        store.get(key),
+      )
+      ;(deps.config.set as ReturnType<typeof vi.fn>).mockImplementation(
+        (key: string, v: string) => {
+          store.set(key, v)
+        },
+      )
+
+      await rpc.handle(IPC.setAgentArgs, [{ opencode: '--advisor --chrome' }])
+      const result = await rpc.handle(IPC.getAgentArgs, [])
+
+      expect(result).toEqual({ opencode: '--advisor --chrome' })
+      for (const kind of BACKEND_KINDS) {
+        if (kind !== 'opencode') expect(result).not.toHaveProperty(kind)
+      }
+    })
+
+    it('setAgentArgs rejects a malformed value', async () => {
+      await expect(
+        rpc.handle(IPC.setAgentArgs, [{ opencode: '--x "unterminated' }]),
+      ).rejects.toThrow()
+    })
+
+    it('setAgentArgs rejects the whole call without a partial write', async () => {
+      const store = new Map<string, string>()
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) =>
+        store.get(key),
+      )
+      ;(deps.config.set as ReturnType<typeof vi.fn>).mockImplementation(
+        (key: string, v: string) => {
+          store.set(key, v)
+        },
+      )
+
+      // Establish pre-call state with a successful save.
+      await rpc.handle(IPC.setAgentArgs, [{ 'claude-code': '--pre-existing' }])
+
+      // 'claude-code' sorts before 'opencode' in BACKEND_KINDS, so a naive
+      // single-pass loop would persist the 'claude-code' change before hitting
+      // the malformed 'opencode' entry and throwing.
+      await expect(
+        rpc.handle(IPC.setAgentArgs, [
+          { 'claude-code': '--changed', opencode: '--x "unterminated' },
+        ]),
+      ).rejects.toThrow()
+
+      const result = await rpc.handle(IPC.getAgentArgs, [])
+      expect(result).toEqual({ 'claude-code': '--pre-existing' })
+    })
+
+    it('startSession with no extraArgs falls back to the saved per-agent default', async () => {
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
+        if (key === 'agentArgs.opencode') return '--advisor'
+        return undefined
+      })
+
+      await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1', agentKind: 'opencode' },
+      ])
+
+      expect(deps.sessions.start).toHaveBeenCalledWith(
+        expect.objectContaining({ extraArgs: '--advisor' }),
+      )
+    })
+
+    it('startSession with a non-blank per-run extraArgs overrides the saved default', async () => {
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
+        if (key === 'agentArgs.opencode') return '--advisor'
+        return undefined
+      })
+
+      await rpc.handle(IPC.startSession, [
+        {
+          tid: 'T-1',
+          title: 'Fix bug',
+          prompt: 'fix it',
+          repoId: 'r1',
+          agentKind: 'opencode',
+          extraArgs: '--verbose',
+        },
+      ])
+
+      expect(deps.sessions.start).toHaveBeenCalledWith(
+        expect.objectContaining({ extraArgs: '--verbose' }),
+      )
+    })
+  })
+
   describe('git hosts (TASK-7LGAO)', () => {
     it('getGitToken/setGitToken keep working for github and gitlab', async () => {
       await rpc.handle(IPC.setGitToken, ['github', 'ghp_tok'])
