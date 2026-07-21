@@ -23,6 +23,37 @@ export type Status =
   | 'tearing-down'
 export type Filter = 'all' | 'needs' | 'running' | 'done'
 
+/** Maps a session's raw status to the sidebar filter segment / counts bucket
+ *  it belongs to. Single source of truth for the "needs"/"running"/"done"
+ *  grouping so the sidebar (AgentList/stores) and Mission Control never
+ *  disagree about which bucket a status lands in (FLO-113): errored sessions
+ *  are as urgent as 'needs', detached/queued are still 'running'. Statuses
+ *  that don't map to a segment (idle, interrupted, reaped, tearing-down) are
+ *  only reachable via "All". Exhaustive switch so a new Status forces a
+ *  bucketing decision here. */
+export function statusBucket(status: Status): 'needs' | 'running' | 'done' | null {
+  switch (status) {
+    case 'needs':
+    case 'errored':
+      return 'needs'
+    case 'running':
+    case 'detached':
+    case 'queued':
+      return 'running'
+    case 'done':
+      return 'done'
+    case 'idle':
+    case 'interrupted':
+    case 'reaped':
+    case 'tearing-down':
+      return null
+    default: {
+      const _exhaustive: never = status
+      return _exhaustive
+    }
+  }
+}
+
 export interface Repo {
   id: string
   org: string

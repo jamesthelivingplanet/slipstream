@@ -32,6 +32,7 @@
   import { extractAsk, formatWait } from '../missionControl'
   import { formatCost, formatTokens, dayKeyFromMs } from '../../../electron/shared/usageFormat.js'
   import { pushToast } from '../toast'
+  import { statusBucket } from '../types'
   import type { Session, Ticket, BackendKind } from '../types'
   import type {
     UsageSummary,
@@ -169,11 +170,9 @@
     return chips
   }
 
-  $: needsSessions = $sessions.filter((s) => s.status === 'needs' || s.status === 'errored')
-  $: runningSessions = $sessions.filter(
-    (s) => s.status === 'running' || s.status === 'detached' || s.status === 'queued',
-  )
-  $: doneSessions = $sessions.filter((s) => s.status === 'done')
+  $: needsSessions = $sessions.filter((s) => statusBucket(s.status) === 'needs')
+  $: runningSessions = $sessions.filter((s) => statusBucket(s.status) === 'running')
+  $: doneSessions = $sessions.filter((s) => statusBucket(s.status) === 'done')
   $: runningCount = $sessions.filter((s) => s.status === 'running').length
 
   $: initialLoading = $initialLoadLoading

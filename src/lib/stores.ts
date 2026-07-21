@@ -1,4 +1,5 @@
 import { writable, derived, get } from 'svelte/store'
+import { statusBucket } from './types'
 import type { Filter, Repo, Session, Status, Ticket, BackendKind, Source } from './types'
 import type {
   RepoDTO,
@@ -159,7 +160,10 @@ export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
 
 export const counts = derived(sessions, ($sessions) => {
   const c = { all: $sessions.length, needs: 0, running: 0, done: 0 } as Record<string, number>
-  for (const s of $sessions) c[s.status] = (c[s.status] ?? 0) + 1
+  for (const s of $sessions) {
+    const bucket = statusBucket(s.status)
+    if (bucket) c[bucket] += 1
+  }
   return c
 })
 
@@ -167,7 +171,7 @@ export const visible = derived([sessions, filter, query], ([$sessions, $filter, 
   const q = $query.toLowerCase()
   return $sessions.filter(
     (s) =>
-      ($filter === 'all' || s.status === $filter) &&
+      ($filter === 'all' || statusBucket(s.status) === $filter) &&
       (s.title.toLowerCase().includes(q) || s.tid.toLowerCase().includes(q)),
   )
 })
