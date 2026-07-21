@@ -18,14 +18,14 @@ export interface OutcomeSentinel {
 
 const VALID_RESULTS: OutcomeResult[] = ['success', 'partial', 'failure']
 
-// Defensive length caps — mirror the caps applied in appMcp.ts's report_outcome
-// handler, but enforced again here since the sentinel file could in principle
+// Defensive length caps — mirror the caps applied by the slipstream CLI's task-complete
+// command, but enforced again here since the sentinel file could in principle
 // be written some other way.
 const MAX_SUMMARY_LEN = 4000
 const MAX_DETAILS_LEN = 32000
 
 /**
- * Parse an outcome.json sentinel written by the app MCP's report_outcome tool.
+ * Parse an outcome.json sentinel written by the slipstream CLI's task-complete command.
  * Returns null for malformed JSON, unknown result, empty summary, or
  * missing/invalid ts. Truncates summary/details defensively.
  */

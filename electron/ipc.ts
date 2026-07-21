@@ -37,8 +37,8 @@ export interface IpcDeps {
   sessionStore: ISessionStore
   /** Per-repo reusable prompt templates (FLO-98). */
   promptTemplates: IPromptTemplateStore
-  /** Structured final session outcomes (FLO-97), reported via the app MCP's
-   *  report_outcome tool and persisted independent of the output ring buffer. */
+  /** Structured final session outcomes (FLO-97), reported via the slipstream CLI's
+   *  task-complete command and persisted independent of the output ring buffer. */
   outcomeStore: IOutcomeStore
   /** Checkpoint/artifact/approval events reported by the slipstream CLI
    *  (FLO-104). Optional so tests can omit it; listSessionAgentEvents then
