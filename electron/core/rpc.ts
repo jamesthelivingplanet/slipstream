@@ -23,6 +23,7 @@ import type {
   PromptTemplateDTO,
   WorktreeUpdateMode,
   GitHost,
+  StatusMeta,
 } from '../shared/contract.js'
 import { GIT_PROVIDERS } from '../services/gitProviders/registry.js'
 import { branchFor } from '../shared/branch.js'
@@ -68,13 +69,6 @@ function pageChatMessages(
   const limit = opts.limit ?? 50
   if (out.length > limit) out = out.slice(-limit)
   return out
-}
-
-function parseCsv(raw: string | undefined): string[] {
-  return (raw ?? '')
-    .split(',')
-    .map((k) => k.trim())
-    .filter((k) => k.length > 0)
 }
 
 const GIT_HOST_IDS = new Set(GIT_PROVIDERS.map((p) => p.meta.id))
@@ -165,9 +159,6 @@ export function createRpc(
     }
   }
 
-  // Tracks which repo+branch each session owns so cleanup can remove the worktree.
-  const sessionMeta = new Map<string, { repo: RepoDTO; branch: string }>()
-
   // Per-session output coalescing: batch session:data bursts and flush on a
   // short timer so a chatty PTY doesn't flood the transport with one message
   // per chunk. Status events are never coalesced.
@@ -198,8 +189,15 @@ export function createRpc(
       flushTimer = setTimeout(flushData, coalesceMs)
     }
   }
-  function onStatus(sessionId: string, status: string): void {
-    emit(IPC.sessionStatus, sessionId, status)
+  function onStatus(sessionId: string, status: string, meta?: StatusMeta): void {
+    // Keep the common (no-meta) case at 2 args over the wire — status fires on
+    // every PTY chunk, a hot path, and JSON.stringify([...,undefined]) would
+    // turn a trailing undefined 4th arg into a `null` anyway.
+    if (meta !== undefined) {
+      emit(IPC.sessionStatus, sessionId, status, meta)
+    } else {
+      emit(IPC.sessionStatus, sessionId, status)
+    }
   }
 
   function onPr(id: string, url: string): void {
@@ -320,7 +318,6 @@ export function createRpc(
           ? await deps.scheduler.submit(req)
           : await launchSession(deps, req)
 
-        sessionMeta.set(session.id, { repo, branch })
         return session
       }
 
@@ -402,17 +399,11 @@ export function createRpc(
         // backstop if this races anyway.)
         deps.scheduler?.cancel(id)
         const persisted = ownedSession(id)
-        let meta = sessionMeta.get(id)
-        if (!meta) {
-          // Post-restart: try to reconstruct from sessionStore
-          if (!persisted) return { removed: false, reason: 'session not found' }
-          const repo = await deps.repos.get(persisted.repoId)
-          if (!repo) return { removed: false, reason: 'session not found' }
-          meta = { repo, branch: persisted.branch }
-        }
-        const result = await deps.worktrees.remove(meta.repo, meta.branch, opts)
+        if (!persisted) return { removed: false, reason: 'session not found' }
+        const repo = await deps.repos.get(persisted.repoId)
+        if (!repo) return { removed: false, reason: 'session not found' }
+        const result = await deps.worktrees.remove(repo, persisted.branch, opts)
         if (result.removed) {
-          sessionMeta.delete(id)
           deps.sessionStore.delete(id)
           deps.clipboardStore?.delete(id)
 
@@ -487,7 +478,6 @@ export function createRpc(
           }),
           opencodePort,
         })
-        sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })
         return { ...dto, port }
       }
@@ -526,7 +516,6 @@ export function createRpc(
           }),
           opencodePort,
         })
-        sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })
         return { ...dto, port }
       }
@@ -597,7 +586,6 @@ export function createRpc(
             if (cur) deps.sessionStore.upsert({ ...cur, opencodeSid: sid })
           })
         }
-        sessionMeta.set(id, { repo, branch: persisted.branch })
         deps.sessionStore.upsert({ ...dto, port })
         return { ...dto, port }
       }
@@ -649,53 +637,18 @@ export function createRpc(
 
       case IPC.getTicketSettings: {
         const src = args[0] as TicketSource
-        if (src === 'linear') {
-          const apiKey = deps.config.get('linear.apiKey') ?? ''
-          return {
-            configured: !!apiKey,
-            scopeKeys: parseCsv(deps.config.get('linear.teamKeys')),
-            onlyMine: deps.config.get('linear.onlyMine') !== '0',
-            apiKey,
-            baseUrl: '',
-            email: '',
-            apiToken: '',
-          } satisfies TicketSourceSettings
-        }
-        if (src === 'jira') {
-          const baseUrl = deps.config.get('jira.baseUrl') ?? ''
-          const email = deps.config.get('jira.email') ?? ''
-          const apiToken = deps.config.get('jira.apiToken') ?? ''
-          return {
-            configured: !!baseUrl && !!email && !!apiToken,
-            scopeKeys: parseCsv(deps.config.get('jira.projectKeys')),
-            onlyMine: deps.config.get('jira.onlyMine') !== '0',
-            apiKey: '',
-            baseUrl,
-            email,
-            apiToken,
-          } satisfies TicketSourceSettings
-        }
-        throw new Error(`Unknown ticket source: ${src}`)
+        const provider = deps.ticketProviders?.[src]
+        if (!provider) throw new Error(`Unknown ticket source: ${src}`)
+        return provider.getSettings()
       }
 
       case IPC.setTicketSettings: {
         const src = args[0] as TicketSource
         const cfg = args[1] as TicketSourceSettings
-        if (src === 'linear') {
-          deps.config.set('linear.apiKey', cfg.apiKey ?? '')
-          deps.config.set('linear.teamKeys', (cfg.scopeKeys ?? []).join(','))
-          deps.config.set('linear.onlyMine', cfg.onlyMine === false ? '0' : '1')
-          return undefined
-        }
-        if (src === 'jira') {
-          deps.config.set('jira.baseUrl', cfg.baseUrl ?? '')
-          deps.config.set('jira.email', cfg.email ?? '')
-          deps.config.set('jira.apiToken', cfg.apiToken ?? '')
-          deps.config.set('jira.projectKeys', (cfg.scopeKeys ?? []).join(','))
-          deps.config.set('jira.onlyMine', cfg.onlyMine === false ? '0' : '1')
-          return undefined
-        }
-        throw new Error(`Unknown ticket source: ${src}`)
+        const provider = deps.ticketProviders?.[src]
+        if (!provider) throw new Error(`Unknown ticket source: ${src}`)
+        provider.setSettings(cfg)
+        return undefined
       }
 
       case IPC.listTicketScopes: {

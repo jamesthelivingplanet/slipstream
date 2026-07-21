@@ -4,6 +4,7 @@ import type {
   TicketDTO,
   WorkflowState,
   PaginatedTickets,
+  TicketSourceSettings,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 
@@ -386,6 +387,29 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
         },
       )
       return true
+    },
+
+    getSettings(): TicketSourceSettings {
+      const baseUrl = config.get('jira.baseUrl') ?? ''
+      const email = config.get('jira.email') ?? ''
+      const apiToken = config.get('jira.apiToken') ?? ''
+      return {
+        configured: !!baseUrl && !!email && !!apiToken,
+        scopeKeys: parseKeys(config.get('jira.projectKeys')),
+        onlyMine: config.get('jira.onlyMine') !== '0',
+        apiKey: '',
+        baseUrl,
+        email,
+        apiToken,
+      }
+    },
+
+    setSettings(cfg: TicketSourceSettings): void {
+      config.set('jira.baseUrl', cfg.baseUrl ?? '')
+      config.set('jira.email', cfg.email ?? '')
+      config.set('jira.apiToken', cfg.apiToken ?? '')
+      config.set('jira.projectKeys', (cfg.scopeKeys ?? []).join(','))
+      config.set('jira.onlyMine', cfg.onlyMine === false ? '0' : '1')
     },
   }
 }

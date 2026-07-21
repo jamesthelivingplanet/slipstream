@@ -4,13 +4,15 @@ import type { GitHost } from '../shared/contract.js'
 import { resolveRemote, providerFor } from './gitProviders/registry.js'
 import type { GitHostConfig } from './gitProviders/types.js'
 
+// Legacy re-exports for backward compat with existing callers/tests — new code
+// should import directly from ./gitProviders/registry.js (or github.js/gitlab.js
+// for the descriptor builders below). TASK-7LGAO Phase 1 moved the actual
+// GitHub/GitLab logic into gitProviders/*.ts; these re-exports keep every
+// pre-existing import of './gitDriver.js' working unchanged.
 export type { GitHostConfig } from './gitProviders/types.js'
 export type { GitProvider, GitProviderMeta } from './gitProviders/types.js'
 export { GIT_PROVIDERS, providerFor, resolveRemote, resolvePrUrl } from './gitProviders/registry.js'
 
-// Re-exported so existing tests/callers importing these pure descriptor
-// functions from './gitDriver.js' keep working unchanged (TASK-7LGAO Phase 1
-// moved the actual GitHub/GitLab logic into gitProviders/*.ts).
 export {
   buildGithubCreatePrDescriptor,
   buildGithubFindPrDescriptor,

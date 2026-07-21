@@ -786,6 +786,13 @@ export interface ITicketProvider {
    * right sub-provider (composite); concrete providers ignore it.
    */
   postComment(tid: string, body: string, src?: TicketSource): Promise<boolean>
+  /** Read this provider's credentials + scoping config, mirroring how
+   *  GIT_PROVIDERS models per-host git config. Sync — config reads are sync
+   *  via IConfigStore. */
+  getSettings(): TicketSourceSettings
+  /** Write this provider's credentials + scoping config. Sync, same rationale
+   *  as getSettings. */
+  setSettings(cfg: TicketSourceSettings): void
 }
 
 export interface PaginatedTickets {
@@ -880,7 +887,7 @@ export interface SlipstreamApi {
 
   /** Returns an unsubscribe fn. */
   onSessionData(cb: (id: string, data: string, seq: number) => void): () => void
-  onSessionStatus(cb: (id: string, status: SessionStatus) => void): () => void
+  onSessionStatus(cb: (id: string, status: SessionStatus, meta?: StatusMeta) => void): () => void
   /** Fires when a session's agent process exits on its own (not on kill/reap/
    *  remote-control takeover) — lets the view offer a restart (FLO-101). */
   onSessionExit(cb: (id: string, code: number) => void): () => void

@@ -1,8 +1,6 @@
 import { writable, derived, get } from 'svelte/store'
 import type { Filter, Repo, Session, Status, Ticket, BackendKind, Source } from './types'
 import type {
-  CliStatusDTO,
-  DiagnosticsDTO,
   RepoDTO,
   SessionDTO,
   TicketDTO,
@@ -26,20 +24,29 @@ import {
   worktreeStatus,
   worktreeUpdateFromBase,
   runApp,
-  stopApp,
-  appStatus,
   onSessionStatus,
   onSessionPr,
   onConnectionChange,
-  getCliStatus as ipcGetCliStatus,
-  getDiagnostics as ipcGetDiagnostics,
 } from './ipc'
 import { pushToast } from './toast'
 import { sessionsToReconcile } from './reconcile'
 import { isStartableTicket } from './ticketFilter.js'
-import type { ReviewComment } from './review.js'
+import { cleanError } from './stores/errors.js'
+import { confirmDialog } from './stores/confirmDialog.js'
+import { appRunKey, setAppRunning, stopAppForSession } from './stores/appRunner.js'
 export { sessionsToReconcile } from './reconcile'
 export { isStartableTicket } from './ticketFilter.js'
+export * from './stores/confirmDialog.js'
+export { cleanError } from './stores/errors.js'
+export * from './stores/cliStatus.js'
+export * from './stores/reviewComments.js'
+export {
+  runningApps,
+  appRunKey,
+  appUrls,
+  stopAppForSession,
+  refreshAppStatus,
+} from './stores/appRunner.js'
 
 function dtoToTickets(
   dtos: {
@@ -97,35 +104,9 @@ export function dtoToSession(dto: SessionDTO): Session {
   }
 }
 
-export function cleanError(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e)
-  return (
-    msg
-      .replace(/^Error invoking remote method '[^']*':\s*/, '')
-      .replace(/^(Uncaught\s+)?Error:\s*/, '')
-      .trim() || 'Something went wrong'
-  )
-}
-
 export function openRepoSettings(repoId: string) {
   settingsRepoId.set(repoId)
   settingsOpen.set(true)
-}
-
-/** In-app replacement for window.confirm — surfaces via <ConfirmDialog />. */
-export interface ConfirmRequest {
-  title: string
-  message: string
-  detail?: string // e.g. the dirty/unmerged reason string
-  confirmLabel?: string // default "Confirm"
-  cancelLabel?: string // default "Cancel"
-  danger?: boolean
-}
-export const confirmState = writable<(ConfirmRequest & { resolve: (ok: boolean) => void }) | null>(
-  null,
-)
-export function confirmDialog(req: ConfirmRequest): Promise<boolean> {
-  return new Promise((resolve) => confirmState.set({ ...req, resolve }))
 }
 
 export const repos = writable<Repo[]>([])
@@ -171,39 +152,6 @@ export const contentLoading = writable<boolean>(false)
 export const contentResolvedAt = writable<number>(0)
 // Bumped by the header refresh button to force a re-fetch of the selected agent's content.
 export const contentRefreshNonce = writable<number>(0)
-
-// FLO-61: slipstream CLI self-test status, shared between the header dot and the Settings
-// Integrations panel so both read the same data without duplicate fetches.
-export const cliStatus = writable<CliStatusDTO | null>(null)
-export const cliChecking = writable(false)
-
-export async function refreshCliStatus(): Promise<void> {
-  if (!hasBackend) return
-  cliChecking.set(true)
-  try {
-    cliStatus.set(await ipcGetCliStatus())
-  } catch (e) {
-    cliStatus.set({ up: false, commands: [], checkedAt: Date.now(), error: cleanError(e) })
-  } finally {
-    cliChecking.set(false)
-  }
-}
-
-// FLO-81: Settings → Diagnostics tab data — daemon/version/repo-consistency info.
-export const diagnostics = writable<DiagnosticsDTO | null>(null)
-export const diagChecking = writable(false)
-
-export async function refreshDiagnostics(): Promise<void> {
-  if (!hasBackend) return
-  diagChecking.set(true)
-  try {
-    diagnostics.set(await ipcGetDiagnostics())
-  } catch {
-    diagnostics.set(null)
-  } finally {
-    diagChecking.set(false)
-  }
-}
 
 export const selected = derived([sessions, selectedId], ([$sessions, $id]) =>
   $id ? ($sessions.find((s) => s.id === $id) ?? null) : null,
@@ -942,34 +890,6 @@ export async function refreshAndReconcile(): Promise<void> {
   await refreshDiffStats().catch(() => {})
 }
 
-/** Sessions with a currently running dev-server app, keyed by "<repo> <branch>"
- *  (matching the backend's app-runner key). Svelte 4 reactivity on a Set needs
- *  reassignment, so `add`/`remove` always replace the Set instance. */
-export const runningApps = writable<Set<string>>(new Set())
-
-/** Stable key for the runningApps set. Returns null when repo/branch aren't set yet. */
-export function appRunKey(s: Session): string | null {
-  return s.repo && s.branch ? `${s.repo} ${s.branch}` : null
-}
-
-/** Tailnet URLs of running apps (from `tailscale serve`), keyed like runningApps. */
-export const appUrls = writable<Record<string, string>>({})
-
-function setAppRunning(key: string, running: boolean, url?: string) {
-  runningApps.update(($r) => {
-    const next = new Set($r)
-    if (running) next.add(key)
-    else next.delete(key)
-    return next
-  })
-  appUrls.update(($u) => {
-    const next = { ...$u }
-    if (running && url) next[key] = url
-    else delete next[key]
-    return next
-  })
-}
-
 /** Run the app for a started session via its repo's start command. Opens that
  *  repo's settings if no start command is configured. */
 export async function runAppForSession(s: Session): Promise<void> {
@@ -997,71 +917,8 @@ export async function runAppForSession(s: Session): Promise<void> {
   }
 }
 
-/** Stop the running dev-server app for a session. */
-export async function stopAppForSession(s: Session): Promise<void> {
-  if (!hasBackend || !s.repo || !s.branch) return
-  const key = appRunKey(s)
-  try {
-    const res = await stopApp({ repoId: s.repo, branch: s.branch })
-    if (res.stopped) {
-      if (key) setAppRunning(key, false)
-      pushToast('success', 'Stopped app')
-    }
-  } catch (e) {
-    pushToast('error', cleanError(e))
-  }
-}
-
 /** Stop then restart the running dev-server app for a session. */
 export async function restartAppForSession(s: Session): Promise<void> {
   await stopAppForSession(s)
   await runAppForSession(s)
-}
-
-/** Hydrate runningApps for a session from the backend — call when a session's
- *  terminal is opened/changed so the Run/Stop buttons reflect reality after reload. */
-export async function refreshAppStatus(s: Session): Promise<void> {
-  if (!hasBackend || !s.repo || !s.branch) return
-  const key = appRunKey(s)
-  if (!key) return
-  try {
-    const res = await appStatus({ repoId: s.repo, branch: s.branch })
-    setAppRunning(key, res.running, res.url)
-  } catch {
-    // leave existing state on failure
-  }
-}
-
-/** Draft review comments accumulated in the Diff view, keyed by session id, so
- *  they survive tab toggles and the `{#key $selected.id}` remount. In-memory
- *  only (lost on reload). Svelte 4 reactivity needs reassignment, so every
- *  action below replaces the record/array instances rather than mutating. */
-export const reviewComments = writable<Record<string, ReviewComment[]>>({})
-
-/** Append a review comment for the given session. */
-export function addReviewComment(sessionId: string, c: ReviewComment): void {
-  reviewComments.update(($r) => ({
-    ...$r,
-    [sessionId]: [...($r[sessionId] ?? []), c],
-  }))
-}
-
-/** Remove a single review comment (by id) for the given session. No-op if the
- *  session has no draft comments (avoids creating a stray empty array entry). */
-export function removeReviewComment(sessionId: string, commentId: string): void {
-  reviewComments.update(($r) => {
-    const existing = $r[sessionId]
-    if (!existing) return $r
-    return { ...$r, [sessionId]: existing.filter((c) => c.id !== commentId) }
-  })
-}
-
-/** Discard all draft review comments for the given session (e.g. after a
- *  successful submit, or via the Discard-all confirm). */
-export function clearReviewComments(sessionId: string): void {
-  reviewComments.update(($r) => {
-    const next = { ...$r }
-    delete next[sessionId]
-    return next
-  })
 }
