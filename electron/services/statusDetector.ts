@@ -157,14 +157,14 @@ export class StatusDetector implements IStatusDetector {
       return this.exitCode === 0 ? 'done' : 'errored'
     }
 
-    // MCP "done" is sticky — once the agent reports completion, nothing short
+    // A CLI "done" signal is sticky — once the agent reports completion, nothing short
     // of a real process exit should undo it.
     if (this.signalState === 'done') return 'done'
 
     const tail = this.buffer.slice(-512)
     const marker = tailSignal(tail)
 
-    // An explicit MCP signal is a deliberate declaration; like `done` it stays in
+    // An explicit CLI signal is a deliberate declaration; like `done` it stays in
     // effect until a strictly-newer explicit tail marker (or process exit)
     // supersedes it — ordinary non-marker output must not revert it.
     if (this.signalState && this.signalAt >= this.lastMarkerAt) return this.signalState

@@ -329,8 +329,8 @@ export interface SessionUsage {
 
 export type OutcomeResult = 'success' | 'partial' | 'failure'
 
-/** Structured final summary for a session, reported by the agent via the app
- *  MCP's report_outcome tool (FLO-97). Durable in SQLite — the 256 KB output
+/** Structured final summary for a session, reported by the agent via the
+ *  slipstream CLI's task-complete command (FLO-97). Durable in SQLite — the 256 KB output
  *  ring buffer is NOT the record. */
 export interface SessionOutcomeDTO {
   sessionId: string
@@ -994,8 +994,8 @@ export interface SlipstreamApi {
     body: string
   }): Promise<PromptTemplateDTO>
   deletePromptTemplate(id: string): Promise<void>
-  /** Structured final summary reported by the agent via the app MCP's
-   *  report_outcome tool, or null if none reported yet (FLO-97). */
+  /** Structured final summary reported by the agent via the slipstream CLI's
+   *  task-complete command, or null if none reported yet (FLO-97). */
   getSessionOutcome(sessionId: string): Promise<SessionOutcomeDTO | null>
   /** Owner-scoped history of all persisted sessions joined with outcomes +
    *  usage, most recent first; powers the History view (browse by repo,

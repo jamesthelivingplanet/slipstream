@@ -88,8 +88,8 @@ export const MIGRATIONS: Migration[] = [
   createdAt INTEGER NOT NULL,
   ownerId   TEXT DEFAULT 'local'
 )`),
-  // 4 — FLO-97: structured final session outcomes, reported via the app MCP's
-  // report_outcome tool and durable independent of the output ring buffer.
+  // 4 — FLO-97: structured final session outcomes, reported via the slipstream CLI's
+  // task-complete command and durable independent of the output ring buffer.
   (db) =>
     db.exec(`
 CREATE TABLE session_outcomes (
