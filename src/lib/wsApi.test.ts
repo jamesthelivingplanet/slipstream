@@ -108,6 +108,11 @@ function lastSent(ws: FakeWsInstance) {
   return JSON.parse(raw)
 }
 
+/** Drain the microtask queue (real timers) so an in-flight ticket fetch settles. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('wsApi', () => {
@@ -532,6 +537,144 @@ describe('wsApi', () => {
       ws.simulateOpen()
       ws.simulateClose(4001)
       expect(onAuthError).toHaveBeenCalledOnce()
+    })
+  })
+
+  // One-time WS ticket flow (docs/SECURITY.md §3, FLO-144) — opted into via
+  // `ticketUrl`. Reverse-proxy-fronted deployments pass it; Electron/Tailscale
+  // omit it and keep the plain `?token=` behavior covered by the tests above.
+  describe('ticket mode (FLO-144)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    })
+
+    it('fetches a ticket via an Authorization header and connects with ?ticket= instead of ?token=', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ticket: 'tik-1', expiresInMs: 10_000 }),
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 'mytoken',
+        ticketUrl: 'http://localhost/rpc-ticket',
+        WebSocketCtor: FakeWS,
+      })
+      await flush()
+
+      expect(fetchMock).toHaveBeenCalledWith('http://localhost/rpc-ticket', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer mytoken' },
+      })
+      expect(getWs().url).toBe('ws://localhost/rpc?ticket=tik-1')
+    })
+
+    it('fetches a fresh ticket on every reconnect, including scheduleReconnect() retries', async () => {
+      let n = 0
+      const fetchMock = vi.fn().mockImplementation(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ ticket: `tik-${++n}`, expiresInMs: 10_000 }),
+      }))
+      vi.stubGlobal('fetch', fetchMock)
+      vi.useFakeTimers()
+
+      createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 't',
+        ticketUrl: 'http://localhost/rpc-ticket',
+        WebSocketCtor: FakeWS,
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      const ws1 = getWs()
+      expect(ws1.url).toBe('ws://localhost/rpc?ticket=tik-1')
+
+      ws1.simulateOpen()
+      ws1.simulateClose(1006) // connection drops → reconnect scheduled (500ms backoff)
+
+      await vi.advanceTimersByTimeAsync(500)
+      const ws2 = getWs()
+      expect(ws2).not.toBe(ws1)
+      expect(ws2.url).toBe('ws://localhost/rpc?ticket=tik-2')
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('a bad/expired/used ticket (WS close 4001) is retried with a fresh ticket, not routed to onAuthError', async () => {
+      let n = 0
+      const fetchMock = vi.fn().mockImplementation(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ ticket: `tik-${++n}`, expiresInMs: 10_000 }),
+      }))
+      vi.stubGlobal('fetch', fetchMock)
+      vi.useFakeTimers()
+      const onAuthError = vi.fn()
+
+      createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 't',
+        ticketUrl: 'http://localhost/rpc-ticket',
+        WebSocketCtor: FakeWS,
+        onAuthError,
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      const ws1 = getWs()
+      ws1.simulateClose(4001) // the ticket itself was rejected — not the long-lived token
+
+      expect(onAuthError).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(500) // reconnect backoff
+      const ws2 = getWs()
+      expect(ws2).not.toBe(ws1)
+      expect(ws2.url).toBe('ws://localhost/rpc?ticket=tik-2')
+      expect(onAuthError).not.toHaveBeenCalled()
+    })
+
+    it('a 401 from POST /rpc-ticket calls onAuthError — the long-lived token itself was rejected', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401 })
+      vi.stubGlobal('fetch', fetchMock)
+      const onAuthError = vi.fn()
+
+      createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 'bad-token',
+        ticketUrl: 'http://localhost/rpc-ticket',
+        WebSocketCtor: FakeWS,
+        onAuthError,
+      })
+      await flush()
+
+      expect(onAuthError).toHaveBeenCalledOnce()
+      expect(lastFakeWs).toBeNull() // never attempted to open a socket
+    })
+
+    it('a network failure fetching the ticket schedules a reconnect instead of throwing', async () => {
+      const fetchMock = vi.fn().mockRejectedValue(new Error('offline'))
+      vi.stubGlobal('fetch', fetchMock)
+      vi.useFakeTimers()
+      const onAuthError = vi.fn()
+
+      createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 't',
+        ticketUrl: 'http://localhost/rpc-ticket',
+        WebSocketCtor: FakeWS,
+        onAuthError,
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(lastFakeWs).toBeNull()
+      expect(onAuthError).not.toHaveBeenCalled()
+
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ticket: 'tik-recovered', expiresInMs: 10_000 }),
+      })
+      await vi.advanceTimersByTimeAsync(500) // reconnect backoff
+      expect(getWs().url).toBe('ws://localhost/rpc?ticket=tik-recovered')
     })
   })
 

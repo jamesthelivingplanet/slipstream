@@ -436,6 +436,43 @@ function wsConnect(port: number, token?: string, origin?: string): WebSocket {
   return new WebSocket(url, origin ? { origin } : undefined)
 }
 
+function wsConnectTicket(port: number, ticket: string): WebSocket {
+  return new WebSocket(`ws://127.0.0.1:${port}/rpc?ticket=${encodeURIComponent(ticket)}`)
+}
+
+function postTicket(port: number, bearerToken?: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/rpc-ticket',
+        method: 'POST',
+        headers: bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {},
+      },
+      (res) => {
+        let data = ''
+        res.on('data', (c) => (data += c))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }))
+      },
+    )
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+function getHealthz(port: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    http
+      .get(`http://127.0.0.1:${port}/healthz`, (res) => {
+        let data = ''
+        res.on('data', (c) => (data += c))
+        res.on('end', () => resolve(data))
+      })
+      .on('error', reject)
+  })
+}
+
 function sendReq(ws: WebSocket, channel: string, args: unknown[] = []): Promise<WireRes> {
   return new Promise((resolve, reject) => {
     const id = Math.random().toString(36).slice(2)
@@ -623,6 +660,172 @@ describe('createServer', () => {
         ws.once('error', reject)
       })
       ws.close()
+    })
+  })
+
+  describe('one-time WS ticket endpoint (FLO-144)', () => {
+    it('POST /rpc-ticket without a bearer token is rejected', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { status } = await postTicket(port)
+      expect(status).toBe(401)
+    })
+
+    it('POST /rpc-ticket with the wrong bearer token is rejected', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { status } = await postTicket(port, 'wrong-token')
+      expect(status).toBe(401)
+    })
+
+    it('a ticket issued via POST /rpc-ticket redeems for a WS connection', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { status, body } = await postTicket(port, 'secret')
+      expect(status).toBe(200)
+      const { ticket, expiresInMs } = JSON.parse(body) as { ticket: string; expiresInMs: number }
+      expect(typeof ticket).toBe('string')
+      expect(ticket.length).toBeGreaterThan(20)
+      expect(expiresInMs).toBeGreaterThan(0)
+
+      const ws = wsConnectTicket(port, ticket)
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', resolve)
+        ws.once('error', reject)
+      })
+      ws.close()
+    })
+
+    it('a ticket is single-use — a second redemption is rejected like a bad token', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { body } = await postTicket(port, 'secret')
+      const { ticket } = JSON.parse(body) as { ticket: string }
+
+      const ws1 = wsConnectTicket(port, ticket)
+      await new Promise<void>((resolve, reject) => {
+        ws1.once('open', resolve)
+        ws1.once('error', reject)
+      })
+      ws1.close()
+
+      const ws2 = wsConnectTicket(port, ticket)
+      const code = await new Promise<number>((resolve) => {
+        ws2.once('close', (c) => resolve(c))
+      })
+      expect(code).toBe(4001)
+    })
+
+    it('an unknown ticket closes with code 4001, same as a bad token', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const ws = wsConnectTicket(port, 'not-a-real-ticket')
+      const code = await new Promise<number>((resolve) => {
+        ws.once('close', (c) => resolve(c))
+      })
+      expect(code).toBe(4001)
+    })
+
+    it('an expired ticket closes with code 4001', async () => {
+      const deps = makeFakeDeps()
+      // Short TTL so the test doesn't have to wait out the real ~10s default.
+      server = createServer(deps, { token: 'secret', port: 0, wsTicketTtlMs: 20 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { body } = await postTicket(port, 'secret')
+      const { ticket } = JSON.parse(body) as { ticket: string }
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const ws = wsConnectTicket(port, ticket)
+      const code = await new Promise<number>((resolve) => {
+        ws.once('close', (c) => resolve(c))
+      })
+      expect(code).toBe(4001)
+    })
+
+    it('a ticket propagates the identity resolved at issuance time (per-device token)', async () => {
+      const deviceTokens = makeFakeDeviceTokenStore()
+      const { token: aliceToken } = deviceTokens.issue('alice', 'alice-phone')
+
+      const deps = makeFakeDeps()
+      deps.deviceTokens = deviceTokens
+      deps.sessionStore.upsert({
+        id: 's-alice',
+        tid: 'T-1',
+        title: 'seeded',
+        prompt: '',
+        repoId: 'r1',
+        branch: 'b',
+        status: 'idle' as const,
+        createdAt: Date.now(),
+        ownerId: 'alice',
+      })
+
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { status, body } = await postTicket(port, aliceToken)
+      expect(status).toBe(200)
+      const { ticket } = JSON.parse(body) as { ticket: string }
+
+      const ws = wsConnectTicket(port, ticket)
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', resolve)
+        ws.once('error', reject)
+      })
+      const res = await sendReq(ws, IPC.listSessions)
+      expect(res.ok).toBe(true)
+      if (res.ok) {
+        expect((res.result as { id: string }[]).map((s) => s.id)).toEqual(['s-alice'])
+      }
+      ws.close()
+    })
+
+    it('GET /healthz omits wsTickets when not enabled', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const body = await getHealthz(port)
+      expect(JSON.parse(body)).toEqual({ ok: true })
+    })
+
+    it('GET /healthz reports wsTickets: true when enabled', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0, wsTickets: true })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const body = await getHealthz(port)
+      expect(JSON.parse(body)).toEqual({ ok: true, wsTickets: true })
     })
   })
 

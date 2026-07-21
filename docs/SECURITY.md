@@ -46,11 +46,11 @@ access — is a durable credential leak. It defeats the constant-time comparison
 and the encrypted-transport story entirely, because the leak happens at rest,
 downstream of TLS termination.
 
-## 3. Designed fix: one-time WS ticket endpoint (implementation deferred)
+## 3. One-time WS ticket endpoint (FLO-144, shipped)
 
-Writing the design down now so it isn't re-derived when reverse-proxy fronting
-is actually adopted. **Not implemented** — ship this design, defer the code,
-until a deployment actually needs it (see Rollout/scoping below).
+Opt-in — off by default, since only the reverse-proxy-fronted deployment needs
+it (see Rollout/scoping below). Set `SLIPSTREAM_WS_TICKETS=1` in
+`server.env` to turn it on.
 
 **Endpoint**: `POST /rpc-ticket`, authenticated via `Authorization: Bearer
 <SLIPSTREAM_TOKEN>` — a header, which never lands in a URL or an access log. No
@@ -82,9 +82,16 @@ handler gains a `?ticket=` branch **checked before** the existing
    identity that was resolved at `POST /rpc-ticket` time via the existing
    `resolveIdentity()` seam.
 3. The `Authorization: Bearer` path is untouched — it stays available for
-   header-capable clients indefinitely. The browser `?token=` path can be
-   retired entirely once tickets ship, since it exists solely to work around
-   the browser WebSocket header limitation that tickets also solve.
+   header-capable clients indefinitely.
+
+The `POST /rpc-ticket` handler and the `?ticket=` upgrade branch are always
+present in `server.ts` regardless of `SLIPSTREAM_WS_TICKETS` — both are
+auth-gated (a ticket can't be minted without a valid bearer token), so leaving
+them on costs nothing. The env var only controls whether `/healthz` advertises
+`wsTickets: true`, which is what the browser client checks to decide whether
+to use tickets at all (see Rollout/scoping). The browser `?token=` path is
+**not** retired globally — Electron and Tailscale-web connections still use it
+(see below); only reverse-proxy browser clients switch to tickets.
 
 **Leak resistance**: even if a ticket does end up in a proxy access log, it's
 already single-use and burns out within ~10 seconds. The replay window for an
@@ -92,46 +99,68 @@ attacker scraping logs in near-real-time is negligible, and unlike the static
 token, a leaked ticket is worthless the moment it's been used once or has
 aged out — there's no persistent credential to rotate.
 
+**Residual — the tokenized onboarding URL.** This fix closes the *recurring*
+leak (the WS upgrade credential, resent on every reconnect). It does not touch
+`deploy.sh`'s printed onboarding URL (`https://host/?token=...`, for the
+operator to open once on a new device) — `main.ts` strips it from the URL bar
+client-side via `history.replaceState`, but a reverse proxy in the path has
+already logged that one request by then. Behind a reverse proxy, prefer typing
+the token into the TokenGate directly over opening the printed URL.
+
 ### Client reconnect impact
 
-`wsApi.ts` currently builds `fullUrl` once (`${opts.url}?token=${...}`) and reuses
-it across every `connect()` call, including calls from `scheduleReconnect()`.
-Under the ticket design, `connect()` must fetch a **fresh** ticket before each
-`new WebSocket(...)` — including every automatic reconnect — via one `POST
-/rpc-ticket` request carrying the `Authorization: Bearer` token from
-`localStorage`. This changes `connect()` from synchronous (`ws = new WS(fullUrl)`)
-to async (fetch ticket → build URL → construct the WebSocket), which needs
-`scheduleReconnect()`'s `setTimeout` callback to await it and route failures back
-into the same backoff path. The long-lived token itself never moves — it stays
-in `localStorage`, and after this change is *only ever* sent as an
-`Authorization` header (to `/rpc-ticket`), never in a URL.
+`wsApi.ts`'s `createWsApi()` takes an optional `ticketUrl`. When set,
+`connect()` fetches a **fresh** ticket (`POST` to `ticketUrl`, `Authorization:
+Bearer <token>`) before every `new WebSocket(...)` — including every
+automatic `scheduleReconnect()` retry — and connects with `?ticket=` instead
+of embedding the token in the URL. When `ticketUrl` is unset, `connect()`
+stays fully synchronous and uses the legacy `?token=` URL, unchanged.
+
+`main.ts`'s `bootWeb()` (the browser boot path — used by both Tailscale-web
+and reverse-proxy-fronted clients) fetches `/healthz` once at boot to learn
+`wsTickets`, and only then passes `ticketUrl` into `createWsApi()`.
+`bootElectron()` never checks this and never passes `ticketUrl`, so the
+desktop app is unaffected regardless of server config.
+
+**4001 means something different in ticket mode.** A WS upgrade closing with
+`4001` in token mode means the long-lived token was rejected → `onAuthError`
+(clear the stored token, re-show the gate). In ticket mode the token was
+already validated at the `POST /rpc-ticket` step; a `4001` on the upgrade
+means the *ticket* was bad/expired/used (e.g. a slow client, or the server
+restarted and dropped its in-memory ticket map) — not that the token is bad.
+`wsApi.ts` treats it as retryable: `scheduleReconnect()` fires and the next
+`connect()` fetches a new ticket. A genuinely-bad token only ever surfaces as
+a real `401` from `POST /rpc-ticket`, which is the only place `onAuthError`
+fires in ticket mode.
 
 ### Rollout / scoping
 
 Not every deployment needs this:
 - **Electron desktop** talks to a `127.0.0.1` daemon with no reverse proxy in
-  the path — nothing logs the URL. Keep `?token=` there.
+  the path — nothing logs the URL. Keeps `?token=`.
 - **Tailscale HTTPS** (`SLIPSTREAM_SERVE=tailscale`) is an encrypted tunnel
-  with no intermediary logging plaintext URLs. Keep `?token=` there too.
+  with no intermediary logging plaintext URLs. Keeps `?token=` too.
 - **Reverse-proxy-fronted** (`SLIPSTREAM_SERVE=none` + user-supplied
   Caddy/nginx/Cloudflare Tunnel) is the only case that actually needs tickets.
 
-So this should be gated — e.g. a `SLIPSTREAM_SERVE` value or an explicit opt-in
-env var that only the reverse-proxy path sets — rather than forced on every
-deployment. Implementing it unconditionally for Tailscale/Electron would add a
-network round-trip to every reconnect for zero security benefit there.
+Gated via `SLIPSTREAM_WS_TICKETS=1` in `server.env` — a dedicated opt-in var
+rather than piggybacking on `SLIPSTREAM_SERVE=none`, since that value also
+covers a plain fully-local setup with no reverse proxy in front at all (where
+tickets would just add a round-trip per reconnect for no benefit). Set it only
+when a reverse proxy actually fronts the server.
 
-### Implementation checklist (deferred)
+### Implementation checklist (shipped)
 
-- [ ] `POST /rpc-ticket` handler in `server.ts` (or a small new module) +
-      in-memory ticket store + expiry sweeper.
-- [ ] `?ticket=` branch in the upgrade handler, checked before `?token=`.
-- [ ] `wsApi.ts`: pre-connect ticket fetch, wired into both the initial
+- [x] `POST /rpc-ticket` handler in `server.ts` + in-memory ticket store
+      (`electron/server/wsTickets.ts`) + expiry sweeper.
+- [x] `?ticket=` branch in the upgrade handler, checked before `?token=`.
+- [x] `wsApi.ts`: pre-connect ticket fetch, wired into both the initial
       `connect()` and `scheduleReconnect()`.
-- [ ] Retire the browser `?token=` path once tickets ship end-to-end.
-- [ ] Tests: ticket single-use + expiry + identity propagation
+- [x] Browser `?token=` path retired for reverse-proxy deployments (gated —
+      Electron/Tailscale still use it; see Rollout/scoping).
+- [x] Tests: ticket single-use + expiry + identity propagation
       (`electron/server/server.test.ts`), reconnect-refetches-ticket
-      (`src/lib/wsApi.test.ts` if/when one exists).
+      (`src/lib/wsApi.test.ts`).
 
 ## 4. Per-device/per-user tokens (FLO-143)
 

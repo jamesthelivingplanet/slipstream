@@ -9,6 +9,7 @@ import { createRpc } from '../core/rpc.js'
 import type { WireReq, WireRes, WirePush, WirePing } from '../shared/wire.js'
 import { resolveIdentity, LOCAL_IDENTITY } from '../core/auth.js'
 import type { Identity } from '../shared/contract.js'
+import { createTicketStore } from './wsTickets.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -34,6 +35,17 @@ export interface ServerOptions {
   port?: number
   /** Optional Origin allowlist enforced only for browser clients that send an Origin header. */
   allowedOrigins?: string[]
+  /**
+   * Advertise the one-time WS ticket flow (docs/SECURITY.md §3) via /healthz so
+   * the browser client can opt into it. The POST /rpc-ticket handler and the
+   * `?ticket=` upgrade branch are always available (both are auth-gated, so
+   * there's no cost to leaving them on) — this flag only controls whether the
+   * client is told to use them, so non-reverse-proxy deployments (Electron,
+   * Tailscale HTTPS) don't pay a round-trip per reconnect for no benefit.
+   */
+  wsTickets?: boolean
+  /** Test-only override for the ticket TTL (default: wsTickets.ts's TICKET_TTL_MS, ~10s). */
+  wsTicketTtlMs?: number
 }
 
 /**
@@ -42,10 +54,19 @@ export interface ServerOptions {
  * Returns the underlying http.Server (useful for obtaining the bound port in tests).
  */
 export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
-  const { token, bind = '127.0.0.1', port = 7421, allowedOrigins } = opts
+  const {
+    token,
+    bind = '127.0.0.1',
+    port = 7421,
+    allowedOrigins,
+    wsTickets = false,
+    wsTicketTtlMs,
+  } = opts
 
   // dist/ is the sibling of dist-electron/ (where this server.js runs from)
   const distDir = path.resolve(__dirname, '..', 'dist')
+
+  const ticketStore = createTicketStore(wsTicketTtlMs)
 
   const httpServer = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
@@ -53,7 +74,28 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     // Health check
     if (url.pathname === '/healthz') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true }))
+      res.end(JSON.stringify({ ok: true, ...(wsTickets ? { wsTickets: true } : {}) }))
+      return
+    }
+
+    // Mint a single-use, short-TTL WS ticket (docs/SECURITY.md §3). Header-only
+    // auth — this never appears in a URL, so it's safe behind a logging
+    // reverse proxy. Always available regardless of `wsTickets`; only the
+    // /healthz advertisement is gated, since minting one is harmless.
+    if (url.pathname === '/rpc-ticket' && req.method === 'POST') {
+      const authHeader = req.headers['authorization']
+      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined
+      const identity = bearerToken
+        ? resolveIdentity(bearerToken, { staticToken: token, deviceTokens: deps.deviceTokens })
+        : undefined
+      if (!identity) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Unauthorized' }))
+        return
+      }
+      const { ticket, expiresInMs } = ticketStore.issue(identity)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ticket, expiresInMs }))
       return
     }
 
@@ -177,6 +219,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
 
   wss.on('close', () => clearInterval(heartbeat))
   httpServer.on('close', () => clearInterval(heartbeat))
+  httpServer.on('close', () => ticketStore.dispose())
 
   httpServer.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
@@ -195,6 +238,25 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     // Origin header (i.e. a browser).
     if (!originAllowed(req.headers.origin, allowedOrigins)) {
       socket.destroy()
+      return
+    }
+
+    // One-time WS ticket branch (docs/SECURITY.md §3) — checked BEFORE the
+    // ?token=/Authorization branch below. A ticket already carries the
+    // identity resolved at POST /rpc-ticket time, so it's redeemed against
+    // the store rather than re-derived from a credential. Missing, expired,
+    // or already-used tickets fall through to the same ws.close(4001) path as
+    // a bad token — no signal distinguishing "bad ticket" from "bad token".
+    const ticketParam = url.searchParams.get('ticket')
+    if (ticketParam !== null) {
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        const identity = ticketStore.redeem(ticketParam)
+        if (!identity) {
+          ws.close(4001, 'Unauthorized')
+          return
+        }
+        wss.emit('connection', ws, req, identity)
+      })
       return
     }
 
@@ -325,6 +387,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1',
     port: process.env.SLIPSTREAM_PORT ? Number(process.env.SLIPSTREAM_PORT) : 7421,
     allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : undefined,
+    // Opt-in only — see docs/SECURITY.md §3. Set for reverse-proxy-fronted
+    // deployments (SLIPSTREAM_SERVE=none + user-supplied Caddy/nginx/Cloudflare
+    // Tunnel) so the browser client stops sending the long-lived token as a URL
+    // query param that a proxy access log would otherwise record.
+    wsTickets: process.env.SLIPSTREAM_WS_TICKETS === '1',
   })
   logger?.server('info', 'server listening', {
     bind: process.env.SLIPSTREAM_BIND ?? '127.0.0.1',

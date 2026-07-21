@@ -41,6 +41,15 @@ export interface WsApiOpts {
   WebSocketCtor?: typeof WebSocket
   /** Called when the server rejects with 401 (close code 4001 or initial open error). */
   onAuthError?: () => void
+  /**
+   * POST endpoint (docs/SECURITY.md §3) that exchanges the long-lived `token`
+   * (sent once, as an Authorization header) for a single-use, ~10s-TTL WS
+   * ticket. When set, every connect — including each scheduleReconnect()
+   * retry — fetches a fresh ticket and connects with `?ticket=` instead of
+   * embedding `token` in the URL. Omit to keep the legacy `?token=` URL
+   * (Electron/Tailscale — see docs/SECURITY.md §3 "Rollout / scoping").
+   */
+  ticketUrl?: string
 }
 
 type PendingReq = {
@@ -152,10 +161,48 @@ export function createWsApi(opts: WsApiOpts): WsApi {
     }, REQUEST_TIMEOUT_MS)
   }
 
+  // Fetches a fresh ticket (Authorization: Bearer <token>, never in the URL)
+  // and connects with it. Called fresh on every connect() — including every
+  // scheduleReconnect() retry — since a ticket is single-use and ~10s-TTL.
+  async function connectWithTicket(): Promise<void> {
+    let ticket: string
+    try {
+      const res = await fetch(opts.ticketUrl!, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${opts.token}` },
+      })
+      if (res.status === 401) {
+        // The long-lived token itself was rejected — re-gate. This is the
+        // only place ticket-mode auth failure is detected; a bad/expired/used
+        // ticket surfacing later as a WS close(4001) is just treated as a
+        // transient failure and retried with a fresh ticket (see onclose).
+        opts.onAuthError?.()
+        return
+      }
+      if (!res.ok) throw new Error(`ticket request failed: ${res.status}`)
+      const body = (await res.json()) as { ticket: string }
+      ticket = body.ticket
+    } catch {
+      scheduleReconnect()
+      return
+    }
+    if (destroyed) return
+    openSocket(`${opts.url}?ticket=${encodeURIComponent(ticket)}`)
+  }
+
   function connect() {
     if (destroyed) return
+    if (opts.ticketUrl) {
+      void connectWithTicket()
+      return
+    }
+    openSocket(fullUrl)
+  }
+
+  function openSocket(target: string) {
+    if (destroyed) return
     try {
-      ws = new WS(fullUrl)
+      ws = new WS(target)
     } catch {
       scheduleReconnect()
       return
@@ -245,8 +292,13 @@ export function createWsApi(opts: WsApiOpts): WsApi {
       // responses would be silently discarded. Queue and pending stay in lockstep.
       queue.length = 0
 
-      // 4001 = auth error (server-sent close code for 401)
-      if (evt.code === 4001 || evt.code === 1008) {
+      // 4001 = auth error (server-sent close code for 401). In ticket mode
+      // this means the *ticket* was bad/expired/used, not the long-lived
+      // token — the token is only ever validated at the POST /rpc-ticket
+      // step (see connectWithTicket), so treat it as retryable: the next
+      // connect() fetches a fresh ticket, and a genuinely-bad token surfaces
+      // there as a real 401 instead.
+      if ((evt.code === 4001 || evt.code === 1008) && !opts.ticketUrl) {
         opts.onAuthError?.()
         return
       }
