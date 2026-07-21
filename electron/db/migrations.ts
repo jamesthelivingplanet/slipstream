@@ -137,6 +137,23 @@ CREATE TABLE push_fcm_tokens (
   // migration, or by a client that couldn't determine a real origin, just
   // fall back to no image.
   (db) => db.exec(`ALTER TABLE push_fcm_tokens ADD COLUMN origin TEXT`),
+  // 8 — FLO-143: per-device/per-user token store behind the resolveIdentity
+  // seam. Only tokenHash (SHA-256 of the credential) is ever persisted — the
+  // plaintext token exists only at issuance time, in the caller's hands.
+  // revokedAt is NULL for a live credential; set once, on revocation, and
+  // never cleared (revocation is final, not a toggle).
+  (db) =>
+    db.exec(`
+CREATE TABLE device_tokens (
+  id        TEXT PRIMARY KEY,
+  ownerId   TEXT NOT NULL,
+  tokenHash TEXT NOT NULL,
+  label     TEXT NOT NULL DEFAULT '',
+  createdAt INTEGER NOT NULL,
+  revokedAt INTEGER
+);
+CREATE UNIQUE INDEX idx_device_tokens_hash ON device_tokens (tokenHash)
+`),
 ]
 
 /** Apply any migrations newer than the DB's current user_version, atomically. */

@@ -1,7 +1,7 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
-import { randomUUID, createHash, timingSafeEqual } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { IpcDeps } from '../ipc.js'
@@ -11,16 +11,6 @@ import { resolveIdentity, LOCAL_IDENTITY } from '../core/auth.js'
 import type { Identity } from '../shared/contract.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-
-// Constant-time comparison against fixed-length SHA-256 hashes so a wrong
-// token doesn't leak the expected token's length via timing.
-function tokensMatch(provided: string | undefined, expected: string): boolean {
-  const a = createHash('sha256')
-    .update(provided ?? '')
-    .digest()
-  const b = createHash('sha256').update(expected).digest()
-  return timingSafeEqual(a, b)
-}
 
 // Interval for server-side ws-protocol pings that reap dead sockets whose
 // close/error events never fired (e.g. a client that vanished without a
@@ -206,11 +196,17 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     // opened socket with 4001 gives the client an unambiguous "auth failed"
     // signal it can act on (see wsApi.ts onAuthError → main.ts re-gate).
     wss.handleUpgrade(req, socket, head, (ws) => {
-      if (!provided || !tokensMatch(provided, token)) {
+      // resolveIdentity checks the static SLIPSTREAM_TOKEN (→ LOCAL_IDENTITY)
+      // first, then falls back to the per-device token store (FLO-143) —
+      // undefined means neither matched, so auth is rejected identically
+      // whether the credential is wrong, unknown, or revoked.
+      const identity = provided
+        ? resolveIdentity(provided, { staticToken: token, deviceTokens: deps.deviceTokens })
+        : undefined
+      if (!identity) {
         ws.close(4001, 'Unauthorized')
         return
       }
-      const identity = resolveIdentity(provided as string)
       wss.emit('connection', ws, req, identity)
     })
   })

@@ -33,6 +33,7 @@ import { createSessionScheduler } from '../services/sessionScheduler.js'
 import { launchSession } from '../services/sessionLauncher.js'
 import { createSessionPersistence } from '../services/sessionPersistence.js'
 import { createPrStatusService } from '../services/prStatus.js'
+import { createDeviceTokenStore } from '../services/deviceTokenStore.js'
 import type { IpcDeps } from '../ipc.js'
 
 /**
@@ -128,6 +129,7 @@ export function createServices(root: string): IpcDeps {
     logger: runLogger,
     writeCoordinator: createWriteCoordinator(),
     prStatus: createPrStatusService({ config: configStore }),
+    deviceTokens: createDeviceTokenStore(db),
     agentCli: {
       binDir: path.join(root, 'bin'),
       cliJsPath: fileURLToPath(new URL('./slipstream-cli.js', import.meta.url)),

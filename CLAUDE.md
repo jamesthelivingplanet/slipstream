@@ -70,10 +70,12 @@ doc only when the symptom matches what you're seeing.
   matches (deleted, or a fresh pod that hasn't cloned it) the run fails deep in
   `worktrees.create` with just the red bubble — register by remote URL (`registerRepoByUrl`)
   instead.
-- **Identity seam (`ownerId`)**: every RPC carries a resolved `Identity` (today always
-  `{ id:'local' }`); `createRpc` filters enumerations and guards reads by `ownerId`. Don't
-  add a read of a `sessions`/`repos` row without scoping it by owner. See
-  [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md).
+- **Identity seam (`ownerId`)**: every RPC carries a resolved `Identity` — the static
+  `SLIPSTREAM_TOKEN` still resolves to `{ id:'local' }`, but any other bearer token is now
+  looked up in the per-device/per-user store (`electron/services/deviceTokenStore.ts`,
+  FLO-143) via `resolveIdentity()` (`electron/core/auth.ts`); `createRpc` filters
+  enumerations and guards reads by `ownerId`. Don't add a read of a `sessions`/`repos` row
+  without scoping it by owner. See [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md).
 - **Secrets at rest**: config-table secrets are `safeStorage`-encrypted (`ss1:`) on
   desktop and AES-256-GCM-encrypted (`sk1:`, key from `SLIPSTREAM_SECRET` or a
   file-backed `<dataDir>/secret.key`) on the daemon/headless server (FLO-145). Reads

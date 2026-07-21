@@ -8,10 +8,16 @@ change the seam, don't touch call sites.
 ## The model
 
 Every RPC request resolves to an `Identity` — `{ id: string }` from
-`electron/shared/contract.ts`. Today `resolveIdentity(token)` in
-`electron/core/auth.ts` maps every valid bearer token to `LOCAL_IDENTITY`
-(`{ id: 'local' }`). The seam is where a future multi-user tier maps
-distinct tokens → distinct owners without touching anything downstream.
+`electron/shared/contract.ts`. `resolveIdentity(token, opts)` in
+`electron/core/auth.ts` resolves a presented bearer token to that `Identity`:
+
+- The deployment-wide `SLIPSTREAM_TOKEN` (`opts.staticToken`) always maps to
+  `LOCAL_IDENTITY` (`{ id: 'local' }`) — the single-user/local tier default,
+  unchanged since before FLO-143.
+- Any other token is looked up in the per-device/per-user token store
+  (`opts.deviceTokens`, FLO-143) — see "Per-device/per-user tokens" below.
+  `undefined` means auth is rejected (identical whether the credential is
+  wrong, unknown, or revoked — no signal leak).
 
 ## Where identity is resolved
 
@@ -66,18 +72,50 @@ passes — behavior is byte-for-byte identical to the pre-seam code. This is
 locked in by `electron/core/auth.test.ts` (identity resolution) and
 `electron/core/rpc.test.ts` (ownership guards on each handler).
 
+## Per-device/per-user tokens (FLO-143)
+
+`electron/services/deviceTokenStore.ts` is a DB-backed store (`device_tokens`
+table, migration 8 in `electron/db/migrations.ts`) of individually-issued,
+individually-revocable credentials:
+
+- **Issue**: `issue(ownerId, label)` mints a random 256-bit token
+  (`dt_<base64url>`), persists only its SHA-256 hash (`tokenHash`), and returns
+  the plaintext token exactly once — like an API key, it is never retrievable
+  again after issuance, only its metadata (`DeviceTokenDTO`: id, ownerId,
+  label, createdAt, revokedAt).
+- **Look up**: `resolveToken(token)` hashes the presented token and looks it up
+  by `tokenHash` (unique-indexed); a live (non-revoked) match resolves to
+  `{ id: row.ownerId }`.
+- **Revoke**: `revoke(id)` sets `revokedAt` once (`WHERE revokedAt IS NULL`) —
+  final, not a toggle. A missing or already-revoked id is a silent idempotent
+  no-op. `resolveToken` for a revoked credential returns `undefined`
+  identically to an unknown token — the compromised device is cut off, every
+  other credential (any owner, any device) keeps resolving exactly as before.
+
+`server.ts`'s WS upgrade handler wires this into `resolveIdentity` (see "The
+model" above) via `IpcDeps.deviceTokens` (optional — a deployment or test
+without one just gets the static-token-only path, unchanged). Device tokens
+flow through the *same* `?token=`/`Authorization: Bearer` presentation path as
+the static token; no client-side change is required to support them.
+
+There is deliberately no RPC/UI surface yet for self-service issuance — that
+was called out as a separate, later item (onboarding UX, below) from the store
+itself. What does exist is an **operator/admin CLI**,
+`electron/cli/manageTokens.ts` (built to `dist-electron/manage-tokens.js`,
+run via `pnpm tokens -- <issue|list|revoke> ...` under
+`ELECTRON_RUN_AS_NODE=1`, same ABI trick `pnpm serve` uses — see
+docs/NATIVE-MODULES.md): an operator runs `issue <ownerId> <label>` to mint a
+new device/user's first credential and hand it to that device as its
+`SLIPSTREAM_TOKEN`, `list` to see every issued credential, and `revoke <id>`
+to cut one off. This is deliberately not agent-facing or end-user-facing (an
+operator/admin action, not a per-owner RPC) — a future onboarding UX (item 2
+below) would likely wrap this same store in an RPC/UI, not replace it.
+
 ## What true multi-user still needs
 
-Today there is exactly one owner: `resolveIdentity(_token)` ignores its argument
-and always returns `LOCAL_IDENTITY`, and a single static `SLIPSTREAM_TOKEN`
-authenticates every device. A security-review pass (FLO-84) flagged that token
-as the first thing to change for a multi-user tier — this records what that
-change touches and what it doesn't, so it isn't re-derived later. It must also
-compose with the one-time WS ticket design in [docs/SECURITY.md](SECURITY.md) §3.
-
 Every downstream call site is already owner-scoped (see Enforcement above), so
-going multi-user is a change *at the seam* — none of the ~15 guarded handlers
-need to know or care how many distinct identities exist.
+going multi-user was a change *at the seam* (FLO-143, above) — none of the ~15
+guarded handlers needed to know or care how many distinct identities exist.
 
 One current-behavior caveat to carry forward: `writeSession`, `resizeSession`,
 `killSession`, `attachSession`, `takeWrite`, and `detachSession` are
@@ -89,25 +127,23 @@ throwing — preserving the no-existence-leak invariant. This requires the sessi
 to be persisted (owned) in `sessionStore`, which is always true after
 `startSession`, so there's no practical behavior change for legitimate callers.
 
-What a real multi-user milestone still needs:
+What's still open for a full multi-user milestone:
 
-1. **A real token → owner store.** `resolveIdentity` becomes a lookup (DB table
-   or similar) mapping each issued token to a distinct owner id — today every
-   valid token maps to `LOCAL_IDENTITY`.
-2. **Per-device/per-user token issuance + onboarding.** A way to mint a new
-   token for a new device/user and get it onto that device — today onboarding is
-   "here's the one `SLIPSTREAM_TOKEN` value, put it in the URL or localStorage"
-   (see `scripts/deploy.sh`'s QR-code onboarding flow).
-3. **Revocation granularity.** Today "rotate" means edit `server.env` and
-   re-onboard *every* device, because there's only one token. Multi-user needs
-   to revoke one token (one compromised device, one departing user) without
-   disturbing any other token's validity.
+1. ~~A real token → owner store.~~ Done (FLO-143, above).
+2. **End-user-facing onboarding UX.** The operator/admin CLI (above) covers
+   *minting* a credential, but getting it onto the new device is still manual
+   (copy the printed token into that device's config) — there's no QR-code
+   -style onboarding flow the way the single static `SLIPSTREAM_TOKEN` has
+   (see `scripts/deploy.sh`), and no self-service RPC/UI for a logged-in user
+   to add a second device of their own without an operator running the CLI.
+3. ~~Revocation granularity.~~ Done (FLO-143, above) — `revoke(id)` disables
+   exactly one credential without touching any other.
 4. **Integration with the one-time WS ticket endpoint** ([docs/SECURITY.md](SECURITY.md)
    §3 — design only, not yet implemented). Tickets must be minted per-token, not
    per-deployment: `POST /rpc-ticket`'s `Authorization: Bearer` check resolves an
    identity via this same seam, and the ticket's stored `identity` field is what
    the upgrade handler uses on redemption. The ticket design composes with
-   per-user tokens for free *if* the token store from item 1 is in place first.
+   per-user tokens for free now that the token store (item 1) is in place.
 5. **The per-owner-data-dir vs. row-level-isolation decision.** Orthogonal to
    token rotation, but both land in the same multi-user milestone and should be
    designed together rather than sequentially discovering conflicts.
