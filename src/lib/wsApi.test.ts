@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createWsApi } from './wsApi.js'
 import type { WireRes, WirePush } from '../../electron/shared/wire.js'
 import { IPC } from '../../electron/shared/contract.js'
+import type { StatusMeta } from '../../electron/shared/contract.js'
 
 // Mirrors the private constants in wsApi.ts (not exported — kept as an implementation
 // detail). Keep these in sync if the module's timing constants change.
@@ -186,11 +187,27 @@ describe('wsApi', () => {
       const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
       const ws = openWs()
 
-      const received: [string, string][] = []
-      api.onSessionStatus((id, status) => received.push([id, status]))
+      const received: [string, string, StatusMeta | undefined][] = []
+      api.onSessionStatus((id, status, meta) => received.push([id, status, meta]))
 
       ws.simulateMessage({ t: 'push', channel: IPC.sessionStatus, args: ['sess-2', 'done'] })
-      expect(received).toEqual([['sess-2', 'done']])
+      expect(received).toEqual([['sess-2', 'done', undefined]])
+    })
+
+    it('delivers session:status meta to onSessionStatus callbacks when present (FLO-104)', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = openWs()
+
+      const received: [string, string, StatusMeta | undefined][] = []
+      api.onSessionStatus((id, status, meta) => received.push([id, status, meta]))
+
+      const meta: StatusMeta = { reason: 'approval', message: 'waiting on review' }
+      ws.simulateMessage({
+        t: 'push',
+        channel: IPC.sessionStatus,
+        args: ['sess-3', 'needs', meta],
+      })
+      expect(received).toEqual([['sess-3', 'needs', meta]])
     })
 
     it('delivers session:exit to onSessionExit callbacks', () => {

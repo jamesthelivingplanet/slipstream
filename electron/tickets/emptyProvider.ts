@@ -1,4 +1,9 @@
-import type { ITicketProvider, WorkflowState, PaginatedTickets } from '../shared/contract.js'
+import type {
+  ITicketProvider,
+  WorkflowState,
+  PaginatedTickets,
+  TicketSourceSettings,
+} from '../shared/contract.js'
 
 export function createEmptyProvider(): ITicketProvider {
   return {
@@ -22,6 +27,20 @@ export function createEmptyProvider(): ITicketProvider {
     },
     async postComment(_tid: string, _body: string): Promise<boolean> {
       return false
+    },
+    getSettings(): TicketSourceSettings {
+      return {
+        configured: false,
+        scopeKeys: [],
+        onlyMine: true,
+        apiKey: '',
+        baseUrl: '',
+        email: '',
+        apiToken: '',
+      }
+    },
+    setSettings(_cfg: TicketSourceSettings): void {
+      // no-op: the empty provider has no config to persist
     },
   }
 }

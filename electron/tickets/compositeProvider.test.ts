@@ -11,6 +11,16 @@ function makeProvider(id: string, overrides: Partial<ITicketProvider> = {}): ITi
     startTicket: vi.fn().mockResolvedValue(null),
     resetTicket: vi.fn().mockResolvedValue(null),
     postComment: vi.fn().mockResolvedValue(true),
+    getSettings: vi.fn().mockReturnValue({
+      configured: false,
+      scopeKeys: [],
+      onlyMine: true,
+      apiKey: '',
+      baseUrl: '',
+      email: '',
+      apiToken: '',
+    }),
+    setSettings: vi.fn(),
     ...overrides,
   }
 }

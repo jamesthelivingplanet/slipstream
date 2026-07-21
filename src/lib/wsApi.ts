@@ -15,6 +15,7 @@ import type {
   RepoSettings,
   SessionDTO,
   SessionStatus,
+  StatusMeta,
   WorkflowState,
   WorktreeInfo,
   WorktreeDiffDTO,
@@ -85,7 +86,7 @@ type PendingReq = {
 }
 
 type DataCb = (id: string, data: string, seq: number) => void
-type StatusCb = (id: string, status: SessionStatus) => void
+type StatusCb = (id: string, status: SessionStatus, meta?: StatusMeta) => void
 type ExitCb = (id: string, code: number) => void
 
 export function createWsApi(opts: WsApiOpts): SlipstreamApi {
@@ -225,8 +226,8 @@ export function createWsApi(opts: WsApiOpts): SlipstreamApi {
           const [id, chunk, seq] = msg.args as [string, string, number]
           for (const cb of dataListeners) cb(id, chunk, seq)
         } else if (msg.channel === IPC.sessionStatus) {
-          const [id, status] = msg.args as [string, SessionStatus]
-          for (const cb of statusListeners) cb(id, status)
+          const [id, status, meta] = msg.args as [string, SessionStatus, StatusMeta?]
+          for (const cb of statusListeners) cb(id, status, meta)
         } else if (msg.channel === IPC.sessionExit) {
           const [id, code] = msg.args as [string, number]
           for (const cb of exitListeners) cb(id, code)
