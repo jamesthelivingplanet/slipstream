@@ -40,6 +40,7 @@
   import OnboardingModal from './lib/components/OnboardingModal.svelte'
   import { nativeStorage } from './lib/nativeStorage'
   import { initOnboarding, onboardingMode } from './lib/onboarding'
+  import { subscribeWidgetSync } from './lib/widgetSync'
   import {
     MOBILE_MEDIA_QUERY,
     DRAWER_MEDIA_QUERY,
@@ -91,6 +92,7 @@
     const offStatus = subscribeSessionStatus()
     const offPr = subscribeSessionPr()
     const offConnection = subscribeConnectionChange()
+    const offWidgetSync = subscribeWidgetSync()
 
     // First-boot onboarding: independent of the backend/ticket bootstrap
     // below (it only reads its own nativeStorage flag), started alongside it
@@ -178,6 +180,7 @@
       offStatus()
       offPr()
       offConnection()
+      offWidgetSync()
       window.removeEventListener('resize', checkViewport)
       window.removeEventListener('orientationchange', checkViewport)
       window.removeEventListener('focusin', onFocusIn)
