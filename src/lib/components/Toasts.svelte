@@ -17,12 +17,14 @@
         class="toast-msg"
         role={t.type === 'error' ? 'alert' : 'status'}
         aria-live={t.type === 'error' ? 'assertive' : 'polite'}
-        aria-atomic="true">{t.message}</span>
+        aria-atomic="true">{t.message}</span
+      >
       <button
         type="button"
         class="toast-close"
         aria-label="Dismiss notification"
-        on:click|stopPropagation={() => dismissToast(t.id)}>×</button>
+        on:click|stopPropagation={() => dismissToast(t.id)}>×</button
+      >
     </div>
   {/each}
 </div>

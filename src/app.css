@@ -197,6 +197,13 @@ button {
   -webkit-appearance: none;
 }
 
+button:focus-visible,
+[role='button']:focus-visible,
+a:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
 /* ───────── layout ───────── */
 .app {
   display: flex;
@@ -276,6 +283,7 @@ header .spacer {
 }
 
 .search {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -304,6 +312,24 @@ header .spacer {
 }
 .search input::placeholder {
   color: hsl(var(--muted-foreground));
+}
+.search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  border-radius: var(--radius);
+  flex: 0 0 auto;
+}
+.search-clear:hover {
+  background: hsl(var(--accent-bg));
+  color: hsl(var(--foreground));
 }
 
 .segs {

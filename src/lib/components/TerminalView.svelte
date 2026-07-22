@@ -788,12 +788,18 @@
 
   async function handleRemoteControl() {
     if (!hasBackend || !session.id) return
+    const id = session.id
+    const gen = ++resyncGen
     try {
-      await attachRemoteControl(session.id)
-      setSessionStatus(session.id, 'running')
+      await attachRemoteControl(id)
+      if (gen !== resyncGen || destroyed) return
+      setSessionStatus(id, 'running')
+      const myGate = new ReplayGate((chunk) => term.write(chunk))
+      gate = myGate
       term.reset()
-      const snap = await getSessionBuffer(session.id)
-      term.write(snap.data)
+      const snap = await getSessionBuffer(id)
+      if (gen !== resyncGen || destroyed) return
+      myGate.applySnapshot(snap.data, snap.seq)
       pushToast('success', 'Remote control attached.')
     } catch (e) {
       pushToast('error', cleanError(e))
@@ -986,7 +992,9 @@
       <span class="tt">{session.tid} · {session.title}</span>
     </div>
     <div class="m">
-      <span class="badge mono">{@html icons.folder} {r?.org}/{r?.name}</span>
+      <span class="badge mono"
+        >{@html icons.folder} {r ? `${r.org}/${r.name}` : session.repo || 'unknown repo'}</span
+      >
       <span class="badge mono">{@html icons.gitBranch} {session.branch}</span>
       {#if session.behind > 0}
         <span

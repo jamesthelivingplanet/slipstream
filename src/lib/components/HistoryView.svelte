@@ -135,7 +135,10 @@
     {#if loading}
       <p class="muted hv-status">Loading history…</p>
     {:else if error}
-      <p class="muted hv-status hv-error">{error}</p>
+      <div class="hv-error-wrap">
+        <p class="muted hv-status hv-error">{error}</p>
+        <button class="btn btn-outline btn-sm" on:click={load}>Retry</button>
+      </div>
     {:else if entries.length === 0}
       <div class="first-run">
         <p>No runs yet — history appears after your first agent run.</p>
@@ -355,6 +358,11 @@
   }
   .hv-error {
     color: hsl(var(--st-error));
+  }
+  .hv-error-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
 
   .first-run {
