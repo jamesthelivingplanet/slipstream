@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import fs, { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -87,15 +87,15 @@ describe('familyForModel', () => {
 // ─── readTranscriptUsage ────────────────────────────────────────────────────
 
 describe('readTranscriptUsage', () => {
-  it('returns exists:false with zero tokens when no transcript is present', () => {
-    const u = readTranscriptUsage('missing-id', projectsDir)
+  it('returns exists:false with zero tokens when no transcript is present', async () => {
+    const u = await readTranscriptUsage('missing-id', projectsDir)
     expect(u.exists).toBe(false)
     expect(u.turns).toBe(0)
     expect(u.costUsd).toBe(0)
     expect(u.tokens).toEqual({ input: 0, output: 0, cacheCreation: 0, cacheRead: 0 })
   })
 
-  it('sums usage across assistant turns (ignoring non-usage lines)', () => {
+  it('sums usage across assistant turns (ignoring non-usage lines)', async () => {
     const id = 'sess-a'
     writeTranscript('proj-a', id, [
       ...NON_USAGE_LINES,
@@ -113,7 +113,7 @@ describe('readTranscriptUsage', () => {
       }),
     ])
 
-    const u = readTranscriptUsage(id, projectsDir)
+    const u = await readTranscriptUsage(id, projectsDir)
     expect(u.exists).toBe(true)
     expect(u.turns).toBe(2)
     expect(u.tokens).toEqual({
@@ -125,7 +125,7 @@ describe('readTranscriptUsage', () => {
     expect(u.model).toBe('claude-sonnet-5')
   })
 
-  it('estimates cost from the per-turn model (sonnet rates)', () => {
+  it('estimates cost from the per-turn model (sonnet rates)', async () => {
     const id = 'sess-cost'
     writeTranscript('proj-a', id, [
       assistantTurn({
@@ -135,11 +135,11 @@ describe('readTranscriptUsage', () => {
       }),
     ])
     // sonnet: $3/M in + $15/M out → 3 + 15 = $18
-    const u = readTranscriptUsage(id, projectsDir)
+    const u = await readTranscriptUsage(id, projectsDir)
     expect(u.costUsd).toBeCloseTo(18, 4)
   })
 
-  it('uses opus rates for opus models', () => {
+  it('uses opus rates for opus models', async () => {
     const id = 'sess-opus'
     writeTranscript('proj-a', id, [
       assistantTurn({
@@ -149,11 +149,11 @@ describe('readTranscriptUsage', () => {
       }),
     ])
     // opus: $15/M in + $75/M out → 15 + 75 = $90
-    const u = readTranscriptUsage(id, projectsDir)
+    const u = await readTranscriptUsage(id, projectsDir)
     expect(u.costUsd).toBeCloseTo(90, 4)
   })
 
-  it('charges cache creation at the write rate and cache read at the read rate', () => {
+  it('charges cache creation at the write rate and cache read at the read rate', async () => {
     const id = 'sess-cache'
     writeTranscript('proj-a', id, [
       assistantTurn({
@@ -163,11 +163,11 @@ describe('readTranscriptUsage', () => {
       }),
     ])
     // sonnet cache: $3.75/M write + $0.30/M read → 3.75 + 0.30 = $4.05
-    const u = readTranscriptUsage(id, projectsDir)
+    const u = await readTranscriptUsage(id, projectsDir)
     expect(u.costUsd).toBeCloseTo(4.05, 4)
   })
 
-  it('tolerates malformed/partial JSONL lines without throwing', () => {
+  it('tolerates malformed/partial JSONL lines without throwing', async () => {
     const id = 'sess-junk'
     writeTranscript('proj-a', id, [
       '{ this is not json',
@@ -175,20 +175,57 @@ describe('readTranscriptUsage', () => {
       assistantTurn({ input: 7, output: 3 }),
       JSON.stringify({ type: 'assistant', message: {/* no usage */} }),
     ])
-    const u = readTranscriptUsage(id, projectsDir)
+    const u = await readTranscriptUsage(id, projectsDir)
     expect(u.turns).toBe(1)
     expect(u.tokens.input).toBe(7)
     expect(u.tokens.output).toBe(3)
   })
 
-  it('keeps the last-seen model when turns use mixed models', () => {
+  it('keeps the last-seen model when turns use mixed models', async () => {
     const id = 'sess-mixed'
     writeTranscript('proj-a', id, [
       assistantTurn({ model: 'claude-opus-4-8', input: 1 }),
       assistantTurn({ model: 'claude-sonnet-5', input: 2 }),
     ])
-    const u = readTranscriptUsage(id, projectsDir)
+    const u = await readTranscriptUsage(id, projectsDir)
     expect(u.model).toBe('claude-sonnet-5')
+  })
+
+  it('serves the second call from cache without re-reading the file (mtime/size unchanged)', async () => {
+    const id = 'sess-cache-hit'
+    writeTranscript('proj-a', id, [assistantTurn({ input: 11, output: 4 })])
+
+    const spy = vi.spyOn(fs, 'createReadStream')
+    try {
+      const first = await readTranscriptUsage(id, projectsDir)
+      const second = await readTranscriptUsage(id, projectsDir)
+
+      // The parse path (createReadStream) must only run once — the second
+      // call should be served straight from the mtime/size-keyed cache.
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(second).toEqual(first)
+      expect(second.tokens.input).toBe(11)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('invalidates the cache when the transcript file is rewritten (mtime/size change)', async () => {
+    const id = 'sess-cache-invalidate'
+    writeTranscript('proj-a', id, [assistantTurn({ input: 1, output: 1 })])
+
+    const first = await readTranscriptUsage(id, projectsDir)
+    expect(first.tokens.input).toBe(1)
+
+    // Rewrite with different (larger) content — changes both size and mtime.
+    writeTranscript('proj-a', id, [
+      assistantTurn({ input: 1, output: 1 }),
+      assistantTurn({ input: 500, output: 500 }),
+    ])
+
+    const second = await readTranscriptUsage(id, projectsDir)
+    expect(second.tokens.input).toBe(501)
+    expect(second.turns).toBe(2)
   })
 })
 
@@ -208,14 +245,14 @@ function dto(id: string, repoId: string, createdAt: number): SessionDTO {
 }
 
 describe('buildUsageSummary', () => {
-  it('skips sessions whose transcript does not exist', () => {
-    const summary = buildUsageSummary([dto('no-file', 'repo-1', 0)], { projectsDir })
+  it('skips sessions whose transcript does not exist', async () => {
+    const summary = await buildUsageSummary([dto('no-file', 'repo-1', 0)], { projectsDir })
     expect(summary.sessions).toHaveLength(0)
     expect(summary.byRepo).toHaveLength(0)
     expect(summary.costUsd).toBe(0)
   })
 
-  it('aggregates tokens + cost by repo and by day', () => {
+  it('aggregates tokens + cost by repo and by day', async () => {
     // Two sessions in repo-1 (same day), one in repo-2 (another day).
     const day1 = Date.UTC(2026, 6, 1) // 2026-07-01
     const day2 = Date.UTC(2026, 6, 2) // 2026-07-02
@@ -230,7 +267,7 @@ describe('buildUsageSummary', () => {
       assistantTurn({ model: 'opus', input: 1_000_000, output: 1_000_000 }), // $90
     ])
 
-    const summary = buildUsageSummary(
+    const summary = await buildUsageSummary(
       [dto('s1', 'repo-1', day1), dto('s2', 'repo-1', day1), dto('s3', 'repo-2', day2)],
       { projectsDir },
     )
@@ -254,12 +291,12 @@ describe('buildUsageSummary', () => {
     expect(summary.sessions.map((s) => s.sessionId)).toEqual(['s3', 's1', 's2'])
   })
 
-  it('skips a transcript that exists but has no usage turns yet', () => {
+  it('skips a transcript that exists but has no usage turns yet', async () => {
     writeTranscript('p1', 's-empty', [
       JSON.stringify({ type: 'last-prompt', sessionId: 's-empty' }),
       JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }),
     ])
-    const summary = buildUsageSummary([dto('s-empty', 'repo-1', 0)], { projectsDir })
+    const summary = await buildUsageSummary([dto('s-empty', 'repo-1', 0)], { projectsDir })
     expect(summary.sessions).toHaveLength(0)
     expect(summary.costUsd).toBe(0)
   })
@@ -268,23 +305,23 @@ describe('buildUsageSummary', () => {
 // ─── readSessionUsage dispatch ──────────────────────────────────────────────
 
 describe('readSessionUsage', () => {
-  it('dispatches claude-code (and undefined agentKind) sessions to readTranscriptUsage', () => {
+  it('dispatches claude-code (and undefined agentKind) sessions to readTranscriptUsage', async () => {
     const id = 'sess-dispatch-claude'
     writeTranscript('proj-a', id, [assistantTurn({ input: 5, output: 2 })])
     const s = dto(id, 'repo-1', 0)
 
-    const withKind = readSessionUsage({ ...s, agentKind: 'claude-code' }, { projectsDir })
+    const withKind = await readSessionUsage({ ...s, agentKind: 'claude-code' }, { projectsDir })
     expect(withKind.exists).toBe(true)
     expect(withKind.tokens.input).toBe(5)
 
-    const withoutKind = readSessionUsage(s, { projectsDir })
+    const withoutKind = await readSessionUsage(s, { projectsDir })
     expect(withoutKind.exists).toBe(true)
     expect(withoutKind.tokens.input).toBe(5)
   })
 
-  it('dispatches opencode sessions without hitting the claude-code transcript reader', () => {
+  it('dispatches opencode sessions without hitting the claude-code transcript reader', async () => {
     const s = dto('sess-dispatch-oc', 'repo-1', 0)
-    const usage = readSessionUsage(
+    const usage = await readSessionUsage(
       { ...s, agentKind: 'opencode', opencodeSid: 'ses_missing' },
       { projectsDir, opencodeRoot: join(projectsDir, 'oc-storage') },
     )
@@ -292,9 +329,9 @@ describe('readSessionUsage', () => {
     expect(usage.sessionId).toBe('sess-dispatch-oc')
   })
 
-  it('dispatches pi sessions without hitting the claude-code transcript reader', () => {
+  it('dispatches pi sessions without hitting the claude-code transcript reader', async () => {
     const s = dto('sess-dispatch-pi', 'repo-1', 0)
-    const usage = readSessionUsage(
+    const usage = await readSessionUsage(
       { ...s, agentKind: 'pi' },
       { projectsDir, cwd: '/nonexistent/cwd', piRoot: join(projectsDir, 'pi-storage') },
     )
@@ -302,10 +339,10 @@ describe('readSessionUsage', () => {
     expect(usage.sessionId).toBe('sess-dispatch-pi')
   })
 
-  it('antigravity/grok sessions return exists:false with zeroed usage — even when a Claude transcript exists for the same id (no reader yet, no fallthrough)', () => {
+  it('antigravity/grok sessions return exists:false with zeroed usage — even when a Claude transcript exists for the same id (no reader yet, no fallthrough)', async () => {
     const idAgy = 'sess-dispatch-antigravity'
     writeTranscript('proj-a', idAgy, [assistantTurn({ input: 99, output: 99 })])
-    const agyUsage = readSessionUsage(
+    const agyUsage = await readSessionUsage(
       { ...dto(idAgy, 'repo-1', 0), agentKind: 'antigravity' },
       {
         projectsDir,
@@ -319,7 +356,7 @@ describe('readSessionUsage', () => {
 
     const idGrok = 'sess-dispatch-grok'
     writeTranscript('proj-a', idGrok, [assistantTurn({ input: 99, output: 99 })])
-    const grokUsage = readSessionUsage(
+    const grokUsage = await readSessionUsage(
       { ...dto(idGrok, 'repo-1', 0), agentKind: 'grok' },
       {
         projectsDir,

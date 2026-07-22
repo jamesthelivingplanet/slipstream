@@ -124,6 +124,19 @@ export function createRpc(
     return repo
   }
 
+  // Negative-cache disk-fallback misses for a bounded window. Scoped inside
+  // createRpc's closure (per-connection), NOT module scope: module scope
+  // would leak across the per-connection createRpc() instances the test
+  // suite creates fresh in every beforeEach, and in production it should
+  // track state for this daemon connection, not survive the whole process.
+  // A History-panel open loops resolveOutcome over every owned session, so
+  // without this a session that never got an outcome (still running, or
+  // finished with no sentinel file) re-reads disk on every open, forever.
+  // The TTL keeps the restart-race fallback self-healing within a bounded
+  // window rather than negative-caching a miss forever.
+  const OUTCOME_MISS_TTL_MS = 30_000
+  const outcomeMissCache = new Map<string, number>() // sessionId -> cache-until epoch ms
+
   // Resolve a session's structured outcome: prefer the durable store, but
   // fall back to reading the outcome.json sentinel straight off disk. A
   // daemon restart can race the sessionManager's fs.watch — the watcher only
@@ -132,10 +145,20 @@ export function createRpc(
   // resume) would otherwise appear to have no outcome even though the agent
   // reported one. On a successful disk read, backfill the store so future
   // reads don't need the fallback.
+  //
+  // The store lookup always runs first, unconditionally — this lets an
+  // outcome written out-of-band by the live sentinelWatcher/sessionPersistence
+  // listener (while this connection stays open) surface immediately even if
+  // an earlier call negative-cached a miss. Only the disk-read fallback is
+  // skipped while a miss is cached.
   async function resolveOutcome(sessionId: string): Promise<SessionOutcomeDTO | null> {
     const stored = deps.outcomeStore.get(sessionId)
     if (stored) return stored
     if (!deps.agentCli) return null
+
+    const missUntil = outcomeMissCache.get(sessionId)
+    if (missUntil !== undefined && missUntil > Date.now()) return null
+
     try {
       const filePath = path.join(
         deps.agentCli.dataDir,
@@ -145,7 +168,10 @@ export function createRpc(
       )
       const content = await fs.promises.readFile(filePath, 'utf8')
       const parsed = parseOutcomeSentinel(content)
-      if (!parsed) return null
+      if (!parsed) {
+        outcomeMissCache.set(sessionId, Date.now() + OUTCOME_MISS_TTL_MS)
+        return null
+      }
       const outcome: SessionOutcomeDTO = {
         sessionId,
         result: parsed.result,
@@ -156,6 +182,7 @@ export function createRpc(
       deps.outcomeStore.upsert(outcome)
       return outcome
     } catch {
+      outcomeMissCache.set(sessionId, Date.now() + OUTCOME_MISS_TTL_MS)
       return null
     }
   }
@@ -908,7 +935,7 @@ export function createRpc(
         const session = ownedSession(id)
         if (!session) throw new Error(`Session not found: ${id}`)
         const cwd = session.agentKind === 'pi' ? await cwdForSession(session) : null
-        return readSessionUsage(session, { cwd })
+        return await readSessionUsage(session, { cwd })
       }
 
       case IPC.usageSummary: {
@@ -921,7 +948,7 @@ export function createRpc(
               cwds.set(s.id, await cwdForSession(s))
             }),
         )
-        return buildUsageSummary(list, { cwdFor: (s) => cwds.get(s.id) ?? null })
+        return await buildUsageSummary(list, { cwdFor: (s) => cwds.get(s.id) ?? null })
       }
 
       case IPC.listPromptTemplates: {
@@ -1089,7 +1116,7 @@ export function createRpc(
         const entries: SessionHistoryEntry[] = []
         for (const session of sessions) {
           const outcome = await resolveOutcome(session.id)
-          const rawUsage = readSessionUsage(session, { cwd: piCwds.get(session.id) ?? null })
+          const rawUsage = await readSessionUsage(session, { cwd: piCwds.get(session.id) ?? null })
           const usage = !rawUsage.exists || rawUsage.turns === 0 ? null : rawUsage
           entries.push({ session, outcome, usage })
         }

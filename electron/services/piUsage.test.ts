@@ -56,26 +56,26 @@ function assistantEntry(opts: {
 }
 
 describe('readPiUsage', () => {
-  it('returns exists:false with zero tokens when cwd is null', () => {
-    const u = readPiUsage('s1', null, root)
+  it('returns exists:false with zero tokens when cwd is null', async () => {
+    const u = await readPiUsage('s1', null, root)
     expect(u.exists).toBe(false)
     expect(u.turns).toBe(0)
     expect(u.costUsd).toBe(0)
     expect(u.tokens).toEqual({ input: 0, output: 0, cacheCreation: 0, cacheRead: 0 })
   })
 
-  it('returns exists:false when the session dir is missing', () => {
-    const u = readPiUsage('s1', '/nowhere', root)
+  it('returns exists:false when the session dir is missing', async () => {
+    const u = await readPiUsage('s1', '/nowhere', root)
     expect(u.exists).toBe(false)
   })
 
-  it('returns exists:false when the dir exists but has zero .jsonl files', () => {
+  it('returns exists:false when the dir exists but has zero .jsonl files', async () => {
     mkdirSync(piSessionDirFor(cwd, root), { recursive: true })
-    const u = readPiUsage('s1', cwd, root)
+    const u = await readPiUsage('s1', cwd, root)
     expect(u.exists).toBe(false)
   })
 
-  it('sums input/output/reasoning/cache tokens + cost across one file', () => {
+  it('sums input/output/reasoning/cache tokens + cost across one file', async () => {
     writeJsonl('run1.jsonl', [
       assistantEntry({
         input: 100,
@@ -88,7 +88,7 @@ describe('readPiUsage', () => {
       assistantEntry({ input: 10, output: 5, costTotal: 0.01 }),
     ])
 
-    const u = readPiUsage('s1', cwd, root)
+    const u = await readPiUsage('s1', cwd, root)
     expect(u.exists).toBe(true)
     expect(u.turns).toBe(2)
     // reasoning tokens are billed as output
@@ -97,7 +97,7 @@ describe('readPiUsage', () => {
     expect(u.model).toBe('claude-sonnet-5')
   })
 
-  it('sums usage across MULTIPLE jsonl files (one per pi launch) in the dir', () => {
+  it('sums usage across MULTIPLE jsonl files (one per pi launch) in the dir', async () => {
     writeJsonl('launch1.jsonl', [assistantEntry({ input: 10, output: 5, costTotal: 0.01 })])
     // Second file for the same session dir (a resume/relaunch of the same cwd).
     const dir = piSessionDirFor(cwd, root)
@@ -106,36 +106,36 @@ describe('readPiUsage', () => {
       assistantEntry({ input: 20, output: 15, costTotal: 0.02 }),
     )
 
-    const u = readPiUsage('s1', cwd, root)
+    const u = await readPiUsage('s1', cwd, root)
     expect(u.turns).toBe(2)
     expect(u.tokens.input).toBe(30)
     expect(u.tokens.output).toBe(20)
     expect(u.costUsd).toBeCloseTo(0.03, 4)
   })
 
-  it('ignores non-assistant message entries (e.g. user turns)', () => {
+  it('ignores non-assistant message entries (e.g. user turns)', async () => {
     writeJsonl('run1.jsonl', [
       JSON.stringify({ message: { role: 'user', content: [] } }),
       assistantEntry({ input: 5, output: 5 }),
     ])
-    const u = readPiUsage('s1', cwd, root)
+    const u = await readPiUsage('s1', cwd, root)
     expect(u.turns).toBe(1)
     expect(u.tokens.input).toBe(5)
   })
 
-  it('tolerates partial/garbage lines without throwing', () => {
+  it('tolerates partial/garbage lines without throwing', async () => {
     writeJsonl('run1.jsonl', [
       '{ not json',
       '',
       assistantEntry({ input: 7, output: 3 }),
       JSON.stringify({ message: { role: 'assistant' /* no usage */ } }),
     ])
-    const u = readPiUsage('s1', cwd, root)
+    const u = await readPiUsage('s1', cwd, root)
     expect(u.turns).toBe(1)
     expect(u.tokens.input).toBe(7)
   })
 
-  it('is lenient when model is absent', () => {
+  it('is lenient when model is absent', async () => {
     writeJsonl('run1.jsonl', [
       JSON.stringify({
         message: {
@@ -144,7 +144,7 @@ describe('readPiUsage', () => {
         },
       }),
     ])
-    const u = readPiUsage('s1', cwd, root)
+    const u = await readPiUsage('s1', cwd, root)
     expect(u.turns).toBe(1)
     expect(u.model).toBeUndefined()
   })
