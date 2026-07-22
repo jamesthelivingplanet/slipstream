@@ -7,6 +7,9 @@ import prettier from 'eslint-config-prettier'
 export default tseslint.config(
   {
     ignores: [
+      // Agent worktrees (full repo checkouts under .claude/worktrees/) and
+      // other Claude Code scratch files — not source we lint.
+      '.claude/**',
       'dist/**',
       'dist-electron/**',
       'out/**',
