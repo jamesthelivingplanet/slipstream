@@ -12,7 +12,10 @@ tag/changelog flow) → [docs/VERSIONING.md](docs/VERSIONING.md).
 Use **pnpm**. Run `pnpm check` (svelte-check), `pnpm test`, and `pnpm lint` (eslint +
 `prettier --check`) before committing — `pnpm lint` gates the MR, so don't skip it; use
 `pnpm lint:fix` to auto-fix formatting. `pnpm deploy` builds, then restarts the systemd
-`slipstream.service` and hits a healthz check. Master takes frequent MR merges: `git pull
+`slipstream.service` and hits a healthz check. `pnpm release [patch|minor|major]` (default
+minor, run from `master`) bumps `package.json`, rolls `CHANGELOG.md`'s `[Unreleased]`
+section into a dated entry, commits, tags `vX.Y.Z`, and pushes — see
+[docs/VERSIONING.md](docs/VERSIONING.md). Master takes frequent MR merges: `git pull
 --rebase origin master` right before pushing, and expect the conflict (if any) in
 `contract.ts` — every feature extends it, so additive changes collide there.
 

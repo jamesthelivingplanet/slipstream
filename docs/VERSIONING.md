@@ -97,20 +97,34 @@ build context).
 
 ## Tagging + changelog
 
-Releases are manual and mechanical:
+Cut a release with:
 
-1. Decide the new version per the semver rules above.
-2. Bump `version` in `package.json`.
-3. Move the `## [Unreleased]` section in `CHANGELOG.md` to a new
+```sh
+pnpm release          # minor bump (default)
+pnpm release patch
+pnpm release minor
+pnpm release major
+```
+
+`scripts/release.sh` does the whole flow mechanically:
+
+1. Refuses to run anywhere but `master`, with an unclean working tree, or on
+   a `master` that's behind `origin/master`.
+2. Runs the quality gates (`pnpm check`, `pnpm test`, `pnpm lint`) —
+   `SKIP_CHECKS=1 pnpm release` skips this.
+3. Bumps `version` in `package.json` per the semver rules above
+   (`npm version <bump> --no-git-tag-version`).
+4. Moves `CHANGELOG.md`'s `## [Unreleased]` section into a new
    `## [X.Y.Z] - YYYY-MM-DD` section (format:
-   [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)); leave a fresh
-   empty `## [Unreleased]` above it.
-4. Commit those two changes.
-5. Tag the commit `vX.Y.Z` (`git tag vX.Y.Z && git push origin vX.Y.Z`) —
-   annotated tags preferred (`git tag -a vX.Y.Z -m "..."`).
-6. Merge to `master` (or merge first, then tag the merge commit — either
-   order is fine as long as the tag lands on the commit that was actually
-   deployed/published).
+   [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)) via
+   `scripts/bumpChangelog.mjs`, leaving a fresh empty `## [Unreleased]`
+   above it. Refuses to proceed (and reverts the version bump) if
+   `[Unreleased]` has nothing in it — add a changelog entry before releasing.
+5. Commits `package.json` + `CHANGELOG.md` as `Release vX.Y.Z`.
+6. Tags the commit `vX.Y.Z` (annotated) and pushes both `master` and the tag.
+
+This only versions and tags a commit — it doesn't deploy anything. Run
+`pnpm deploy` separately to update a running service to the new version.
 
 `.gitlab-ci.yml`'s `publish-image` job already publishes
 `$CI_REGISTRY_IMAGE:latest` and `:$CI_COMMIT_SHORT_SHA` on every merge to
