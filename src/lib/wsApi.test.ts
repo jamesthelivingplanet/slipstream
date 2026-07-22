@@ -933,6 +933,89 @@ describe('wsApi', () => {
     })
   })
 
+  describe('autoConnect: false (FLO-144 follow-up — mount must not wait on ticket probe)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    })
+
+    it('does not construct a WebSocket until .connect() is called', () => {
+      const api = createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 't',
+        autoConnect: false,
+        WebSocketCtor: FakeWS,
+      })
+      expect(lastFakeWs).toBeNull()
+
+      api.connect(undefined)
+      expect(lastFakeWs).not.toBeNull()
+    })
+
+    it('.connect(undefined) connects with legacy ?token=', () => {
+      const api = createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 'mytoken',
+        autoConnect: false,
+        WebSocketCtor: FakeWS,
+      })
+      api.connect(undefined)
+      expect(getWs().url).toBe('ws://localhost/rpc?token=mytoken')
+    })
+
+    it('.connect(ticketUrl) fetches the ticket then connects with ?ticket=', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ticket: 'tik-1', expiresInMs: 10_000 }),
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const api = createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 'mytoken',
+        autoConnect: false,
+        WebSocketCtor: FakeWS,
+      })
+      expect(lastFakeWs).toBeNull()
+
+      api.connect('http://localhost/rpc-ticket')
+      await flush()
+
+      expect(fetchMock).toHaveBeenCalledWith('http://localhost/rpc-ticket', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer mytoken' },
+      })
+      expect(getWs().url).toBe('ws://localhost/rpc?ticket=tik-1')
+    })
+
+    it('a second .connect() call after started is a no-op', () => {
+      const api = createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 't',
+        autoConnect: false,
+        WebSocketCtor: FakeWS,
+      })
+      api.connect(undefined)
+      const ws1 = getWs()
+
+      api.connect(undefined)
+      expect(getWs()).toBe(ws1) // no second FakeWebSocket constructed
+    })
+
+    it('.connect() after destroy() is a no-op', () => {
+      const api = createWsApi({
+        url: 'ws://localhost/rpc',
+        token: 't',
+        autoConnect: false,
+        WebSocketCtor: FakeWS,
+      })
+      api.destroy()
+      api.connect(undefined)
+      expect(lastFakeWs).toBeNull()
+    })
+  })
+
   describe('heartbeat', () => {
     afterEach(() => {
       vi.useRealTimers()

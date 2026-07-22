@@ -50,6 +50,13 @@ export interface WsApiOpts {
    * (Electron/Tailscale — see docs/SECURITY.md §3 "Rollout / scoping").
    */
   ticketUrl?: string
+  /**
+   * Default true. When false, createWsApi does not open the socket in its
+   * constructor — the caller must invoke .connect(ticketUrl) to start
+   * connecting. Lets the web boot mount the UI before the ticket-mode
+   * decision resolves.
+   */
+  autoConnect?: boolean
 }
 
 type PendingReq = {
@@ -75,6 +82,12 @@ export type WsApi = SlipstreamApi & {
    * live forever, holding a closure over the stale token.
    */
   destroy(): void
+  /**
+   * Starts the socket for an instance built with autoConnect:false; ticketUrl
+   * selects ticket mode (undefined = legacy ?token=). No-op if already
+   * started or destroyed.
+   */
+  connect(ticketUrl: string | undefined): void
 }
 
 export function createWsApi(opts: WsApiOpts): WsApi {
@@ -84,6 +97,8 @@ export function createWsApi(opts: WsApiOpts): WsApi {
   let ws: WebSocket | null = null
   let open = false
   let destroyed = false
+  let started = false
+  let ticketUrl = opts.ticketUrl
   let reconnectAttempt = 0
   let heartbeatInterval: ReturnType<typeof setInterval> | undefined
   let pongTimeout: ReturnType<typeof setTimeout> | undefined
@@ -167,7 +182,7 @@ export function createWsApi(opts: WsApiOpts): WsApi {
   async function connectWithTicket(): Promise<void> {
     let ticket: string
     try {
-      const res = await fetch(opts.ticketUrl!, {
+      const res = await fetch(ticketUrl!, {
         method: 'POST',
         headers: { Authorization: `Bearer ${opts.token}` },
       })
@@ -190,9 +205,9 @@ export function createWsApi(opts: WsApiOpts): WsApi {
     openSocket(`${opts.url}?ticket=${encodeURIComponent(ticket)}`)
   }
 
-  function connect() {
+  function openConnection() {
     if (destroyed) return
-    if (opts.ticketUrl) {
+    if (ticketUrl) {
       void connectWithTicket()
       return
     }
@@ -298,7 +313,7 @@ export function createWsApi(opts: WsApiOpts): WsApi {
       // step (see connectWithTicket), so treat it as retryable: the next
       // connect() fetches a fresh ticket, and a genuinely-bad token surfaces
       // there as a real 401 instead.
-      if ((evt.code === 4001 || evt.code === 1008) && !opts.ticketUrl) {
+      if ((evt.code === 4001 || evt.code === 1008) && !ticketUrl) {
         opts.onAuthError?.()
         return
       }
@@ -319,7 +334,7 @@ export function createWsApi(opts: WsApiOpts): WsApi {
     reconnectAttempt++
     reconnectTimer = setTimeout(() => {
       reconnectTimer = undefined
-      connect()
+      openConnection()
     }, delay)
   }
 
@@ -337,7 +352,7 @@ export function createWsApi(opts: WsApiOpts): WsApi {
       clearTimeout(reconnectTimer)
       reconnectTimer = undefined
       reconnectAttempt = 0
-      connect()
+      openConnection()
       return
     }
     if (isOpen()) {
@@ -413,8 +428,19 @@ export function createWsApi(opts: WsApiOpts): WsApi {
     })
   }
 
-  // Boot the connection
-  connect()
+  // Boot the connection — unless the caller opted out (autoConnect: false),
+  // in which case .connect(ticketUrl) (see publicConnect below) starts it.
+  if (opts.autoConnect !== false) {
+    started = true
+    openConnection()
+  }
+
+  function publicConnect(nextTicketUrl: string | undefined): void {
+    if (destroyed || started) return
+    started = true
+    ticketUrl = nextTicketUrl
+    openConnection()
+  }
 
   // ── SlipstreamApi implementation ────────────────────────────────────────────
 
@@ -653,5 +679,5 @@ export function createWsApi(opts: WsApiOpts): WsApi {
     },
   }
 
-  return { ...api, destroy }
+  return { ...api, destroy, connect: publicConnect }
 }

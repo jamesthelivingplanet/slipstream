@@ -95,13 +95,17 @@ async function bootWeb() {
  * to the legacy ?token= URL rather than blocking boot.
  */
 async function wsTicketsEnabled(serverOrigin: string): Promise<boolean> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 2000)
   try {
-    const res = await fetch(new URL('/healthz', serverOrigin))
+    const res = await fetch(new URL('/healthz', serverOrigin), { signal: controller.signal })
     if (!res.ok) return false
     const body = (await res.json()) as { wsTickets?: boolean }
     return body.wsTickets === true
   } catch {
     return false
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -111,7 +115,7 @@ async function connectWithToken(
   createWsApi: typeof import('./lib/wsApi.js').createWsApi,
   serverOrigin: string,
 ): Promise<void> {
-  const useTickets = await wsTicketsEnabled(serverOrigin)
+  const ticketsPromise = wsTicketsEnabled(serverOrigin)
 
   return new Promise<void>((resolve) => {
     let authFailed = false
@@ -119,7 +123,7 @@ async function connectWithToken(
     const api = createWsApi({
       url: wsUrl,
       token,
-      ticketUrl: useTickets ? new URL('/rpc-ticket', serverOrigin).toString() : undefined,
+      autoConnect: false,
       onAuthError: async () => {
         if (authFailed) return
         authFailed = true
@@ -146,6 +150,12 @@ async function connectWithToken(
     mountApp(() => authFailed).then(() => {
       if (authFailed) return // onAuthError already swapped in the gate
       resolve()
+    })
+
+    // The ticket-mode probe races the mount above instead of gating it — once
+    // it resolves, start the actual socket connection.
+    void ticketsPromise.then((useTickets) => {
+      api.connect(useTickets ? new URL('/rpc-ticket', serverOrigin).toString() : undefined)
     })
   })
 }
