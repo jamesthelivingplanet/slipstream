@@ -3,10 +3,16 @@ import type { IpcDeps } from '../../ipc.js'
 import { IPC, BACKEND_KINDS } from '../../shared/contract.js'
 import type { BackendKind, TicketSource } from '../../shared/contract.js'
 import { branchFor } from '../../shared/branch.js'
-import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../../shared/promptComposer.js'
+import {
+  buildSystemPrompt,
+  buildHandoffPrompt,
+  formatChatExcerpt,
+  AGENT_LABELS,
+} from '../../shared/promptComposer.js'
 import { parseAgentArgs } from '../../shared/agentCli.js'
 import { launchSession, resumeProcedure } from '../../services/sessionLauncher.js'
 import type { LaunchRequest } from '../../services/sessionLauncher.js'
+import { readSessionChat } from '../../services/sessionChatReader.js'
 import type { RpcContext } from '../rpcContext.js'
 import type { ChannelHandlerMap } from './types.js'
 
@@ -234,6 +240,14 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
         throw new Error(`Session is already running on ${AGENT_LABELS[agentKind]}`)
       const repo = await deps.repos.resolvePath(persisted.repoId)
       const outcome = await resolveOutcome(id)
+      // Gather the prior agent's recent conversation (its reasoning, the tools
+      // it ran, where it left off) so the new agent can pick up the run
+      // instead of re-deriving it from git state alone. Read BEFORE
+      // resumeProcedure kills the old PTY, while the prior backend's chat
+      // source is still maximally fresh; best-effort — a backend with no chat
+      // reader (antigravity/grok) or nothing recoverable yields an empty
+      // excerpt and the prompt falls back to the git-state path.
+      const priorConversation = formatChatExcerpt((await readSessionChat(deps, persisted)).messages)
       const handoffPrompt = buildHandoffPrompt({
         tid: persisted.tid,
         title: persisted.title,
@@ -242,6 +256,7 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
         branch: persisted.branch,
         base: repo.base,
         outcomeSummary: outcome?.summary,
+        priorConversation,
       })
       return resumeProcedure(deps, {
         mode: 'handoff',

@@ -5,9 +5,11 @@ import {
   buildAgentsMdContent,
   deliverPrompt,
   buildHandoffPrompt,
+  formatChatExcerpt,
   AGENT_LABELS,
 } from './promptComposer.js'
 import { LIFECYCLE_INVOCATIONS } from './slipstreamCommands.js'
+import type { SessionChatMessageDTO } from './contract.js'
 
 describe('defaultUserPrompt', () => {
   it('returns "Begin implementing <tid>."', () => {
@@ -276,5 +278,133 @@ describe('buildHandoffPrompt', () => {
   it('omits "last reported summary" when outcomeSummary is not provided', () => {
     const result = buildHandoffPrompt(baseCtx)
     expect(result).not.toContain('last reported summary')
+  })
+
+  it('includes the prior conversation under a "Conversation so far" section when provided', () => {
+    const result = buildHandoffPrompt({
+      ...baseCtx,
+      priorConversation: 'User: fix the bug\n\nAssistant: Investigating now.',
+    })
+    expect(result).toContain('Conversation so far (from Claude Code)')
+    expect(result).toContain('User: fix the bug')
+    expect(result).toContain('Assistant: Investigating now.')
+  })
+
+  it('points the agent at the conversation excerpt instead of warning about missing scrollback', () => {
+    const result = buildHandoffPrompt({
+      ...baseCtx,
+      priorConversation: 'User: fix the bug',
+    })
+    expect(result).toContain('conversation excerpt above')
+    expect(result).not.toContain('terminal scrollback from before is not available')
+  })
+
+  it('falls back to the scrollback/git-state wording when no prior conversation is available', () => {
+    const result = buildHandoffPrompt(baseCtx)
+    expect(result).toContain('terminal scrollback from before is not available')
+    expect(result).not.toContain('Conversation so far')
+  })
+})
+
+function msg(
+  role: 'user' | 'assistant',
+  text: string,
+  overrides: Partial<SessionChatMessageDTO> = {},
+): SessionChatMessageDTO {
+  return {
+    uuid: `${role}-${text.slice(0, 4)}`,
+    role,
+    blocks: [{ type: 'text', text }],
+    ts: 0,
+    ...overrides,
+  }
+}
+
+describe('formatChatExcerpt', () => {
+  it('returns an empty string for no messages', () => {
+    expect(formatChatExcerpt([])).toBe('')
+  })
+
+  it('renders a user/assistant exchange with role labels', () => {
+    const out = formatChatExcerpt([
+      msg('user', 'Begin implementing T-1.'),
+      msg('assistant', 'Investigating the codebase.'),
+    ])
+    expect(out).toContain('User: Begin implementing T-1.')
+    expect(out).toContain('Assistant: Investigating the codebase.')
+  })
+
+  it('renders tool_use blocks as a compact [tool name: input] marker', () => {
+    const out = formatChatExcerpt([
+      {
+        uuid: 'a1',
+        role: 'assistant',
+        ts: 0,
+        blocks: [
+          { type: 'text', text: 'Running a command.' },
+          { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls -la' } },
+        ],
+      },
+    ])
+    expect(out).toContain('Assistant: Running a command.')
+    expect(out).toContain('[tool Bash: {"command":"ls -la"}]')
+  })
+
+  it('renders tool_result blocks, marking errors distinctly', () => {
+    const ok = formatChatExcerpt([
+      {
+        uuid: 'u1',
+        role: 'user',
+        ts: 0,
+        blocks: [{ type: 'tool_result', toolUseId: 't1', content: 'src/ tests/' }],
+      },
+    ])
+    expect(ok).toContain('[tool result: src/ tests/]')
+
+    const err = formatChatExcerpt([
+      {
+        uuid: 'u2',
+        role: 'user',
+        ts: 0,
+        blocks: [{ type: 'tool_result', toolUseId: 't1', content: 'boom', isError: true }],
+      },
+    ])
+    expect(err).toContain('[tool error: boom]')
+  })
+
+  it('truncates long text blocks to perBlockChars with an ellipsis', () => {
+    const long = 'x'.repeat(100)
+    const out = formatChatExcerpt([msg('user', long)], { perBlockChars: 20 })
+    expect(out).toHaveLength('User: '.length + 20)
+    expect(out.endsWith('\u2026')).toBe(true)
+  })
+
+  it('keeps the most recent messages and drops oldest when maxMessages binds', () => {
+    const msgs = Array.from({ length: 5 }, (_, i) => msg('user', `m${i}`))
+    const out = formatChatExcerpt(msgs, { maxMessages: 2, maxChars: 1000 })
+    expect(out).toContain('m3')
+    expect(out).toContain('m4')
+    expect(out).not.toContain('m2')
+  })
+
+  it('keeps the most recent messages and drops oldest when the char budget binds', () => {
+    const msgs = [
+      msg('user', 'oldest message that should be dropped'),
+      msg('assistant', 'recent message one'),
+      msg('assistant', 'recent message two'),
+    ]
+    // Budget only fits the two most recent whole messages.
+    const out = formatChatExcerpt(msgs, { maxChars: 60, maxMessages: 10 })
+    expect(out).toContain('recent message one')
+    expect(out).toContain('recent message two')
+    expect(out).not.toContain('oldest message')
+  })
+
+  it('skips messages whose blocks render to nothing (e.g. text is blank)', () => {
+    const out = formatChatExcerpt([
+      { uuid: 'x', role: 'assistant', ts: 0, blocks: [{ type: 'text', text: '   ' }] },
+      msg('user', 'real content'),
+    ])
+    expect(out).toBe('User: real content')
   })
 })

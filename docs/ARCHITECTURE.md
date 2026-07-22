@@ -315,7 +315,11 @@ worktree/session id when the current one hits its limits; `rpc.ts` composes a ta
 agent's reported outcome, and the new backend's `buildHandoffArgs` (`agentBackend.ts`) spawns
 it. The old PTY is killed first (`sessionManager.ts`'s `handoff`), `opencodeSid` is cleared on
 the DTO, and the sid is re-captured (same pattern as initial start) when handing off *to*
-opencode.
+opencode. The takeover prompt also carries the prior agent's **recent conversation** — read
+via the shared per-backend reader (`sessionChatReader.ts`, the same dispatch the Chat panel
+uses) and rendered to a compact excerpt by `formatChatExcerpt` — so the new agent can pick up
+the run's reasoning and direction instead of re-deriving it from git state alone. Backends
+with no chat reader (antigravity/grok) fall back to the git-state wording unchanged.
 
 The 256 KB output ring-buffer is scrollback, not a record — it truncates, and it's not
 queryable. FLO-97 gives agents a way to leave a durable, structured final summary: the
