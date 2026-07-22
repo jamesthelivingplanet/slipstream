@@ -23,6 +23,7 @@
     reviewComments,
     mobile,
     markSessionInput,
+    connected,
   } from '../stores'
   import {
     hasBackend,
@@ -1275,7 +1276,7 @@
   <!-- TerminalView is reused across sessions, so key the composer to reset its diff base on switch. -->
   {#key session.id}
     <MobileTermInput
-      disabled={!canWrite}
+      disabled={!canWrite || !$connected}
       onData={(d) => {
         if (!session.id) return
         markSessionInput(session.id)
