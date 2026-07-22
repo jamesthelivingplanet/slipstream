@@ -99,17 +99,54 @@ describe('ScrollbackStore', () => {
     })
   })
 
-  describe('bounding — 256 KB cap', () => {
+  describe('bounding — high-water truncation', () => {
     const MAX = 256 * 1024
+    const HIGH_WATER = MAX * 2
 
-    it('truncates head when total exceeds MAX_CHARS', () => {
+    it('does NOT truncate while below the high-water mark (append-only)', () => {
       const id = randomUUID()
+      // MAX + 100 is above the old per-append cap but below 2× MAX, so the
+      // store must leave the file intact — the whole point of FLO-134 is that
+      // a normal-sized chunk no longer triggers a read-modify-rewrite.
       store.append(id, 'a'.repeat(MAX))
       store.append(id, 'b'.repeat(100))
+      const data = store.read(id)
+      expect(data.length).toBe(MAX + 100)
+      expect(data.endsWith('b'.repeat(100))).toBe(true)
+    })
 
+    it('re-bounds to the MAX_CHARS tail once the high-water mark is crossed', () => {
+      const id = randomUUID()
+      store.append(id, 'a'.repeat(MAX)) // under high-water — no truncation
+      store.append(id, 'b'.repeat(MAX + 1)) // total > HIGH_WATER → re-bound
       const data = store.read(id)
       expect(data.length).toBe(MAX)
-      expect(data.endsWith('b'.repeat(100))).toBe(true)
+      // The last MAX chars written are all 'b's; every 'a' is dropped.
+      expect(data).toBe('b'.repeat(MAX))
+    })
+
+    it('drops the head and keeps the exact tail across the boundary', () => {
+      const id = randomUUID()
+      store.append(id, 'a'.repeat(MAX)) // MAX of 'a'
+      store.append(id, 'b'.repeat(MAX)) // exactly HIGH_WATER — not yet over
+      store.append(id, 'b'.repeat(1)) // +1 → over → re-bound to MAX tail
+      const data = store.read(id)
+      expect(data.length).toBe(MAX)
+      expect(data).toBe('b'.repeat(MAX))
+    })
+
+    it('keeps the file bounded across many small chunks (amortized rewrite)', () => {
+      const id = randomUUID()
+      // A chatty build: 5× MAX fed in 1 KB chunks. The file must stay
+      // bounded by the high-water mark and hold only the recent tail — never
+      // the full 5× MAX — while doing the rewrite at most ~once per MAX.
+      const chunk = 'c'.repeat(1024)
+      const total = MAX * 5
+      for (let i = 0; i < total / chunk.length; i += 1) store.append(id, chunk)
+      const data = store.read(id)
+      expect(data.length).toBeLessThanOrEqual(HIGH_WATER)
+      expect(data.length).toBeLessThan(total)
+      expect(data).toBe('c'.repeat(data.length))
     })
 
     it('keeps data under MAX_CHARS for smaller writes', () => {
@@ -118,6 +155,22 @@ describe('ScrollbackStore', () => {
       const data = store.read(id)
       expect(data.length).toBeLessThanOrEqual(MAX)
       expect(data).toBe('small data')
+    })
+
+    it('a fresh store seeds its size cache from a pre-existing file (resume)', () => {
+      // On session restart, launch() builds a NEW ScrollbackStore but the
+      // prior run's log is still on disk; new PTY chunks append to it. The
+      // in-memory size cache must seed from that existing file so the
+      // high-water check still trips correctly (and doesn't double-count
+      // the first new chunk).
+      const id = randomUUID()
+      store.append(id, 'a'.repeat(MAX)) // prior run leaves MAX on disk
+
+      const resumed = new ScrollbackStore(tmpDir)
+      resumed.append(id, 'b'.repeat(MAX + 1)) // new chunk pushes past HIGH_WATER
+      const data = resumed.read(id)
+      expect(data.length).toBe(MAX)
+      expect(data).toBe('b'.repeat(MAX))
     })
   })
 
@@ -154,6 +207,13 @@ describe('ScrollbackStore', () => {
 
       expect(store.read(idA)).toBe('A1A2')
       expect(store.read(idB)).toBe('B1B2')
+    })
+
+    it('is a no-op (no file created) when the chunk strips to empty', () => {
+      const id = randomUUID()
+      store.append(id, '\x1b]52;c;QUJD\x07') // pure OSC 52 → stripped to ''
+      expect(store.read(id)).toBe('')
+      expect(fs.existsSync(path.join(tmpDir, 'scrollback', `${id}.log`))).toBe(false)
     })
   })
 })
