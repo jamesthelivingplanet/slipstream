@@ -114,6 +114,14 @@
 
   $: cliMissing = cliCheck !== null && cliCheck.found === false
 
+  $: startBlockReason = !title.trim()
+    ? 'Enter a title to continue.'
+    : !repoChoice
+      ? 'Choose a repository to continue.'
+      : cliMissing
+        ? `${cliCheck?.bin ?? 'The selected CLI'} isn't available.`
+        : null
+
   $: chosen = repoChoice ? repoById(repoChoice) : undefined
   $: previewTid = picked ? picked.tid : draftTid
   $: branch = previewTid ? branchFor(previewTid, title.trim() || 'task') : ''
@@ -412,6 +420,9 @@
     </div>
 
     <svelte:fragment slot="footer">
+      {#if startBlockReason}
+        <span class="muted start-hint">{startBlockReason}</span>
+      {/if}
       <button class="btn btn-ghost" on:click={() => dialogOpen.set(false)}>Cancel</button>
       <button
         class="btn btn-primary"
@@ -423,6 +434,11 @@
 {/if}
 
 <style>
+  .start-hint {
+    font-size: 12px;
+    margin-right: auto;
+    align-self: center;
+  }
   .link-btn {
     color: hsl(var(--primary));
     text-decoration: underline;

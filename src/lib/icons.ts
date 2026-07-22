@@ -17,6 +17,7 @@ export const icons = {
   chevronLeft: svg('<path d="m15 18-6-6 6-6"/>'),
   chevronRight: svg('<path d="m9 18 6-6-6-6"/>'),
   check: svg('<path d="M20 6 9 17l-5-5"/>', 15),
+  close: svg('<path d="M18 6 6 18M6 6l12 12"/>', 14),
   terminal: svg(
     '<path d="m7 8 4 4-4 4M13 16h4"/><rect x="2" y="3" width="20" height="18" rx="2"/>',
     22,

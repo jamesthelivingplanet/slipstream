@@ -227,7 +227,13 @@
     >
       <img src="/icons/nulliel-glyph.svg" alt="Slipstream" class="glyph" />
       <b>Slip<span class="wm-accent">stream</span></b>
-      {#if !$mobile}<span class="danger-chip"><span class="dd"></span>Dangerous mode</span>{/if}
+      {#if !$mobile}
+        <span
+          class="danger-chip"
+          title="Agents run with --dangerously-skip-permissions — no per-action confirmation prompts"
+          ><span class="dd"></span>Dangerous mode</span
+        >
+      {/if}
       <CliStatus />
     </div>
     {#if $selected}
@@ -242,7 +248,11 @@
     {/if}
     <div class="spacer"></div>
     <ThemeMenu />
-    <button class="btn btn-outline btn-icon btn-sm" title="Refresh" on:click={onRefresh}>
+    <button
+      class="btn btn-outline btn-icon btn-sm"
+      title="Refresh — also cleans up merged & signed-off agents"
+      on:click={onRefresh}
+    >
       {#if $contentLoading}
         <span class="spin">{@html icons.refresh}</span>
       {:else if showCheck}

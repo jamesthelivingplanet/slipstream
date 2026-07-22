@@ -32,7 +32,17 @@
 
     <div class="search">
       {@html icons.search}
-      <input placeholder="Search agents…" bind:value={$query} />
+      <input placeholder="Search agents…" aria-label="Search agents" bind:value={$query} />
+      {#if $query}
+        <button
+          type="button"
+          class="search-clear"
+          aria-label="Clear search"
+          on:click={() => query.set('')}
+        >
+          {@html icons.close}
+        </button>
+      {/if}
     </div>
 
     <div class="segs">

@@ -14,6 +14,7 @@
   let prompt = ''
   let repoChoice: string | null = null
   let menuOpen = false
+  let startAttemptedNoRepo = false
   let lastId: string | undefined = ''
 
   let agentKind: BackendKind = 'claude-code'
@@ -49,6 +50,7 @@
 
   function start() {
     if (!repoChoice) {
+      startAttemptedNoRepo = true
       menuOpen = true
       return
     }
@@ -104,6 +106,7 @@
                 on:click={() => {
                   repoChoice = r.id
                   menuOpen = false
+                  startAttemptedNoRepo = false
                 }}
               >
                 <span><span class="muted">{r.org}/</span>{r.name}</span>
@@ -164,6 +167,9 @@
       </div>
     </div>
 
+    {#if startAttemptedNoRepo && !repoChoice}
+      <p class="cfg-hint start-hint">Pick a repository first.</p>
+    {/if}
     <button class="btn btn-primary" style="width:100%;height:40px;font-size:14px" on:click={start}>
       {@html icons.play} Start agent
     </button>
