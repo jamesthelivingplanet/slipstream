@@ -27,7 +27,7 @@ import type {
   StatusMeta,
 } from '../shared/contract.js'
 import { GIT_PROVIDERS } from '../services/gitProviders/registry.js'
-import { branchFor } from '../shared/branch.js'
+import { branchFor, isSafeSlug } from '../shared/branch.js'
 import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../shared/promptComposer.js'
 import { parseAgentArgs } from '../shared/agentCli.js'
 import { LOCAL_IDENTITY } from './auth.js'
@@ -122,6 +122,15 @@ export function createRpc(
     const repo = await deps.repos.get(repoId)
     if (!repo || !ownedByCaller(repo)) throw new Error(`Unknown repo: ${repoId}`)
     return repo
+  }
+
+  // `branch` reaches `join()`-based worktree paths and shell cwds (worktree
+  // status/diff/update, openInEditor, runApp) — reject anything that isn't a
+  // plain slug so a `..`/absolute-path payload can't escape `.worktrees/`
+  // (FLO-129).
+  function requireSafeBranch(branch: string): string {
+    if (!isSafeSlug(branch)) throw new Error(`Invalid branch: ${branch}`)
+    return branch
   }
 
   // Negative-cache disk-fallback misses for a bounded window. Scoped inside
@@ -636,21 +645,21 @@ export function createRpc(
 
       case IPC.worktreeStatus: {
         const repoId = args[0] as string
-        const branch = args[1] as string
+        const branch = requireSafeBranch(args[1] as string)
         const repo = await requireOwnedRepo(repoId)
         return deps.worktrees.status(repo, branch)
       }
 
       case IPC.worktreeDiff: {
         const repoId = args[0] as string
-        const branch = args[1] as string
+        const branch = requireSafeBranch(args[1] as string)
         const repo = await requireOwnedRepo(repoId)
         return deps.worktrees.diff(repo, branch)
       }
 
       case IPC.worktreeUpdateFromBase: {
         const repoId = args[0] as string
-        const branch = args[1] as string
+        const branch = requireSafeBranch(args[1] as string)
         const mode = args[2] as WorktreeUpdateMode
         const repo = await requireOwnedRepo(repoId)
         return deps.worktrees.updateFromBase(repo, branch, { mode })
@@ -735,8 +744,9 @@ export function createRpc(
 
       case IPC.openInEditor: {
         const input = args[0] as { repoId: string; branch: string; mobile?: boolean }
+        const branch = requireSafeBranch(input.branch)
         const repo = await requireOwnedRepo(input.repoId)
-        const cwd = deps.worktrees.pathFor(repo, input.branch)
+        const cwd = deps.worktrees.pathFor(repo, branch)
         const desktop = deps.config.get('editor.command') ?? 'code'
         const mobileCmd = (deps.config.get('editor.mobileCommand') ?? '').trim()
         const command = input.mobile && mobileCmd ? mobileCmd : desktop
@@ -759,7 +769,8 @@ export function createRpc(
       }
 
       case IPC.runApp: {
-        const { repoId, branch } = args[0] as { repoId: string; branch: string }
+        const { repoId, branch: rawBranch } = args[0] as { repoId: string; branch: string }
+        const branch = requireSafeBranch(rawBranch)
         const repo = await requireOwnedRepo(repoId)
         const settings = await deps.repos.getSettings(repoId)
         if (!settings.startCmd.trim()) return { started: false, reason: 'no-start-command' }

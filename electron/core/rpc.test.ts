@@ -1454,6 +1454,43 @@ describe('createRpc', () => {
     ).rejects.toThrow('Unknown repo: unknown')
   })
 
+  describe('branch validation (FLO-129)', () => {
+    const traversalPayloads = ['..', '../../etc/passwd', 'foo/../../bar', '/etc/passwd']
+
+    it.each(traversalPayloads)('worktreeStatus rejects branch %j', async (payload) => {
+      await expect(rpc.handle(IPC.worktreeStatus, ['r1', payload])).rejects.toThrow(
+        'Invalid branch',
+      )
+      expect(deps.worktrees.status).not.toHaveBeenCalled()
+    })
+
+    it.each(traversalPayloads)('worktreeDiff rejects branch %j', async (payload) => {
+      await expect(rpc.handle(IPC.worktreeDiff, ['r1', payload])).rejects.toThrow('Invalid branch')
+      expect(deps.worktrees.diff).not.toHaveBeenCalled()
+    })
+
+    it.each(traversalPayloads)('worktreeUpdateFromBase rejects branch %j', async (payload) => {
+      await expect(
+        rpc.handle(IPC.worktreeUpdateFromBase, ['r1', payload, 'rebase']),
+      ).rejects.toThrow('Invalid branch')
+      expect(deps.worktrees.updateFromBase).not.toHaveBeenCalled()
+    })
+
+    it.each(traversalPayloads)('openInEditor rejects branch %j', async (payload) => {
+      await expect(
+        rpc.handle(IPC.openInEditor, [{ repoId: 'r1', branch: payload }]),
+      ).rejects.toThrow('Invalid branch')
+      expect(deps.editor.open).not.toHaveBeenCalled()
+    })
+
+    it.each(traversalPayloads)('runApp rejects branch %j', async (payload) => {
+      await expect(rpc.handle(IPC.runApp, [{ repoId: 'r1', branch: payload }])).rejects.toThrow(
+        'Invalid branch',
+      )
+      expect(deps.appRunner.run).not.toHaveBeenCalled()
+    })
+  })
+
   it('startSession passes systemPrompt containing the ticket id to sessions.start', async () => {
     await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
