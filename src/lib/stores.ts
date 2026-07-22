@@ -469,6 +469,24 @@ export async function registerRepoByUrl(remoteUrl: string): Promise<void> {
 }
 
 export async function removeRepoById(id: string): Promise<void> {
+  const repo = repoById(id)
+  const label = repo ? `${repo.org}/${repo.name}` : 'this repository'
+  const liveSessions = get(sessions).filter((s) => s.repo === id)
+  if (liveSessions.length > 0) {
+    const n = liveSessions.length
+    pushToast(
+      'error',
+      `Can't remove ${label}: ${n} session${n === 1 ? '' : 's'} still ${n === 1 ? 'references' : 'reference'} it. Clean those up first.`,
+    )
+    return
+  }
+  const ok = await confirmDialog({
+    title: 'Remove repository?',
+    message: `This untracks ${label} from Slipstream. It doesn't delete anything on disk.`,
+    confirmLabel: 'Remove',
+    danger: true,
+  })
+  if (!ok) return
   try {
     await removeRepo(id)
     repos.update(($r) => $r.filter((r) => r.id !== id))
