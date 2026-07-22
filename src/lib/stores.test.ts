@@ -83,6 +83,7 @@ import {
   markSessionInput,
   refreshAndReconcile,
   subscribeConnectionChange,
+  connected,
   initFromBackend,
   selected,
   confirmState,
@@ -1463,6 +1464,28 @@ describe('FLO-114: local drafts survive a backend re-seed', () => {
     expect(ids).toContain('backend-1')
     expect(get(sessions).find((s) => s.id === draftId)?.status).toBe('idle')
     expect(get(sessions).find((s) => s.id === draftId)?.prompt).toBe('typing a prompt…')
+
+    unsubscribe()
+  })
+
+  it('subscribeConnectionChange: mirrors every transition into the connected store (FLO-108)', async () => {
+    let emit: ((connected: boolean) => void) | undefined
+    vi.mocked(onConnectionChange).mockImplementation((cb: (connected: boolean) => void) => {
+      emit = cb
+      return () => {}
+    })
+    vi.mocked(listSessions).mockResolvedValue([])
+
+    const unsubscribe = subscribeConnectionChange()
+    expect(get(connected)).toBe(true)
+
+    emit?.(false)
+    expect(get(connected)).toBe(false)
+
+    emit?.(true)
+    expect(get(connected)).toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
 
     unsubscribe()
   })
