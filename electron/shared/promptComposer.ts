@@ -1,4 +1,4 @@
-import type { BackendKind } from './contract.js'
+import type { BackendKind, ChatBlock, SessionChatMessageDTO } from './contract.js'
 import { SINGLE_CHANNEL_CLAIM } from './slipstreamCommands.js'
 
 export { AGENT_LABELS } from './agents.js'
@@ -86,13 +86,22 @@ export interface HandoffContext {
   base: string
   /** The previous agent's reported outcome summary, when one exists. */
   outcomeSummary?: string
+  /** The prior agent's recent conversation, rendered as a compact transcript
+   *  excerpt via {@link formatChatExcerpt}, when the backend had a chat
+   *  reader (claude-code/pi/opencode/kilo). Omitted for terminal-only
+   *  backends (antigravity/grok) or when no history was recoverable. */
+  priorConversation?: string
 }
 
 export function buildHandoffPrompt(ctx: HandoffContext): string {
-  const { tid, title, prompt, fromAgent, branch, base, outcomeSummary } = ctx
+  const { tid, title, prompt, fromAgent, branch, base, outcomeSummary, priorConversation } = ctx
   const outcomeSection =
     outcomeSummary && outcomeSummary.trim().length > 0
       ? `\n\n## Previous agent's last reported summary\n\n${outcomeSummary}`
+      : ''
+  const conversationSection =
+    priorConversation && priorConversation.trim().length > 0
+      ? `\n\n## Conversation so far (from ${fromAgent})\n\nThis is the prior agent's recent conversation — its reasoning, the tools it ran, and where it left off. Use it to get up to speed; don't redo work it already finished.\n\n${priorConversation}`
       : ''
 
   return `You are taking over an in-progress run from another agent (${fromAgent}) that became unavailable (e.g. it hit its usage limits). Do not start over — continue from the existing work.
@@ -101,11 +110,11 @@ export function buildHandoffPrompt(ctx: HandoffContext): string {
 
 ${tid}: ${title}
 
-${prompt}${outcomeSection}
+${prompt}${outcomeSection}${conversationSection}
 
 ## How to pick up the run
 
-The worktree already contains all progress so far — review it before doing anything else. On branch \`${branch}\`, run \`git log ${base}..HEAD\`, \`git status\`, and \`git diff ${base}...HEAD\` to see what has been done. The terminal scrollback from before is not available to you, so rely on the git state and any notes in the worktree.
+The worktree already contains all progress so far — review it before doing anything else. On branch \`${branch}\`, run \`git log ${base}..HEAD\`, \`git status\`, and \`git diff ${base}...HEAD\` to see what has been done.${priorConversation ? ' The conversation excerpt above is your fastest path to understanding the current state and direction; pair it with the git state.' : ' The terminal scrollback from before is not available to you, so rely on the git state and any notes in the worktree.'}
 
 Then continue the task to completion, following the system-prompt instructions (report your state via the \`slipstream\` CLI — \`task-started\` now, then the lifecycle commands — and open the merge request via \`slipstream open-mr\` when done).`
 }
@@ -135,4 +144,94 @@ export function deliverPrompt(kind: BackendKind, layers: PromptLayers): SpawnPro
     default:
       return { systemArgs: [], userPrompt: system ? `${system}\n\n${user}` : user }
   }
+}
+
+/** Truncate `s` to `max` chars, appending an ellipsis if it was cut. A `max`
+ *  of 0 or less returns an empty string. */
+function truncate(s: string, max: number): string {
+  if (max <= 0) return ''
+  if (s.length <= max) return s
+  // Reserve one char for the ellipsis so the result never exceeds `max`.
+  return `${s.slice(0, max - 1).trimEnd()}\u2026`
+}
+
+/** Render a single chat block to a compact one-liner for the excerpt. */
+function renderBlock(block: ChatBlock, perBlock: number): string {
+  switch (block.type) {
+    case 'text':
+      return truncate(block.text.replace(/\s+/g, ' ').trim(), perBlock)
+    case 'tool_use':
+      // tool_use.input is tool-specific JSON (e.g. Bash's {command}); a
+      // short JSON preview is enough for the new agent to know what was
+      // done — the full artifact is in the worktree/git state if it needs it.
+      return `[tool ${block.name}: ${truncate(safeJson(block.input), perBlock)}]`
+    case 'tool_result':
+      return block.isError
+        ? `[tool error: ${truncate(block.content.replace(/\s+/g, ' ').trim(), perBlock)}]`
+        : `[tool result: ${truncate(block.content.replace(/\s+/g, ' ').trim(), perBlock)}]`
+  }
+}
+
+/** Stringify a tool_use input defensively: JSON.stringify throws on cycles,
+ *  which a malformed transcript could contain. */
+function safeJson(v: unknown): string {
+  try {
+    return JSON.stringify(v)
+  } catch {
+    return String(v)
+  }
+}
+
+export interface ChatExcerptOptions {
+  /** Max number of most-recent messages to consider (older messages dropped
+   *  before the char budget is applied). Defaults to 40. */
+  maxMessages?: number
+  /** Hard cap on total rendered length (chars). The most recent messages are
+   *  kept first; whole messages are dropped from the oldest end until the run
+   *  fits, so an excerpt never cuts a message mid-sentence. Defaults to 16000. */
+  maxChars?: number
+  /** Per-block truncation limit (chars). Defaults to 350 — enough to show the
+   *  gist of a bash command or tool result without flooding the prompt. */
+  perBlockChars?: number
+}
+
+/** Render a session's chat messages into a compact, readable transcript
+ *  excerpt for a handoff prompt. Returns an empty string when there's nothing
+ *  to show. Output is oldest-first (natural reading order), prioritizing the
+ *  most recent context when the {@link ChatExcerptOptions.maxChars} budget is
+ *  binding. Pure and deterministic — unit-tested directly. */
+export function formatChatExcerpt(
+  messages: SessionChatMessageDTO[],
+  opts: ChatExcerptOptions = {},
+): string {
+  if (messages.length === 0) return ''
+  const maxMessages = opts.maxMessages ?? 40
+  const maxChars = opts.maxChars ?? 16_000
+  const perBlock = opts.perBlockChars ?? 350
+
+  const recent = messages.slice(-maxMessages)
+  const rendered = recent
+    .map((m) => {
+      const label = m.role === 'assistant' ? 'Assistant' : 'User'
+      const parts = m.blocks.map((b) => renderBlock(b, perBlock)).filter((s) => s.length > 0)
+      if (parts.length === 0) return ''
+      return `${label}: ${parts.join(' ')}`
+    })
+    .filter((s) => s.length > 0)
+
+  if (rendered.length === 0) return ''
+
+  // Keep whole messages, most-recent first, while the char budget holds.
+  // Newer context is more valuable to a take-over agent, so an over-budget
+  // excerpt drops from the oldest end rather than truncating arbitrarily.
+  const kept: string[] = []
+  let total = 0
+  for (let i = rendered.length - 1; i >= 0; i--) {
+    const r = rendered[i]
+    const sep = kept.length > 0 ? 2 : 0 // the '\n\n' join below
+    if (total + r.length + sep > maxChars) break
+    kept.unshift(r)
+    total += r.length + sep
+  }
+  return kept.join('\n\n').trim()
 }

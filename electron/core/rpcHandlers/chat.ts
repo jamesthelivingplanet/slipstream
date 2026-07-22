@@ -1,17 +1,7 @@
-import fs from 'node:fs'
 import type { IpcDeps } from '../../ipc.js'
 import { IPC } from '../../shared/contract.js'
 import type { SessionChatMessageDTO } from '../../shared/contract.js'
-import { usesEmbeddedServer } from '../../services/agentBackend.js'
-import { transcriptPathFor } from '../../services/transcripts.js'
-import { parseTranscriptMessages } from '../../services/transcriptMessages.js'
-import { parsePiChatMessages } from '../../services/piChatMessages.js'
-import {
-  findNewestPiSessionFile,
-  piSessionDirFor,
-  readPiSessionFile,
-} from '../../services/piSessions.js'
-import { fetchOpencodeMessages, opencodeMessagesToChat } from '../../services/opencodeSessions.js'
+import { readSessionChat } from '../../services/sessionChatReader.js'
 import { listAgentSkillsFor } from '../../services/agentSkills.js'
 import { extractScreenQuestion } from '../../services/chatQuestion.js'
 import type { RpcContext } from '../rpcContext.js'
@@ -62,41 +52,12 @@ export function createChatHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHandl
       const session = ownedSession(id)
       if (!session) throw new Error(`Session not found: ${id}`)
 
-      const kind = session.agentKind ?? 'claude-code'
-
-      if (kind === 'claude-code') {
-        const file = transcriptPathFor(id)
-        if (!file) return { available: false, messages: [] }
-        let raw: string
-        try {
-          raw = await fs.promises.readFile(file, 'utf8')
-        } catch {
-          return { available: false, messages: [] }
-        }
-        return { available: true, messages: pageChatMessages(parseTranscriptMessages(raw), opts) }
-      }
-
-      if (kind === 'pi') {
-        const cwdForSession = makeCwdForSession(deps)
-        const cwd = await cwdForSession(session)
-        if (!cwd) return { available: false, messages: [] }
-        const file = await findNewestPiSessionFile(piSessionDirFor(cwd))
-        if (!file) return { available: false, messages: [] }
-        const raw = await readPiSessionFile(file)
-        return { available: true, messages: pageChatMessages(parsePiChatMessages(raw), opts) }
-      }
-
-      if (usesEmbeddedServer(kind)) {
-        const state = deps.sessions.getOpencodeState?.(id)
-        if (!state?.port || !state.sid) return { available: false, messages: [] }
-        const raw = await fetchOpencodeMessages(state.port, state.sid)
-        return { available: true, messages: pageChatMessages(opencodeMessagesToChat(raw), opts) }
-      }
-
-      // antigravity/grok have no chat reader (TASK-FPH60) — terminal-only.
-      // kilo goes through the embedded-server branch above (opencode + kilo
-      // share it — see usesEmbeddedServer).
-      return { available: false, messages: [] }
+      // The per-backend dispatch (claude transcript / pi session file /
+      // opencode embedded server / antigravity+grok none) lives once in
+      // sessionChatReader so this handler and the handoff path can't drift —
+      // paging is layered on top here.
+      const { available, messages } = await readSessionChat(deps, session)
+      return { available, messages: pageChatMessages(messages, opts) }
     },
 
     [IPC.subscribeChat]: async (args) => {
