@@ -51,17 +51,17 @@ const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ?
  * message dir, or the dir is unreadable. Unparseable files are skipped
  * silently (mirrors readTranscriptUsage's tolerance of partial/garbage data).
  */
-export function readOpencodeUsage(
+export async function readOpencodeUsage(
   sessionId: string,
   opencodeSid: string | undefined,
   storageRoot: string = opencodeStorageRoot(),
-): SessionUsage {
+): Promise<SessionUsage> {
   if (!opencodeSid) return emptyUsage(sessionId)
 
   const dir = path.join(storageRoot, 'message', opencodeSid)
   let files: string[]
   try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'))
+    files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith('.json'))
   } catch {
     return emptyUsage(sessionId)
   }
@@ -74,7 +74,7 @@ export function readOpencodeUsage(
   for (const file of files) {
     let raw: unknown
     try {
-      raw = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'))
+      raw = JSON.parse(await fs.promises.readFile(path.join(dir, file), 'utf8'))
     } catch {
       continue
     }

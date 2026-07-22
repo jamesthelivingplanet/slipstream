@@ -12,6 +12,7 @@
  * table as a single editable constant.
  */
 import fs from 'node:fs'
+import readline from 'node:readline'
 import { claudeProjectsDir, transcriptPathFor } from './transcripts.js'
 import { dayKeyFromMs } from '../shared/usageFormat.js'
 import { readOpencodeUsage } from './opencodeUsage.js'
@@ -102,17 +103,39 @@ function tokensFromUsage(raw: unknown): UsageTokens {
   }
 }
 
+/** In-memory cache of parsed transcript usage, keyed by the resolved absolute
+ *  transcript file path (not session id — a session's transcript path can
+ *  change across resume/re-provision). A history-panel open re-derives usage
+ *  for every session; without this, a huge unread transcript gets re-streamed
+ *  and re-parsed on every open even though its content hasn't changed. Module
+ *  scope is intentional: this cache tracks on-disk file state, not
+ *  per-connection RPC state (contrast the per-connection outcome-miss cache
+ *  in rpc.ts). Invalidated by mtime/size, not by TTL. */
+interface UsageCacheEntry {
+  mtimeMs: number
+  size: number
+  usage: SessionUsage
+}
+const transcriptUsageCache = new Map<string, UsageCacheEntry>()
+
 /**
  * Parse a single session's transcript JSONL into a token + cost rollup.
  * Sums every assistant turn's top-level `message.usage` (Claude Code's own
  * cost tracking uses these same fields; the nested `iterations` array is a
  * duplicate and is intentionally not double-counted). Returns `exists: false`
  * with zeroed tokens when no transcript file is present yet.
+ *
+ * Reads the file via a streamed, line-buffered `readline` interface rather
+ * than `readFileSync` + `split('\n')` so a large transcript doesn't block the
+ * daemon's single event loop (the same loop that streams live PTY output) in
+ * one synchronous pass. A module-scope cache keyed by the resolved file path
+ * (see `transcriptUsageCache`) skips the read+parse entirely when the file's
+ * mtime/size haven't changed since the last call.
  */
-export function readTranscriptUsage(
+export async function readTranscriptUsage(
   id: string,
   projectsDir: string = claudeProjectsDir(),
-): SessionUsage {
+): Promise<SessionUsage> {
   const file = transcriptPathFor(id, projectsDir)
   if (!file) {
     return {
@@ -124,9 +147,9 @@ export function readTranscriptUsage(
     }
   }
 
-  let text: string
+  let stat: fs.Stats
   try {
-    text = fs.readFileSync(file, 'utf8')
+    stat = await fs.promises.stat(file)
   } catch {
     return {
       sessionId: id,
@@ -137,34 +160,53 @@ export function readTranscriptUsage(
     }
   }
 
+  const cached = transcriptUsageCache.get(file)
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.usage
+  }
+
   let tokens = { ...ZERO_TOKENS }
   let cost = 0
   let turns = 0
   let model: string | undefined
 
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue
-    let entry: unknown
-    try {
-      entry = JSON.parse(line)
-    } catch {
-      continue // transcripts can contain partial/append-in-progress lines
-    }
-    if (typeof entry !== 'object' || entry === null) continue
-    const e = entry as { type?: unknown; message?: unknown }
-    if (e.type !== 'assistant') continue
-    if (!e.message || typeof e.message !== 'object') continue
-    const msg = e.message as { usage?: unknown; model?: unknown }
-    if (!msg.usage) continue
+  try {
+    const rl = readline.createInterface({
+      input: fs.createReadStream(file, { encoding: 'utf8' }),
+      crlfDelay: Infinity,
+    })
+    for await (const line of rl) {
+      if (!line.trim()) continue
+      let entry: unknown
+      try {
+        entry = JSON.parse(line)
+      } catch {
+        continue // transcripts can contain partial/append-in-progress lines
+      }
+      if (typeof entry !== 'object' || entry === null) continue
+      const e = entry as { type?: unknown; message?: unknown }
+      if (e.type !== 'assistant') continue
+      if (!e.message || typeof e.message !== 'object') continue
+      const msg = e.message as { usage?: unknown; model?: unknown }
+      if (!msg.usage) continue
 
-    const t = tokensFromUsage(msg.usage)
-    tokens = addTokens(tokens, t)
-    cost += costForTurn(t, typeof msg.model === 'string' ? msg.model : undefined)
-    turns++
-    if (typeof msg.model === 'string' && msg.model) model = msg.model
+      const t = tokensFromUsage(msg.usage)
+      tokens = addTokens(tokens, t)
+      cost += costForTurn(t, typeof msg.model === 'string' ? msg.model : undefined)
+      turns++
+      if (typeof msg.model === 'string' && msg.model) model = msg.model
+    }
+  } catch {
+    return {
+      sessionId: id,
+      exists: false,
+      tokens: { ...ZERO_TOKENS },
+      costUsd: 0,
+      turns: 0,
+    }
   }
 
-  return {
+  const usage: SessionUsage = {
     sessionId: id,
     exists: true,
     tokens,
@@ -172,6 +214,8 @@ export function readTranscriptUsage(
     turns,
     model,
   }
+  transcriptUsageCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, usage })
+  return usage
 }
 
 /** Empty (no data yet) usage shape shared by any kind with no reader. */
@@ -185,7 +229,7 @@ function emptyUsage(sessionId: string): SessionUsage {
  * every backend produces the same SessionUsage contract shape (FLO-94 parity
  * gap: opencode/pi sessions always showed usage:null).
  */
-export function readSessionUsage(
+export async function readSessionUsage(
   session: SessionDTO,
   opts: {
     projectsDir?: string
@@ -193,7 +237,7 @@ export function readSessionUsage(
     piRoot?: string
     cwd?: string | null
   } = {},
-): SessionUsage {
+): Promise<SessionUsage> {
   const kind = session.agentKind ?? 'claude-code'
   switch (kind) {
     case 'claude-code':
@@ -218,7 +262,7 @@ export function readSessionUsage(
  * Repo buckets are keyed by repoId; day buckets by 'YYYY-MM-DD' derived from
  * each session's createdAt (the day the run started).
  */
-export function buildUsageSummary(
+export async function buildUsageSummary(
   sessions: SessionDTO[],
   opts: {
     projectsDir?: string
@@ -226,15 +270,20 @@ export function buildUsageSummary(
     piRoot?: string
     cwdFor?: (s: SessionDTO) => string | null
   } = {},
-): UsageSummary {
+): Promise<UsageSummary> {
   const perSession: SessionUsage[] = []
   const byRepo = new Map<string, UsageBucket>()
   const byDay = new Map<string, UsageBucket>()
   let total = { ...ZERO_TOKENS }
   let totalCost = 0
 
+  // Serial by design: each read already yields the event loop internally
+  // (readline over a stream), so a serial loop keeps live PTY streaming
+  // responsive without opening many concurrent file descriptors. Parsing is
+  // CPU-bound and single-threaded in JS, so Promise.all across sessions
+  // wouldn't reduce total work — only add FD/memory contention.
   for (const s of sessions) {
-    const u = readSessionUsage(s, {
+    const u = await readSessionUsage(s, {
       projectsDir: opts.projectsDir,
       opencodeRoot: opts.opencodeRoot,
       piRoot: opts.piRoot,
