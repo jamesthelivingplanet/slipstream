@@ -23,6 +23,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const TAIL_CHARS = 2048
+/** Rotation cap for the process-level server.log (FLO-133): once a write
+ *  would cross this, the current file is renamed to server.log.1 (one backup,
+ *  no N-file rotation) before the new line is appended. */
+const MAX_SERVER_LOG_BYTES = 10 * 1024 * 1024
 
 export interface RunLogger {
   /** Record a session spawn (start or resume). */
@@ -31,6 +35,8 @@ export interface RunLogger {
   exit(sessionId: string, info: ExitInfo): void
   /** Record a process-level event (startup, uncaught error, etc.). */
   server(level: 'info' | 'warn' | 'error', msg: string, extra?: unknown): void
+  /** Delete a session's run log (cleanup on session delete). Best-effort. */
+  deleteSessionLog(sessionId: string): void
 }
 
 export interface SpawnInfo {
@@ -59,6 +65,14 @@ export function createRunLogger(root: string): RunLogger {
   // mkdir at creation so the dir always exists before the first write.
   fs.mkdirSync(logDir, { recursive: true })
   const serverLogPath = path.join(logDir, 'server.log')
+  // Seeded once at creation time; tracks the current on-disk size of
+  // server.log so the rotation check below doesn't need a statSync per write.
+  let serverLogBytes = 0
+  try {
+    serverLogBytes = fs.statSync(serverLogPath).size
+  } catch {
+    // file doesn't exist yet
+  }
 
   function ts(): string {
     return new Date().toISOString()
@@ -108,6 +122,15 @@ export function createRunLogger(root: string): RunLogger {
   function server(level: 'info' | 'warn' | 'error', msg: string, extra?: unknown): void {
     const extraStr = extra !== undefined ? ' ' + safeStringify(extra) : ''
     const line = `${ts()} [${level}] ${msg}${extraStr}\n`
+    const lineBytes = Buffer.byteLength(line, 'utf8')
+    if (serverLogBytes + lineBytes > MAX_SERVER_LOG_BYTES) {
+      try {
+        fs.renameSync(serverLogPath, serverLogPath + '.1')
+      } catch {
+        // best-effort
+      }
+      serverLogBytes = 0
+    }
     try {
       fs.appendFile(serverLogPath, line, () => {
         /* fire-and-forget */
@@ -115,9 +138,18 @@ export function createRunLogger(root: string): RunLogger {
     } catch {
       // best-effort
     }
+    serverLogBytes += lineBytes
   }
 
-  return { spawn, exit, server }
+  function deleteSessionLog(sessionId: string): void {
+    try {
+      fs.unlinkSync(sessionLogPath(sessionId))
+    } catch {
+      // best-effort: no-op if the file doesn't exist
+    }
+  }
+
+  return { spawn, exit, server, deleteSessionLog }
 }
 
 function safeStringify(v: unknown): string {

@@ -173,7 +173,7 @@ describe('createSessionScheduler', () => {
   beforeEach(() => {
     config = makeConfig()
     store = makeStore()
-    logger = { spawn: vi.fn(), exit: vi.fn(), server: vi.fn() }
+    logger = { spawn: vi.fn(), exit: vi.fn(), server: vi.fn(), deleteSessionLog: vi.fn() }
   })
 
   it('maxConcurrent 0 (unlimited) always launches immediately, nothing queued', async () => {

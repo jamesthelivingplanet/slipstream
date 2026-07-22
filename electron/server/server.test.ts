@@ -222,6 +222,7 @@ function makeFakeDeps(): IpcDeps {
   }
 
   return {
+    dataDir: '/tmp/slipstream-test',
     repos,
     worktrees,
     sessions,
@@ -382,6 +383,7 @@ function makeSurvivalDeps(): {
   }
 
   const deps: IpcDeps = {
+    dataDir: '/tmp/slipstream-test',
     repos,
     worktrees,
     sessions,
