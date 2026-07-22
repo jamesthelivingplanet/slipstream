@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { repos, repoById, startAgent, discardDraft } from '../stores'
+  import { repos, repoById, startAgent, discardDraft, updateDraftPrompt } from '../stores'
   import { branchFor } from '../branch'
   import AgentSelector from './AgentSelector.svelte'
   import { floatingAnchor } from '../floating'
@@ -35,6 +35,13 @@
     menuOpen = false
     agentKind = (session.agentKind as BackendKind) ?? 'claude-code'
     extraArgs = session.extraArgs ?? ''
+  }
+
+  // FLO-114: mirror the in-progress kickoff prompt into the store as the
+  // user types, so a page reload's persisted-draft restore has the actual
+  // text rather than the placeholder set when the draft was created.
+  $: if (session?.id && session.status === 'idle' && prompt !== session.prompt) {
+    updateDraftPrompt(session.id, prompt)
   }
 
   $: chosen = repoChoice ? repoById(repoChoice) : undefined

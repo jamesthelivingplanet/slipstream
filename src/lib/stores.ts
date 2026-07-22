@@ -30,6 +30,7 @@ import {
   onConnectionChange,
 } from './ipc'
 import { pushToast } from './toast'
+import { nativeStorage, DRAFTS_KEY } from './nativeStorage'
 import { sessionsToReconcile } from './reconcile'
 import { isStartableTicket } from './ticketFilter.js'
 import { cleanError } from './stores/errors.js'
@@ -108,6 +109,81 @@ export function dtoToSession(dto: SessionDTO): Session {
 export function openRepoSettings(repoId: string) {
   settingsRepoId.set(repoId)
   settingsOpen.set(true)
+}
+
+/**
+ * FLO-114: local drafts (status 'idle', created by createAgentFromTicket /
+ * createBlankAgent) exist only in the renderer store — the backend never
+ * persists a session row until startSession is called, and startSession
+ * always returns status 'running'/'queued'. So a draft can never appear in
+ * `dtos`, and re-seeding sessions from the backend must preserve any current
+ * drafts rather than `sessions.set()`-ing over them, or a WS reconnect (or a
+ * retried initial load) silently deletes whatever the user is typing.
+ */
+function mergeSessionsPreservingDrafts(dtos: SessionDTO[]): Session[] {
+  const freshIds = new Set(dtos.map((d) => d.id))
+  const drafts = get(sessions).filter(
+    (s) => s.status === 'idle' && (s.id === undefined || !freshIds.has(s.id)),
+  )
+  return [...drafts, ...dtos.map(dtoToSession)]
+}
+
+const DRAFT_PERSIST_DEBOUNCE_MS = 500
+let draftPersistTimer: ReturnType<typeof setTimeout> | undefined
+
+/**
+ * FLO-114: a page reload drops the renderer store entirely, so — unlike the
+ * WS-reconnect case above — there is no in-memory draft left to preserve.
+ * Best-effort snapshot every current 'idle' draft to nativeStorage so
+ * loadPersistedDrafts() can restore it on the next boot. Fire-and-forget:
+ * losing a draft-persistence write must never surface as an error to the
+ * user typing a kickoff prompt.
+ */
+function persistDraftsNow(): void {
+  const drafts = get(sessions).filter((s) => s.status === 'idle')
+  const write = drafts.length
+    ? nativeStorage.set(DRAFTS_KEY, JSON.stringify(drafts))
+    : nativeStorage.remove(DRAFTS_KEY)
+  write.catch(() => {})
+}
+
+/** Debounced persistDraftsNow(), for high-frequency callers (prompt typing). */
+function schedulePersistDrafts(): void {
+  clearTimeout(draftPersistTimer)
+  draftPersistTimer = setTimeout(persistDraftsNow, DRAFT_PERSIST_DEBOUNCE_MS)
+}
+
+/** Restore drafts saved by a previous session that were never started or
+ *  discarded. Best-effort: any missing/malformed value yields no drafts,
+ *  never a thrown error. */
+async function loadPersistedDrafts(): Promise<Session[]> {
+  try {
+    const raw = await nativeStorage.get(DRAFTS_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (s): s is Session => !!s && typeof s === 'object' && (s as Session).status === 'idle',
+    )
+  } catch {
+    return []
+  }
+}
+
+/** Live-sync an in-progress draft's kickoff prompt into the store as the
+ *  user types (FLO-114), so the debounced persistDraftsNow() snapshot holds
+ *  the actual in-progress text rather than the placeholder set at draft
+ *  creation. No-op once the session has left 'idle' (started/discarded). */
+export function updateDraftPrompt(id: string, prompt: string): void {
+  let changed = false
+  sessions.update(($s) =>
+    $s.map((s) => {
+      if (s.id !== id || s.status !== 'idle') return s
+      changed = true
+      return { ...s, prompt }
+    }),
+  )
+  if (changed) schedulePersistDrafts()
 }
 
 export const repos = writable<Repo[]>([])
@@ -251,7 +327,24 @@ export async function initFromBackend(): Promise<void> {
 
   tickets.set(dtoToTickets(ticketDTOs).filter(isStartableTicket))
 
-  sessions.set(sessionDTOs.map(dtoToSession))
+  sessions.set(mergeSessionsPreservingDrafts(sessionDTOs))
+
+  // FLO-114: a page reload has no in-memory draft for
+  // mergeSessionsPreservingDrafts to have found above — restore whatever was
+  // last persisted to nativeStorage instead. Skip anything whose id already
+  // landed in the store (a live draft created while this load was in
+  // flight, or — vanishingly unlikely — a real backend session).
+  const persistedDrafts = await loadPersistedDrafts()
+  if (persistedDrafts.length) {
+    const existingIds = new Set(
+      get(sessions)
+        .map((s) => s.id)
+        .filter((id): id is string => id !== undefined),
+    )
+    const restored = persistedDrafts.filter((d) => d.id === undefined || !existingIds.has(d.id))
+    if (restored.length) sessions.update(($s) => [...restored, ...$s])
+  }
+
   await refreshDiffStats().catch(() => {})
 
   initialLoadLoading.set(false)
@@ -415,6 +508,7 @@ export function createAgentFromTicket(
     },
     ...$s,
   ])
+  persistDraftsNow()
   if (doSelect) {
     dialogOpen.set(false)
     select(id)
@@ -448,6 +542,7 @@ export function createBlankAgent(
     },
     ...$s,
   ])
+  persistDraftsNow()
   dialogOpen.set(false)
   select(id)
   return id
@@ -464,6 +559,7 @@ export function discardDraft(s: Session): void {
   if (s.status !== 'idle') return
   const cameFromTicket = s.suggestedRepo !== undefined
   sessions.update(($s) => $s.filter((x) => x.id !== s.id))
+  persistDraftsNow()
   if (get(selectedId) === s.id) select(null)
   if (cameFromTicket && hasBackend) {
     refreshTickets()
@@ -497,6 +593,9 @@ export async function startAgent(
       ago: 'just now',
       activity: { text: 'Creating worktree & starting claude…' },
     }))
+    // No longer a draft — drop it from persisted storage now, not just once
+    // the async startSession below resolves (FLO-114).
+    persistDraftsNow()
     try {
       const dto = await startSession({
         tid: s.tid,
@@ -547,6 +646,7 @@ export async function startAgent(
       ago: 'just now',
       activity: { text: 'Creating worktree & starting claude…' },
     }))
+    persistDraftsNow()
   }
 }
 
@@ -592,8 +692,10 @@ export function subscribeSessionPr(): () => void {
 /**
  * Subscribe to transport reconnects and re-seed `sessions` from the backend
  * (FLO-103). Any status/exit/PR pushes missed while disconnected are lost —
- * a plain refresh (no clever merging) is the simplest way to reconcile, and
- * matches what a manual remount already did before reconnect handling existed.
+ * a full refresh is the simplest way to reconcile the backend-known sessions,
+ * and matches what a manual remount already did before reconnect handling
+ * existed. Local 'idle' drafts are never backend-known, so they're merged
+ * back in rather than wiped out from under a typing user (FLO-114).
  */
 export function subscribeConnectionChange(): () => void {
   if (!hasBackend) return () => {}
@@ -606,7 +708,7 @@ export function subscribeConnectionChange(): () => void {
     if (!wasDisconnected) return
     wasDisconnected = false
     listSessions()
-      .then((dtos) => sessions.set(dtos.map(dtoToSession)))
+      .then((dtos) => sessions.set(mergeSessionsPreservingDrafts(dtos)))
       .then(() => refreshDiffStats().catch(() => {}))
       .catch(() => {})
   })

@@ -2,6 +2,24 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { get } from 'svelte/store'
 import { isStartableTicket } from './ticketFilter.js'
 
+const { draftsStore } = vi.hoisted(() => ({ draftsStore: new Map<string, string>() }))
+
+vi.mock('./nativeStorage', () => ({
+  DRAFTS_KEY: 'slipstream.drafts',
+  nativeStorage: {
+    isAvailable: () => false,
+    get: vi.fn(async (key: string) => draftsStore.get(key) ?? null),
+    set: vi.fn(async (key: string, value: string) => {
+      draftsStore.set(key, value)
+    }),
+    remove: vi.fn(async (key: string) => {
+      draftsStore.delete(key)
+    }),
+    migrateLegacy: vi.fn(async () => {}),
+    restart: vi.fn(async () => {}),
+  },
+}))
+
 vi.mock('./ipc', () => ({
   hasBackend: true,
   listRepos: vi.fn(),
@@ -23,6 +41,7 @@ vi.mock('./ipc', () => ({
   appStatus: vi.fn(),
   onSessionStatus: vi.fn(),
   onSessionPr: vi.fn(),
+  onConnectionChange: vi.fn(),
   getCliStatus: vi.fn(),
 }))
 
@@ -31,10 +50,13 @@ import {
   killSession,
   runApp,
   stopApp,
+  listRepos,
   listTickets,
+  listSessions,
   sessionMerged,
   getTicketStatus,
   startSession,
+  onConnectionChange,
   worktreeUpdateFromBase,
 } from './ipc'
 import {
@@ -59,6 +81,8 @@ import {
   removeSession,
   markSessionInput,
   refreshAndReconcile,
+  subscribeConnectionChange,
+  initFromBackend,
   selected,
   confirmState,
   runningApps,
@@ -75,6 +99,7 @@ import {
   visible,
   filter,
   query,
+  updateDraftPrompt,
 } from './stores.js'
 import { toasts } from './toast.js'
 import type { Ticket, Session, Status } from './types.js'
@@ -1304,5 +1329,217 @@ describe('refreshAndReconcile merged-branch cleanup', () => {
     expect(cleanupSession).toHaveBeenCalledWith('u1', { force: false })
     expect(get(sessions).find((s) => s.id === 'u1')).toBeDefined()
     expect(get(toasts).find((t) => t.type === 'warning')).toBeDefined()
+  })
+})
+
+describe('FLO-114: local drafts survive a backend re-seed', () => {
+  function backendDto(overrides: Partial<SessionDTO> = {}): SessionDTO {
+    return {
+      id: 'backend-1',
+      tid: 'FLO-2',
+      title: 'Backend session',
+      prompt: 'go',
+      repoId: 'repo1',
+      branch: 'FLO-2-branch',
+      status: 'running',
+      createdAt: 0,
+      src: 'linear',
+      ...overrides,
+    } as SessionDTO
+  }
+
+  beforeEach(() => {
+    sessions.set([])
+    repos.set([{ id: 'repo1', org: 'acme', name: 'widgets', base: 'main' }])
+    tickets.set([])
+    selectedId.set(null)
+    dialogOpen.set(true)
+    draftsStore.clear()
+    vi.clearAllMocks()
+  })
+
+  it('subscribeConnectionChange: a reconnect re-seed keeps an idle draft alongside the fresh backend sessions', async () => {
+    let emit: ((connected: boolean) => void) | undefined
+    vi.mocked(onConnectionChange).mockImplementation((cb: (connected: boolean) => void) => {
+      emit = cb
+      return () => {}
+    })
+    vi.mocked(listSessions).mockResolvedValue([backendDto()])
+
+    const unsubscribe = subscribeConnectionChange()
+    const t: Ticket = { tid: 'FLO-1', src: 'jira', title: 'Draft ticket', repo: '', done: false }
+    const draftId = createAgentFromTicket(t, 'typing a prompt…')
+
+    // Simulate a WS drop followed by a reconnect — the re-seed only fires on
+    // the connected(true) edge after having been disconnected.
+    emit?.(false)
+    emit?.(true)
+    // Let the listSessions().then(...) chain flush.
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const ids = get(sessions).map((s) => s.id)
+    expect(ids).toContain(draftId)
+    expect(ids).toContain('backend-1')
+    expect(get(sessions).find((s) => s.id === draftId)?.status).toBe('idle')
+    expect(get(sessions).find((s) => s.id === draftId)?.prompt).toBe('typing a prompt…')
+
+    unsubscribe()
+  })
+
+  it('subscribeConnectionChange: does not re-seed on the first connected event without a prior disconnect', async () => {
+    let emit: ((connected: boolean) => void) | undefined
+    vi.mocked(onConnectionChange).mockImplementation((cb: (connected: boolean) => void) => {
+      emit = cb
+      return () => {}
+    })
+    vi.mocked(listSessions).mockResolvedValue([backendDto()])
+
+    subscribeConnectionChange()
+    emit?.(true)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(listSessions).not.toHaveBeenCalled()
+  })
+
+  it('initFromBackend: preserves an idle draft created before the initial load resolves', async () => {
+    vi.mocked(listRepos).mockResolvedValue([])
+    vi.mocked(listTickets).mockResolvedValue({
+      tickets: [],
+      totalCount: 0,
+      hasMore: false,
+      page: 1,
+      pageSize: 20,
+    })
+    let resolveSessions!: (dtos: SessionDTO[]) => void
+    vi.mocked(listSessions).mockReturnValue(
+      new Promise<SessionDTO[]>((r) => {
+        resolveSessions = r
+      }),
+    )
+
+    const pending = initFromBackend()
+    const t: Ticket = { tid: 'FLO-1', src: 'jira', title: 'Draft ticket', repo: '', done: false }
+    const draftId = createAgentFromTicket(t, 'typing a prompt…')
+
+    resolveSessions([backendDto()])
+    await pending
+
+    const ids = get(sessions).map((s) => s.id)
+    expect(ids).toContain(draftId)
+    expect(ids).toContain('backend-1')
+  })
+})
+
+describe('FLO-114: drafts persisted to nativeStorage survive a page reload', () => {
+  function backendDto(overrides: Partial<SessionDTO> = {}): SessionDTO {
+    return {
+      id: 'backend-1',
+      tid: 'FLO-2',
+      title: 'Backend session',
+      prompt: 'go',
+      repoId: 'repo1',
+      branch: 'FLO-2-branch',
+      status: 'running',
+      createdAt: 0,
+      src: 'linear',
+      ...overrides,
+    } as SessionDTO
+  }
+
+  beforeEach(() => {
+    sessions.set([])
+    repos.set([{ id: 'repo1', org: 'acme', name: 'widgets', base: 'main' }])
+    tickets.set([])
+    selectedId.set(null)
+    dialogOpen.set(true)
+    draftsStore.clear()
+    vi.clearAllMocks()
+  })
+
+  it('createBlankAgent snapshots the new idle draft to nativeStorage', async () => {
+    const id = createBlankAgent('Some task', 'typing…', 'FLO-9')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const raw = draftsStore.get('slipstream.drafts')
+    expect(raw).toBeDefined()
+    const parsed = JSON.parse(raw as string)
+    expect(parsed).toHaveLength(1)
+    expect(parsed[0].id).toBe(id)
+    expect(parsed[0].prompt).toBe('typing…')
+  })
+
+  it('discardDraft removes the draft from nativeStorage', async () => {
+    const id = createBlankAgent('Some task', 'go', 'FLO-9')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(draftsStore.get('slipstream.drafts')).toBeDefined()
+
+    const draft = get(sessions).find((s) => s.id === id) as Session
+    discardDraft(draft)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(draftsStore.get('slipstream.drafts')).toBeUndefined()
+  })
+
+  it('startAgent clears the draft from nativeStorage once it is no longer idle', async () => {
+    const id = createBlankAgent('Some task', 'go', 'FLO-9')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(draftsStore.get('slipstream.drafts')).toBeDefined()
+
+    vi.mocked(startSession).mockResolvedValue(backendDto({ id }))
+    await startAgent(id, 'repo1', 'go', 'claude-code')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(draftsStore.get('slipstream.drafts')).toBeUndefined()
+  })
+
+  it('updateDraftPrompt live-syncs typed text into the store for an idle draft', () => {
+    const id = createBlankAgent('Some task', 'initial', 'FLO-9')
+    updateDraftPrompt(id as string, 'the user is still typing')
+
+    expect(get(sessions).find((s) => s.id === id)?.prompt).toBe('the user is still typing')
+  })
+
+  it('initFromBackend restores a draft persisted by a previous page load (no in-memory drafts left)', async () => {
+    const persisted: Session = {
+      id: 'restored-draft',
+      tid: 'FLO-3',
+      src: 'jira',
+      status: 'idle',
+      title: 'Never started',
+      repo: null,
+      branch: null,
+      add: 0,
+      del: 0,
+      behind: 0,
+      ago: 'draft',
+      prompt: 'left mid-sentence',
+      activity: { text: 'Not started.' },
+    }
+    draftsStore.set('slipstream.drafts', JSON.stringify([persisted]))
+
+    vi.mocked(listRepos).mockResolvedValue([])
+    vi.mocked(listTickets).mockResolvedValue({
+      tickets: [],
+      totalCount: 0,
+      hasMore: false,
+      page: 1,
+      pageSize: 20,
+    })
+    vi.mocked(listSessions).mockResolvedValue([backendDto()])
+
+    await initFromBackend()
+
+    const ids = get(sessions).map((s) => s.id)
+    expect(ids).toContain('restored-draft')
+    expect(ids).toContain('backend-1')
+    expect(get(sessions).find((s) => s.id === 'restored-draft')?.prompt).toBe('left mid-sentence')
   })
 })
