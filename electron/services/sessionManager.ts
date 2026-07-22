@@ -186,12 +186,7 @@ export function createSessionManager(
     })
     proc.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => {
       if (rec.disposed) return
-      stopPolling(rec)
-      rec.watcher?.close()
-      rec.watcher = undefined
-      disposeChatTail(rec)
-      disposeOpencodeChatPoll(rec)
-      rec.disposed = true
+      teardown(id, rec, { killPty: false })
       detector.markExit(exitCode)
       const s = detector.status()
       rec.dto.status = s
@@ -203,10 +198,8 @@ export function createSessionManager(
         status: s,
         tail: buffer.snapshot().data,
       })
-      screen.dispose()
       emit('status', id, s)
       emit('exit', id, exitCode)
-      if (sessions.get(id) === rec) sessions.delete(id)
     })
   }
 
@@ -217,6 +210,30 @@ export function createSessionManager(
       clearInterval(rec.pollTimer)
       rec.pollTimer = undefined
     }
+  }
+
+  /** Single teardown path for a session record: stop polling, close the
+   *  sentinel watcher, dispose chat tail/poll, mark disposed, kill the pty
+   *  (unless already exited), dispose the screen, and drop it from the map
+   *  (only if the map still points at this exact record — a stale onExit for
+   *  an id that handoff/attachRemoteControl already replaced must not delete
+   *  the new record). */
+  function teardown(id: string, rec: SessionRecord, opts: { killPty?: boolean } = {}): void {
+    stopPolling(rec)
+    rec.watcher?.close()
+    rec.watcher = undefined
+    disposeChatTail(rec)
+    disposeOpencodeChatPoll(rec)
+    rec.disposed = true
+    if (opts.killPty !== false) {
+      try {
+        rec.pty.kill()
+      } catch {
+        /* already gone */
+      }
+    }
+    rec.screen.dispose()
+    if (sessions.get(id) === rec) sessions.delete(id)
   }
 
   // ── Chat tail / poll plumbing (TASK-FPH60, extended to pi + opencode) ─────
@@ -523,12 +540,7 @@ export function createSessionManager(
 
     if (sessions.has(id)) {
       const old = sessions.get(id)!
-      old.disposed = true
-      old.pty.kill()
-      old.screen.dispose()
-      disposeChatTail(old)
-      disposeOpencodeChatPoll(old)
-      sessions.delete(id)
+      teardown(id, old)
     }
 
     const backend = selectBackend(input.session.agentKind)
@@ -568,15 +580,7 @@ export function createSessionManager(
     // necessarily exit) — kill it silently before the new backend takes over.
     const old = sessions.get(id)
     if (old) {
-      stopPolling(old)
-      old.watcher?.close()
-      old.watcher = undefined
-      disposeChatTail(old)
-      disposeOpencodeChatPoll(old)
-      old.disposed = true
-      old.pty.kill()
-      old.screen.dispose()
-      sessions.delete(id)
+      teardown(id, old)
     }
 
     const backend = selectBackend(input.agentKind)
@@ -638,15 +642,7 @@ export function createSessionManager(
   function kill(sessionId: string): void {
     const rec = sessions.get(sessionId)
     if (!rec) return
-    stopPolling(rec)
-    rec.watcher?.close()
-    rec.watcher = undefined
-    disposeChatTail(rec)
-    disposeOpencodeChatPoll(rec)
-    rec.disposed = true
-    rec.pty.kill()
-    rec.screen.dispose()
-    sessions.delete(sessionId)
+    teardown(sessionId, rec)
   }
 
   function on<E extends keyof SessionEvents>(event: E, listener: SessionEvents[E]): void {
@@ -677,21 +673,9 @@ export function createSessionManager(
   }
 
   function killAll(): void {
-    for (const rec of sessions.values()) {
-      stopPolling(rec)
-      rec.watcher?.close()
-      rec.watcher = undefined
-      disposeChatTail(rec)
-      disposeOpencodeChatPoll(rec)
-      rec.disposed = true
-      try {
-        rec.pty.kill()
-      } catch {
-        /* already gone */
-      }
-      rec.screen.dispose()
+    for (const [id, rec] of [...sessions]) {
+      teardown(id, rec)
     }
-    sessions.clear()
   }
 
   function liveSessions(): LiveSessionInfo[] {
@@ -710,21 +694,10 @@ export function createSessionManager(
   function reap(sessionId: string): void {
     const rec = sessions.get(sessionId)
     if (!rec) return
-    stopPolling(rec)
-    rec.watcher?.close()
-    rec.watcher = undefined
-    disposeChatTail(rec)
-    disposeOpencodeChatPoll(rec)
     rec.disposed = true // suppress the onExit status/exit emission
     rec.dto.status = 'reaped'
     emit('status', sessionId, 'reaped')
-    try {
-      rec.pty.kill()
-    } catch {
-      /* already gone */
-    }
-    rec.screen.dispose()
-    sessions.delete(sessionId)
+    teardown(sessionId, rec)
   }
 
   function setOpencodeSid(sessionId: string, sid: string): void {

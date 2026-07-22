@@ -748,6 +748,24 @@ describe('SessionManager — sentinel watcher', () => {
     expect(rec.status.length).toBe(statusBefore)
   })
 
+  it('tears down the old watcher on attachRemoteControl() (no further sentinel emissions from the stale record)', async () => {
+    const { mgr } = setup({ root })
+    const dto = mgr.start(withCwd(makeStartInput({ sessionId: 's1' }), worktree))
+    const rec = await waitForWatcher(mgr, 's1')
+
+    mgr.attachRemoteControl({ session: dto, cwd: worktree })
+    const statusBefore = rec.status.length
+
+    await nudgeSentinel(
+      path.join(root, 'sessions', 's1'),
+      STATUS_SENTINEL_FILE,
+      () => JSON.stringify({ state: 'errored', ts: Date.now() }),
+      300,
+    )
+
+    expect(rec.status.length).toBe(statusBefore)
+  })
+
   it('tears down the watcher on natural PTY exit', async () => {
     const { mgr, pties } = setup({ root })
     mgr.start(withCwd(makeStartInput({ sessionId: 's1' }), worktree))
