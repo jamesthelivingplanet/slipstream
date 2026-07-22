@@ -1,6 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!--
+    Crab mark ("Clawd") sourced from the "Claude Clawd" icon by Emanuele & rchiileea,
+    Custom Brand Icons (https://svgicons.com/icon/239517/claude-clawd), licensed
+    CC BY-NC-SA 4.0 (https://creativecommons.org/licenses/by-nc-sa/4.0/).
+  -->
   <rect width="24" height="24" rx="5" fill="#D97757" />
-  <g fill="#ffffff" transform="translate(3.6 3.6) scale(0.7)">
-    <path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z" />
-  </g>
+  <path fill="#ffffff" d="M4.5 6h15v5H22v2h-2.5v3h-1v2H17v-2h-1v2h-1.5v-2h-5v2H8v-2H7v2H5.5v-2h-1v-3H2v-2h2.5ZM7 8v3h1V8Zm9 0v3h1V8Z"/>
 </svg>

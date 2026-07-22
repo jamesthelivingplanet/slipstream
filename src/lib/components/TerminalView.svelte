@@ -43,12 +43,11 @@
     getPrStatus,
     onConnectionChange,
     syncClipboardImage,
-    getChatMessages,
   } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
-  import type { Session, WorkflowState, BackendKind } from '../types'
+  import type { Session, WorkflowState, BackendKind, Status } from '../types'
   import type { PrStatusDTO, WorktreeUpdateMode } from '../../../electron/shared/contract.js'
   import { getTicketStatus, setTicketStatus } from '../ipc'
   import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
@@ -116,8 +115,6 @@
   let lastTid = ''
   let lastNonce = 0
   let viewMode: 'terminal' | 'chat' = 'terminal'
-  let chatAvailable = false
-  let chatCheckedFor: string | null = null
   // Svelte runs reactive statements once during init, BEFORE onMount creates
   // `term` — and App.svelte keys this component by session id, so a fresh
   // instance mounts with a live session already selected. Gate the reactive
@@ -128,10 +125,17 @@
   $: r = repoById(session.repo)
   $: base = r?.base ?? 'base'
   $: pendingCommentCount = ($reviewComments[session.id ?? ''] ?? []).length
-  $: dot =
-    session.status === 'idle' || session.status === 'queued'
-      ? 'hsl(var(--muted-foreground))'
-      : `hsl(var(--st-${session.status === 'needs' ? 'needs' : session.status === 'running' ? 'run' : session.status === 'done' ? 'done' : 'error'}))`
+  // Mirrors app.css's per-status `.stat-dot` rules exactly: only needs/running/
+  // done/errored get a status color, everything else (idle/queued/detached/
+  // interrupted/reaped/tearing-down) is muted gray. A lookup (rather than a
+  // nested ternary) so an unmapped status can't silently fall through to red.
+  const DOT_COLOR: Partial<Record<Status, string>> = {
+    needs: 'hsl(var(--st-needs))',
+    running: 'hsl(var(--st-run))',
+    done: 'hsl(var(--st-done))',
+    errored: 'hsl(var(--st-error))',
+  }
+  $: dot = DOT_COLOR[session.status] ?? 'hsl(var(--muted-foreground))'
 
   $: runKey = appRunKey(session)
   $: appRunning = runKey ? $runningApps.has(runKey) : false
@@ -140,22 +144,21 @@
   $: currentKind = (session.agentKind ?? 'claude-code') as BackendKind
   $: handoffTargets = AGENTS.filter((a) => a.kind !== currentKind)
 
-  // TASK-FPH60: the view actually rendered — chat only when both the user's
-  // (or preference-seeded) viewMode says chat AND the backend has confirmed
-  // chat is available for this session. Falls back to terminal whenever
-  // chat can't render, so `.term-wrap` hidden, the ChatView branch, and the
-  // mobile composer guard never disagree (a prior bug hid BOTH — term-wrap
-  // hid on viewMode alone while the ChatView branch also required
-  // chatAvailable, so a pre-first-turn session with the chat-default
-  // preference rendered a blank body). The toggle button that lets a user
-  // manually flip viewMode only renders once chatAvailable is already true
-  // (see `{#if chatAvailable}` below), so viewMode can't be left on 'chat'
-  // by a manual toggle while unavailable — it only ever gets there via the
-  // initial preference seed, which means once chatAvailable later flips
-  // true this recomputes to 'chat' on its own, satisfying "switch to chat
-  // automatically when it becomes available and the user hasn't manually
-  // chosen terminal for this session".
-  $: effectiveViewMode = viewMode === 'chat' && chatAvailable ? 'chat' : 'terminal'
+  // Whether this session's agent kind has a chat transcript reader at all
+  // (claude-code/pi/opencode/kilo — not antigravity/grok). This is a static
+  // property of the kind, not of whether a transcript exists yet, so chat
+  // is offered as the default/first view even before the agent's first turn
+  // — ChatView.svelte handles the "no messages yet" state on its own.
+  $: chatCapable = agentOption(currentKind).supportsChat
+
+  // The view actually rendered — chat only when both the user's (or
+  // preference-seeded) viewMode says chat AND this kind supports chat at
+  // all. Falls back to terminal whenever chat can't render, so `.term-wrap`
+  // hidden, the ChatView branch, and the mobile composer guard never
+  // disagree. The toggle button that lets a user manually flip viewMode
+  // only renders when chatCapable (see `{#if chatCapable}` below), so
+  // viewMode can only be 'chat' here for a chat-capable kind.
+  $: effectiveViewMode = viewMode === 'chat' && chatCapable ? 'chat' : 'terminal'
 
   function openLink(_event: MouseEvent, uri: string) {
     window.open(uri, '_blank', 'noopener,noreferrer')
@@ -440,37 +443,6 @@
       })
   }
   $: refreshPrStatus(session.id, session.prUrl)
-
-  // TASK-FPH60: cheap 1-message probe purely to decide whether to show the
-  // chat/terminal toggle button — ChatView.svelte does its own real 50-message
-  // load independently. Clearing chatAvailable synchronously before the async
-  // call resolves prevents a stale `true` from a previous session leaking into
-  // the new one's render (mirrors refreshPrStatus's clear-immediately idiom).
-  // Backend answers `available` for claude-code/pi/opencode sessions (false
-  // for other kinds) — no kind gating needed here, the backend is the source
-  // of truth. Re-probes when session.status changes and the last probe came
-  // back false, since a session only becomes chat-capable once its first
-  // turn/session file appears (e.g. right after launch).
-  let chatCheckedStatus: string | undefined
-  function refreshChatAvailability(id: string | undefined, status: string | undefined) {
-    if (!hasBackend || !id) return
-    const isNewSession = id !== chatCheckedFor
-    if (!isNewSession) {
-      if (chatAvailable) return // already known available — nothing left to probe for
-      if (status === chatCheckedStatus) return // status hasn't moved since the last probe
-    }
-    chatCheckedFor = id
-    chatCheckedStatus = status
-    if (isNewSession) chatAvailable = false
-    getChatMessages(id, { limit: 1 })
-      .then((r) => {
-        if (id === chatCheckedFor) chatAvailable = r.available
-      })
-      .catch(() => {
-        if (id === chatCheckedFor) chatAvailable = false
-      })
-  }
-  $: refreshChatAvailability(session.id, session.status)
 
   interface PrBadge {
     text: string
@@ -1080,7 +1052,7 @@
         <span class="diff-count">{pendingCommentCount}</span>
       {/if}
     </button>
-    {#if chatAvailable}
+    {#if chatCapable}
       <button
         class="btn btn-outline btn-sm"
         class:btn-active={viewMode === 'chat'}
@@ -1315,7 +1287,7 @@
         <span class="diff-count">{pendingCommentCount}</span>
       {/if}
     </button>
-    {#if chatAvailable}
+    {#if chatCapable}
       <button
         class="btn btn-outline btn-sm"
         class:btn-active={viewMode === 'chat'}

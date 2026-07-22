@@ -76,8 +76,17 @@ function dtoToTickets(
  *  src round-trip is unit-testable. Legacy rows with no persisted source
  *  default to 'jira'. */
 export function dtoToSession(dto: SessionDTO): Session {
-  const uiStatus: Status =
-    dto.status === 'running' || dto.status === 'needs' ? 'detached' : (dto.status as Status)
+  // Used to pessimistically relabel a persisted 'running'/'needs' status as
+  // 'detached', guessing that a daemon restart had orphaned the process and a
+  // corrective live `status` push would arrive shortly to fix it back up. That
+  // guess is now stale: restoreInterruptedSessions (electron/services/sessionStore.ts)
+  // runs at daemon boot, before any RPC is served, and converts any genuinely
+  // orphaned running/needs session to 'interrupted' first. So a 'running'/'needs'
+  // status reported here is already known-live — trust it directly, exactly like
+  // every subsequent live update already does via setSessionStatus. Guessing
+  // 'detached' instead could stick indefinitely for poll-driven backends
+  // (pi/opencode/kilo) that don't self-correct via the PTY-driven status flap.
+  const uiStatus = dto.status as Status
   return {
     id: dto.id,
     tid: dto.tid,
