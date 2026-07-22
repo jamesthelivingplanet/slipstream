@@ -15,15 +15,7 @@
   function finish() {
     markOnboardingSeen()
   }
-
-  // Esc dismiss, matching ConfirmDialog.svelte's pattern (ResponsivePanel
-  // itself only wires the backdrop click, not the keyboard).
-  function onKeydown(e: KeyboardEvent) {
-    if ($onboardingVisible && e.key === 'Escape') finish()
-  }
 </script>
-
-<svelte:window on:keydown={onKeydown} />
 
 {#if $onboardingVisible}
   <ResponsivePanel open mobile={$mobile} onClose={finish} dialogClass="onboarding-dialog">

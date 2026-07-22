@@ -7,13 +7,7 @@
     confirmState.set(null)
     req?.resolve(ok)
   }
-
-  function onKeydown(e: KeyboardEvent) {
-    if ($confirmState && e.key === 'Escape') finish(false)
-  }
 </script>
-
-<svelte:window on:keydown={onKeydown} />
 
 {#if $confirmState}
   <ResponsivePanel open mobile={$mobile} onClose={() => finish(false)}>

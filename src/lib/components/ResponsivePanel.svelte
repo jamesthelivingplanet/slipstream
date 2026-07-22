@@ -1,5 +1,6 @@
 <script lang="ts">
   import { shouldDismissDrawer } from '../responsive'
+  import { trapFocus } from '../focusTrap'
 
   export let open = false
   export let onClose: () => void = () => {}
@@ -33,6 +34,10 @@
     <div class="drawer-overlay" on:click={onClose} role="presentation"></div>
     <div
       class="drawer"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      use:trapFocus={{ onClose }}
       style="transform: translateY({dragY}px); transition: {dragging
         ? 'none'
         : 'transform .26s cubic-bezier(.2,.8,.2,1)'}"
@@ -57,7 +62,13 @@
     </div>
   {:else}
     <div class="overlay" on:click={onClose} role="presentation"></div>
-    <div class="dialog {dialogClass}">
+    <div
+      class="dialog {dialogClass}"
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      use:trapFocus={{ onClose }}
+    >
       <div class="dlg-head"><slot name="header" /></div>
       <slot />
       {#if $$slots.footer}
