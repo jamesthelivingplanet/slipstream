@@ -5,7 +5,9 @@ Hard-won, non-obvious notes for this repo — start with
 native build pain → [docs/NATIVE-MODULES.md](docs/NATIVE-MODULES.md); the dev
 loop (daemon rebuild, tests, logs, e2e) → [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md);
 the auth/secrets threat model → [docs/SECURITY.md](docs/SECURITY.md); the
-multi-user identity seam → [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md).
+multi-user identity seam → [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md); the
+versioning/release scheme (semver, build stamping, schema-vs-app version,
+tag/changelog flow) → [docs/VERSIONING.md](docs/VERSIONING.md).
 
 Use **pnpm**. Run `pnpm check` (svelte-check), `pnpm test`, and `pnpm lint` (eslint +
 `prettier --check`) before committing — `pnpm lint` gates the MR, so don't skip it; use

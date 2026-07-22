@@ -156,6 +156,17 @@ CREATE UNIQUE INDEX idx_device_tokens_hash ON device_tokens (tokenHash)
 `),
 ]
 
+/**
+ * The DB schema version this build expects — one greater than the highest
+ * applied `user_version` after `runMigrations` finishes. Surfaced in
+ * DiagnosticsDTO.versions.schema and GET /healthz so support can tell which
+ * schema shape a running instance is on. Independent of the app's semver:
+ * a schema-changing release bumps this automatically (it's just
+ * MIGRATIONS.length) and should bump at least the app's minor version by
+ * convention — see docs/VERSIONING.md.
+ */
+export const SCHEMA_VERSION = MIGRATIONS.length
+
 /** Apply any migrations newer than the DB's current user_version, atomically. */
 export function runMigrations(db: MigrationDb): void {
   const current = db.pragma('user_version', { simple: true }) as number

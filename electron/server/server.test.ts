@@ -18,6 +18,8 @@ import type {
   SessionOutcomeDTO,
 } from '../shared/contract.js'
 import { IPC } from '../shared/contract.js'
+import { APP_VERSION, GIT_SHA } from '../shared/version.js'
+import { SCHEMA_VERSION } from '../db/migrations.js'
 import { WebSocket } from 'ws'
 import type { WireReq, WireRes } from '../shared/wire.js'
 import type { IConfigStore } from '../services/configStore.js'
@@ -814,7 +816,12 @@ describe('createServer', () => {
       )
 
       const body = await getHealthz(port)
-      expect(JSON.parse(body)).toEqual({ ok: true })
+      expect(JSON.parse(body)).toEqual({
+        ok: true,
+        version: APP_VERSION,
+        gitSha: GIT_SHA,
+        schema: SCHEMA_VERSION,
+      })
     })
 
     it('GET /healthz reports wsTickets: true when enabled', async () => {
@@ -825,7 +832,13 @@ describe('createServer', () => {
       )
 
       const body = await getHealthz(port)
-      expect(JSON.parse(body)).toEqual({ ok: true, wsTickets: true })
+      expect(JSON.parse(body)).toEqual({
+        ok: true,
+        version: APP_VERSION,
+        gitSha: GIT_SHA,
+        schema: SCHEMA_VERSION,
+        wsTickets: true,
+      })
     })
   })
 
@@ -992,7 +1005,7 @@ describe('createServer', () => {
     ws.close()
   })
 
-  it('GET /healthz returns { ok: true }', async () => {
+  it('GET /healthz returns version info', async () => {
     const deps = makeFakeDeps()
     server = createServer(deps, { token: 'secret', port: 0 })
     const port = await new Promise<number>((res) =>
@@ -1009,7 +1022,12 @@ describe('createServer', () => {
         .on('error', reject)
     })
 
-    expect(JSON.parse(body)).toEqual({ ok: true })
+    expect(JSON.parse(body)).toEqual({
+      ok: true,
+      version: APP_VERSION,
+      gitSha: GIT_SHA,
+      schema: SCHEMA_VERSION,
+    })
   })
 
   it('session survives across zero connected clients — output replays on reconnect, PTY not reaped', async () => {
