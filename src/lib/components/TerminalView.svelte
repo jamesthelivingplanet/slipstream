@@ -61,6 +61,7 @@
   import DiffView from './DiffView.svelte'
   import ChatView from './ChatView.svelte'
   import MobileTermInput from './MobileTermInput.svelte'
+  import NullielLoader from './NullielLoader.svelte'
   import { initChatViewPref, preferChatView, setPreferChatView } from '../chatViewPrefs'
 
   export let session: Session
@@ -100,6 +101,12 @@
   let exited = false
   let exitCode: number | null = null
   let restarting = false
+  // FLO-110: a queued or freshly started session has no PTY snapshot yet —
+  // getSessionBuffer 404s (or resync early-returns) and the view retries every
+  // 1s. Until the first snapshot lands we show a Nulliel overlay instead of a
+  // blank black terminal. Raised in resync() (queued branch / buffer 404),
+  // cleared on snapshot success.
+  let snapshotPending = false
   let handoffOpen = false
   let handingOff = false
   let updateBaseOpen = false
@@ -493,6 +500,26 @@
     return badges
   }
 
+  // FLO-110: reset the startup overlay when switching sessions; resync()
+  // re-raises it for the queued / fresh-start-404 window. A queued session
+  // shows it right away; otherwise it appears on the first buffer 404.
+  let overlayForId: string | undefined
+  $: if (session.id !== overlayForId) {
+    overlayForId = session.id
+    snapshotPending = session.status === 'queued'
+  }
+  $: startupCaption =
+    session.status === 'queued'
+      ? 'Queued — will start when a slot frees'
+      : 'Creating worktree & starting agent'
+  $: showStartupOverlay =
+    liveMode &&
+    !exited &&
+    session.status !== 'errored' &&
+    !showDiff &&
+    effectiveViewMode === 'terminal' &&
+    snapshotPending
+
   $: if (mounted && liveMode && session.id && session.id !== liveId) startLive()
   $: if (mounted && !liveMode && !simStarted) {
     simStarted = true
@@ -557,6 +584,9 @@
     // retry loop (the same one that covers the fresh-start buffer 404) until
     // the scheduler starts it.
     if (session.status === 'queued') {
+      // FLO-110: there's no PTY to snapshot yet — flag the overlay so the pane
+      // reads "Queued…" instead of blank black while we poll for the start.
+      snapshotPending = true
       scheduleLiveRetry()
       return
     }
@@ -612,9 +642,14 @@
       // already reset the terminal — writing OUR full snapshot now would
       // duplicate the scrollback. Its own snapshot covers everything.
       if (gen !== resyncGen || destroyed) return
+      // FLO-110: first real content landed — drop the startup overlay.
+      snapshotPending = false
       myGate.applySnapshot(snap.data, snap.seq)
     } catch {
       if (gen !== resyncGen || destroyed) return
+      // FLO-110: backend session hasn't materialized yet (fresh start) — keep
+      // the overlay up while scheduleLiveRetry polls for it.
+      snapshotPending = true
       myGate.fail()
       scheduleLiveRetry()
     }
@@ -1200,6 +1235,14 @@
 
 <div class="term-wrap" class:hidden={showDiff || effectiveViewMode === 'chat'}>
   <div class="term-mount" bind:this={mountEl}></div>
+  {#if showStartupOverlay}
+    <!-- FLO-110: covers the blank terminal while the backend creates the
+         worktree / waits for a scheduler slot, mirroring the .alert overlays
+         the exited / needs-input states get lower down. -->
+    <div class="startup-overlay" role="status" aria-live="polite">
+      <NullielLoader size={48} caption={startupCaption} />
+    </div>
+  {/if}
 </div>
 
 {#if showDiff}
@@ -1462,6 +1505,21 @@
      Diff view and back. */
   .hidden {
     display: none;
+  }
+
+  /* FLO-110: Nulliel overlay that replaces the blank terminal while a session
+   * is queued or waiting on its first PTY snapshot. Anchored to .term-wrap
+   * (positioned in app.css) so it covers exactly the terminal area, leaving
+   * the exited / needs-input alert bars below it visible. */
+  .startup-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: hsl(var(--background));
+    animation: fade 0.2s ease-out;
   }
 
   .btn-active {
