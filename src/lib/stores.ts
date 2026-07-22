@@ -231,6 +231,11 @@ export const keyboardInset = writable<number>(0)
  *  the agent list sidebar should be a toggleable overlay drawer. Synced from App.svelte. */
 export const drawer = writable<boolean>(false)
 
+/** True when the WS transport is up (FLO-108). Defaults true so design mode
+ *  (no backend) never shows a disconnected banner — subscribeConnectionChange
+ *  is the only writer, and it's a no-op without hasBackend. */
+export const connected = writable<boolean>(true)
+
 // FLO-56: the header refresh button doubles as the agent-content fetch indicator.
 // TicketStatusBar reports its ticket-status fetch here so the header can show loading/resolved.
 export const contentLoading = writable<boolean>(false)
@@ -727,8 +732,9 @@ export function subscribeSessionPr(): () => void {
 export function subscribeConnectionChange(): () => void {
   if (!hasBackend) return () => {}
   let wasDisconnected = false
-  return onConnectionChange((connected) => {
-    if (!connected) {
+  return onConnectionChange((isConnected) => {
+    connected.set(isConnected)
+    if (!isConnected) {
       wasDisconnected = true
       return
     }
