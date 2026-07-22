@@ -21,6 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1 \
     npm_config_build_from_source=true
 
+# .git is excluded from the build context (.dockerignore) so `git rev-parse`
+# can't resolve a SHA inside the image build; thread it in from outside
+# instead (CI passes --build-arg GIT_SHA=$CI_COMMIT_SHORT_SHA). See
+# docs/VERSIONING.md and scripts/lib/buildMeta.mjs.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 WORKDIR /app
 RUN corepack enable
 

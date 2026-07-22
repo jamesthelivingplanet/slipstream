@@ -95,6 +95,12 @@ export interface DiagnosticsDTO {
     dbPath: string
   }
   versions: {
+    /** package.json version — the semver source of truth. See docs/VERSIONING.md. */
+    app: string
+    /** Short git SHA the running build was compiled from ('unknown' if unavailable). */
+    gitSha: string
+    /** SQLite schema version (electron/db/migrations.ts SCHEMA_VERSION). */
+    schema: number
     node: string
     electron?: string
     v8: string

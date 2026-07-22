@@ -21,6 +21,7 @@
     "tokens": "ELECTRON_RUN_AS_NODE=1 electron dist-electron/manage-tokens.js",
     "package": "pnpm build && electron-builder --publish never",
     "deploy": "bash scripts/deploy.sh",
+    "release": "bash scripts/release.sh",
     "setup": "bash scripts/setup.sh",
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint . --fix && prettier --write .",

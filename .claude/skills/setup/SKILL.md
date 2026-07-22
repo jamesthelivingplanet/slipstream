@@ -83,11 +83,16 @@ This is an admin-console toggle and cannot be done automatically by the script.
 
 ## Deploy / start
 
-After setup, and for every subsequent release:
+After setup, and for every subsequent update to the running service:
 
 ```sh
 pnpm deploy
 ```
+
+(This is distinct from `pnpm release`, which bumps `package.json`'s version,
+rolls the changelog, and pushes a `vX.Y.Z` git tag — see
+[docs/VERSIONING.md](../../../docs/VERSIONING.md). Cut a release first if
+you're publishing a new version, then `pnpm deploy` to run it.)
 
 Phases:
 
