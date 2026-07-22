@@ -9,6 +9,20 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- Android home-screen widget (TASK-DM25C): lists running agent sessions
+  (title, status, repo) in a scrollable list, color-coded by urgency (needs
+  attention / running / done). Renders a local snapshot only — no network
+  calls and no auth token on the widget's render path.
+- Mobile UX fast lanes (TASK-CQFRV): a reveal-gated "Pair a device" QR
+  code/link in Settings > Integrations (reuses the existing `?token=` boot
+  path, so scanning it connects a phone with no manual URL/token entry);
+  home-screen widget rows now deep-link into the tapped session instead of
+  just opening the app; a mobile keyboard quick-key row (Esc, Tab, Ctrl+C,
+  history up/down) on the terminal composer; and one-tap yes/no/proceed
+  reply chips on Mission Control's "needs you" cards for unambiguous asks.
+
 ## [0.2.0] - 2026-07-22
 
 ### Added
