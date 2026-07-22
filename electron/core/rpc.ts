@@ -31,11 +31,9 @@ import { branchFor, isSafeSlug } from '../shared/branch.js'
 import { buildSystemPrompt, buildHandoffPrompt, AGENT_LABELS } from '../shared/promptComposer.js'
 import { parseAgentArgs } from '../shared/agentCli.js'
 import { LOCAL_IDENTITY } from './auth.js'
-import { agentSessionEnv } from '../services/agentCliProvision.js'
-import { captureOpencodeSessionId } from '../services/opencodeSessions.js'
-import { usesEmbeddedServer, KILO_BIN } from '../services/agentBackend.js'
+import { usesEmbeddedServer } from '../services/agentBackend.js'
 import { readGcPolicy, writeGcPolicy } from '../services/sessionReaper.js'
-import { launchSession } from '../services/sessionLauncher.js'
+import { launchSession, resumeProcedure } from '../services/sessionLauncher.js'
 import type { LaunchRequest } from '../services/sessionLauncher.js'
 import { readSchedulerPolicy, writeSchedulerPolicy } from '../services/sessionScheduler.js'
 import { checkSlipstreamCli, lastCliActivity } from '../services/cliHealth.js'
@@ -498,35 +496,7 @@ export function createRpc(
         // A queued session hasn't been spawned yet — the scheduler owns when
         // it launches (spawning it here would let a viewer jump the queue).
         if (persisted.status === 'queued') return persisted
-        const repo = await deps.repos.resolvePath(persisted.repoId)
-        const cwd = deps.worktrees.pathFor(repo, persisted.branch)
-        let port: number | undefined
-        try {
-          port = await deps.ports.claim(cwd, 'web')
-        } catch {
-          port = undefined
-        }
-        let opencodePort: number | undefined
-        if (usesEmbeddedServer(persisted.agentKind)) {
-          try {
-            opencodePort = await deps.ports.claim(cwd, persisted.agentKind ?? 'claude-code')
-          } catch {
-            opencodePort = undefined
-          }
-        }
-        const dto = deps.sessions.resume({
-          session: persisted,
-          cwd,
-          env: agentSessionEnv(deps.agentCli, {
-            sessionId: id,
-            base: repo.base,
-            branch: persisted.branch,
-            port,
-          }),
-          opencodePort,
-        })
-        deps.sessionStore.upsert({ ...dto, port })
-        return { ...dto, port }
+        return resumeProcedure(deps, { mode: 'resume', session: persisted })
       }
 
       case IPC.attachRemoteControl: {
@@ -536,35 +506,7 @@ export function createRpc(
         // A queued session hasn't been spawned yet — the scheduler owns when
         // it launches (spawning it here would let a viewer jump the queue).
         if (persisted.status === 'queued') return persisted
-        const repo = await deps.repos.resolvePath(persisted.repoId)
-        const cwd = deps.worktrees.pathFor(repo, persisted.branch)
-        let port: number | undefined
-        try {
-          port = await deps.ports.claim(cwd, 'web')
-        } catch {
-          port = undefined
-        }
-        let opencodePort: number | undefined
-        if (usesEmbeddedServer(persisted.agentKind)) {
-          try {
-            opencodePort = await deps.ports.claim(cwd, persisted.agentKind ?? 'claude-code')
-          } catch {
-            opencodePort = undefined
-          }
-        }
-        const dto = deps.sessions.attachRemoteControl({
-          session: persisted,
-          cwd,
-          env: agentSessionEnv(deps.agentCli, {
-            sessionId: id,
-            base: repo.base,
-            branch: persisted.branch,
-            port,
-          }),
-          opencodePort,
-        })
-        deps.sessionStore.upsert({ ...dto, port })
-        return { ...dto, port }
+        return resumeProcedure(deps, { mode: 'attach', session: persisted })
       }
 
       case IPC.handoffSession: {
@@ -581,21 +523,6 @@ export function createRpc(
         if (fromKind === agentKind)
           throw new Error(`Session is already running on ${AGENT_LABELS[agentKind]}`)
         const repo = await deps.repos.resolvePath(persisted.repoId)
-        const cwd = deps.worktrees.pathFor(repo, persisted.branch)
-        let port: number | undefined
-        try {
-          port = await deps.ports.claim(cwd, 'web')
-        } catch {
-          port = undefined
-        }
-        let opencodePort: number | undefined
-        if (usesEmbeddedServer(agentKind)) {
-          try {
-            opencodePort = await deps.ports.claim(cwd, agentKind)
-          } catch {
-            opencodePort = undefined
-          }
-        }
         const outcome = await resolveOutcome(id)
         const handoffPrompt = buildHandoffPrompt({
           tid: persisted.tid,
@@ -606,35 +533,12 @@ export function createRpc(
           base: repo.base,
           outcomeSummary: outcome?.summary,
         })
-        const dto = deps.sessions.handoff({
+        return resumeProcedure(deps, {
+          mode: 'handoff',
           session: persisted,
-          cwd,
-          env: agentSessionEnv(deps.agentCli, {
-            sessionId: id,
-            base: repo.base,
-            branch: persisted.branch,
-            port,
-          }),
-          opencodePort,
           agentKind,
           handoffPrompt,
         })
-        // Same async sid capture as sessionLauncher.ts: the embedded-server
-        // session id only exists after the TUI boots; status polling starts
-        // once it's known.
-        if (usesEmbeddedServer(agentKind)) {
-          void captureOpencodeSessionId({
-            cwd,
-            bin: agentKind === 'kilo' ? KILO_BIN : undefined,
-          }).then((sid) => {
-            if (!sid) return
-            deps.sessions.setOpencodeSid(id, sid)
-            const cur = deps.sessionStore.get(id)
-            if (cur) deps.sessionStore.upsert({ ...cur, opencodeSid: sid })
-          })
-        }
-        deps.sessionStore.upsert({ ...dto, port })
-        return { ...dto, port }
       }
 
       case IPC.getSessionBuffer: {

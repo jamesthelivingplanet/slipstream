@@ -25,6 +25,29 @@ import { captureOpencodeSessionId } from './opencodeSessions.js'
 import { usesEmbeddedServer, KILO_BIN } from './agentBackend.js'
 import { agentSessionEnv, type AgentCliDep } from './agentCliProvision.js'
 
+export type ResumeMode = 'resume' | 'attach' | 'handoff'
+
+export interface ResumeProcedureDeps {
+  repos: Pick<IRepoRegistry, 'resolvePath'>
+  worktrees: Pick<IWorktreeManager, 'pathFor'>
+  sessions: Pick<ISessionManager, 'resume' | 'attachRemoteControl' | 'handoff' | 'setOpencodeSid'>
+  ports: IPortBroker
+  sessionStore: ISessionStore
+  agentCli?: AgentCliDep
+}
+
+export interface ResumeProcedureRequest {
+  mode: ResumeMode
+  session: SessionDTO
+  /** Target agent kind — required for 'handoff' (the backend being switched
+   *  to); ignored for 'resume'/'attach', which stay on session.agentKind. */
+  agentKind?: BackendKind
+  /** Required for 'handoff' — the takeover prompt, built by the caller via
+   *  buildHandoffPrompt (needs the resolved outcome, which is rpc.ts's
+   *  concern, not the launcher's). */
+  handoffPrompt?: string
+}
+
 export interface LaunchRequest {
   sessionId: string
   tid: string
@@ -135,4 +158,82 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
   }
 
   return { ...session, port }
+}
+
+/** Run the shared "reconnect to an already-started session" procedure shared
+ *  by resume, attach-remote-control, and handoff (FLO-118): resolve the repo
+ *  → worktree cwd → claim the web port → claim the embedded-server port (if
+ *  the target backend needs one) → build the CLI env → make the mode-specific
+ *  sessions.* call → persist the assigned port. Callers own everything that
+ *  differs per mode before calling in (owner/queued guards, the handoff
+ *  prompt, the "already on this agent" check) and after (nothing — the
+ *  returned DTO is ready to hand back over IPC). */
+export async function resumeProcedure(
+  deps: ResumeProcedureDeps,
+  req: ResumeProcedureRequest,
+): Promise<SessionDTO & { port?: number }> {
+  const { mode, session } = req
+
+  const repo = await deps.repos.resolvePath(session.repoId)
+  const cwd = deps.worktrees.pathFor(repo, session.branch)
+
+  let port: number | undefined
+  try {
+    port = await deps.ports.claim(cwd, 'web')
+  } catch {
+    port = undefined
+  }
+
+  const targetAgentKind = mode === 'handoff' ? req.agentKind : session.agentKind
+  let opencodePort: number | undefined
+  if (usesEmbeddedServer(targetAgentKind)) {
+    try {
+      opencodePort = await deps.ports.claim(cwd, targetAgentKind ?? 'claude-code')
+    } catch {
+      opencodePort = undefined
+    }
+  }
+
+  const env = agentSessionEnv(deps.agentCli, {
+    sessionId: session.id,
+    base: repo.base,
+    branch: session.branch,
+    port,
+  })
+
+  let dto: SessionDTO
+  if (mode === 'resume') {
+    dto = deps.sessions.resume({ session, cwd, env, opencodePort })
+  } else if (mode === 'attach') {
+    dto = deps.sessions.attachRemoteControl({ session, cwd, env, opencodePort })
+  } else {
+    const agentKind = req.agentKind
+    if (!agentKind || !req.handoffPrompt) {
+      throw new Error('resumeProcedure: handoff requires agentKind and handoffPrompt')
+    }
+    dto = deps.sessions.handoff({
+      session,
+      cwd,
+      env,
+      opencodePort,
+      agentKind,
+      handoffPrompt: req.handoffPrompt,
+    })
+    // Same async sid capture as launchSession above: the embedded-server
+    // session id only exists after the TUI boots; status polling starts
+    // once it's known.
+    if (usesEmbeddedServer(agentKind)) {
+      void captureOpencodeSessionId({ cwd, bin: agentKind === 'kilo' ? KILO_BIN : undefined }).then(
+        (sid) => {
+          if (!sid) return
+          deps.sessions.setOpencodeSid(session.id, sid)
+          const cur = deps.sessionStore.get(session.id)
+          if (cur) deps.sessionStore.upsert({ ...cur, opencodeSid: sid })
+        },
+      )
+    }
+  }
+
+  deps.sessionStore.upsert({ ...dto, port })
+  return { ...dto, port }
 }
