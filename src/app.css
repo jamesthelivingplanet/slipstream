@@ -617,6 +617,7 @@ html[data-mode='light'] .seg.on {
 }
 
 .term-wrap {
+  position: relative;
   flex: 1;
   padding: 12px 14px;
   overflow: hidden;
