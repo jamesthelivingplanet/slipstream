@@ -1022,6 +1022,22 @@ describe('createRpc', () => {
         const result = await rpc.handle(IPC.getSessionOutcome, ['s1'])
         expect(result).toBeNull()
       })
+
+      it('negative-caches a disk-fallback miss, but a store upsert in between still surfaces on the next call (store-check-first is never shadowed)', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1' }))
+
+        // First call: no sentinel on disk, no store entry — negative-cached.
+        const first = await rpc.handle(IPC.getSessionOutcome, ['s1'])
+        expect(first).toBeNull()
+
+        // Simulates the live sentinelWatcher/sessionPersistence listener
+        // pushing a real outcome into the store out-of-band while this
+        // connection stays open.
+        deps.outcomeStore.upsert(makeOutcome({ sessionId: 's1' }))
+
+        const second = await rpc.handle(IPC.getSessionOutcome, ['s1'])
+        expect(second).toEqual(makeOutcome({ sessionId: 's1' }))
+      })
     })
 
     it('listSessionHistory joins sessions with outcomes and usage, most recent first', async () => {

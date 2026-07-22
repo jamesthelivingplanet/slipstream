@@ -47,27 +47,27 @@ function assistantMessage(opts: {
 }
 
 describe('readOpencodeUsage', () => {
-  it('returns exists:false with zero tokens when opencodeSid is undefined', () => {
-    const u = readOpencodeUsage('s1', undefined, storageRoot)
+  it('returns exists:false with zero tokens when opencodeSid is undefined', async () => {
+    const u = await readOpencodeUsage('s1', undefined, storageRoot)
     expect(u.exists).toBe(false)
     expect(u.turns).toBe(0)
     expect(u.costUsd).toBe(0)
     expect(u.tokens).toEqual({ input: 0, output: 0, cacheCreation: 0, cacheRead: 0 })
   })
 
-  it('returns exists:false when the message dir does not exist', () => {
-    const u = readOpencodeUsage('s1', 'ses_missing', storageRoot)
+  it('returns exists:false when the message dir does not exist', async () => {
+    const u = await readOpencodeUsage('s1', 'ses_missing', storageRoot)
     expect(u.exists).toBe(false)
   })
 
-  it('returns exists:false for an empty message dir', () => {
+  it('returns exists:false for an empty message dir', async () => {
     mkdirSync(join(storageRoot, 'message', 'ses_empty'), { recursive: true })
-    const u = readOpencodeUsage('s1', 'ses_empty', storageRoot)
+    const u = await readOpencodeUsage('s1', 'ses_empty', storageRoot)
     expect(u.exists).toBe(true)
     expect(u.turns).toBe(0)
   })
 
-  it('sums input/output/reasoning/cache tokens and cost across assistant messages', () => {
+  it('sums input/output/reasoning/cache tokens and cost across assistant messages', async () => {
     const sid = 'ses_abc'
     writeMessage(
       sid,
@@ -95,7 +95,7 @@ describe('readOpencodeUsage', () => {
       }),
     )
 
-    const u = readOpencodeUsage('s1', sid, storageRoot)
+    const u = await readOpencodeUsage('s1', sid, storageRoot)
     expect(u.exists).toBe(true)
     expect(u.turns).toBe(2)
     // reasoning tokens are billed as output
@@ -104,38 +104,38 @@ describe('readOpencodeUsage', () => {
     expect(u.model).toBe('anthropic/claude-sonnet-5')
   })
 
-  it('ignores non-assistant messages (e.g. user turns)', () => {
+  it('ignores non-assistant messages (e.g. user turns)', async () => {
     const sid = 'ses_user'
     writeMessage(sid, 'msg1', { role: 'user', sessionID: sid })
     writeMessage(sid, 'msg2', assistantMessage({ input: 5, output: 5 }))
 
-    const u = readOpencodeUsage('s1', sid, storageRoot)
+    const u = await readOpencodeUsage('s1', sid, storageRoot)
     expect(u.turns).toBe(1)
     expect(u.tokens.input).toBe(5)
   })
 
-  it('skips assistant messages missing a tokens object', () => {
+  it('skips assistant messages missing a tokens object', async () => {
     const sid = 'ses_notokens'
     writeMessage(sid, 'msg1', { role: 'assistant', sessionID: sid, cost: 1 })
     writeMessage(sid, 'msg2', assistantMessage({ input: 1, output: 1 }))
 
-    const u = readOpencodeUsage('s1', sid, storageRoot)
+    const u = await readOpencodeUsage('s1', sid, storageRoot)
     expect(u.turns).toBe(1)
   })
 
-  it('tolerates malformed/unparseable message files without throwing', () => {
+  it('tolerates malformed/unparseable message files without throwing', async () => {
     const sid = 'ses_junk'
     const dir = join(storageRoot, 'message', sid)
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, 'garbage.json'), '{ not json')
     writeMessage(sid, 'msg-good', assistantMessage({ input: 7, output: 3 }))
 
-    const u = readOpencodeUsage('s1', sid, storageRoot)
+    const u = await readOpencodeUsage('s1', sid, storageRoot)
     expect(u.turns).toBe(1)
     expect(u.tokens.input).toBe(7)
   })
 
-  it('treats missing/non-numeric fields as 0', () => {
+  it('treats missing/non-numeric fields as 0', async () => {
     const sid = 'ses_lenient'
     writeMessage(sid, 'msg1', {
       role: 'assistant',
@@ -144,7 +144,7 @@ describe('readOpencodeUsage', () => {
       cost: 'free',
     })
 
-    const u = readOpencodeUsage('s1', sid, storageRoot)
+    const u = await readOpencodeUsage('s1', sid, storageRoot)
     expect(u.turns).toBe(1)
     expect(u.tokens).toEqual({ input: 0, output: 0, cacheCreation: 0, cacheRead: 0 })
     expect(u.costUsd).toBe(0)

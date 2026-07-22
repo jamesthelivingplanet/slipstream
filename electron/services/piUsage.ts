@@ -46,13 +46,17 @@ const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ?
  * null, the dir is missing, or it has zero `.jsonl` files. Tolerates
  * partial/garbage lines and files exactly like readTranscriptUsage.
  */
-export function readPiUsage(sessionId: string, cwd: string | null, root?: string): SessionUsage {
+export async function readPiUsage(
+  sessionId: string,
+  cwd: string | null,
+  root?: string,
+): Promise<SessionUsage> {
   if (!cwd) return emptyUsage(sessionId)
 
   const dir = piSessionDirFor(cwd, root)
   let files: string[]
   try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'))
+    files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith('.jsonl'))
   } catch {
     return emptyUsage(sessionId)
   }
@@ -66,7 +70,7 @@ export function readPiUsage(sessionId: string, cwd: string | null, root?: string
   for (const file of files) {
     let text: string
     try {
-      text = fs.readFileSync(path.join(dir, file), 'utf8')
+      text = await fs.promises.readFile(path.join(dir, file), 'utf8')
     } catch {
       continue
     }
