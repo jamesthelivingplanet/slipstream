@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tinted at render time via RemoteViews.setInt(id, "setColorFilter", color)
+     — see AgentWidgetService.colorForBucket(). Base color here is only the
+     fallback before the first tint is applied. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="#9AA5B1" />
+    <size android:width="10dp" android:height="10dp" />
+</shape>
