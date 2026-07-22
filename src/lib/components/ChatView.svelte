@@ -386,7 +386,7 @@
 {#if !firstLoadDone}
   <div class="chat-view chat-empty">Loading messages…</div>
 {:else if !available}
-  <div class="chat-view chat-empty">Chat isn't available for this session.</div>
+  <div class="chat-view chat-empty">No messages yet — start the conversation below.</div>
 {:else}
   <div class="chat-view">
     <div class="chat-body" bind:this={chatBody} on:scroll={onScroll}>

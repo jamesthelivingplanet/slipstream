@@ -3,6 +3,7 @@
   import { STATUS_LABEL, type Filter } from '../types'
   import { icons } from '../icons'
   import NullielLoader from './NullielLoader.svelte'
+  import NullielTrio from './NullielTrio.svelte'
 
   /** On mobile, controlled by parent to show/hide as drawer overlay. */
   export let mobileOpen: boolean = true
@@ -76,6 +77,10 @@
             <span class="td-loader" title="Tearing down">
               <NullielLoader size={14} />
             </span>
+          {:else if s.status === 'running'}
+            <span class="run-loader" title="Running">
+              <NullielTrio size={10} />
+            </span>
           {:else}
             <span class="stat-dot"></span>
           {/if}
@@ -126,5 +131,13 @@
     flex: 0 0 7px;
     width: 7px;
     height: 7px;
+  }
+  /* Running rows swap the breathing .stat-dot for a three-glyph "dancing"
+   * indicator (NullielTrio). Wider than the 7px dot, so give it its own
+   * non-shrinking flex basis rather than trying to force it into 7px. */
+  .run-loader {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
   }
 </style>
