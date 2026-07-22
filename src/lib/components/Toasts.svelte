@@ -1,12 +1,29 @@
 <script lang="ts">
-  import { toasts, dismissToast } from '../toast'
+  import { toasts, dismissToast, pauseToast, resumeToast } from '../toast'
 </script>
 
 <div class="toasts-wrap">
   {#each $toasts as t (t.id)}
-    <button type="button" class="toast {t.type}" on:click={() => dismissToast(t.id)}>
-      {t.message}
-    </button>
+    <div
+      class="toast {t.type}"
+      on:mouseenter={() => pauseToast(t.id)}
+      on:mouseleave={() => resumeToast(t.id)}
+    >
+      <!-- Each toast is its own live region (FLO-115): role="alert" is
+           assertive (errors), role="status" is polite (success/warning). The
+           × button is a sibling, not inside the region, so screen readers
+           announce only the message — never "Dismiss". -->
+      <span
+        class="toast-msg"
+        role={t.type === 'error' ? 'alert' : 'status'}
+        aria-live={t.type === 'error' ? 'assertive' : 'polite'}
+        aria-atomic="true">{t.message}</span>
+      <button
+        type="button"
+        class="toast-close"
+        aria-label="Dismiss notification"
+        on:click|stopPropagation={() => dismissToast(t.id)}>×</button>
+    </div>
   {/each}
 </div>
 
@@ -24,16 +41,47 @@
 
   .toast {
     pointer-events: auto;
-    max-width: 340px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    max-width: 420px;
     padding: 10px 14px;
     border-radius: var(--radius);
     font-size: 13px;
     font-weight: 500;
-    text-align: left;
-    cursor: pointer;
     border: 1px solid transparent;
     border-left-width: 3px;
     animation: slideIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .toast-msg {
+    flex: 1 1 auto;
+    /* Long/multi-clause errors (e.g. the stash-conflict warning) must be
+       selectable and copyable, and must wrap without clipping. */
+    user-select: text;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    cursor: default;
+  }
+
+  .toast-close {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin-top: -1px;
+    padding: 0;
+    line-height: 1;
+    font-size: 16px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: hsl(var(--foreground) / 0.6);
+    cursor: pointer;
+  }
+
+  .toast-close:hover {
+    color: hsl(var(--foreground));
+    background: hsl(var(--foreground) / 0.1);
   }
 
   .toast.success {
