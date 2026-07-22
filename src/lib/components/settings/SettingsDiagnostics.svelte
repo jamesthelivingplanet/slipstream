@@ -67,6 +67,12 @@
     <div class="diag-grid">
       <span class="diag-key muted">App</span>
       <span class="mono">{appVersion} · {appGitHash}</span>
+      <span class="diag-key muted">Daemon</span>
+      <span class="mono"
+        >{$diagnostics?.versions?.app ?? '—'} · {$diagnostics?.versions?.gitSha ?? '—'}</span
+      >
+      <span class="diag-key muted">DB schema</span>
+      <span class="mono">{$diagnostics?.versions?.schema ?? '—'}</span>
       <span class="diag-key muted">Electron</span>
       <span class="mono">{$diagnostics?.versions?.electron ?? '—'}</span>
       <span class="diag-key muted">Node</span>

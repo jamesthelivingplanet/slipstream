@@ -10,6 +10,8 @@ import type { WireReq, WireRes, WirePush, WirePing } from '../shared/wire.js'
 import { resolveIdentity, LOCAL_IDENTITY } from '../core/auth.js'
 import type { Identity } from '../shared/contract.js'
 import { createTicketStore } from './wsTickets.js'
+import { APP_VERSION, GIT_SHA } from '../shared/version.js'
+import { SCHEMA_VERSION } from '../db/migrations.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -74,7 +76,15 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     // Health check
     if (url.pathname === '/healthz') {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ ok: true, ...(wsTickets ? { wsTickets: true } : {}) }))
+      res.end(
+        JSON.stringify({
+          ok: true,
+          version: APP_VERSION,
+          gitSha: GIT_SHA,
+          schema: SCHEMA_VERSION,
+          ...(wsTickets ? { wsTickets: true } : {}),
+        }),
+      )
       return
     }
 

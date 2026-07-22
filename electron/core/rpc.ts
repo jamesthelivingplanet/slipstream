@@ -40,6 +40,8 @@ import type { LaunchRequest } from '../services/sessionLauncher.js'
 import { readSchedulerPolicy, writeSchedulerPolicy } from '../services/sessionScheduler.js'
 import { checkSlipstreamCli, lastCliActivity } from '../services/cliHealth.js'
 import { diagnoseRepos, realRepoProbes } from '../services/diagnostics.js'
+import { APP_VERSION, GIT_SHA } from '../shared/version.js'
+import { SCHEMA_VERSION } from '../db/migrations.js'
 import { findAgentCli, binForKind } from '../services/cliProbe.js'
 import { readSessionUsage, buildUsageSummary } from '../services/usage.js'
 import { parseOutcomeSentinel, OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
@@ -923,6 +925,9 @@ export function createRpc(
             dbPath: dataDir ? path.join(dataDir, 'slipstream.db') : '',
           },
           versions: {
+            app: APP_VERSION,
+            gitSha: GIT_SHA,
+            schema: SCHEMA_VERSION,
             node: process.versions.node,
             electron: process.versions.electron,
             v8: process.versions.v8,

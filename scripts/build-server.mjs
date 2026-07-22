@@ -5,6 +5,7 @@
  */
 import { build } from 'esbuild'
 import { builtinModules } from 'node:module'
+import { getBuildMeta } from './lib/buildMeta.mjs'
 
 const external = [
   'electron',
@@ -16,6 +17,16 @@ const external = [
   ...builtinModules.map((m) => `node:${m}`),
 ]
 
+const { version, gitSha } = getBuildMeta()
+// Stamps __APP_VERSION__/__APP_GIT_HASH__ into the daemon bundle — this is
+// the same server.js the Electron app spawns as a child process AND what the
+// pod Docker image runs directly, so this one define covers both surfaces.
+// See docs/VERSIONING.md.
+const define = {
+  __APP_VERSION__: JSON.stringify(version),
+  __APP_GIT_HASH__: JSON.stringify(gitSha),
+}
+
 await build({
   entryPoints: ['electron/server/server.ts'],
   outfile: 'dist-electron/server.js',
@@ -23,6 +34,7 @@ await build({
   platform: 'node',
   format: 'esm',
   external,
+  define,
   sourcemap: true,
 })
 
