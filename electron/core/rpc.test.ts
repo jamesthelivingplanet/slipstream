@@ -1324,6 +1324,81 @@ describe('createRpc', () => {
       expect(deps.sessionStore.get('s1')?.status).toBe('running')
     })
 
+    // Feeding the prior agent's conversation into the handoff prompt: a
+    // claude-code transcript on disk for the session must be read and rendered
+    // into the takeover prompt so the new agent gets up to speed. Mirrors the
+    // CLAUDE_CONFIG_DIR fixture approach used by the chat-messages suite.
+    describe('prior conversation (FLO-102 context handoff)', () => {
+      let configDir: string
+      let prevConfigDir: string | undefined
+
+      function chatLine(
+        uuid: string,
+        ts: string,
+        text: string,
+        role: 'user' | 'assistant' = 'assistant',
+      ): string {
+        return JSON.stringify({
+          type: role,
+          isSidechain: false,
+          uuid,
+          timestamp: ts,
+          message: { role, content: [{ type: 'text', text }] },
+        })
+      }
+
+      function writeTranscript(id: string, lines: string[]): void {
+        const sub = path.join(configDir, 'projects', 'proj-a')
+        fs.mkdirSync(sub, { recursive: true })
+        fs.writeFileSync(path.join(sub, `${id}.jsonl`), lines.join('\n') + '\n')
+      }
+
+      beforeEach(() => {
+        configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-rpc-handoff-'))
+        prevConfigDir = process.env.CLAUDE_CONFIG_DIR
+        process.env.CLAUDE_CONFIG_DIR = configDir
+      })
+
+      afterEach(() => {
+        if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+        else process.env.CLAUDE_CONFIG_DIR = prevConfigDir
+        fs.rmSync(configDir, { recursive: true, force: true })
+      })
+
+      it("renders the prior agent's transcript into the handoff prompt", async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+        writeTranscript('s1', [
+          chatLine('u1', '2026-07-19T10:00:00.000Z', 'Begin implementing T-1.', 'user'),
+          chatLine('a1', '2026-07-19T10:00:01.000Z', 'Investigating the codebase now.'),
+        ])
+
+        await rpc.handle(IPC.handoffSession, ['s1', 'pi'])
+
+        const prompt = vi.mocked(deps.sessions.handoff).mock.calls[0][0] as {
+          handoffPrompt: string
+        }
+        expect(prompt.handoffPrompt).toContain('Conversation so far')
+        expect(prompt.handoffPrompt).toContain('User: Begin implementing T-1.')
+        expect(prompt.handoffPrompt).toContain('Assistant: Investigating the codebase now.')
+        // The conversation-aware wording replaces the scrollback warning.
+        expect(prompt.handoffPrompt).not.toContain(
+          'terminal scrollback from before is not available',
+        )
+      })
+
+      it('omits the conversation section and keeps the git-state wording when no transcript exists', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+
+        await rpc.handle(IPC.handoffSession, ['s1', 'pi'])
+
+        const prompt = vi.mocked(deps.sessions.handoff).mock.calls[0][0] as {
+          handoffPrompt: string
+        }
+        expect(prompt.handoffPrompt).not.toContain('Conversation so far')
+        expect(prompt.handoffPrompt).toContain('terminal scrollback from before is not available')
+      })
+    })
+
     it('throws for a missing session', async () => {
       await expect(rpc.handle(IPC.handoffSession, ['missing', 'pi'])).rejects.toThrow(
         'Session not found: missing',
