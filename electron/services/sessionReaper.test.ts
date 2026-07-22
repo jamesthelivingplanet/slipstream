@@ -140,7 +140,7 @@ describe('createSessionReaper', () => {
     config = makeConfig()
     store = makeStore()
     viewersMap = new Map()
-    logger = { spawn: vi.fn(), exit: vi.fn(), server: vi.fn() }
+    logger = { spawn: vi.fn(), exit: vi.fn(), server: vi.fn(), deleteSessionLog: vi.fn() }
   })
 
   it('reaps nothing when disabled', () => {

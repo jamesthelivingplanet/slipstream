@@ -74,4 +74,7 @@ export interface IpcDeps {
    *  resolveIdentity's multi-user seam. Optional so tests without one fall
    *  back to the static-token-only (single-user) auth path. */
   deviceTokens?: import('./services/deviceTokenStore.js').IDeviceTokenStore
+  /** The Slipstream data root (e.g. ~/.config/slipstream) — the same value
+   *  passed to createSessionManager/createRunLogger/createClipboardStore. */
+  dataDir: string
 }

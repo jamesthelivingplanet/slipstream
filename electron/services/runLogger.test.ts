@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRunLogger } from './runLogger.js'
@@ -137,6 +137,45 @@ describe('createRunLogger', () => {
       const content = readFileSync(join(root, 'logs', 'server.log'), 'utf8')
       expect(content).toContain('"name":"TypeError"')
       expect(content).toContain('"message":"bad arg"')
+    })
+  })
+
+  describe('deleteSessionLog', () => {
+    it('deletes an existing session log file', () => {
+      const log = createRunLogger(root)
+      const sid = 'ffffffff-0000-1111-2222-333333333333'
+      log.spawn(sid, { agentKind: 'claude-code', cmd: 'c', args: [], cwd: '/x' })
+      expect(existsSync(join(root, 'logs', `${sid}.log`))).toBe(true)
+      log.deleteSessionLog(sid)
+      expect(existsSync(join(root, 'logs', `${sid}.log`))).toBe(false)
+    })
+
+    it('is a no-op (does not throw) for a session that never logged anything', () => {
+      const log = createRunLogger(root)
+      expect(() => log.deleteSessionLog('never-logged-session')).not.toThrow()
+    })
+  })
+
+  describe('server.log rotation', () => {
+    it('rotates server.log to server.log.1 once writes cross the cap', async () => {
+      const log = createRunLogger(root)
+      const chunk = 'x'.repeat(1024 * 1024) // ~1 MiB payload per line
+      // 11 calls comfortably cross the 10 MiB cap; the crossing call rotates
+      // the accumulated file to server.log.1 and starts a fresh server.log.
+      for (let i = 0; i < 11; i++) {
+        log.server('info', chunk)
+      }
+      // server.log uses async appendFile; wait for it to flush
+      await new Promise((r) => setTimeout(r, 200))
+
+      const rotatedPath = join(root, 'logs', 'server.log.1')
+      const currentPath = join(root, 'logs', 'server.log')
+      expect(existsSync(rotatedPath)).toBe(true)
+      const rotatedSize = statSync(rotatedPath).size
+      const currentSize = statSync(currentPath).size
+      expect(rotatedSize).toBeGreaterThan(9 * 1024 * 1024)
+      // rotation actually happened (fresh file), not just appended forever
+      expect(currentSize).toBeLessThan(rotatedSize)
     })
   })
 

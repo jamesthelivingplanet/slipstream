@@ -20,10 +20,12 @@ import type {
   IPromptTemplateStore,
   PromptTemplateDTO,
   IOutcomeStore,
+  IAgentEventStore,
   IClipboardStore,
   SessionStatus,
   StatusMeta,
   WriteLockState,
+  SessionAgentEventDTO,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
 import type { IEditorLauncher } from '../services/editorLauncher.js'
@@ -32,6 +34,8 @@ import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import type { IWriteCoordinator } from '../services/writeCoordinator.js'
 import type { ISessionScheduler } from '../services/sessionScheduler.js'
 import { piSessionDirFor } from '../services/piSessions.js'
+import { createRunLogger } from '../services/runLogger.js'
+import { ScrollbackStore } from '../services/scrollbackStore.js'
 
 vi.mock('../services/opencodeSessions.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/opencodeSessions.js')>()
@@ -84,7 +88,9 @@ function makeWorktreeDiff(): WorktreeDiffDTO {
 
 type Listener = (...args: unknown[]) => void
 
-function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) => void } {
+function makeFakeDeps(
+  dataDir: string,
+): IpcDeps & { _emit: (event: string, ...args: unknown[]) => void } {
   const listeners: Record<string, Listener[]> = {}
 
   const sessions: ISessionManager = {
@@ -247,7 +253,23 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     }),
   }
 
+  const agentEventMap = new Map<string, SessionAgentEventDTO[]>()
+  const agentEventStore: IAgentEventStore = {
+    insert(e) {
+      const list = agentEventMap.get(e.sessionId) ?? []
+      list.push(e)
+      agentEventMap.set(e.sessionId, list)
+    },
+    list(sessionId) {
+      return agentEventMap.get(sessionId) ?? []
+    },
+    delete(sessionId) {
+      agentEventMap.delete(sessionId)
+    },
+  }
+
   return {
+    dataDir,
     repos,
     worktrees,
     sessions,
@@ -257,11 +279,13 @@ function makeFakeDeps(): IpcDeps & { _emit: (event: string, ...args: unknown[]) 
     sessionStore,
     promptTemplates,
     outcomeStore,
+    agentEventStore,
     clipboardStore,
     editor,
     appRunner,
     tailscale,
     push,
+    logger: createRunLogger(dataDir),
     _emit(event: string, ...args: unknown[]) {
       for (const l of listeners[event] ?? []) l(...args)
     },
@@ -274,9 +298,11 @@ describe('createRpc', () => {
   let deps: ReturnType<typeof makeFakeDeps>
   let emitted: Array<[string, ...unknown[]]>
   let rpc: ReturnType<typeof createRpc>
+  let tempDir: string
 
   beforeEach(() => {
-    deps = makeFakeDeps()
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-cleanup-'))
+    deps = makeFakeDeps(tempDir)
     emitted = []
     rpc = createRpc(
       deps,
@@ -285,6 +311,10 @@ describe('createRpc', () => {
       },
       { coalesceMs: 0 },
     )
+  })
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
   it('routes listRepos to repos.list()', async () => {
@@ -1241,6 +1271,82 @@ describe('createRpc', () => {
     expect(deps.worktrees.remove).toHaveBeenCalled()
     expect(result).toEqual({ removed: true })
     expect(deps.sessionStore.list()).toHaveLength(0)
+  })
+
+  describe('cleanupSession — artifact cleanup (FLO-133)', () => {
+    // Fixture: pre-create every on-disk/DB artifact cleanupSession must sweep
+    // for the given session id, mirroring how the real writers (outcomeStore,
+    // agentEventStore, the slipstream CLI sentinel dir, ScrollbackStore, and
+    // RunLogger) populate them during a live run.
+    function seedArtifacts(id: string): void {
+      deps.outcomeStore.upsert({
+        sessionId: id,
+        result: 'success',
+        summary: 'done',
+        reportedAt: Date.now(),
+      })
+      deps.agentEventStore!.insert({ sessionId: id, kind: 'checkpoint', message: 'a', ts: 1 })
+      const scrollback = new ScrollbackStore(tempDir)
+      scrollback.append(id, 'hello')
+      scrollback.setSize(id, 80, 24)
+      fs.mkdirSync(path.join(tempDir, 'sessions', id), { recursive: true })
+      fs.writeFileSync(path.join(tempDir, 'sessions', id, 'status.json'), '{}')
+      deps.logger!.spawn(id, { agentKind: 'claude-code', cmd: 'claude', args: [], cwd: '/repo' })
+    }
+
+    function artifactPaths(id: string) {
+      return {
+        scrollbackLog: path.join(tempDir, 'scrollback', `${id}.log`),
+        scrollbackSize: path.join(tempDir, 'scrollback', `${id}.size.json`),
+        sentinelDir: path.join(tempDir, 'sessions', id),
+        sessionLog: path.join(tempDir, 'logs', `${id}.log`),
+      }
+    }
+
+    it('removes every per-session artifact on cleanup', async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', repoId: 'r1', branch: 't-1-fix-bug' }))
+      seedArtifacts('s1')
+      const paths = artifactPaths('s1')
+      expect(fs.existsSync(paths.scrollbackLog)).toBe(true)
+      expect(fs.existsSync(paths.scrollbackSize)).toBe(true)
+      expect(fs.existsSync(paths.sentinelDir)).toBe(true)
+      expect(fs.existsSync(paths.sessionLog)).toBe(true)
+
+      const result = await rpc.handle(IPC.cleanupSession, ['s1'])
+      expect(result).toEqual({ removed: true })
+
+      expect(deps.outcomeStore.get('s1')).toBeUndefined()
+      expect(deps.agentEventStore!.list('s1')).toEqual([])
+      expect(fs.existsSync(paths.scrollbackLog)).toBe(false)
+      expect(fs.existsSync(paths.scrollbackSize)).toBe(false)
+      expect(fs.existsSync(paths.sentinelDir)).toBe(false)
+      expect(fs.existsSync(paths.sessionLog)).toBe(false)
+    })
+
+    it("does not touch another session's artifacts or the shared parent dirs", async () => {
+      deps.sessionStore.upsert(makeSession({ id: 's1', repoId: 'r1', branch: 't-1-fix-bug' }))
+      deps.sessionStore.upsert(
+        makeSession({ id: 's2', repoId: 'r1', branch: 't-1-fix-bug-2', tid: 'T-2' }),
+      )
+      seedArtifacts('s1')
+      seedArtifacts('s2')
+
+      await rpc.handle(IPC.cleanupSession, ['s1'])
+
+      const s2 = artifactPaths('s2')
+      expect(deps.outcomeStore.get('s2')).toBeDefined()
+      expect(deps.agentEventStore!.list('s2')).toHaveLength(1)
+      expect(fs.existsSync(s2.scrollbackLog)).toBe(true)
+      expect(fs.existsSync(s2.scrollbackSize)).toBe(true)
+      expect(fs.existsSync(s2.sentinelDir)).toBe(true)
+      expect(fs.existsSync(s2.sessionLog)).toBe(true)
+
+      // The shared parent dirs must survive — an over-broad delete (e.g.
+      // fs.rm-ing 'sessions/' instead of 'sessions/<id>/') would wipe these.
+      expect(fs.existsSync(path.join(tempDir, 'logs'))).toBe(true)
+      expect(fs.existsSync(path.join(tempDir, 'scrollback'))).toBe(true)
+      expect(fs.existsSync(path.join(tempDir, 'sessions'))).toBe(true)
+    })
   })
 
   it('sessionMerged returns merged:false for an unknown session', async () => {
@@ -2338,7 +2444,7 @@ describe('createRpc', () => {
     let rpcB: ReturnType<typeof createRpc>
 
     beforeEach(() => {
-      sharedDeps = makeFakeDeps()
+      sharedDeps = makeFakeDeps(tempDir)
       coord = createWriteCoordinator()
       sharedDeps.writeCoordinator = coord
       sharedDeps.sessionStore.upsert(makeSession({ id: 's1' }))
