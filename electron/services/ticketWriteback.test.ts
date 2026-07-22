@@ -140,7 +140,7 @@ describe('createTicketWriteback', () => {
       sessions,
       store,
       tickets,
-      logger: { spawn: vi.fn(), exit: vi.fn(), server },
+      logger: { spawn: vi.fn(), exit: vi.fn(), server, deleteSessionLog: vi.fn() },
     })
 
     emitter.emit('pr', 's1', 'https://example.com/pr/1')

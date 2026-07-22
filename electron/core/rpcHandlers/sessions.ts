@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { IpcDeps } from '../../ipc.js'
 import { IPC, BACKEND_KINDS } from '../../shared/contract.js'
@@ -13,6 +15,7 @@ import { parseAgentArgs } from '../../shared/agentCli.js'
 import { launchSession, resumeProcedure } from '../../services/sessionLauncher.js'
 import type { LaunchRequest } from '../../services/sessionLauncher.js'
 import { readSessionChat } from '../../services/sessionChatReader.js'
+import { ScrollbackStore } from '../../services/scrollbackStore.js'
 import type { RpcContext } from '../rpcContext.js'
 import type { ChannelHandlerMap } from './types.js'
 
@@ -163,6 +166,20 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
       if (result.removed) {
         deps.sessionStore.delete(id)
         deps.clipboardStore?.delete(id)
+
+        // FLO-133: sweep the remaining per-session artifacts that otherwise
+        // accumulate forever on a long-lived daemon. All best-effort — a
+        // failure here must not prevent the others from being attempted or
+        // fail the cleanup call (the worktree/DB row are already gone).
+        deps.outcomeStore.delete(id)
+        deps.agentEventStore?.delete(id)
+        new ScrollbackStore(deps.dataDir).delete(id)
+        deps.logger?.deleteSessionLog(id)
+        try {
+          fs.rmSync(path.join(deps.dataDir, 'sessions', id), { recursive: true, force: true })
+        } catch {
+          // best-effort — cleanup must not fail after the worktree/DB row are already gone
+        }
 
         // FLO-35: move the linked ticket back to "To Do" when the agent run
         // is deleted, so the next agent can pick it up. Best-effort — a
