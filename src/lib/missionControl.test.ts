@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { stripAnsi, extractAsk, formatWait } from './missionControl.js'
+import { stripAnsi, extractAsk, formatWait, suggestedReplies } from './missionControl.js'
 
 // ─── stripAnsi ────────────────────────────────────────────────────────────────
 
@@ -106,6 +106,66 @@ describe('extractAsk', () => {
 
   it('does not truncate when the question fits within maxLen', () => {
     expect(extractAsk('Continue?', 20)).toBe('Continue?')
+  })
+})
+
+// ─── suggestedReplies ───────────────────────────────────────────────────────────
+
+describe('suggestedReplies', () => {
+  it('returns [] for null', () => {
+    expect(suggestedReplies(null)).toEqual([])
+  })
+
+  it('returns [] for undefined', () => {
+    expect(suggestedReplies(undefined)).toEqual([])
+  })
+
+  it('returns [] for an empty string', () => {
+    expect(suggestedReplies('')).toEqual([])
+  })
+
+  it('returns [] for a whitespace-only string', () => {
+    expect(suggestedReplies('   ')).toEqual([])
+  })
+
+  it('matches a trailing [y/n] prompt', () => {
+    expect(suggestedReplies('Remove unused imports? [y/n]')).toEqual(['y', 'n'])
+  })
+
+  it('matches a trailing (y/N) prompt and preserves the default-hint casing', () => {
+    expect(suggestedReplies('Overwrite the file (y/N)')).toEqual(['y', 'N'])
+  })
+
+  it('matches a trailing [Y/n] prompt and preserves the default-hint casing', () => {
+    expect(suggestedReplies('Proceed with deploy [Y/n]')).toEqual(['Y', 'n'])
+  })
+
+  it('matches a trailing "yes/no?" prompt', () => {
+    expect(suggestedReplies('Should I delete this? yes/no?')).toEqual(['y', 'n'])
+  })
+
+  it('matches a trailing "proceed?" question', () => {
+    expect(suggestedReplies('Should I proceed?')).toEqual(['Yes', 'No'])
+  })
+
+  it('matches a trailing "continue?" question', () => {
+    expect(suggestedReplies('Continue?')).toEqual(['Yes', 'No'])
+  })
+
+  it('matches "shall I proceed" phrasing', () => {
+    expect(suggestedReplies('Shall I proceed with the migration?')).toEqual(['Yes', 'No'])
+  })
+
+  it('returns [] for an open-ended question', () => {
+    expect(suggestedReplies('What should I name this branch?')).toEqual([])
+  })
+
+  it('returns [] for a multi-choice menu question', () => {
+    expect(suggestedReplies('Pick an option: 1. Deploy now 2. Cancel')).toEqual([])
+  })
+
+  it('returns [] for plain non-question text', () => {
+    expect(suggestedReplies('Installing dependencies...')).toEqual([])
   })
 })
 

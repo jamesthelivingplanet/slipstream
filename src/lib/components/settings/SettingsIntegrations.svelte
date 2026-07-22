@@ -10,6 +10,7 @@
     setTicketSettings,
     listTicketScopes,
   } from '../../ipc'
+  import { nativeStorage, TOKEN_KEY } from '../../nativeStorage'
   import { pushToast } from '../../toast'
   import SettingsSection from './SettingsSection.svelte'
   import type {
@@ -18,6 +19,54 @@
     GitHost,
     GitProviderInfoDTO,
   } from '../../../../electron/shared/contract.js'
+
+  // ── Pair a device (QR / link embedding the live bearer token) ────────────
+  // Only meaningful when this client is actually holding a bearer token —
+  // e.g. a plain Electron desktop connection has none to embed, which is
+  // expected (see src/main.ts bootWeb()), not a bug. `pairingLink` stays null
+  // in that case and the whole section renders nothing.
+  let pairingLink: string | null = null
+  let pairingRevealed = false
+  let qrDataUrl = ''
+
+  async function loadPairingLink() {
+    if (!hasBackend) return
+    try {
+      const token = await nativeStorage.get(TOKEN_KEY)
+      if (token && typeof location !== 'undefined') {
+        pairingLink = `${location.origin}/?token=${encodeURIComponent(token)}`
+      }
+    } catch {
+      // ignore — section just won't render
+    }
+  }
+
+  async function revealPairing() {
+    if (!pairingLink) return
+    pairingRevealed = true
+    if (!qrDataUrl) {
+      try {
+        const QRCode = await import('qrcode')
+        qrDataUrl = await QRCode.toDataURL(pairingLink, { margin: 1, width: 220 })
+      } catch {
+        pushToast('error', 'Failed to generate QR code')
+      }
+    }
+  }
+
+  function hidePairing() {
+    pairingRevealed = false
+  }
+
+  async function copyPairingLink() {
+    if (!pairingLink) return
+    try {
+      await navigator.clipboard.writeText(pairingLink)
+      pushToast('success', 'Copied')
+    } catch {
+      pushToast('error', 'Failed to copy — copy it manually instead')
+    }
+  }
 
   function emptySettings(): TicketSourceSettings {
     return {
@@ -218,12 +267,37 @@
     loadJiraSettings()
     loadGitProviders()
     refreshCliStatus()
+    loadPairingLink()
   })
 </script>
 
 <div class="tab-header">
   <span class="tab-title">Integrations</span>
 </div>
+{#if pairingLink}
+  <SettingsSection title="Pair a device">
+    {#if !pairingRevealed}
+      <p class="integration-hint">
+        Get a QR code / link that opens Slipstream on another device already connected — no typing a
+        server URL or token by hand.
+      </p>
+      <button class="btn btn-outline btn-sm" on:click={revealPairing}> Show pairing link </button>
+    {:else}
+      <p class="integration-hint">
+        Scan this with your phone's camera to open Slipstream already connected. This link contains
+        your access token — treat it like a password.
+      </p>
+      {#if qrDataUrl}
+        <img class="pairing-qr" src={qrDataUrl} alt="QR code for the pairing link" />
+      {/if}
+      <div class="path-add">
+        <input type="text" class="path-input mono" readonly value={pairingLink} />
+        <button class="btn btn-outline btn-sm" on:click={copyPairingLink}> Copy </button>
+      </div>
+      <button class="btn btn-outline btn-sm" on:click={hidePairing}> Hide </button>
+    {/if}
+  </SettingsSection>
+{/if}
 <SettingsSection title="slipstream CLI">
   <p class="integration-hint">
     Lets an agent report status, record checkpoints, publish artifacts, and open the PR back to
@@ -484,6 +558,16 @@
 {/each}
 
 <style>
+  .pairing-qr {
+    display: block;
+    width: 220px;
+    height: 220px;
+    max-width: 100%;
+    margin: 4px 0 10px;
+    border-radius: var(--radius);
+    background: #fff;
+    padding: 8px;
+  }
   .mcp-settings-row {
     display: flex;
     align-items: center;

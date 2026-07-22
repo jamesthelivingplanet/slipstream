@@ -43,6 +43,13 @@
     send()
   }
 
+  /** Quick-key chips: send a raw control/ANSI sequence without stealing focus
+   *  from the composer input, so the user can keep typing right after. */
+  function sendChip(seq: string) {
+    onData(seq)
+    el?.focus()
+  }
+
   function handlePaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items
     if (items) {
@@ -87,3 +94,86 @@
     on:paste={handlePaste}
   />
 </div>
+
+<div class="term-chips" role="group" aria-label="Quick keys">
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Escape"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\x1b')}
+  >
+    Esc
+  </button>
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Tab"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\t')}
+  >
+    Tab
+  </button>
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Interrupt (Ctrl+C)"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\x03')}
+  >
+    Ctrl+C
+  </button>
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Previous (history up)"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\x1b[A')}
+  >
+    &uarr;
+  </button>
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Next (history down)"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\x1b[B')}
+  >
+    &darr;
+  </button>
+</div>
+
+<style>
+  /* Quick-key row: sits directly under the composer input, sharing its
+     background so the two read as one composer surface. Chips are plain
+     .btn/.btn-outline/.btn-sm (see app.css) so they match every other
+     toolbar control in the app — only the row layout is new here. */
+  .term-chips {
+    display: flex;
+    gap: 6px;
+    padding: 4px 8px 8px;
+    background: hsl(var(--background));
+    overflow-x: auto;
+  }
+  .chip {
+    flex: 0 0 auto;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  /* .term-input's own border-top already separates the composer from
+     whatever is above it; .term-actions (app.css) normally adds its own
+     border-top too, but that would double up right where the chip row now
+     sits flush against it, so drop it here exactly like the input row does. */
+  .term-chips + :global(.term-actions) {
+    border-top: none;
+  }
+</style>

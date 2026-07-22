@@ -82,6 +82,57 @@ export function extractAsk(buffer: string, maxLen: number = DEFAULT_MAX_LEN): st
   return joined
 }
 
+// ─── Suggested one-tap replies ──────────────────────────────────────────────
+// Deliberately narrow: only the clearest yes/no-shaped asks get a reply chip.
+// A chip that doesn't actually fit the question is worse than no chip at all,
+// so anything ambiguous — multi-choice, open-ended, "which option" — falls
+// through to []. Mirrors extractAsk's precedent of matching heuristics, not
+// full NLP.
+
+// Trailing "(y/n)", "[y/n]", "y/n?", "yes/no?" etc. — a slash-separated
+// yes/no token pair, optionally bracketed, optionally followed by '?'.
+const YN_RE = /[([]?\s*(y(?:es)?)\s*\/\s*(n(?:o)?)\s*[)\]]?\s*\??\s*$/i
+
+// A trailing "proceed?" / "continue?" question, or the common phrasing
+// "shall I proceed" (with or without a trailing '?').
+const PROCEED_RE = /\b(?:proceed|continue)\s*\?\s*$/i
+const SHALL_PROCEED_RE = /\bshall i proceed\b/i
+
+/**
+ * Given the ask text extracted by `extractAsk`, return 0-2 one-tap reply
+ * strings for the common, unambiguous yes/no / proceed-or-stop question
+ * shapes. Returns `[]` for anything else — including null/undefined/empty
+ * input, and any open-ended or multi-choice ask. Never throws.
+ */
+export function suggestedReplies(ask: string | null | undefined): string[] {
+  try {
+    if (!ask || typeof ask !== 'string') return []
+    const trimmed = ask.trim()
+    if (!trimmed) return []
+
+    const ynMatch = trimmed.match(YN_RE)
+    if (ynMatch) {
+      const yToken = ynMatch[1]
+      const nToken = ynMatch[2]
+      // Preserve the classic "(Y/n)" / "(y/N)" default-hint casing when
+      // exactly one side is capitalized; otherwise default to lowercase.
+      const yUpper = /^[A-Z]/.test(yToken)
+      const nUpper = /^[A-Z]/.test(nToken)
+      if (yUpper && !nUpper) return ['Y', 'n']
+      if (nUpper && !yUpper) return ['y', 'N']
+      return ['y', 'n']
+    }
+
+    if (PROCEED_RE.test(trimmed) || SHALL_PROCEED_RE.test(trimmed)) {
+      return ['Yes', 'No']
+    }
+
+    return []
+  } catch {
+    return []
+  }
+}
+
 // ─── Elapsed-time formatting ─────────────────────────────────────────────────
 
 const MINUTE_MS = 60_000

@@ -1,11 +1,14 @@
 package app.slipstream.mobile;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
+import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.CapConfig;
+import org.json.JSONObject;
 
 /**
  * TASK-I9S44: the daemon URL is a runtime preference, not just the build-time
@@ -35,6 +38,41 @@ public class MainActivity extends BridgeActivity {
         }
 
         super.onCreate(savedInstanceState);
+
+        // Cold start from a widget row tap (see AgentWidgetService).
+        forwardWidgetSessionId(getIntent());
+    }
+
+    /**
+     * TASK-CQFRV: android:launchMode="singleTask" (manifest) means a widget
+     * tap while the app is already running arrives here, not onCreate.
+     */
+    @Override
+    public void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        forwardWidgetSessionId(intent);
+    }
+
+    /** Forwards a widget row's sessionId extra to the SPA as a DOM event
+     *  (see App.svelte's 'slipstream:widget-open' listener). No-op if the
+     *  intent didn't come from a widget tap. */
+    private void forwardWidgetSessionId(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String sessionId = intent.getStringExtra("sessionId");
+        if (sessionId == null || sessionId.isEmpty()) {
+            return;
+        }
+        WebView webView = getBridge().getWebView();
+        if (webView == null) {
+            return;
+        }
+        String js =
+            "window.dispatchEvent(new CustomEvent('slipstream:widget-open', { detail: { sessionId: " +
+            JSONObject.quote(sessionId) +
+            " } }))";
+        webView.evaluateJavascript(js, null);
     }
 
     private CapConfig resolveRuntimeServerUrl() {

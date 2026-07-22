@@ -127,6 +127,12 @@
       })
     }
 
+    // Widget tap (Android home-screen widget, see MainActivity.forwardWidgetSessionId)
+    window.addEventListener('slipstream:widget-open', (e) => {
+      const sessionId = (e as CustomEvent).detail?.sessionId
+      if (sessionId) openAgentById(sessionId)
+    })
+
     checkViewport()
     window.addEventListener('resize', checkViewport)
     window.addEventListener('orientationchange', checkViewport)
