@@ -58,6 +58,7 @@ import {
   startSession,
   onConnectionChange,
   worktreeUpdateFromBase,
+  removeRepo,
 } from './ipc'
 import {
   sessions,
@@ -100,6 +101,7 @@ import {
   filter,
   query,
   updateDraftPrompt,
+  removeRepoById,
 } from './stores.js'
 import { toasts } from './toast.js'
 import type { Ticket, Session, Status } from './types.js'
@@ -504,6 +506,83 @@ describe('FLO-56 content stores', () => {
     expect(get(contentLoading)).toBe(false)
     expect(get(contentResolvedAt)).toBe(0)
     expect(get(contentRefreshNonce)).toBe(0)
+  })
+})
+
+describe('removeRepoById (FLO-111)', () => {
+  function makeSession(overrides: Partial<Session> = {}): Session {
+    return {
+      id: 'u1',
+      tid: 'FLO-1',
+      src: 'linear',
+      status: 'done',
+      title: 'Some task',
+      repo: 'repo1',
+      branch: 'FLO-1-branch',
+      add: 0,
+      del: 0,
+      behind: 0,
+      ago: '',
+      activity: { text: '' },
+      ...overrides,
+    }
+  }
+
+  beforeEach(() => {
+    toasts.set([])
+    sessions.set([])
+    repos.set([])
+    confirmState.set(null)
+    vi.mocked(removeRepo).mockReset()
+  })
+
+  it('blocks removal when a session references the repo, without ever prompting', async () => {
+    repos.set([{ id: 'repo1', org: 'acme', name: 'api', base: 'main' }])
+    sessions.set([makeSession({ id: 'u1', repo: 'repo1' })])
+
+    await removeRepoById('repo1')
+
+    expect(removeRepo).not.toHaveBeenCalled()
+    expect(get(repos).some((r) => r.id === 'repo1')).toBe(true)
+    expect(get(confirmState)).toBeNull()
+    const errorToast = get(toasts).find((t) => t.type === 'error')
+    expect(errorToast).toBeDefined()
+    expect(errorToast?.message).toMatch(/acme\/api|1 session/i)
+  })
+
+  it('confirms and removes when no sessions reference the repo', async () => {
+    repos.set([{ id: 'repo1', org: 'acme', name: 'api', base: 'main' }])
+    sessions.set([])
+    vi.mocked(removeRepo).mockResolvedValue(undefined)
+
+    const pending = removeRepoById('repo1')
+
+    for (let i = 0; i < 10 && get(confirmState) === null; i++) await Promise.resolve()
+    get(confirmState)?.resolve(true)
+    confirmState.set(null)
+
+    await pending
+
+    expect(removeRepo).toHaveBeenCalledWith('repo1')
+    expect(get(repos).some((r) => r.id === 'repo1')).toBe(false)
+    expect(get(toasts).find((t) => t.type === 'success')).toBeDefined()
+  })
+
+  it('cancelling the confirm dialog leaves the repo in place', async () => {
+    repos.set([{ id: 'repo1', org: 'acme', name: 'api', base: 'main' }])
+    sessions.set([])
+    vi.mocked(removeRepo).mockResolvedValue(undefined)
+
+    const pending = removeRepoById('repo1')
+
+    for (let i = 0; i < 10 && get(confirmState) === null; i++) await Promise.resolve()
+    get(confirmState)?.resolve(false)
+    confirmState.set(null)
+
+    await pending
+
+    expect(removeRepo).not.toHaveBeenCalled()
+    expect(get(repos).some((r) => r.id === 'repo1')).toBe(true)
   })
 })
 
