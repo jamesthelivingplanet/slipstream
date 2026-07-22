@@ -30,6 +30,10 @@ export const TOKEN_KEY = 'slipstream.token'
 export const DAEMON_URL_KEY = 'slipstream.daemonUrl'
 /** Preferences key for the last-registered FCM record, JSON `{token, enabled}`. */
 export const FCM_KEY = 'slipstream.fcm'
+/** Preferences key for in-progress 'New agent' drafts, JSON array of Session
+ *  objects with status 'idle' — so a page reload (which drops the renderer
+ *  store entirely) doesn't silently wipe an unsent kickoff prompt (FLO-114). */
+export const DRAFTS_KEY = 'slipstream.drafts'
 
 interface CapacitorPreferencesPlugin {
   get(options: { key: string }): Promise<{ value: string | null }>
