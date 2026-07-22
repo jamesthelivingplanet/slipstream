@@ -28,8 +28,8 @@
     setTicketsQuery,
     refreshTickets,
   } from '../stores'
-  import { getSessionBuffer, hasBackend, getUsageSummary, getPrStatus } from '../ipc'
-  import { extractAsk, formatWait } from '../missionControl'
+  import { getSessionBuffer, hasBackend, getUsageSummary, getPrStatus, writeSession } from '../ipc'
+  import { extractAsk, formatWait, suggestedReplies } from '../missionControl'
   import { formatCost, formatTokens, dayKeyFromMs } from '../../../electron/shared/usageFormat.js'
   import { pushToast } from '../toast'
   import { statusBucket } from '../types'
@@ -95,6 +95,20 @@
   }
 
   $: refreshAsks($sessions)
+
+  // One-tap reply chips (see suggestedReplies): sends the exact reply text
+  // followed by Enter, mirroring how the terminal composer submits a line.
+  // writeSession is a fire-and-forget IPC call (void, not a Promise), so
+  // "failure" here means it threw synchronously (e.g. no backend/session).
+  function sendReply(id: string | undefined, reply: string) {
+    if (!id) return
+    try {
+      writeSession(id, reply + '\r')
+      pushToast('success', `Sent "${reply}"`)
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : `Failed to send "${reply}"`)
+    }
+  }
 
   // FLO-96: post-handoff PR/MR status (merge/CI/review), keyed by session id.
   // Backend caches per prUrl with a TTL, so polling every session with a
@@ -342,6 +356,19 @@
                 <div class="c-title">{s.title}</div>
                 {#if s.status !== 'errored' && hasBackend && s.id && asks[s.id]}
                   <div class="ask">{asks[s.id]}</div>
+                  {#if suggestedReplies(asks[s.id]).length > 0}
+                    <div class="reply-chips">
+                      {#each suggestedReplies(asks[s.id]) as reply (reply)}
+                        <button
+                          type="button"
+                          class="chip reply-chip"
+                          on:click|stopPropagation={() => sendReply(s.id, reply)}
+                        >
+                          {reply}
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
                 {/if}
                 <div class="c-foot">
                   {#if s.branch}<span>{s.branch}</span>{/if}
@@ -808,6 +835,28 @@
   .ask::before {
     content: '❯ ';
     color: hsl(var(--st-needs));
+  }
+  /* one-tap suggested replies (see suggestedReplies) */
+  .reply-chips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .reply-chip {
+    border: 1px solid hsl(var(--st-needs) / 0.4);
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 600;
+    transition:
+      background 0.12s ease,
+      border-color 0.12s ease;
+  }
+  .reply-chip:hover {
+    background: hsl(var(--st-needs) / 0.15);
+    border-color: hsl(var(--st-needs) / 0.7);
+  }
+  .reply-chip:active {
+    background: hsl(var(--st-needs) / 0.25);
   }
   .c-foot {
     display: flex;

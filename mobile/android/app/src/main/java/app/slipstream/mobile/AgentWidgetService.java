@@ -83,8 +83,13 @@ public class AgentWidgetService extends RemoteViewsService {
 
             // Required for setPendingIntentTemplate (AgentWidgetProvider) to
             // make each row respond to taps — the template alone does nothing
-            // without a fill-in intent per item.
-            row.setOnClickFillInIntent(R.id.widget_item_root, new Intent());
+            // without a fill-in intent per item. The sessionId extra merges
+            // into the PendingIntent template's launch intent so MainActivity
+            // can deep-link into this specific session (see onNewIntent).
+            String sessionId = session.optString("id", "");
+            Intent fillInIntent = new Intent();
+            fillInIntent.putExtra("sessionId", sessionId);
+            row.setOnClickFillInIntent(R.id.widget_item_root, fillInIntent);
 
             return row;
         }
