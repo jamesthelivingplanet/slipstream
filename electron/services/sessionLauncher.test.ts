@@ -11,7 +11,7 @@ import type {
   WorktreeInfo,
 } from '../shared/contract.js'
 import type { AgentCliDep } from './agentCliProvision.js'
-import type { LaunchDeps, LaunchRequest } from './sessionLauncher.js'
+import type { LaunchDeps, LaunchRequest, ResumeProcedureDeps } from './sessionLauncher.js'
 
 // ── module under test (and its one async side-effect) ───────────────────────
 // captureOpencodeSessionId shells out to the CLI and polls, so it's mocked
@@ -21,7 +21,7 @@ vi.mock('./opencodeSessions.js', async (importOriginal) => {
   return { ...actual, captureOpencodeSessionId: vi.fn() }
 })
 
-const { launchSession } = await import('./sessionLauncher.js')
+const { launchSession, resumeProcedure } = await import('./sessionLauncher.js')
 const { captureOpencodeSessionId } = await import('./opencodeSessions.js')
 const captureSid = vi.mocked(captureOpencodeSessionId)
 
@@ -119,6 +119,33 @@ function makeDeps(overrides: Partial<LaunchDeps> = {}): LaunchDeps {
 /** Flush the fire-and-forget captureOpencodeSessionId().then(...) microtask. */
 function flushMicrotasks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/** A full ResumeProcedureDeps built from vi.fn() spies, mirroring makeDeps()
+ *  above. The sessionStore is a real in-memory ISessionStore so tests can
+ *  assert on what got persisted. */
+function makeResumeDeps(overrides: Partial<ResumeProcedureDeps> = {}): ResumeProcedureDeps {
+  const sessionStore = makeStore()
+  return {
+    repos: {
+      resolvePath: vi.fn(async () => REPO),
+    } satisfies Pick<IRepoRegistry, 'resolvePath'>,
+    worktrees: {
+      pathFor: vi.fn(() => '/repo/.worktrees/r1-b1'),
+    } satisfies Pick<IWorktreeManager, 'pathFor'>,
+    sessions: {
+      resume: vi.fn(() => makeSessionDto('s1')),
+      attachRemoteControl: vi.fn(() => makeSessionDto('s1')),
+      handoff: vi.fn(() => makeSessionDto('s1', { agentKind: 'pi' })),
+      setOpencodeSid: vi.fn(),
+    } satisfies Pick<
+      ISessionManager,
+      'resume' | 'attachRemoteControl' | 'handoff' | 'setOpencodeSid'
+    >,
+    ports: { claim: vi.fn(async () => 3742) } satisfies IPortBroker,
+    sessionStore,
+    ...overrides,
+  }
 }
 
 describe('launchSession — happy path', () => {
@@ -382,5 +409,176 @@ describe('launchSession — failure ordering / rollback', () => {
     const session = await launchSession(deps, makeReq())
     expect(session.id).toBe('s1')
     expect(deps.sessionStore.get('s1')?.status).toBe('running')
+  })
+})
+
+// ── resumeProcedure (FLO-118) ────────────────────────────────────────────────
+// The shared "reconnect to an already-started session" procedure behind
+// resume/attach/handoff — previously three drifting 40-70-line copies inline
+// in rpc.ts. These tests exercise the launcher function directly; rpc.test.ts
+// covers the thin IPC-handler wiring (owner/queued guards) around it.
+describe('resumeProcedure', () => {
+  beforeEach(() => {
+    captureSid.mockReset()
+    captureSid.mockResolvedValue(null)
+  })
+
+  it('resume: resolves repo, claims only the web port, and calls sessions.resume', async () => {
+    const deps = makeResumeDeps()
+    const session = makeSessionDto('s1', { agentKind: 'claude-code' })
+
+    const result = await resumeProcedure(deps, { mode: 'resume', session })
+
+    expect(result).toMatchObject({ id: 's1', port: 3742 })
+    expect(deps.repos.resolvePath).toHaveBeenCalledWith('r1')
+    expect(deps.worktrees.pathFor).toHaveBeenCalledWith(REPO, 'b1')
+    expect(deps.ports.claim).toHaveBeenCalledTimes(1)
+    expect(deps.ports.claim).toHaveBeenCalledWith('/repo/.worktrees/r1-b1', 'web')
+    expect(deps.sessions.resume).toHaveBeenCalledWith({
+      session,
+      cwd: '/repo/.worktrees/r1-b1',
+      env: { PORT: '3742' },
+      opencodePort: undefined,
+    })
+    expect(deps.sessionStore.get('s1')).toMatchObject({ port: 3742 })
+  })
+
+  it('resume: claims a second port for an embedded-server agentKind', async () => {
+    const deps = makeResumeDeps()
+    ;(deps.ports.claim as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(3742)
+      .mockResolvedValueOnce(4999)
+    const session = makeSessionDto('s1', { agentKind: 'opencode' })
+
+    await resumeProcedure(deps, { mode: 'resume', session })
+
+    expect(deps.ports.claim).toHaveBeenCalledTimes(2)
+    expect(deps.ports.claim).toHaveBeenNthCalledWith(2, '/repo/.worktrees/r1-b1', 'opencode')
+    const call = (deps.sessions.resume as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+      opencodePort?: number
+    }
+    expect(call.opencodePort).toBe(4999)
+    // resume never captures a sid — only handoff does.
+    expect(captureSid).not.toHaveBeenCalled()
+  })
+
+  it('resume: swallows a port-claim failure (port undefined, still calls through)', async () => {
+    const deps = makeResumeDeps()
+    ;(deps.ports.claim as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('claim failed'))
+    const session = makeSessionDto('s1')
+
+    const result = await resumeProcedure(deps, { mode: 'resume', session })
+
+    expect(result.port).toBeUndefined()
+    expect(deps.sessions.resume).toHaveBeenCalledOnce()
+  })
+
+  it('attach: calls sessions.attachRemoteControl instead of resume', async () => {
+    const deps = makeResumeDeps()
+    const session = makeSessionDto('s1')
+
+    await resumeProcedure(deps, { mode: 'attach', session })
+
+    expect(deps.sessions.attachRemoteControl).toHaveBeenCalledOnce()
+    expect(deps.sessions.resume).not.toHaveBeenCalled()
+  })
+
+  it('handoff: calls sessions.handoff with the target agentKind and prompt, and persists the port', async () => {
+    const deps = makeResumeDeps()
+    const session = makeSessionDto('s1', { agentKind: 'claude-code' })
+
+    const result = await resumeProcedure(deps, {
+      mode: 'handoff',
+      session,
+      agentKind: 'pi',
+      handoffPrompt: 'take over',
+    })
+
+    expect(deps.sessions.handoff).toHaveBeenCalledWith({
+      session,
+      cwd: '/repo/.worktrees/r1-b1',
+      env: { PORT: '3742' },
+      opencodePort: undefined,
+      agentKind: 'pi',
+      handoffPrompt: 'take over',
+    })
+    expect(result).toMatchObject({ port: 3742 })
+    expect(deps.sessionStore.get('s1')).toMatchObject({ port: 3742 })
+  })
+
+  it("handoff: claims an embedded-server port for the TARGET agentKind, not the session's current one", async () => {
+    const deps = makeResumeDeps()
+    ;(deps.ports.claim as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(3742)
+      .mockResolvedValueOnce(4999)
+    const session = makeSessionDto('s1', { agentKind: 'claude-code' })
+
+    await resumeProcedure(deps, {
+      mode: 'handoff',
+      session,
+      agentKind: 'opencode',
+      handoffPrompt: 'take over',
+    })
+
+    expect(deps.ports.claim).toHaveBeenNthCalledWith(2, '/repo/.worktrees/r1-b1', 'opencode')
+  })
+
+  it('handoff: captures the embedded-server sid and writes it back (fire-and-forget)', async () => {
+    captureSid.mockResolvedValue('opencode-sid-99')
+    const deps = makeResumeDeps()
+    const session = makeSessionDto('s1', { agentKind: 'claude-code' })
+
+    await resumeProcedure(deps, {
+      mode: 'handoff',
+      session,
+      agentKind: 'opencode',
+      handoffPrompt: 'take over',
+    })
+    await flushMicrotasks()
+
+    expect(captureSid).toHaveBeenCalledWith({ cwd: '/repo/.worktrees/r1-b1', bin: undefined })
+    expect(deps.sessions.setOpencodeSid).toHaveBeenCalledWith('s1', 'opencode-sid-99')
+    expect(deps.sessionStore.get('s1')?.opencodeSid).toBe('opencode-sid-99')
+  })
+
+  it('handoff: passes the kilo binary to captureOpencodeSessionId for the kilo backend', async () => {
+    const deps = makeResumeDeps()
+    const session = makeSessionDto('s1', { agentKind: 'claude-code' })
+
+    await resumeProcedure(deps, {
+      mode: 'handoff',
+      session,
+      agentKind: 'kilo',
+      handoffPrompt: 'take over',
+    })
+
+    expect(captureSid).toHaveBeenCalledOnce()
+    expect(captureSid.mock.calls[0][0]).toMatchObject({ bin: expect.stringMatching(/kilo$/) })
+  })
+
+  it('handoff: does not capture a sid for a non-embedded target (claude-code)', async () => {
+    const deps = makeResumeDeps()
+    const session = makeSessionDto('s1', { agentKind: 'pi' })
+
+    await resumeProcedure(deps, {
+      mode: 'handoff',
+      session,
+      agentKind: 'claude-code',
+      handoffPrompt: 'take over',
+    })
+
+    expect(captureSid).not.toHaveBeenCalled()
+  })
+
+  it('handoff: throws when agentKind or handoffPrompt is missing', async () => {
+    const deps = makeResumeDeps()
+    const session = makeSessionDto('s1')
+
+    await expect(
+      resumeProcedure(deps, { mode: 'handoff', session, handoffPrompt: 'take over' }),
+    ).rejects.toThrow('handoff requires agentKind and handoffPrompt')
+    await expect(
+      resumeProcedure(deps, { mode: 'handoff', session, agentKind: 'pi' }),
+    ).rejects.toThrow('handoff requires agentKind and handoffPrompt')
   })
 })
