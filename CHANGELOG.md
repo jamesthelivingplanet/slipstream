@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-23
+
 ### Fixed
 
 - Hand-off target list (TASK-S870M) no longer forgets a session's current
