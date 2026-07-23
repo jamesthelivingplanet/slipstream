@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-23
+
 ### Added
 
 - Android home-screen widget rows now show PR/CI/review chips and an
