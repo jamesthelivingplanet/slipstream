@@ -27,8 +27,22 @@
     loadMoreTickets,
     setTicketsQuery,
     refreshTickets,
+    mobile,
+    cleanupAgent,
+    setSessionAgent,
+    setSessionStatus,
+    cleanError,
   } from '../stores'
-  import { getSessionBuffer, hasBackend, getUsageSummary, getPrStatus, writeSession } from '../ipc'
+  import {
+    getSessionBuffer,
+    hasBackend,
+    getUsageSummary,
+    getPrStatus,
+    writeSession,
+    resumeSession,
+    handoffSession,
+    checkAgentCli,
+  } from '../ipc'
   import { extractAsk, formatWait, suggestedReplies } from '../missionControl'
   import { formatCost, formatTokens, dayKeyFromMs } from '../../../electron/shared/usageFormat.js'
   import { pushToast } from '../toast'
@@ -44,6 +58,9 @@
   import { icons } from '../icons'
   import NullielLoader from './NullielLoader.svelte'
   import SearchInput from './SearchInput.svelte'
+  import SwipeActions from './SwipeActions.svelte'
+  import { floatingAnchor } from '../floating'
+  import { AGENTS, agentOption } from '../agents'
 
   // Ticks every 30s so "waiting Xm" labels stay fresh without a full re-render trigger.
   let now = Date.now()
@@ -223,6 +240,86 @@
     select(id)
   }
 
+  // FLO-152: swipe-to-reveal single-session actions on mobile rows/cards.
+  // Only one row may be open at a time — opening another (or firing any
+  // action) clears `openSwipeId`, which each SwipeActions reacts to by
+  // snapping shut. `handoffFor` is the session whose agent-picker menu is
+  // open inside a revealed panel.
+  let openSwipeId: string | null = null
+  let handoffFor: string | null = null
+  $: swipeEnabled = $mobile && hasBackend
+
+  function swipeKey(s: Session): string {
+    return s.id ?? s.tid
+  }
+
+  /** Agents this run could be handed off to (every kind except the current). */
+  function swipeHandoffTargets(s: Session) {
+    return AGENTS.filter((a) => a.kind !== (s.agentKind ?? 'claude-code'))
+  }
+
+  /** Tear the session down (manual path: confirms first). */
+  async function swipeCleanup(s: Session) {
+    openSwipeId = null
+    handoffFor = null
+    await cleanupAgent(s, { auto: false })
+  }
+
+  /** Resume/restart the agent process in its existing worktree. */
+  async function swipeRestart(s: Session) {
+    openSwipeId = null
+    handoffFor = null
+    if (!hasBackend || !s.id) return
+    try {
+      await resumeSession(s.id)
+      pushToast('success', `Restarted ${s.tid}.`)
+    } catch (e) {
+      pushToast('error', cleanError(e))
+    }
+  }
+
+  function toggleHandoff(s: Session) {
+    const key = swipeKey(s)
+    handoffFor = handoffFor === key ? null : key
+  }
+
+  /** Continue the run with a different agent, keeping the worktree. */
+  async function swipeHandoff(s: Session, kind: BackendKind) {
+    handoffFor = null
+    openSwipeId = null
+    if (!hasBackend || !s.id) return
+    try {
+      const cli = await checkAgentCli(kind)
+      if (!cli.found) {
+        pushToast(
+          'error',
+          `${agentOption(kind).label} CLI ('${cli.bin}') was not found on the server's PATH.`,
+        )
+        return
+      }
+      await handoffSession(s.id, kind)
+      setSessionAgent(s.id, kind)
+      setSessionStatus(s.id, 'running')
+      pushToast('success', `Run handed off to ${agentOption(kind).label}.`)
+    } catch (e) {
+      pushToast('error', cleanError(e))
+    }
+  }
+
+  // Close any open swipe row / handoff menu when a pointer lands outside a
+  // swipe row entirely (the deck, section headers, empty space). A pointer
+  // that starts a drag on another row still navigates/closes naturally.
+  function onWindowPointerDown(e: PointerEvent) {
+    const t = e.target as HTMLElement | null
+    if (!t) return
+    if (handoffFor && !t.closest('.handoff-menu') && !t.closest('[data-handoff-trigger]')) {
+      handoffFor = null
+    }
+    if (openSwipeId && !t.closest('.swipe')) {
+      openSwipeId = null
+    }
+  }
+
   /** Cost chip text for a session row, or null when there's no usage yet. */
   function costFor(s: Session): { cost: string; tokens: string } | null {
     if (!s.id) return null
@@ -276,6 +373,8 @@
     }
   }
 </script>
+
+<svelte:window on:pointerdown={onWindowPointerDown} />
 
 <div class="mc">
   <Streamlines running={runningCount} needs={needsSessions.length} />
@@ -338,45 +437,96 @@
           <div class="eyebrow hot">Needs you <span class="cnt">{needsSessions.length}</span></div>
           <div class="cards">
             {#each needsSessions as s (s.id ?? s.tid)}
-              <button
-                type="button"
-                class="card"
-                class:error={s.status === 'errored'}
-                on:click={() => choose(s.id)}
+              <SwipeActions
+                id={swipeKey(s)}
+                enabled={swipeEnabled}
+                openId={openSwipeId}
+                on:open={(e) => (openSwipeId = e.detail.id)}
+                on:close={() => {
+                  if (openSwipeId === swipeKey(s)) openSwipeId = null
+                }}
               >
-                <div class="c-top">
-                  <span class="dot" class:err={s.status === 'errored'}></span>
-                  {#if s.status === 'errored'}
-                    <span class="wait err">errored</span>
-                  {:else if s.needsSince !== undefined}
-                    <span class="wait">waiting {formatWait(s.needsSince, now)}</span>
+                <svelte:fragment slot="left">
+                  <button
+                    type="button"
+                    class="swipe-act restart"
+                    title="Restart agent"
+                    on:click|stopPropagation={() => swipeRestart(s)}
+                    >{@html icons.refresh}<span class="lbl">Restart</span></button
+                  >
+                  <div class="swipe-handoff">
+                    <button
+                      type="button"
+                      class="swipe-act handoff"
+                      data-handoff-trigger
+                      title="Hand off to another agent"
+                      on:click|stopPropagation={() => toggleHandoff(s)}
+                      >{@html icons.arrowRightLeft}<span class="lbl">Hand off</span></button
+                    >
+                    {#if handoffFor === swipeKey(s)}
+                      <div class="handoff-menu" use:floatingAnchor>
+                        {#each swipeHandoffTargets(s) as agent (agent.kind)}
+                          <button
+                            type="button"
+                            class="opt"
+                            on:click|stopPropagation={() => swipeHandoff(s, agent.kind)}
+                          >
+                            <span>Hand off to {agent.label}</span>
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                </svelte:fragment>
+                <svelte:fragment slot="right">
+                  <button
+                    type="button"
+                    class="swipe-act danger"
+                    title="Clean up agent"
+                    on:click|stopPropagation={() => swipeCleanup(s)}
+                    >{@html icons.trash}<span class="lbl">Cleanup</span></button
+                  >
+                </svelte:fragment>
+                <button
+                  type="button"
+                  class="card"
+                  class:error={s.status === 'errored'}
+                  on:click={() => choose(s.id)}
+                >
+                  <div class="c-top">
+                    <span class="dot" class:err={s.status === 'errored'}></span>
+                    {#if s.status === 'errored'}
+                      <span class="wait err">errored</span>
+                    {:else if s.needsSince !== undefined}
+                      <span class="wait">waiting {formatWait(s.needsSince, now)}</span>
+                    {/if}
+                    <span class="c-id mono">{s.tid}{s.agentKind ? ` · ${s.agentKind}` : ''}</span>
+                  </div>
+                  <div class="c-title">{s.title}</div>
+                  {#if s.status !== 'errored' && hasBackend && s.id && asks[s.id]}
+                    <div class="ask">{asks[s.id]}</div>
+                    {#if suggestedReplies(asks[s.id]).length > 0}
+                      <div class="reply-chips">
+                        {#each suggestedReplies(asks[s.id]) as reply (reply)}
+                          <button
+                            type="button"
+                            class="chip reply-chip"
+                            on:click|stopPropagation={() => sendReply(s.id, reply)}
+                          >
+                            {reply}
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
                   {/if}
-                  <span class="c-id mono">{s.tid}{s.agentKind ? ` · ${s.agentKind}` : ''}</span>
-                </div>
-                <div class="c-title">{s.title}</div>
-                {#if s.status !== 'errored' && hasBackend && s.id && asks[s.id]}
-                  <div class="ask">{asks[s.id]}</div>
-                  {#if suggestedReplies(asks[s.id]).length > 0}
-                    <div class="reply-chips">
-                      {#each suggestedReplies(asks[s.id]) as reply (reply)}
-                        <button
-                          type="button"
-                          class="chip reply-chip"
-                          on:click|stopPropagation={() => sendReply(s.id, reply)}
-                        >
-                          {reply}
-                        </button>
-                      {/each}
-                    </div>
-                  {/if}
-                {/if}
-                <div class="c-foot">
-                  {#if s.branch}<span>{s.branch}</span>{/if}
-                  <span class="add">+{s.add}</span>
-                  <span class="del">−{s.del}</span>
-                  <span class="go" class:err={s.status === 'errored'}>Answer →</span>
-                </div>
-              </button>
+                  <div class="c-foot">
+                    {#if s.branch}<span>{s.branch}</span>{/if}
+                    <span class="add">+{s.add}</span>
+                    <span class="del">−{s.del}</span>
+                    <span class="go" class:err={s.status === 'errored'}>Answer →</span>
+                  </div>
+                </button>
+              </SwipeActions>
             {/each}
           </div>
         </section>
@@ -387,43 +537,94 @@
           <div class="eyebrow">Running <span class="cnt">{runningSessions.length}</span></div>
           <div class="rows">
             {#each runningSessions as s (s.id ?? s.tid)}
-              <button type="button" class="row" on:click={() => choose(s.id)}>
-                <span class="dot" class:queued={s.status === 'queued'}></span>
-                <span class="r-id mono">{s.tid}</span>
-                <span class="r-title">{s.title}</span>
-                {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
-                {#if s.status === 'detached' || s.status === 'queued'}
-                  <span class="r-activity muted">{s.activity.text}</span>
-                {:else}
-                  <span class="r-diff mono">
-                    <span class="add">+{s.add}</span>
-                    <span class="del">−{s.del}</span>
-                    {#if s.behind > 0}
-                      <span
-                        class="behind"
-                        title={`${s.behind} commit${s.behind === 1 ? '' : 's'} behind base`}
-                        >↓{s.behind}</span
-                      >
-                    {/if}
-                  </span>
-                {/if}
-                {#if costFor(s)}
-                  <span
-                    class="r-cost mono"
-                    title={`${costFor(s)?.tokens} tokens · estimated from transcript usage`}
-                    >{costFor(s)?.cost}</span
+              <SwipeActions
+                id={swipeKey(s)}
+                enabled={swipeEnabled}
+                openId={openSwipeId}
+                on:open={(e) => (openSwipeId = e.detail.id)}
+                on:close={() => {
+                  if (openSwipeId === swipeKey(s)) openSwipeId = null
+                }}
+              >
+                <svelte:fragment slot="left">
+                  <button
+                    type="button"
+                    class="swipe-act restart"
+                    title="Restart agent"
+                    on:click|stopPropagation={() => swipeRestart(s)}
+                    >{@html icons.refresh}<span class="lbl">Restart</span></button
                   >
-                {/if}
-                {#if s.id && s.prUrl && prStatuses[s.id]}
-                  <span class="pr-chips">
-                    {#each prChips(prStatuses[s.id]) as c (c.text)}
-                      <span class="pr-chip pr-{c.cls}" title={prStatuses[s.id]?.error}
-                        >{c.text}</span
-                      >
-                    {/each}
-                  </span>
-                {/if}
-              </button>
+                  <div class="swipe-handoff">
+                    <button
+                      type="button"
+                      class="swipe-act handoff"
+                      data-handoff-trigger
+                      title="Hand off to another agent"
+                      on:click|stopPropagation={() => toggleHandoff(s)}
+                      >{@html icons.arrowRightLeft}<span class="lbl">Hand off</span></button
+                    >
+                    {#if handoffFor === swipeKey(s)}
+                      <div class="handoff-menu" use:floatingAnchor>
+                        {#each swipeHandoffTargets(s) as agent (agent.kind)}
+                          <button
+                            type="button"
+                            class="opt"
+                            on:click|stopPropagation={() => swipeHandoff(s, agent.kind)}
+                          >
+                            <span>Hand off to {agent.label}</span>
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                </svelte:fragment>
+                <svelte:fragment slot="right">
+                  <button
+                    type="button"
+                    class="swipe-act danger"
+                    title="Clean up agent"
+                    on:click|stopPropagation={() => swipeCleanup(s)}
+                    >{@html icons.trash}<span class="lbl">Cleanup</span></button
+                  >
+                </svelte:fragment>
+                <button type="button" class="row" on:click={() => choose(s.id)}>
+                  <span class="dot" class:queued={s.status === 'queued'}></span>
+                  <span class="r-id mono">{s.tid}</span>
+                  <span class="r-title">{s.title}</span>
+                  {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
+                  {#if s.status === 'detached' || s.status === 'queued'}
+                    <span class="r-activity muted">{s.activity.text}</span>
+                  {:else}
+                    <span class="r-diff mono">
+                      <span class="add">+{s.add}</span>
+                      <span class="del">−{s.del}</span>
+                      {#if s.behind > 0}
+                        <span
+                          class="behind"
+                          title={`${s.behind} commit${s.behind === 1 ? '' : 's'} behind base`}
+                          >↓{s.behind}</span
+                        >
+                      {/if}
+                    </span>
+                  {/if}
+                  {#if costFor(s)}
+                    <span
+                      class="r-cost mono"
+                      title={`${costFor(s)?.tokens} tokens · estimated from transcript usage`}
+                      >{costFor(s)?.cost}</span
+                    >
+                  {/if}
+                  {#if s.id && s.prUrl && prStatuses[s.id]}
+                    <span class="pr-chips">
+                      {#each prChips(prStatuses[s.id]) as c (c.text)}
+                        <span class="pr-chip pr-{c.cls}" title={prStatuses[s.id]?.error}
+                          >{c.text}</span
+                        >
+                      {/each}
+                    </span>
+                  {/if}
+                </button>
+              </SwipeActions>
             {/each}
           </div>
         </section>
@@ -508,32 +709,83 @@
           <div class="eyebrow">Recently landed</div>
           <div class="rows">
             {#each doneSessions as s (s.id ?? s.tid)}
-              <button type="button" class="row" on:click={() => choose(s.id)}>
-                <span
-                  class="dot"
-                  class:not-merged={prNotMerged(s)}
-                  title={prNotMerged(s) ? 'agent finished — PR not merged yet' : undefined}
-                ></span>
-                <span class="r-id mono">{s.tid}</span>
-                <span class="r-title">{s.title}</span>
-                {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
-                {#if costFor(s)}
-                  <span
-                    class="r-cost mono"
-                    title={`${costFor(s)?.tokens} tokens · estimated from transcript usage`}
-                    >{costFor(s)?.cost}</span
+              <SwipeActions
+                id={swipeKey(s)}
+                enabled={swipeEnabled}
+                openId={openSwipeId}
+                on:open={(e) => (openSwipeId = e.detail.id)}
+                on:close={() => {
+                  if (openSwipeId === swipeKey(s)) openSwipeId = null
+                }}
+              >
+                <svelte:fragment slot="left">
+                  <button
+                    type="button"
+                    class="swipe-act restart"
+                    title="Restart agent"
+                    on:click|stopPropagation={() => swipeRestart(s)}
+                    >{@html icons.refresh}<span class="lbl">Restart</span></button
                   >
-                {/if}
-                {#if s.id && s.prUrl && prStatuses[s.id]}
-                  <span class="pr-chips">
-                    {#each prChips(prStatuses[s.id]) as c (c.text)}
-                      <span class="pr-chip pr-{c.cls}" title={prStatuses[s.id]?.error}
-                        >{c.text}</span
-                      >
-                    {/each}
-                  </span>
-                {/if}
-              </button>
+                  <div class="swipe-handoff">
+                    <button
+                      type="button"
+                      class="swipe-act handoff"
+                      data-handoff-trigger
+                      title="Hand off to another agent"
+                      on:click|stopPropagation={() => toggleHandoff(s)}
+                      >{@html icons.arrowRightLeft}<span class="lbl">Hand off</span></button
+                    >
+                    {#if handoffFor === swipeKey(s)}
+                      <div class="handoff-menu" use:floatingAnchor>
+                        {#each swipeHandoffTargets(s) as agent (agent.kind)}
+                          <button
+                            type="button"
+                            class="opt"
+                            on:click|stopPropagation={() => swipeHandoff(s, agent.kind)}
+                          >
+                            <span>Hand off to {agent.label}</span>
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                </svelte:fragment>
+                <svelte:fragment slot="right">
+                  <button
+                    type="button"
+                    class="swipe-act danger"
+                    title="Clean up agent"
+                    on:click|stopPropagation={() => swipeCleanup(s)}
+                    >{@html icons.trash}<span class="lbl">Cleanup</span></button
+                  >
+                </svelte:fragment>
+                <button type="button" class="row" on:click={() => choose(s.id)}>
+                  <span
+                    class="dot"
+                    class:not-merged={prNotMerged(s)}
+                    title={prNotMerged(s) ? 'agent finished — PR not merged yet' : undefined}
+                  ></span>
+                  <span class="r-id mono">{s.tid}</span>
+                  <span class="r-title">{s.title}</span>
+                  {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
+                  {#if costFor(s)}
+                    <span
+                      class="r-cost mono"
+                      title={`${costFor(s)?.tokens} tokens · estimated from transcript usage`}
+                      >{costFor(s)?.cost}</span
+                    >
+                  {/if}
+                  {#if s.id && s.prUrl && prStatuses[s.id]}
+                    <span class="pr-chips">
+                      {#each prChips(prStatuses[s.id]) as c (c.text)}
+                        <span class="pr-chip pr-{c.cls}" title={prStatuses[s.id]?.error}
+                          >{c.text}</span
+                        >
+                      {/each}
+                    </span>
+                  {/if}
+                </button>
+              </SwipeActions>
             {/each}
           </div>
         </section>
@@ -1060,6 +1312,91 @@
      that actually landed (FLO-96). */
   .landed .dot.not-merged {
     background: hsl(var(--st-needs));
+  }
+
+  /* FLO-152: swipe-to-reveal action buttons behind a row/card. */
+  .swipe-act {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-width: 64px;
+    padding: 0 10px;
+    border: none;
+    background: transparent;
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .swipe-act :global(svg) {
+    width: 18px;
+    height: 18px;
+  }
+  .swipe-act.restart {
+    background: hsl(var(--primary) / 0.16);
+    color: hsl(var(--primary));
+  }
+  .swipe-act.handoff {
+    background: hsl(var(--muted) / 0.55);
+    color: hsl(var(--foreground));
+  }
+  .swipe-act.danger {
+    background: hsl(var(--st-error) / 0.16);
+    color: hsl(var(--st-error));
+  }
+  .swipe-act:active {
+    filter: brightness(0.92);
+  }
+
+  /* Hand-off target picker — portaled to <body> by floatingAnchor so it
+     escapes the short, overflow-clipped row. Mirrors the app's sel-menu. */
+  .swipe-handoff {
+    position: relative;
+    display: flex;
+  }
+  :global(.handoff-menu) {
+    z-index: 80;
+    padding: 5px;
+    background: hsl(var(--popover));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    min-width: 180px;
+    animation: pop 0.14s ease;
+  }
+  :global(.handoff-menu .opt) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: calc(var(--radius) - 3px);
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: hsl(var(--foreground));
+    text-align: left;
+  }
+  :global(.handoff-menu .opt:hover) {
+    background: hsl(var(--accent-bg));
+  }
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
