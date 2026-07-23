@@ -15,6 +15,10 @@ specifically (schema versioning, build stamping, release flow).
   estimated cost label when a session has an open PR and/or transcript
   usage (FLO-157), reusing the same chip semantics as Mission Control's
   PR badges and cost pills so the widget can't disagree with the app.
+- Android app buzzes once (haptic feedback) when a session flips to "needs
+  you" while the app is foregrounded (FLO-161) — re-armed per episode the
+  same way the desktop notification is, not a raw status check, so an idle
+  TUI's needs/running flap doesn't buzz repeatedly.
 
 ## [0.2.2] - 2026-07-23
 

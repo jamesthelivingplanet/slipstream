@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.CapConfig;
@@ -38,6 +39,17 @@ public class MainActivity extends BridgeActivity {
         }
 
         super.onCreate(savedInstanceState);
+
+        // Capacitor's own Bridge.initWebView() never sets these two, so they
+        // default to false. Without them the WebView ignores the SPA's
+        // <meta name="viewport" content="width=device-width"> (index.html)
+        // and lays out at a wide desktop-style width, scaled down to fit —
+        // which also breaks the SPA's own mobile/drawer layout, since those
+        // are driven by matchMedia against that same (wrongly wide) viewport
+        // (see src/lib/responsive.ts's MOBILE_BREAKPOINT/DRAWER_BREAKPOINT).
+        WebSettings settings = getBridge().getWebView().getSettings();
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
 
         // Cold start from a widget row tap (see AgentWidgetService).
         forwardWidgetSessionId(getIntent());
