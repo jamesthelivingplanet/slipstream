@@ -23,6 +23,7 @@
     reviewComments,
     mobile,
     markSessionInput,
+    connected,
   } from '../stores'
   import {
     hasBackend,
@@ -48,6 +49,7 @@
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
+  import { uploadClipboardImage, type ImageUploadDeps } from '../imageUpload'
   import type { Session, WorkflowState, BackendKind } from '../types'
   import type { PrStatusDTO, WorktreeUpdateMode } from '../../../electron/shared/contract.js'
   import { getTicketStatus, setTicketStatus } from '../ipc'
@@ -61,6 +63,7 @@
   import DiffView from './DiffView.svelte'
   import ChatView from './ChatView.svelte'
   import MobileTermInput from './MobileTermInput.svelte'
+  import NullielLoader from './NullielLoader.svelte'
   import { initChatViewPref, preferChatView, setPreferChatView } from '../chatViewPrefs'
 
   export let session: Session
@@ -100,6 +103,12 @@
   let exited = false
   let exitCode: number | null = null
   let restarting = false
+  // FLO-110: a queued or freshly started session has no PTY snapshot yet —
+  // getSessionBuffer 404s (or resync early-returns) and the view retries every
+  // 1s. Until the first snapshot lands we show a Nulliel overlay instead of a
+  // blank black terminal. Raised in resync() (queued branch / buffer 404),
+  // cleared on snapshot success.
+  let snapshotPending = false
   let handoffOpen = false
   let handingOff = false
   let updateBaseOpen = false
@@ -276,37 +285,21 @@
     stopMomentum()
   }
 
-  // Converts a Blob to base64 without spreading into a giant intermediate
-  // array/string — safe for multi-MB clipboard images.
-  function blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => {
-        const result = reader.result as string
-        const idx = result.indexOf(',')
-        resolve(idx >= 0 ? result.slice(idx + 1) : result)
-      }
-      reader.onerror = () => reject(reader.error ?? new Error('FileReader failed'))
-      reader.readAsDataURL(blob)
-    })
-  }
+  // Shared upload+^V sequencing (src/lib/imageUpload.ts) — built once from
+  // this component's own ipc/stores imports (dependency injection keeps the
+  // module itself DOM/backend-free and unit-testable).
+  const imageUploadDeps: ImageUploadDeps = { syncClipboardImage, writeSession, markSessionInput }
 
-  // Shared by the desktop capture-phase paste interceptor (onPaste) and the
-  // mobile composer's image-paste sink (MobileTermInput's onPasteImage): upload
-  // the image to the daemon's per-session virtual clipboard, then send ^V so
-  // the agent's clipboard shell-out can read the synced file.
-  async function uploadImageAndSignal(sessionId: string, blob: Blob) {
-    const b64 = await blobToBase64(blob)
-    await syncClipboardImage(sessionId, b64)
-    markSessionInput(sessionId)
-    writeSession(sessionId, '\x16')
-  }
+  // In-flight-upload gate: pasting an image kicks off an awaited upload+^V
+  // round-trip. Without this, subsequent keystrokes/Enter (term.onData/
+  // onBinary, synchronous PTY passthrough) would reach the PTY before the
+  // upload's ^V lands, so the CLI would submit the text alone. While an
+  // upload is pending, PTY writes are buffered here and flushed in order
+  // once the ^V has actually gone out.
+  let pendingImageUpload: Promise<void> | null = null
+  let queuedWrites: string[] = []
 
-  // Fire-and-forget wrapper: swallows/logs a rejection so callers don't need
-  // their own try/catch (and don't leave an unhandled promise rejection).
-  function uploadImageAndSignalSafe(sessionId: string, blob: Blob) {
-    uploadImageAndSignal(sessionId, blob).catch((err) => console.warn('Failed to paste image', err))
-  }
+  let fileInput: HTMLInputElement
 
   function onPaste(e: ClipboardEvent) {
     if (!session.id || !canWrite) return
@@ -314,7 +307,10 @@
     if (!items) return
     let imageItem: DataTransferItem | null = null
     for (const item of items) {
-      if (item.kind === 'image') {
+      // DataTransferItem.kind is only ever 'string' or 'file' per spec — an
+      // image on the clipboard surfaces as kind 'file' with an image/* type,
+      // never kind 'image' (there is no such kind).
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
         imageItem = item
         break
       }
@@ -324,7 +320,48 @@
     e.stopPropagation()
     const blob = imageItem.getAsFile()
     if (!blob) return
-    uploadImageAndSignalSafe(session.id, blob)
+    if (pendingImageUpload) return // ignore a 2nd paste while one is in flight
+    pendingImageUpload = uploadClipboardImage(imageUploadDeps, session.id, blob)
+      .catch((err) => {
+        pushToast('error', err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        const pending = queuedWrites
+        queuedWrites = []
+        pendingImageUpload = null
+        for (const d of pending) {
+          if (session.id) {
+            markSessionInput(session.id)
+            writeSession(session.id, d)
+          }
+        }
+      })
+  }
+
+  // Desktop attach button (header): same upload-then-^V sequencing as
+  // clipboard paste, gated behind the same pendingImageUpload queue so a
+  // fast-typed follow-up doesn't overtake the ^V.
+  function handleFileChange(e: Event) {
+    const input = e.currentTarget as HTMLInputElement
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file || !session.id || !canWrite) return
+    if (pendingImageUpload) return // ignore a 2nd pick while one is in flight
+    pendingImageUpload = uploadClipboardImage(imageUploadDeps, session.id, file)
+      .catch((err) => {
+        pushToast('error', err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        const pending = queuedWrites
+        queuedWrites = []
+        pendingImageUpload = null
+        for (const d of pending) {
+          if (session.id) {
+            markSessionInput(session.id)
+            writeSession(session.id, d)
+          }
+        }
+      })
   }
 
   onMount(() => {
@@ -493,6 +530,26 @@
     return badges
   }
 
+  // FLO-110: reset the startup overlay when switching sessions; resync()
+  // re-raises it for the queued / fresh-start-404 window. A queued session
+  // shows it right away; otherwise it appears on the first buffer 404.
+  let overlayForId: string | undefined
+  $: if (session.id !== overlayForId) {
+    overlayForId = session.id
+    snapshotPending = session.status === 'queued'
+  }
+  $: startupCaption =
+    session.status === 'queued'
+      ? 'Queued — will start when a slot frees'
+      : 'Creating worktree & starting agent'
+  $: showStartupOverlay =
+    liveMode &&
+    !exited &&
+    session.status !== 'errored' &&
+    !showDiff &&
+    effectiveViewMode === 'terminal' &&
+    snapshotPending
+
   $: if (mounted && liveMode && session.id && session.id !== liveId) startLive()
   $: if (mounted && !liveMode && !simStarted) {
     simStarted = true
@@ -557,6 +614,9 @@
     // retry loop (the same one that covers the fresh-start buffer 404) until
     // the scheduler starts it.
     if (session.status === 'queued') {
+      // FLO-110: there's no PTY to snapshot yet — flag the overlay so the pane
+      // reads "Queued…" instead of blank black while we poll for the start.
+      snapshotPending = true
       scheduleLiveRetry()
       return
     }
@@ -612,9 +672,14 @@
       // already reset the terminal — writing OUR full snapshot now would
       // duplicate the scrollback. Its own snapshot covers everything.
       if (gen !== resyncGen || destroyed) return
+      // FLO-110: first real content landed — drop the startup overlay.
+      snapshotPending = false
       myGate.applySnapshot(snap.data, snap.seq)
     } catch {
       if (gen !== resyncGen || destroyed) return
+      // FLO-110: backend session hasn't materialized yet (fresh start) — keep
+      // the overlay up while scheduleLiveRetry polls for it.
+      snapshotPending = true
       myGate.fail()
       scheduleLiveRetry()
     }
@@ -652,6 +717,10 @@
     })
     onDataSub = term.onData((d) => {
       if (session.id && canWrite) {
+        if (pendingImageUpload) {
+          queuedWrites.push(d)
+          return
+        }
         markSessionInput(session.id)
         writeSession(session.id, d)
       }
@@ -663,6 +732,10 @@
     // since snapshots restore SGR encoding and this is the legacy fallback.
     onBinarySub = term.onBinary((d) => {
       if (session.id && canWrite) {
+        if (pendingImageUpload) {
+          queuedWrites.push(d)
+          return
+        }
         markSessionInput(session.id)
         writeSession(session.id, d)
       }
@@ -1195,11 +1268,37 @@
     <button class="btn btn-outline btn-sm btn-danger" on:click={handleCleanup}>
       {@html icons.trash} <span class="btn-label">Clean up</span>
     </button>
+    <!-- Attach image button (TASK-6R28O) -->
+    <input
+      bind:this={fileInput}
+      type="file"
+      accept="image/*"
+      style="display:none"
+      on:change={handleFileChange}
+    />
+    <button
+      type="button"
+      class="btn btn-outline btn-sm btn-icon"
+      title="Attach image"
+      aria-label="Attach image"
+      disabled={!canWrite || !session.id}
+      on:click={() => fileInput.click()}
+    >
+      {@html icons.image}
+    </button>
   {/if}
 </div>
 
 <div class="term-wrap" class:hidden={showDiff || effectiveViewMode === 'chat'}>
   <div class="term-mount" bind:this={mountEl}></div>
+  {#if showStartupOverlay}
+    <!-- FLO-110: covers the blank terminal while the backend creates the
+         worktree / waits for a scheduler slot, mirroring the .alert overlays
+         the exited / needs-input states get lower down. -->
+    <div class="startup-overlay" role="status" aria-live="polite">
+      <NullielLoader size={48} caption={startupCaption} />
+    </div>
+  {/if}
 </div>
 
 {#if showDiff}
@@ -1260,16 +1359,15 @@
   <!-- TerminalView is reused across sessions, so key the composer to reset its diff base on switch. -->
   {#key session.id}
     <MobileTermInput
-      disabled={!canWrite}
+      disabled={!canWrite || !$connected}
       onData={(d) => {
         if (!session.id) return
         markSessionInput(session.id)
         writeSession(session.id, d)
       }}
       onPaste={(t) => term?.paste(t)}
-      onPasteImage={(blob) => session.id && uploadImageAndSignalSafe(session.id, blob)}
       onAttachImage={session.id
-        ? (blob) => uploadImageAndSignal(session.id ?? '', blob)
+        ? (blob) => uploadClipboardImage(imageUploadDeps, session.id ?? '', blob)
         : undefined}
     />
   {/key}
@@ -1465,6 +1563,21 @@
      Diff view and back. */
   .hidden {
     display: none;
+  }
+
+  /* FLO-110: Nulliel overlay that replaces the blank terminal while a session
+   * is queued or waiting on its first PTY snapshot. Anchored to .term-wrap
+   * (positioned in app.css) so it covers exactly the terminal area, leaving
+   * the exited / needs-input alert bars below it visible. */
+  .startup-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: hsl(var(--background));
+    animation: fade 0.2s ease-out;
   }
 
   .btn-active {

@@ -29,6 +29,7 @@
     unsubscribeChat,
     listAgentSkills,
     getChatQuestion,
+    syncClipboardImage,
   } from '../ipc'
   import { markSessionInput } from '../stores'
   import { frameForPty } from '../review.js'
@@ -44,6 +45,9 @@
   import { renderMarkdown } from '../markdown'
   import { agentOption } from '../agents'
   import { floatingAnchor } from '../floating'
+  import { icons } from '../icons'
+  import { uploadClipboardImage, type ImageUploadDeps } from '../imageUpload'
+  import { pushToast } from '../toast'
 
   export let session: Session
   export let canWrite: boolean
@@ -110,6 +114,49 @@
   let offChatMessage: (() => void) | null = null
   let textareaEl: HTMLTextAreaElement
   let inputBarEl: HTMLDivElement
+
+  // ── Image attach/paste (TASK-6R28O) ───────────────────────────────────────
+  const imageUploadDeps: ImageUploadDeps = { syncClipboardImage, writeSession, markSessionInput }
+  let fileInput: HTMLInputElement
+  let stagedImage: { blob: Blob; previewUrl: string } | null = null
+
+  function handleFileChange(e: Event) {
+    const input = e.currentTarget as HTMLInputElement
+    const file = input.files?.[0]
+    if (file) {
+      if (stagedImage) URL.revokeObjectURL(stagedImage.previewUrl)
+      stagedImage = { blob: file, previewUrl: URL.createObjectURL(file) }
+    }
+    input.value = ''
+  }
+
+  function removeStagedImage() {
+    if (!stagedImage) return
+    URL.revokeObjectURL(stagedImage.previewUrl)
+    stagedImage = null
+  }
+
+  function handleImagePaste(e: ClipboardEvent) {
+    const items = e.clipboardData?.items
+    if (items) {
+      for (const item of items) {
+        // DataTransferItem.kind is only ever 'string' or 'file' per spec — an
+        // image on the clipboard surfaces as kind 'file' with an image/*
+        // type, never kind 'image' (there is no such kind).
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const blob = item.getAsFile()
+          if (blob) {
+            e.preventDefault()
+            if (stagedImage) URL.revokeObjectURL(stagedImage.previewUrl)
+            stagedImage = { blob, previewUrl: URL.createObjectURL(blob) }
+            return
+          }
+          break
+        }
+      }
+    }
+    // else: let normal text paste flow into the textarea untouched.
+  }
 
   // ── Needs-input question (TASK-FPH60) ─────────────────────────────────────
   // What the agent is actually asking, shown inside the needs-card instead of
@@ -341,15 +388,32 @@
 
   async function submit() {
     const text = draftText.trim()
-    if (!canWrite || !session.id || !text) return
-    // Bracketed-paste the text, then send the submit key as a separate,
-    // delayed write — a plain `text + '\r'` in one chunk lands in the TUI's
-    // input box without submitting it (mirrors DiffView's handleSubmit).
-    const { paste, submit: submitSeq } = frameForPty(text)
-    markSessionInput(session.id)
-    writeSession(session.id, paste)
-    await new Promise((r) => setTimeout(r, 75))
-    writeSession(session.id, submitSeq)
+    if (!canWrite || !session.id) return
+    if (!text && !stagedImage) return // allow image-only send
+    if (stagedImage) {
+      const blob = stagedImage.blob
+      URL.revokeObjectURL(stagedImage.previewUrl)
+      stagedImage = null
+      try {
+        await uploadClipboardImage(imageUploadDeps, session.id, blob)
+      } catch (err) {
+        pushToast('error', err instanceof Error ? err.message : String(err))
+      }
+    }
+    if (text) {
+      // Bracketed-paste the text, then send the submit key as a separate,
+      // delayed write — a plain `text + '\r'` in one chunk lands in the TUI's
+      // input box without submitting it (mirrors DiffView's handleSubmit).
+      const { paste, submit: submitSeq } = frameForPty(text)
+      markSessionInput(session.id)
+      writeSession(session.id, paste)
+      await new Promise((r) => setTimeout(r, 75))
+      writeSession(session.id, submitSeq)
+    } else {
+      // Image-only send: the ^V already inserted the image ref; submit it.
+      markSessionInput(session.id)
+      writeSession(session.id, '\r')
+    }
     draftText = ''
   }
 
@@ -465,6 +529,19 @@
       {/if}
     </div>
 
+    {#if stagedImage}
+      <div class="term-attach-preview">
+        <button
+          type="button"
+          class="term-attach-thumb"
+          aria-label="Remove attached image"
+          on:click={removeStagedImage}
+        >
+          <img src={stagedImage.previewUrl} alt="Attached preview" />
+          <span class="term-attach-thumb-remove">{@html icons.close}</span>
+        </button>
+      </div>
+    {/if}
     <div class="chat-input-bar" bind:this={inputBarEl}>
       {#if slashMenuOpen}
         <div
@@ -494,10 +571,28 @@
           {/each}
         </div>
       {/if}
+      <input
+        bind:this={fileInput}
+        type="file"
+        accept="image/*"
+        style="display:none"
+        on:change={handleFileChange}
+      />
+      <button
+        type="button"
+        class="btn btn-outline term-attach"
+        title="Attach image"
+        aria-label="Attach image"
+        disabled={!canWrite || !session.id}
+        on:click={() => fileInput.click()}
+      >
+        {@html icons.image}
+      </button>
       <textarea
         bind:this={textareaEl}
         bind:value={draftText}
         on:keydown={onKeydown}
+        on:paste={handleImagePaste}
         disabled={!canWrite || !session.id}
         placeholder={writeDisabledReason || 'Message the agent…'}
         rows="2"
@@ -509,7 +604,7 @@
       <button
         type="button"
         class="btn btn-primary btn-sm"
-        disabled={!canWrite || !session.id || draftText.trim() === ''}
+        disabled={!canWrite || !session.id || (draftText.trim() === '' && !stagedImage)}
         on:click={submit}
       >
         Send
@@ -766,6 +861,51 @@
   }
   .chat-input-bar textarea:disabled {
     opacity: 0.5;
+  }
+  /* Attach button: sized to match this bar's .btn-sm (30px tall) siblings. */
+  .term-attach {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    justify-content: center;
+  }
+  /* Staged-image preview strip: sits directly above .chat-input-bar. */
+  .term-attach-preview {
+    flex: 0 0 auto;
+    display: flex;
+    padding: 0.5rem 1rem 0;
+    background: hsl(var(--background));
+  }
+  .term-attach-thumb {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: none;
+    cursor: pointer;
+  }
+  .term-attach-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .term-attach-thumb-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: hsl(var(--background) / 0.85);
+    color: hsl(var(--foreground));
   }
   .chat-lock-note {
     flex: 0 0 auto;
