@@ -76,6 +76,12 @@ apk_build() {
   store="$(apk_store_dir)"
   mkdir -p "$store"
 
+  echo "  Syncing mobile dependencies (pnpm install)…"
+  if ! pnpm --dir "$REPO_ROOT/mobile" install; then
+    echo "✗ pnpm install in mobile/ failed."
+    return 1
+  fi
+
   local built="$REPO_ROOT/mobile/android/app/build/outputs/apk/debug/app-debug.apk"
 
   if ! (
