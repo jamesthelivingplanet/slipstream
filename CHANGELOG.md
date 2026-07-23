@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-23
+
 ### Added
 
 - Android home-screen widget (TASK-DM25C): lists running agent sessions
