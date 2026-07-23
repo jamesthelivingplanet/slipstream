@@ -23,7 +23,6 @@
     reviewComments,
     mobile,
     markSessionInput,
-    connected,
   } from '../stores'
   import {
     hasBackend,
@@ -44,11 +43,12 @@
     getPrStatus,
     onConnectionChange,
     syncClipboardImage,
+    getChatMessages,
   } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
   import { icons } from '../icons'
-  import type { Session, WorkflowState, BackendKind, Status } from '../types'
+  import type { Session, WorkflowState, BackendKind } from '../types'
   import type { PrStatusDTO, WorktreeUpdateMode } from '../../../electron/shared/contract.js'
   import { getTicketStatus, setTicketStatus } from '../ipc'
   import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
@@ -61,7 +61,6 @@
   import DiffView from './DiffView.svelte'
   import ChatView from './ChatView.svelte'
   import MobileTermInput from './MobileTermInput.svelte'
-  import NullielLoader from './NullielLoader.svelte'
   import { initChatViewPref, preferChatView, setPreferChatView } from '../chatViewPrefs'
 
   export let session: Session
@@ -101,12 +100,6 @@
   let exited = false
   let exitCode: number | null = null
   let restarting = false
-  // FLO-110: a queued or freshly started session has no PTY snapshot yet —
-  // getSessionBuffer 404s (or resync early-returns) and the view retries every
-  // 1s. Until the first snapshot lands we show a Nulliel overlay instead of a
-  // blank black terminal. Raised in resync() (queued branch / buffer 404),
-  // cleared on snapshot success.
-  let snapshotPending = false
   let handoffOpen = false
   let handingOff = false
   let updateBaseOpen = false
@@ -123,6 +116,8 @@
   let lastTid = ''
   let lastNonce = 0
   let viewMode: 'terminal' | 'chat' = 'terminal'
+  let chatAvailable = false
+  let chatCheckedFor: string | null = null
   // Svelte runs reactive statements once during init, BEFORE onMount creates
   // `term` — and App.svelte keys this component by session id, so a fresh
   // instance mounts with a live session already selected. Gate the reactive
@@ -133,17 +128,10 @@
   $: r = repoById(session.repo)
   $: base = r?.base ?? 'base'
   $: pendingCommentCount = ($reviewComments[session.id ?? ''] ?? []).length
-  // Mirrors app.css's per-status `.stat-dot` rules exactly: only needs/running/
-  // done/errored get a status color, everything else (idle/queued/detached/
-  // interrupted/reaped/tearing-down) is muted gray. A lookup (rather than a
-  // nested ternary) so an unmapped status can't silently fall through to red.
-  const DOT_COLOR: Partial<Record<Status, string>> = {
-    needs: 'hsl(var(--st-needs))',
-    running: 'hsl(var(--st-run))',
-    done: 'hsl(var(--st-done))',
-    errored: 'hsl(var(--st-error))',
-  }
-  $: dot = DOT_COLOR[session.status] ?? 'hsl(var(--muted-foreground))'
+  $: dot =
+    session.status === 'idle' || session.status === 'queued'
+      ? 'hsl(var(--muted-foreground))'
+      : `hsl(var(--st-${session.status === 'needs' ? 'needs' : session.status === 'running' ? 'run' : session.status === 'done' ? 'done' : 'error'}))`
 
   $: runKey = appRunKey(session)
   $: appRunning = runKey ? $runningApps.has(runKey) : false
@@ -152,21 +140,22 @@
   $: currentKind = (session.agentKind ?? 'claude-code') as BackendKind
   $: handoffTargets = AGENTS.filter((a) => a.kind !== currentKind)
 
-  // Whether this session's agent kind has a chat transcript reader at all
-  // (claude-code/pi/opencode/kilo — not antigravity/grok). This is a static
-  // property of the kind, not of whether a transcript exists yet, so chat
-  // is offered as the default/first view even before the agent's first turn
-  // — ChatView.svelte handles the "no messages yet" state on its own.
-  $: chatCapable = agentOption(currentKind).supportsChat
-
-  // The view actually rendered — chat only when both the user's (or
-  // preference-seeded) viewMode says chat AND this kind supports chat at
-  // all. Falls back to terminal whenever chat can't render, so `.term-wrap`
-  // hidden, the ChatView branch, and the mobile composer guard never
-  // disagree. The toggle button that lets a user manually flip viewMode
-  // only renders when chatCapable (see `{#if chatCapable}` below), so
-  // viewMode can only be 'chat' here for a chat-capable kind.
-  $: effectiveViewMode = viewMode === 'chat' && chatCapable ? 'chat' : 'terminal'
+  // TASK-FPH60: the view actually rendered — chat only when both the user's
+  // (or preference-seeded) viewMode says chat AND the backend has confirmed
+  // chat is available for this session. Falls back to terminal whenever
+  // chat can't render, so `.term-wrap` hidden, the ChatView branch, and the
+  // mobile composer guard never disagree (a prior bug hid BOTH — term-wrap
+  // hid on viewMode alone while the ChatView branch also required
+  // chatAvailable, so a pre-first-turn session with the chat-default
+  // preference rendered a blank body). The toggle button that lets a user
+  // manually flip viewMode only renders once chatAvailable is already true
+  // (see `{#if chatAvailable}` below), so viewMode can't be left on 'chat'
+  // by a manual toggle while unavailable — it only ever gets there via the
+  // initial preference seed, which means once chatAvailable later flips
+  // true this recomputes to 'chat' on its own, satisfying "switch to chat
+  // automatically when it becomes available and the user hasn't manually
+  // chosen terminal for this session".
+  $: effectiveViewMode = viewMode === 'chat' && chatAvailable ? 'chat' : 'terminal'
 
   function openLink(_event: MouseEvent, uri: string) {
     window.open(uri, '_blank', 'noopener,noreferrer')
@@ -452,6 +441,37 @@
   }
   $: refreshPrStatus(session.id, session.prUrl)
 
+  // TASK-FPH60: cheap 1-message probe purely to decide whether to show the
+  // chat/terminal toggle button — ChatView.svelte does its own real 50-message
+  // load independently. Clearing chatAvailable synchronously before the async
+  // call resolves prevents a stale `true` from a previous session leaking into
+  // the new one's render (mirrors refreshPrStatus's clear-immediately idiom).
+  // Backend answers `available` for claude-code/pi/opencode sessions (false
+  // for other kinds) — no kind gating needed here, the backend is the source
+  // of truth. Re-probes when session.status changes and the last probe came
+  // back false, since a session only becomes chat-capable once its first
+  // turn/session file appears (e.g. right after launch).
+  let chatCheckedStatus: string | undefined
+  function refreshChatAvailability(id: string | undefined, status: string | undefined) {
+    if (!hasBackend || !id) return
+    const isNewSession = id !== chatCheckedFor
+    if (!isNewSession) {
+      if (chatAvailable) return // already known available — nothing left to probe for
+      if (status === chatCheckedStatus) return // status hasn't moved since the last probe
+    }
+    chatCheckedFor = id
+    chatCheckedStatus = status
+    if (isNewSession) chatAvailable = false
+    getChatMessages(id, { limit: 1 })
+      .then((r) => {
+        if (id === chatCheckedFor) chatAvailable = r.available
+      })
+      .catch(() => {
+        if (id === chatCheckedFor) chatAvailable = false
+      })
+  }
+  $: refreshChatAvailability(session.id, session.status)
+
   interface PrBadge {
     text: string
     cls: 'done' | 'error' | 'needs' | 'muted'
@@ -472,26 +492,6 @@
     else if (dto.review === 'changes_requested') badges.push({ text: 'changes', cls: 'error' })
     return badges
   }
-
-  // FLO-110: reset the startup overlay when switching sessions; resync()
-  // re-raises it for the queued / fresh-start-404 window. A queued session
-  // shows it right away; otherwise it appears on the first buffer 404.
-  let overlayForId: string | undefined
-  $: if (session.id !== overlayForId) {
-    overlayForId = session.id
-    snapshotPending = session.status === 'queued'
-  }
-  $: startupCaption =
-    session.status === 'queued'
-      ? 'Queued — will start when a slot frees'
-      : 'Creating worktree & starting agent'
-  $: showStartupOverlay =
-    liveMode &&
-    !exited &&
-    session.status !== 'errored' &&
-    !showDiff &&
-    effectiveViewMode === 'terminal' &&
-    snapshotPending
 
   $: if (mounted && liveMode && session.id && session.id !== liveId) startLive()
   $: if (mounted && !liveMode && !simStarted) {
@@ -557,9 +557,6 @@
     // retry loop (the same one that covers the fresh-start buffer 404) until
     // the scheduler starts it.
     if (session.status === 'queued') {
-      // FLO-110: there's no PTY to snapshot yet — flag the overlay so the pane
-      // reads "Queued…" instead of blank black while we poll for the start.
-      snapshotPending = true
       scheduleLiveRetry()
       return
     }
@@ -615,14 +612,9 @@
       // already reset the terminal — writing OUR full snapshot now would
       // duplicate the scrollback. Its own snapshot covers everything.
       if (gen !== resyncGen || destroyed) return
-      // FLO-110: first real content landed — drop the startup overlay.
-      snapshotPending = false
       myGate.applySnapshot(snap.data, snap.seq)
     } catch {
       if (gen !== resyncGen || destroyed) return
-      // FLO-110: backend session hasn't materialized yet (fresh start) — keep
-      // the overlay up while scheduleLiveRetry polls for it.
-      snapshotPending = true
       myGate.fail()
       scheduleLiveRetry()
     }
@@ -1088,7 +1080,7 @@
         <span class="diff-count">{pendingCommentCount}</span>
       {/if}
     </button>
-    {#if chatCapable}
+    {#if chatAvailable}
       <button
         class="btn btn-outline btn-sm"
         class:btn-active={viewMode === 'chat'}
@@ -1208,14 +1200,6 @@
 
 <div class="term-wrap" class:hidden={showDiff || effectiveViewMode === 'chat'}>
   <div class="term-mount" bind:this={mountEl}></div>
-  {#if showStartupOverlay}
-    <!-- FLO-110: covers the blank terminal while the backend creates the
-         worktree / waits for a scheduler slot, mirroring the .alert overlays
-         the exited / needs-input states get lower down. -->
-    <div class="startup-overlay" role="status" aria-live="polite">
-      <NullielLoader size={48} caption={startupCaption} />
-    </div>
-  {/if}
 </div>
 
 {#if showDiff}
@@ -1276,7 +1260,7 @@
   <!-- TerminalView is reused across sessions, so key the composer to reset its diff base on switch. -->
   {#key session.id}
     <MobileTermInput
-      disabled={!canWrite || !$connected}
+      disabled={!canWrite}
       onData={(d) => {
         if (!session.id) return
         markSessionInput(session.id)
@@ -1284,6 +1268,9 @@
       }}
       onPaste={(t) => term?.paste(t)}
       onPasteImage={(blob) => session.id && uploadImageAndSignalSafe(session.id, blob)}
+      onAttachImage={session.id
+        ? (blob) => uploadImageAndSignal(session.id ?? '', blob)
+        : undefined}
     />
   {/key}
 {/if}
@@ -1331,7 +1318,7 @@
         <span class="diff-count">{pendingCommentCount}</span>
       {/if}
     </button>
-    {#if chatCapable}
+    {#if chatAvailable}
       <button
         class="btn btn-outline btn-sm"
         class:btn-active={viewMode === 'chat'}
@@ -1478,21 +1465,6 @@
      Diff view and back. */
   .hidden {
     display: none;
-  }
-
-  /* FLO-110: Nulliel overlay that replaces the blank terminal while a session
-   * is queued or waiting on its first PTY snapshot. Anchored to .term-wrap
-   * (positioned in app.css) so it covers exactly the terminal area, leaving
-   * the exited / needs-input alert bars below it visible. */
-  .startup-overlay {
-    position: absolute;
-    inset: 0;
-    z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: hsl(var(--background));
-    animation: fade 0.2s ease-out;
   }
 
   .btn-active {

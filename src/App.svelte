@@ -12,7 +12,6 @@
     subscribeSessionStatus,
     subscribeSessionPr,
     subscribeConnectionChange,
-    connected,
     mobile,
     drawer,
     keyboardInset,
@@ -41,7 +40,7 @@
   import OnboardingModal from './lib/components/OnboardingModal.svelte'
   import { nativeStorage } from './lib/nativeStorage'
   import { initOnboarding, onboardingMode } from './lib/onboarding'
-  import { subscribeWidgetSync } from './lib/widgetSync'
+  import { subscribeWidgetSync, subscribeWidgetAgentOpen } from './lib/widgetSync'
   import {
     MOBILE_MEDIA_QUERY,
     DRAWER_MEDIA_QUERY,
@@ -94,6 +93,7 @@
     const offPr = subscribeSessionPr()
     const offConnection = subscribeConnectionChange()
     const offWidgetSync = subscribeWidgetSync()
+    const offWidgetAgentOpen = subscribeWidgetAgentOpen()
 
     // First-boot onboarding: independent of the backend/ticket bootstrap
     // below (it only reads its own nativeStorage flag), started alongside it
@@ -126,12 +126,6 @@
         }
       })
     }
-
-    // Widget tap (Android home-screen widget, see MainActivity.forwardWidgetSessionId)
-    window.addEventListener('slipstream:widget-open', (e) => {
-      const sessionId = (e as CustomEvent).detail?.sessionId
-      if (sessionId) openAgentById(sessionId)
-    })
 
     checkViewport()
     window.addEventListener('resize', checkViewport)
@@ -188,6 +182,7 @@
       offPr()
       offConnection()
       offWidgetSync()
+      offWidgetAgentOpen()
       window.removeEventListener('resize', checkViewport)
       window.removeEventListener('orientationchange', checkViewport)
       window.removeEventListener('focusin', onFocusIn)
@@ -296,12 +291,6 @@
     {/if}
   </header>
 
-  {#if !$connected}
-    <!-- FLO-108: slim strip so a WS drop (daemon restart, tailnet blip, laptop
-         sleep) reads as "reconnecting" instead of a silently frozen terminal. -->
-    <div class="conn-banner" role="status">Connection lost — reconnecting…</div>
-  {/if}
-
   <!-- Drawer overlay backdrop: tap outside drawer to close (mobile + medium) -->
   {#if $drawer && listOpen}
     <div class="drawer-backdrop" on:click={() => (listOpen = false)} role="presentation"></div>
@@ -357,16 +346,6 @@
     inset: 0;
     z-index: 29;
     background: rgba(0, 0, 0, 0.45);
-  }
-  .conn-banner {
-    flex: none;
-    padding: 4px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    text-align: center;
-    color: hsl(var(--st-needs));
-    background: hsl(var(--st-needs) / 0.12);
-    border-bottom: 1px solid hsl(var(--border));
   }
   /* TASK-RAHTX: the booting Nulliel loading screen overlays the whole term
    * pane (terminal area) while a freshly started agent spins up. */

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ptySequenceForEdit, codePointIndex, type PtyEditState } from '../ptyInput'
+  import { icons } from '../icons'
 
   /** Disable typing while another client holds the write lock. */
   export let disabled = false
@@ -9,10 +10,15 @@
   export let onPaste: (text: string) => void
   /** Image clipboard paste sink (wired by the parent to upload+^V). Undefined = feature not wired, skip silently. */
   export let onPasteImage: ((blob: Blob) => void) | undefined = undefined
+  /** Image attach sink (wired by the parent to upload+^V, run just before the Enter that sends). Undefined = feature not wired, hide the attach button. */
+  export let onAttachImage: ((blob: Blob) => Promise<void>) | undefined = undefined
 
   let el: HTMLInputElement
+  let fileInput: HTMLInputElement
   // Where we last left the PTY line/cursor — the diff base for the next edit.
   let prev: PtyEditState = { text: '', cursor: 0 }
+  // Picked-but-not-yet-sent image, previewed above the input row.
+  let stagedImage: { blob: Blob; previewUrl: string } | null = null
 
   function handleInput() {
     const next: PtyEditState = {
@@ -24,7 +30,17 @@
     prev = next
   }
 
-  function send() {
+  async function send() {
+    if (stagedImage) {
+      const blob = stagedImage.blob
+      URL.revokeObjectURL(stagedImage.previewUrl)
+      stagedImage = null
+      try {
+        await onAttachImage?.(blob)
+      } catch (err) {
+        console.warn('Failed to attach image', err)
+      }
+    }
     onData('\r')
     el.value = ''
     prev = { text: '', cursor: 0 }
@@ -41,13 +57,6 @@
     if (e.inputType !== 'insertLineBreak') return
     e.preventDefault()
     send()
-  }
-
-  /** Quick-key chips: send a raw control/ANSI sequence without stealing focus
-   *  from the composer input, so the user can keep typing right after. */
-  function sendChip(seq: string) {
-    onData(seq)
-    el?.focus()
   }
 
   function handlePaste(e: ClipboardEvent) {
@@ -75,9 +84,58 @@
     // existing diff (`prev` state) already accounts for whatever the browser
     // inserts natively, so no further bookkeeping is needed here.
   }
+
+  function handleFileChange(e: Event) {
+    const input = e.currentTarget as HTMLInputElement
+    const file = input.files?.[0]
+    if (file) {
+      if (stagedImage) URL.revokeObjectURL(stagedImage.previewUrl)
+      stagedImage = { blob: file, previewUrl: URL.createObjectURL(file) }
+    }
+    input.value = ''
+  }
+
+  function removeStagedImage() {
+    if (!stagedImage) return
+    URL.revokeObjectURL(stagedImage.previewUrl)
+    stagedImage = null
+  }
 </script>
 
+{#if stagedImage}
+  <div class="term-attach-preview">
+    <button
+      type="button"
+      class="term-attach-thumb"
+      aria-label="Remove attached image"
+      on:click={removeStagedImage}
+    >
+      <img src={stagedImage.previewUrl} alt="Attached image preview" />
+      <span class="term-attach-thumb-remove">{@html icons.close}</span>
+    </button>
+  </div>
+{/if}
+
 <div class="term-input">
+  {#if onAttachImage}
+    <input
+      bind:this={fileInput}
+      type="file"
+      accept="image/*"
+      style="display:none"
+      on:change={handleFileChange}
+    />
+    <button
+      type="button"
+      class="btn btn-outline term-attach"
+      title="Attach image"
+      aria-label="Attach image"
+      {disabled}
+      on:click={() => fileInput.click()}
+    >
+      {@html icons.image}
+    </button>
+  {/if}
   <input
     bind:this={el}
     type="text"
@@ -94,86 +152,3 @@
     on:paste={handlePaste}
   />
 </div>
-
-<div class="term-chips" role="group" aria-label="Quick keys">
-  <button
-    type="button"
-    class="btn btn-outline btn-sm chip"
-    tabindex="-1"
-    {disabled}
-    title="Escape"
-    on:mousedown|preventDefault={() => {}}
-    on:click={() => sendChip('\x1b')}
-  >
-    Esc
-  </button>
-  <button
-    type="button"
-    class="btn btn-outline btn-sm chip"
-    tabindex="-1"
-    {disabled}
-    title="Tab"
-    on:mousedown|preventDefault={() => {}}
-    on:click={() => sendChip('\t')}
-  >
-    Tab
-  </button>
-  <button
-    type="button"
-    class="btn btn-outline btn-sm chip"
-    tabindex="-1"
-    {disabled}
-    title="Interrupt (Ctrl+C)"
-    on:mousedown|preventDefault={() => {}}
-    on:click={() => sendChip('\x03')}
-  >
-    Ctrl+C
-  </button>
-  <button
-    type="button"
-    class="btn btn-outline btn-sm chip"
-    tabindex="-1"
-    {disabled}
-    title="Previous (history up)"
-    on:mousedown|preventDefault={() => {}}
-    on:click={() => sendChip('\x1b[A')}
-  >
-    &uarr;
-  </button>
-  <button
-    type="button"
-    class="btn btn-outline btn-sm chip"
-    tabindex="-1"
-    {disabled}
-    title="Next (history down)"
-    on:mousedown|preventDefault={() => {}}
-    on:click={() => sendChip('\x1b[B')}
-  >
-    &darr;
-  </button>
-</div>
-
-<style>
-  /* Quick-key row: sits directly under the composer input, sharing its
-     background so the two read as one composer surface. Chips are plain
-     .btn/.btn-outline/.btn-sm (see app.css) so they match every other
-     toolbar control in the app — only the row layout is new here. */
-  .term-chips {
-    display: flex;
-    gap: 6px;
-    padding: 4px 8px 8px;
-    background: hsl(var(--background));
-    overflow-x: auto;
-  }
-  .chip {
-    flex: 0 0 auto;
-    font-family: 'JetBrains Mono', monospace;
-  }
-  /* .term-input's own border-top already separates the composer from
-     whatever is above it; .term-actions (app.css) normally adds its own
-     border-top too, but that would double up right where the chip row now
-     sits flush against it, so drop it here exactly like the input row does. */
-  .term-chips + :global(.term-actions) {
-    border-top: none;
-  }
-</style>
