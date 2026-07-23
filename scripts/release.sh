@@ -124,7 +124,7 @@ fi
 # Phase 5: Commit, tag, push
 # ---------------------------------------------------------------------------
 echo "▶ Committing…"
-git add package.json CHANGELOG.md
+git add package.json package-lock.json CHANGELOG.md
 git commit -m "Release v${NEW_VERSION}"
 
 echo "▶ Tagging v${NEW_VERSION}…"
