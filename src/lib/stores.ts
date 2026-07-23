@@ -102,6 +102,7 @@ export function dtoToSession(dto: SessionDTO): Session {
     ago: '',
     prompt: dto.prompt,
     port: dto.port,
+    agentKind: dto.agentKind,
     prUrl: dto.prUrl,
     activity: {
       text:
