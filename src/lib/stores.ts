@@ -36,6 +36,7 @@ import { isStartableTicket } from './ticketFilter.js'
 import { cleanError } from './stores/errors.js'
 import { confirmDialog } from './stores/confirmDialog.js'
 import { appRunKey, setAppRunning, stopAppForSession } from './stores/appRunner.js'
+import { buzzNeedsYou } from './haptics'
 export { sessionsToReconcile } from './reconcile'
 export { isStartableTicket } from './ticketFilter.js'
 export * from './stores/confirmDialog.js'
@@ -807,6 +808,11 @@ export function setSessionStatus(id: string, status: Status) {
     const next = new Set(seen)
     next.add(status)
     notified.set(id, next)
+    // FLO-161: haptic buzz on the same per-episode dedupe as the desktop
+    // notification below, but independent of it — notifyTransition() early-
+    // returns when the bare `Notification` API is unavailable/ungranted,
+    // which must never suppress the native haptic on mobile.
+    if (status === 'needs') buzzNeedsYou()
     notifyTransition(status, title)
   }
 }

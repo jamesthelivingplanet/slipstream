@@ -20,6 +20,11 @@ vi.mock('./nativeStorage', () => ({
   },
 }))
 
+const buzzNeedsYouMock = vi.hoisted(() => vi.fn())
+vi.mock('./haptics', () => ({
+  buzzNeedsYou: buzzNeedsYouMock,
+}))
+
 vi.mock('./ipc', () => ({
   hasBackend: true,
   listRepos: vi.fn(),
@@ -405,6 +410,7 @@ describe('FLO-105 per-episode desktop-notification dedupe', () => {
     ;(MockNotification as unknown as { permission: string }).permission = 'granted'
     // notifyTransition reads the bare global `Notification`, so install on globalThis.
     ;(globalThis as unknown as { Notification: unknown }).Notification = MockNotification
+    buzzNeedsYouMock.mockReset()
     sessions.set([makeSession('u1')])
   })
 
@@ -499,6 +505,49 @@ describe('FLO-105 per-episode desktop-notification dedupe', () => {
     sessions.set([makeSession('u1', 'running')])
     setSessionStatus('u1', 'needs')
     expect(notifCalls).toHaveLength(2)
+  })
+
+  describe('FLO-161 haptic buzz', () => {
+    it('buzzes once per needs episode across a needs↔running flap (same dedupe as the desktop notification)', () => {
+      setSessionStatus('u1', 'needs')
+      setSessionStatus('u1', 'running')
+      setSessionStatus('u1', 'needs')
+      setSessionStatus('u1', 'running')
+      setSessionStatus('u1', 'needs')
+
+      expect(buzzNeedsYouMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not buzz on a done transition', () => {
+      setSessionStatus('u1', 'needs')
+      buzzNeedsYouMock.mockClear()
+
+      setSessionStatus('u1', 'running')
+      setSessionStatus('u1', 'done')
+
+      expect(buzzNeedsYouMock).not.toHaveBeenCalled()
+    })
+
+    it('re-arms on real user input (markSessionInput) so the next needs episode buzzes again', () => {
+      setSessionStatus('u1', 'needs')
+      expect(buzzNeedsYouMock).toHaveBeenCalledTimes(1)
+
+      setSessionStatus('u1', 'running')
+      setSessionStatus('u1', 'needs')
+      expect(buzzNeedsYouMock).toHaveBeenCalledTimes(1)
+
+      markSessionInput('u1')
+      setSessionStatus('u1', 'running')
+      setSessionStatus('u1', 'needs')
+      expect(buzzNeedsYouMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('still buzzes when the desktop Notification API is unavailable/ungranted', () => {
+      delete (globalThis as unknown as { Notification?: unknown }).Notification
+      setSessionStatus('u1', 'needs')
+      expect(buzzNeedsYouMock).toHaveBeenCalledTimes(1)
+      expect(notifCalls).toHaveLength(0)
+    })
   })
 })
 
