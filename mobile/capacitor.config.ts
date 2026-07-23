@@ -9,12 +9,18 @@ import type { CapacitorConfig } from '@capacitor/cli'
 // — it's a self-contained ServerGate for setting that preference from
 // scratch. Auth is handled entirely by the SPA's own TokenGate screen, so
 // this app has no separate token/credential handling of its own.
+// `server.errorPath` points at `www/offline.html`, Nulliel's "can't reach the
+// daemon" page — Capacitor's BridgeWebViewClient loads it in place of
+// Chromium's default error page whenever the main-frame load of `server.url`
+// fails, with a one-tap retry and the same daemon-URL-editing form as the
+// ServerGate.
 const config: CapacitorConfig = {
   appId: 'app.slipstream.mobile',
   appName: 'Slipstream',
   webDir: 'www',
   server: {
     url: 'https://omarchy.taile11bed.ts.net',
+    errorPath: 'offline.html',
   },
 }
 
