@@ -9,6 +9,18 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hand-off target list (TASK-S870M) no longer forgets a session's current
+  agent after a reload or daemon restart. `dtoToSession` was dropping
+  `agentKind` when rebuilding the renderer's session store from the backend
+  DTO, so a rehydrated session always displayed as if it were still on its
+  original agent (usually Claude Code) — hiding that agent from "Hand off"
+  (since the UI thought it was already current) while leaving the *actual*
+  current agent selectable as a target. Most visible after handing a run off
+  from Claude Code to another agent (e.g. Pi) and later trying to hand it
+  back once that agent hit its usage limit.
+
 ## [0.2.3] - 2026-07-23
 
 ### Added
