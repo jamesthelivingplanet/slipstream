@@ -182,6 +182,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
           otf: 'font/otf',
           eot: 'application/vnd.ms-fontobject',
           pdf: 'application/pdf',
+          apk: 'application/vnd.android.package-archive',
         }
         // Cache policy:
         //  - index.html and other non-asset files: no-cache (always revalidate)

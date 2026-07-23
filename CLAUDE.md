@@ -34,6 +34,9 @@ describes the current behavior and update it in the same change.
 - **Svelte 4** (legacy stores, `$store`, `on:click`) — not Svelte 5. Reuse the shadcn
   classes/tokens in `src/app.css` over ad-hoc styles.
 - Parallelizable work splits cleanly along `electron/` vs `src/` (disjoint dirs).
+- **Record changes as you make them.** Any user-facing feature or fix gets an entry under
+  `CHANGELOG.md`'s `[Unreleased]` section (Keep a Changelog format); `pnpm release` rolls it
+  into the dated release entry — see [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## Gotchas (hard-won)
 

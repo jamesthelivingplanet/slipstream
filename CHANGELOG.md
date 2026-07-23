@@ -9,6 +9,17 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- `pnpm release` also builds the versioned debug APK to
+  `dist-apk/slipstream-<version>.apk` (best-effort — warns and continues if
+  the Android toolchain is absent or `SKIP_APK=1` / `--skip-apk` is passed),
+  and prints the Tailscale access URL.
+- `pnpm deploy` publishes the newest built APK for download: copied into
+  `dist/` as both `slipstream-latest.apk` and the versioned name, with a
+  download URL + QR printed, served with the
+  `application/vnd.android.package-archive` MIME type.
+
 ## [0.2.4] - 2026-07-23
 
 ### Fixed

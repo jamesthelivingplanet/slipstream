@@ -13,6 +13,11 @@
 # Phase 5 publishes the app over Tailscale HTTPS via 'tailscale serve'; this
 # requires HTTPS Certificates to be enabled for the tailnet (Tailscale admin
 # console → DNS page: https://login.tailscale.com/admin/dns).
+#
+# Phase 6 publishes the newest dist-apk/slipstream-<version>.apk (built by
+# 'pnpm release', see scripts/lib/apk.sh) into dist/ so it's downloadable at
+# .../slipstream-latest.apk over the daemon's static route — best-effort; a
+# one-line note is printed instead if no APK has been built yet.
 
 set -euo pipefail
 
@@ -29,6 +34,10 @@ cd "$REPO_ROOT"
 # ---------------------------------------------------------------------------
 # shellcheck source=lib/node22.sh
 source "$SCRIPT_DIR/lib/node22.sh"
+# shellcheck source=lib/apk.sh
+source "$SCRIPT_DIR/lib/apk.sh"
+# shellcheck source=lib/tailscale.sh
+source "$SCRIPT_DIR/lib/tailscale.sh"
 
 # ---------------------------------------------------------------------------
 # Onboarding QR code — printed at the end of each success path so a phone can
@@ -43,6 +52,30 @@ print_onboarding_qr() {
   else
     echo "  (install qrencode to show a scannable QR code)"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# APK download — publishes the newest dist-apk/slipstream-<version>.apk (built
+# by 'pnpm release', see scripts/lib/apk.sh) into dist/ so the daemon's static
+# route can serve it, then prints a download URL + QR. Best-effort: if no APK
+# has ever been built, prints a one-line note and does not fail the deploy.
+# ---------------------------------------------------------------------------
+print_apk_download() {
+  local base_url="$1"
+
+  if ! apk_publish_to_dist "$REPO_ROOT/dist"; then
+    echo "  (no APK found in dist-apk/ yet — run 'pnpm release' to build one)"
+    return 0
+  fi
+
+  local apk_path versioned
+  apk_path="$(apk_latest)"
+  versioned="$(basename "$apk_path")"
+
+  echo ""
+  echo "  App download : ${base_url}/slipstream-latest.apk"
+  echo "                 (versioned: ${base_url}/${versioned})"
+  print_onboarding_qr "${base_url}/slipstream-latest.apk"
 }
 
 # ---------------------------------------------------------------------------
@@ -181,6 +214,7 @@ if [[ "${SLIPSTREAM_SERVE:-tailscale}" == "none" ]]; then
   else
     echo "  (no SLIPSTREAM_TOKEN found in server.env — skipping tokenized onboarding URL)"
   fi
+  print_apk_download "http://${BIND}:${PORT}"
   exit 0
 fi
 
@@ -213,7 +247,7 @@ if ! tailscale serve --bg --https=443 "http://127.0.0.1:${PORT}"; then
 fi
 
 # Derive tailnet DNS name without requiring jq
-TS_DNS="$(tailscale status --json 2>/dev/null | grep -o '"DNSName": *"[^"]*"' | head -1 | sed 's/.*"DNSName": *"//; s/\.\?"$//')" || true
+TS_DNS="$(ts_dns)"
 
 echo ""
 if [[ -n "$TS_DNS" ]]; then
@@ -230,6 +264,11 @@ if [[ -n "$TS_DNS" ]]; then
   else
     echo "  (no SLIPSTREAM_TOKEN found in server.env — skipping tokenized onboarding URL)"
   fi
+
+  # -------------------------------------------------------------------------
+  # Phase 6: Publish newest APK for download
+  # -------------------------------------------------------------------------
+  print_apk_download "https://${TS_DNS}"
 else
   echo "✔ Tailscale HTTPS serve is active!"
   echo "  (Could not derive tailnet DNS name — current serve config:)"

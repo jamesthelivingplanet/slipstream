@@ -122,9 +122,25 @@ pnpm release major
    `[Unreleased]` has nothing in it — add a changelog entry before releasing.
 5. Commits `package.json` + `CHANGELOG.md` as `Release vX.Y.Z`.
 6. Tags the commit `vX.Y.Z` (annotated) and pushes both `master` and the tag.
+7. As a best-effort last phase (after the commit/tag/push, so it can never
+   block a completed release), builds a debug Android APK via
+   `scripts/lib/apk.sh` into `dist-apk/slipstream-X.Y.Z.apk` (`dist-apk/` is
+   gitignored — it's a local build cache, not a release artifact). Skipped
+   with a warning, not a failure, if the Android toolchain (JDK, Android SDK,
+   `mobile/android/gradlew`) isn't present on this machine, or if
+   `SKIP_APK=1` / `--skip-apk` is passed. Also prints the Tailscale access
+   URL best-effort, if available.
 
 This only versions and tags a commit — it doesn't deploy anything. Run
 `pnpm deploy` separately to update a running service to the new version.
+
+`pnpm deploy` publishes whichever APK is newest in `dist-apk/` (by version
+order) into `dist/` as both `slipstream-<version>.apk` and
+`slipstream-latest.apk` — after `pnpm build`, since `vite build` wipes
+`dist/` — so it's downloadable from the daemon's static route, e.g.
+`https://<tailnet-dns>/slipstream-latest.apk`, with a QR code printed
+alongside the onboarding URL. If no APK has been built yet, deploy prints a
+one-line note (run `pnpm release` first) rather than failing.
 
 `.gitlab-ci.yml`'s `publish-image` job already publishes
 `$CI_REGISTRY_IMAGE:latest` and `:$CI_COMMIT_SHORT_SHA` on every merge to

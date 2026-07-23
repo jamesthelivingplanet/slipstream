@@ -109,6 +109,11 @@ Phases:
    ```
    and prints `https://<machine>.<tailnet>.ts.net/`. Skipped entirely when
    `SLIPSTREAM_SERVE=none`.
+6. **Publish latest APK** — copies the newest `dist-apk/slipstream-<version>.apk`
+   (built by `pnpm release`, see [docs/VERSIONING.md](../../../docs/VERSIONING.md))
+   into `dist/` as `slipstream-latest.apk`, downloadable from the daemon's static
+   route. Best-effort: if no APK has been built yet, prints a one-line note (run
+   `pnpm release` first) instead of failing.
 
 **With `SLIPSTREAM_SERVE=none`** the app is reachable only at `http://127.0.0.1:7421`
 locally. Remote or phone access requires a BYO HTTPS origin — e.g. a Cloudflare Tunnel, or
@@ -120,6 +125,9 @@ scannable terminal QR code for it (`print_onboarding_qr` in `scripts/deploy.sh`)
 `SLIPSTREAM_TOKEN` is found in `server.env`, it skips the QR/tokenized URL and prints a
 note instead — install `qrencode` (e.g. `apt install qrencode` / `brew install qrencode`)
 to get the QR code.
+
+If an APK was published (`print_apk_download` in `scripts/deploy.sh`), both success paths
+also print an app download URL (`.../slipstream-latest.apk`) with its own QR code.
 
 To skip quality gates for a hot fix:
 
