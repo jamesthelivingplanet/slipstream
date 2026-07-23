@@ -12,6 +12,7 @@
     subscribeSessionStatus,
     subscribeSessionPr,
     subscribeConnectionChange,
+    connected,
     mobile,
     drawer,
     keyboardInset,
@@ -291,6 +292,12 @@
     {/if}
   </header>
 
+  {#if !$connected}
+    <!-- FLO-108: slim strip so a WS drop (daemon restart, tailnet blip, laptop
+         sleep) reads as "reconnecting" instead of a silently frozen terminal. -->
+    <div class="conn-banner" role="status">Connection lost — reconnecting…</div>
+  {/if}
+
   <!-- Drawer overlay backdrop: tap outside drawer to close (mobile + medium) -->
   {#if $drawer && listOpen}
     <div class="drawer-backdrop" on:click={() => (listOpen = false)} role="presentation"></div>
@@ -346,6 +353,16 @@
     inset: 0;
     z-index: 29;
     background: rgba(0, 0, 0, 0.45);
+  }
+  .conn-banner {
+    flex: none;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    color: hsl(var(--st-needs));
+    background: hsl(var(--st-needs) / 0.12);
+    border-bottom: 1px solid hsl(var(--border));
   }
   /* TASK-RAHTX: the booting Nulliel loading screen overlays the whole term
    * pane (terminal area) while a freshly started agent spins up. */

@@ -8,9 +8,9 @@
   export let onData: (data: string) => void
   /** Multi-line/large paste sink — bypasses the diff-based composer entirely. */
   export let onPaste: (text: string) => void
-  /** Image clipboard paste sink (wired by the parent to upload+^V). Undefined = feature not wired, skip silently. */
-  export let onPasteImage: ((blob: Blob) => void) | undefined = undefined
-  /** Image attach sink (wired by the parent to upload+^V, run just before the Enter that sends). Undefined = feature not wired, hide the attach button. */
+  /** Image attach sink (wired by the parent to upload+^V, run just before the Enter that sends).
+   *  Undefined = feature not wired, hide the attach button. Used for both the file-attach button
+   *  and clipboard-paste (both stage locally first, so neither can race the Enter that follows). */
   export let onAttachImage: ((blob: Blob) => Promise<void>) | undefined = undefined
 
   let el: HTMLInputElement
@@ -59,15 +59,26 @@
     send()
   }
 
+  /** Quick-key chips: send a raw control/ANSI sequence without stealing focus
+   *  from the composer input, so the user can keep typing right after. */
+  function sendChip(seq: string) {
+    onData(seq)
+    el?.focus()
+  }
+
   function handlePaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items
     if (items) {
       for (const item of items) {
-        if (item.kind === 'image') {
-          if (onPasteImage) {
+        // DataTransferItem.kind is only ever 'string' or 'file' per spec — an
+        // image on the clipboard surfaces as kind 'file' with an image/*
+        // type, never kind 'image' (there is no such kind).
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const blob = item.getAsFile()
+          if (blob) {
             e.preventDefault()
-            const blob = item.getAsFile()
-            if (blob) onPasteImage(blob)
+            if (stagedImage) URL.revokeObjectURL(stagedImage.previewUrl)
+            stagedImage = { blob, previewUrl: URL.createObjectURL(blob) }
             return
           }
           break
@@ -110,7 +121,7 @@
       aria-label="Remove attached image"
       on:click={removeStagedImage}
     >
-      <img src={stagedImage.previewUrl} alt="Attached image preview" />
+      <img src={stagedImage.previewUrl} alt="Attached preview" />
       <span class="term-attach-thumb-remove">{@html icons.close}</span>
     </button>
   </div>
@@ -152,3 +163,86 @@
     on:paste={handlePaste}
   />
 </div>
+
+<div class="term-chips" role="group" aria-label="Quick keys">
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Escape"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\x1b')}
+  >
+    Esc
+  </button>
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Tab"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\t')}
+  >
+    Tab
+  </button>
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Interrupt (Ctrl+C)"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\x03')}
+  >
+    Ctrl+C
+  </button>
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Previous (history up)"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\x1b[A')}
+  >
+    &uarr;
+  </button>
+  <button
+    type="button"
+    class="btn btn-outline btn-sm chip"
+    tabindex="-1"
+    {disabled}
+    title="Next (history down)"
+    on:mousedown|preventDefault={() => {}}
+    on:click={() => sendChip('\x1b[B')}
+  >
+    &darr;
+  </button>
+</div>
+
+<style>
+  /* Quick-key row: sits directly under the composer input, sharing its
+     background so the two read as one composer surface. Chips are plain
+     .btn/.btn-outline/.btn-sm (see app.css) so they match every other
+     toolbar control in the app — only the row layout is new here. */
+  .term-chips {
+    display: flex;
+    gap: 6px;
+    padding: 4px 8px 8px;
+    background: hsl(var(--background));
+    overflow-x: auto;
+  }
+  .chip {
+    flex: 0 0 auto;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  /* .term-input's own border-top already separates the composer from
+     whatever is above it; .term-actions (app.css) normally adds its own
+     border-top too, but that would double up right where the chip row now
+     sits flush against it, so drop it here exactly like the input row does. */
+  .term-chips + :global(.term-actions) {
+    border-top: none;
+  }
+</style>
