@@ -925,6 +925,22 @@ describe('dtoToSession (FLO-83 src round-trip)', () => {
     expect(s.status).toBe('queued')
     expect(s.activity.text).toBe('Queued — will start when an agent slot frees.')
   })
+
+  it('TASK-S870M: preserves agentKind so a reload/reconnect does not forget a prior hand-off', () => {
+    const dto: SessionDTO = {
+      id: 's4',
+      tid: 'T-4',
+      title: 't',
+      prompt: 'p',
+      repoId: 'r',
+      branch: 'b',
+      status: 'interrupted',
+      createdAt: 0,
+      src: 'jira',
+      agentKind: 'pi',
+    }
+    expect(dtoToSession(dto).agentKind).toBe('pi')
+  })
 })
 
 describe('counts/visible bucket agreement with Mission Control (FLO-113)', () => {
