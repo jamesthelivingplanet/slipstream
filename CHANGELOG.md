@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-23
+
 ### Added
 
 - `pnpm release` also builds the versioned debug APK to
