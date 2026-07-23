@@ -91,8 +91,11 @@ echo "  New version: ${NEW_VERSION}"
 # ---------------------------------------------------------------------------
 echo "▶ Updating CHANGELOG.md…"
 if ! node scripts/bumpChangelog.mjs "$NEW_VERSION"; then
-  echo "  Reverting package.json version bump…"
-  git checkout -- package.json
+  # `npm version` bumps both package.json AND package-lock.json's embedded
+  # version field (standard npm behavior, even in this pnpm project) — revert
+  # both or the working tree is left half-reverted and dirty.
+  echo "  Reverting version bump…"
+  git checkout -- package.json package-lock.json
   exit 1
 fi
 
