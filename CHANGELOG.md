@@ -9,6 +9,13 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- Android home-screen widget rows now show PR/CI/review chips and an
+  estimated cost label when a session has an open PR and/or transcript
+  usage (FLO-157), reusing the same chip semantics as Mission Control's
+  PR badges and cost pills so the widget can't disagree with the app.
+
 ## [0.2.2] - 2026-07-23
 
 ### Added

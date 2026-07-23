@@ -9,6 +9,8 @@ import type { Session } from './types'
 
 const repoByIdMock = vi.hoisted(() => vi.fn())
 const openAgentByIdMock = vi.hoisted(() => vi.fn())
+const getPrStatusMock = vi.hoisted(() => vi.fn())
+const getUsageSummaryMock = vi.hoisted(() => vi.fn())
 
 vi.mock('./stores', async () => {
   const { writable } = await import('svelte/store')
@@ -19,8 +21,21 @@ vi.mock('./stores', async () => {
   }
 })
 
+vi.mock('./ipc', () => ({
+  getPrStatus: getPrStatusMock,
+  getUsageSummary: getUsageSummaryMock,
+}))
+
 import { subscribeWidgetSync, subscribeWidgetAgentOpen } from './widgetSync.js'
 import { sessions as sessionsStore } from './stores'
+
+const ZERO_USAGE_SUMMARY = {
+  total: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 },
+  costUsd: 0,
+  byRepo: [],
+  byDay: [],
+  sessions: [],
+}
 
 function makeSession(overrides: Partial<Session> & { id: string; tid?: string }): Session {
   return {
@@ -66,6 +81,10 @@ describe('widgetSync', () => {
     repoByIdMock.mockReset()
     repoByIdMock.mockReturnValue(undefined)
     openAgentByIdMock.mockReset()
+    getPrStatusMock.mockReset()
+    getPrStatusMock.mockResolvedValue(null)
+    getUsageSummaryMock.mockReset()
+    getUsageSummaryMock.mockResolvedValue(ZERO_USAGE_SUMMARY)
     // @ts-expect-error test-only global stub
     delete globalThis.window
   })
@@ -193,6 +212,131 @@ describe('widgetSync', () => {
     expect(parsed.sessions.every((s: { id: string }) => s.id.startsWith('s'))).toBe(true)
 
     unsub()
+  })
+
+  it('fetches PR status for a session with a prUrl and includes the resolved chips in the snapshot', async () => {
+    getPrStatusMock.mockResolvedValue({
+      sessionId: 'a',
+      url: 'https://github.com/acme/widget/pull/1',
+      host: 'github',
+      state: 'open',
+      ci: 'passed',
+      review: 'approved',
+      approvals: 1,
+      checkedAt: Date.now(),
+    })
+    const capacitor = makeFakeCapacitor()
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    const unsub = subscribeWidgetSync()
+
+    sessionsStore.set([
+      makeSession({ id: 'a', prUrl: 'https://github.com/acme/widget/pull/1', status: 'running' }),
+    ])
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(getPrStatusMock).toHaveBeenCalledWith('a')
+
+    vi.advanceTimersByTime(4000)
+
+    const call = capacitor._syncWidget.mock.calls[0][0] as { snapshotJson: string }
+    const parsed = JSON.parse(call.snapshotJson)
+    expect(parsed.sessions[0].prChip).toEqual({ label: 'open', cls: 'muted' })
+    expect(parsed.sessions[0].ciChip).toEqual({ label: 'CI ✓', cls: 'done' })
+    expect(parsed.sessions[0].reviewChip).toEqual({ label: 'approved', cls: 'done' })
+
+    unsub()
+  })
+
+  it('never calls getPrStatus for a session without a prUrl, and its chips are all null', async () => {
+    const capacitor = makeFakeCapacitor()
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    const unsub = subscribeWidgetSync()
+
+    sessionsStore.set([makeSession({ id: 'a', status: 'running' })])
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(getPrStatusMock).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(4000)
+
+    const call = capacitor._syncWidget.mock.calls[0][0] as { snapshotJson: string }
+    const parsed = JSON.parse(call.snapshotJson)
+    expect(parsed.sessions[0].prChip).toBeNull()
+    expect(parsed.sessions[0].ciChip).toBeNull()
+    expect(parsed.sessions[0].reviewChip).toBeNull()
+
+    unsub()
+  })
+
+  it('populates costLabel from getUsageSummary for a matching session, and null otherwise', async () => {
+    getUsageSummaryMock.mockResolvedValue({
+      ...ZERO_USAGE_SUMMARY,
+      sessions: [
+        {
+          sessionId: 'a',
+          exists: true,
+          tokens: { input: 100, output: 50, cacheCreation: 0, cacheRead: 0 },
+          costUsd: 0.42,
+          turns: 3,
+        },
+        {
+          sessionId: 'b',
+          exists: false,
+          tokens: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 },
+          costUsd: 0,
+          turns: 0,
+        },
+      ],
+    })
+    const capacitor = makeFakeCapacitor()
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    const unsub = subscribeWidgetSync()
+
+    sessionsStore.set([
+      makeSession({ id: 'a', status: 'running' }),
+      makeSession({ id: 'b', status: 'running' }),
+    ])
+    await Promise.resolve()
+    await Promise.resolve()
+
+    vi.advanceTimersByTime(4000)
+
+    const call = capacitor._syncWidget.mock.calls[0][0] as { snapshotJson: string }
+    const parsed = JSON.parse(call.snapshotJson)
+    const byId = Object.fromEntries(
+      parsed.sessions.map((s: { id: string; costLabel: string | null }) => [s.id, s.costLabel]),
+    )
+    expect(byId.a).toBe('$0.42')
+    expect(byId.b).toBeNull()
+
+    unsub()
+  })
+
+  it('stops calling getPrStatus/getUsageSummary after unsubscribe', async () => {
+    const capacitor = makeFakeCapacitor()
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    const unsub = subscribeWidgetSync()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const prCallsBefore = getPrStatusMock.mock.calls.length
+    const usageCallsBefore = getUsageSummaryMock.mock.calls.length
+
+    unsub()
+
+    sessionsStore.set([
+      makeSession({ id: 'a', prUrl: 'https://github.com/acme/widget/pull/1', status: 'running' }),
+    ])
+    vi.advanceTimersByTime(120_000)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(getPrStatusMock.mock.calls.length).toBe(prCallsBefore)
+    expect(getUsageSummaryMock.mock.calls.length).toBe(usageCallsBefore)
   })
 
   it('stops syncing after unsubscribe', () => {

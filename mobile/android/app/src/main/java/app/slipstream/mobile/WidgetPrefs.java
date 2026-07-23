@@ -11,8 +11,9 @@ final class WidgetPrefs {
 
     static final String PREFS_NAME = "SlipstreamWidget";
 
-    /** JSON array of {id, title, repo, bucket, statusLabel} — see
-     *  WidgetSessionSnapshotEntry in src/lib/widgetSync.ts for the shape. */
+    /** JSON array of {id, title, repo, bucket, statusLabel} plus optional
+     *  {prChip, ciChip, reviewChip, costLabel} — see WidgetSessionSnapshotEntry
+     *  in src/lib/widgetSync.ts for the shape. */
     static final String SESSIONS_JSON_KEY = "sessionsJson";
 
     /** Epoch millis the snapshot was produced, per Date.now() on the JS side. */
