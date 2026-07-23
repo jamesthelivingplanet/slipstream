@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-23
+
 ### Added
 
 - Android app now shows a Nulliel-branded "can't reach the daemon" page
