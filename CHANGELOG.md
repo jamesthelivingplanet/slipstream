@@ -9,6 +9,12 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- Android app now shows a Nulliel-branded "can't reach the daemon" page
+  (TASK-COOXW) instead of the browser's default connection-error page, with
+  a one-tap retry and a way to fix a stale server address inline.
+
 ## [0.2.1] - 2026-07-23
 
 ### Added

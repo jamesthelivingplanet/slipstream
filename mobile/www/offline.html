@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Slipstream — Connection Lost</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b0e14;
+        color: #d7dae0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      main {
+        text-align: center;
+        max-width: 28rem;
+        width: 100%;
+      }
+      .glyph {
+        position: relative;
+        width: 72px;
+        height: 72px;
+        margin: 0 auto 12px;
+      }
+      .glow {
+        position: absolute;
+        inset: -10px;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle,
+          rgba(180, 147, 232, 0.4) 0%,
+          rgba(180, 147, 232, 0) 68%
+        );
+        filter: blur(10px);
+        animation: glow 2.4s ease-in-out infinite;
+      }
+      .glyph svg {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        animation: float 2.4s ease-in-out infinite;
+      }
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-6px);
+        }
+      }
+      @keyframes glow {
+        0%,
+        100% {
+          opacity: 0.5;
+          transform: scale(0.92);
+        }
+        50% {
+          opacity: 0.9;
+          transform: scale(1.05);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .glyph svg,
+        .glow {
+          animation: none;
+        }
+      }
+      h1 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0 0 0.5rem;
+      }
+      p {
+        margin: 0.25rem 0 1.25rem;
+        color: #8b93a1;
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+      button {
+        height: 40px;
+        border-radius: 8px;
+        border: none;
+        background: #4c7cf0;
+        color: #fff;
+        font-family: inherit;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0 20px;
+      }
+      button:disabled {
+        background: #2a3550;
+        color: #6b7488;
+        cursor: not-allowed;
+      }
+      .status {
+        min-height: 1.2em;
+        font-size: 0.8rem;
+        margin-top: 8px;
+      }
+      .status.error {
+        color: #f0796c;
+      }
+      .status.ok {
+        color: #7fd39a;
+      }
+      details {
+        margin-top: 28px;
+        text-align: left;
+      }
+      summary {
+        cursor: pointer;
+        font-size: 0.8rem;
+        color: #8b93a1;
+        text-align: center;
+      }
+      summary:hover {
+        color: #d7dae0;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 14px;
+      }
+      label {
+        font-size: 0.8rem;
+        color: #8b93a1;
+      }
+      input[type='url'] {
+        width: 100%;
+        height: 40px;
+        box-sizing: border-box;
+        background: #12161f;
+        border: 1px solid #262c3a;
+        border-radius: 8px;
+        color: #d7dae0;
+        font-family: inherit;
+        font-size: 0.95rem;
+        padding: 0 12px;
+      }
+      input[type='url']:focus {
+        outline: none;
+        border-color: #4c7cf0;
+      }
+      code {
+        color: #d7dae0;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="glyph" aria-hidden="true">
+        <span class="glow"></span>
+        <svg viewBox="0 0 13 13" shape-rendering="crispEdges">
+          <g fill="#b493e8">
+            <rect x="6" y="0" width="1" height="1" />
+            <rect x="5" y="1" width="1" height="1" />
+            <rect x="6" y="1" width="1" height="1" />
+            <rect x="7" y="1" width="1" height="1" />
+            <rect x="4" y="2" width="1" height="1" />
+            <rect x="5" y="2" width="1" height="1" />
+            <rect x="7" y="2" width="1" height="1" />
+            <rect x="3" y="3" width="1" height="1" />
+            <rect x="4" y="3" width="1" height="1" />
+            <rect x="2" y="4" width="1" height="1" />
+            <rect x="3" y="4" width="1" height="1" />
+            <rect x="1" y="5" width="1" height="1" />
+            <rect x="2" y="5" width="1" height="1" />
+            <rect x="0" y="6" width="1" height="1" />
+            <rect x="1" y="6" width="1" height="1" />
+            <rect x="1" y="7" width="1" height="1" />
+            <rect x="2" y="7" width="1" height="1" />
+            <rect x="2" y="8" width="1" height="1" />
+            <rect x="3" y="8" width="1" height="1" />
+            <rect x="3" y="9" width="1" height="1" />
+          </g>
+          <g fill="#b493e8" fill-opacity="0.7">
+            <rect x="6" y="12" width="1" height="1" />
+            <rect x="5" y="11" width="1" height="1" />
+            <rect x="6" y="11" width="1" height="1" />
+            <rect x="7" y="11" width="1" height="1" />
+            <rect x="4" y="10" width="1" height="1" />
+            <rect x="5" y="10" width="1" height="1" />
+            <rect x="7" y="10" width="1" height="1" />
+            <rect x="4" y="9" width="1" height="1" />
+            <rect x="8" y="9" width="1" height="1" />
+            <rect x="8" y="10" width="1" height="1" />
+            <rect x="9" y="8" width="1" height="1" />
+            <rect x="9" y="9" width="1" height="1" />
+            <rect x="10" y="7" width="1" height="1" />
+            <rect x="10" y="8" width="1" height="1" />
+            <rect x="11" y="5" width="1" height="1" />
+            <rect x="11" y="6" width="1" height="1" />
+            <rect x="11" y="7" width="1" height="1" />
+            <rect x="12" y="6" width="1" height="1" />
+            <rect x="9" y="4" width="1" height="1" />
+            <rect x="10" y="4" width="1" height="1" />
+            <rect x="10" y="5" width="1" height="1" />
+          </g>
+          <g fill="#b493e8" fill-opacity="0.35">
+            <rect x="7" y="3" width="1" height="1" />
+            <rect x="7" y="4" width="1" height="1" />
+          </g>
+          <rect x="5" y="9" width="1" height="1" fill="#b493e8" fill-opacity="0.3" />
+          <rect x="8" y="7" width="1" height="1" fill="#eb4763" />
+          <rect x="9" y="7" width="1" height="1" fill="#eb4763" fill-opacity="0.4" />
+        </svg>
+      </div>
+
+      <h1>Nulliel lost the signal</h1>
+      <p>
+        Flew out looking for your daemon and came back alone. It might just be asleep — or the
+        address below might be stale. Either way, this is Nulliel's problem to fix, not a browser
+        error.
+      </p>
+
+      <button type="button" id="retry-btn">Retry connection</button>
+      <div class="status" id="retry-status" role="status"></div>
+
+      <details id="fix-url">
+        <summary>Wrong server address?</summary>
+        <form id="gate-form">
+          <label for="gate-url">Daemon URL</label>
+          <input
+            type="url"
+            id="gate-url"
+            name="url"
+            placeholder="https://your-host.example.com"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            required
+          />
+          <button type="submit" id="gate-submit">Save &amp; retry</button>
+          <div class="status" id="gate-status" role="status"></div>
+        </form>
+      </details>
+    </main>
+
+    <script>
+      // Loaded via Bridge.getErrorUrl() (server.errorPath in capacitor.config.ts)
+      // whenever the main-frame WebView load of the daemon URL fails
+      // (onReceivedError/onReceivedHttpError in Capacitor's BridgeWebViewClient) —
+      // replaces Chromium's default "site can't be reached" page. Served from the
+      // same local webDir as www/index.html, so window.Capacitor plugins are
+      // available the same way. "Retry" calls AppControl.restart(), which
+      // recreates MainActivity and re-attempts the baked/preference daemon URL
+      // (see MainActivity.java) without force-closing the app. The "Wrong server
+      // address?" form mirrors index.html's ServerGate for fixing a stale URL
+      // from here instead of hunting for Settings.
+      ;(function () {
+        'use strict'
+
+        var DAEMON_URL_KEY = 'slipstream.daemonUrl'
+
+        var retryBtn = document.getElementById('retry-btn')
+        var retryStatus = document.getElementById('retry-status')
+        var gateForm = document.getElementById('gate-form')
+        var gateInput = document.getElementById('gate-url')
+        var gateSubmit = document.getElementById('gate-submit')
+        var gateStatus = document.getElementById('gate-status')
+
+        function setStatus(el, msg, kind) {
+          el.textContent = msg || ''
+          el.className = 'status' + (kind ? ' ' + kind : '')
+        }
+
+        function getCapacitor() {
+          return window.Capacitor
+        }
+
+        function getPreferences() {
+          var cap = getCapacitor()
+          return cap && cap.Plugins && cap.Plugins.Preferences
+        }
+
+        function getAppControl() {
+          var cap = getCapacitor()
+          return cap && cap.Plugins && cap.Plugins.AppControl
+        }
+
+        function isValidHttpUrl(value) {
+          try {
+            var u = new URL(value)
+            return u.protocol === 'http:' || u.protocol === 'https:'
+          } catch (e) {
+            return false
+          }
+        }
+
+        function restartApp(statusEl, savingMsg) {
+          var appControl = getAppControl()
+          if (!appControl || !appControl.restart) {
+            setStatus(
+              statusEl,
+              'Native restart is unavailable here — close and reopen the app to retry.',
+              'error',
+            )
+            return
+          }
+          setStatus(statusEl, savingMsg || 'Retrying…', 'ok')
+          appControl.restart().catch(function () {
+            setStatus(statusEl, 'Could not restart automatically — reopen the app.', 'error')
+          })
+        }
+
+        retryBtn.addEventListener('click', function () {
+          retryBtn.disabled = true
+          restartApp(retryStatus, 'Retrying…')
+          // Give a visible "trying" state even if restart() never resolves
+          // before the Activity recreates out from under this page.
+          setTimeout(function () {
+            retryBtn.disabled = false
+          }, 3000)
+        })
+
+        function loadExisting() {
+          var prefs = getPreferences()
+          if (!prefs) return
+          prefs
+            .get({ key: DAEMON_URL_KEY })
+            .then(function (res) {
+              if (res && res.value) gateInput.value = res.value
+            })
+            .catch(function () {
+              // ignore — form still works for a fresh entry
+            })
+        }
+
+        gateForm.addEventListener('submit', function (evt) {
+          evt.preventDefault()
+          var value = gateInput.value.trim()
+          if (!isValidHttpUrl(value)) {
+            setStatus(gateStatus, 'Enter a valid http(s) URL.', 'error')
+            return
+          }
+
+          var prefs = getPreferences()
+          if (!prefs) {
+            setStatus(gateStatus, 'Native storage plugin unavailable — cannot save.', 'error')
+            return
+          }
+
+          gateSubmit.disabled = true
+          setStatus(gateStatus, 'Saving…', '')
+
+          prefs
+            .set({ key: DAEMON_URL_KEY, value: value })
+            .then(function () {
+              restartApp(gateStatus, 'Saved. Retrying…')
+            })
+            .catch(function () {
+              setStatus(gateStatus, 'Could not save the URL. Please try again.', 'error')
+            })
+            .then(function () {
+              gateSubmit.disabled = false
+            })
+        })
+
+        loadExisting()
+      })()
+    </script>
+  </body>
+</html>
