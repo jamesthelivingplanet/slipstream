@@ -90,6 +90,16 @@
   }
 
   onMount(() => {
+    // Establish the mobile/drawer layout FIRST, before any native/backend
+    // subscription below. A failing subscription used to throw partway
+    // through onMount and abort everything after it — including this call —
+    // which left `mobile`/`drawer` stuck at their `false` defaults and the
+    // Android app rendering its desktop layout on a phone screen. Doing this
+    // first means a later throw can no longer strand the layout.
+    checkViewport()
+    window.addEventListener('resize', checkViewport)
+    window.addEventListener('orientationchange', checkViewport)
+
     const offStatus = subscribeSessionStatus()
     const offPr = subscribeSessionPr()
     const offConnection = subscribeConnectionChange()
@@ -127,10 +137,6 @@
         }
       })
     }
-
-    checkViewport()
-    window.addEventListener('resize', checkViewport)
-    window.addEventListener('orientationchange', checkViewport)
 
     // Track the on-screen keyboard so the bottom bars (mobile composer +
     // .term-actions) can shift up above it. The keyboard only exists while an
