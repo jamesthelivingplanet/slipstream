@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-24
+
 ### Fixed
 
 - Android app rendered the desktop layout (overflowing header, panned-off UI)
