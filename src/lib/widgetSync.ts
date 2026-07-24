@@ -33,10 +33,15 @@ interface AppControlPlugin {
   // cold-start case (app not yet running) instead arrives via the
   // `?agent=` query param on the initial page load, same as the
   // push-notification tap path — see App.svelte's onMount.
+  // Capacitor 6 returned a Promise here; Capacitor 7 made addListener
+  // synchronous and returns the bare handle instead (a breaking change that
+  // isn't reflected if you only type against the older docs) — this app
+  // ships @capacitor/core 7.6.8, so callers must accept BOTH shapes. See
+  // subscribeWidgetAgentOpen() below for the actual runtime handling.
   addListener(
     eventName: 'openAgent',
     listenerFunc: (data: { agentId: string }) => void,
-  ): Promise<AppControlPluginListenerHandle>
+  ): AppControlPluginListenerHandle | Promise<AppControlPluginListenerHandle>
 }
 
 // Cast through `unknown` rather than extending the global `Window.Capacitor`
@@ -334,17 +339,31 @@ export function subscribeWidgetAgentOpen(): () => void {
   if (agentOpenListenerBoundFor !== plugin) {
     agentOpenListenerBoundFor = plugin
     agentOpenListenerHandle = null
-    plugin
-      .addListener('openAgent', (data) => {
-        if (data?.agentId) openAgentById(data.agentId)
-      })
-      .then((handle) => {
-        agentOpenListenerHandle = handle
-      })
-      .catch(() => {
-        // best-effort — a widget tap while this failed to bind just falls
-        // back to opening the app without deep-linking, no worse than before
-      })
+    try {
+      // Capacitor 6 returns a Promise<handle>; Capacitor 7 (what this app
+      // ships) made addListener synchronous and returns the bare handle —
+      // Promise.resolve() normalizes both shapes into a thenable so the
+      // rest of this stays one code path. The try/catch guards a plugin
+      // that throws synchronously (or is a stale/broken bridge object) so a
+      // native subscription failure can never propagate out of this
+      // function and abort the caller's onMount (see App.svelte, which
+      // chains other setup after this call).
+      Promise.resolve(
+        plugin.addListener('openAgent', (data) => {
+          if (data?.agentId) openAgentById(data.agentId)
+        }),
+      )
+        .then((handle) => {
+          agentOpenListenerHandle = handle
+        })
+        .catch(() => {
+          // best-effort — a widget tap while this failed to bind just falls
+          // back to opening the app without deep-linking, no worse than before
+        })
+    } catch {
+      // synchronous throw from addListener itself (e.g. a broken bridge) —
+      // same best-effort fallback as the async rejection case above
+    }
   }
 
   return () => {

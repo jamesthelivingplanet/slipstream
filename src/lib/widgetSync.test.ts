@@ -54,13 +54,27 @@ function makeSession(overrides: Partial<Session> & { id: string; tid?: string })
   }
 }
 
-function makeFakeCapacitor(opts: { pluginAvailable?: boolean } = {}) {
+// `addListenerMode` picks which Capacitor major's addListener() shape the
+// fake mimics: Capacitor <=6 resolved a Promise<handle>, Capacitor 7 (what
+// this app ships) returns the bare handle synchronously — the exact
+// discrepancy that crashed subscribeWidgetAgentOpen() in production (it
+// unconditionally called `.then()` on the return value). `'throw'` mimics a
+// broken/absent bridge that throws synchronously from addListener itself.
+function makeFakeCapacitor(
+  opts: {
+    pluginAvailable?: boolean
+    addListenerMode?: 'promise' | 'sync' | 'throw'
+  } = {},
+) {
+  const mode = opts.addListenerMode ?? 'promise'
   const syncWidget = vi.fn().mockResolvedValue(undefined)
   const removeListener = vi.fn().mockResolvedValue(undefined)
   let openAgentListener: ((data: { agentId: string }) => void) | undefined
   const addListener = vi.fn((eventName: string, fn: (data: { agentId: string }) => void) => {
     if (eventName === 'openAgent') openAgentListener = fn
-    return Promise.resolve({ remove: removeListener })
+    if (mode === 'throw') throw new Error('addListener not available')
+    const handle = { remove: removeListener }
+    return mode === 'sync' ? handle : Promise.resolve(handle)
   })
   return {
     isPluginAvailable: vi.fn((name: string) =>
@@ -382,30 +396,58 @@ describe('subscribeWidgetAgentOpen', () => {
     expect(capacitor._addListener).not.toHaveBeenCalled()
   })
 
-  it('calls openAgentById with the id carried by a native openAgent event', async () => {
-    const capacitor = makeFakeCapacitor()
+  // Parameterized across both addListener() shapes: 'promise' is Capacitor
+  // <=6 (a Promise<handle>), 'sync' is Capacitor 7 (the bare handle,
+  // returned synchronously) — the version this app actually ships
+  // (@capacitor/core 7.6.8). subscribeWidgetAgentOpen() must work
+  // identically under both.
+  const modes = ['promise', 'sync'] as const
+
+  for (const mode of modes) {
+    it(`[${mode}] does not throw when subscribing`, () => {
+      const capacitor = makeFakeCapacitor({ addListenerMode: mode })
+      // @ts-expect-error minimal window stub
+      globalThis.window = { Capacitor: capacitor }
+      expect(() => subscribeWidgetAgentOpen()).not.toThrow()
+    })
+
+    it(`[${mode}] calls openAgentById with the id carried by a native openAgent event`, async () => {
+      const capacitor = makeFakeCapacitor({ addListenerMode: mode })
+      // @ts-expect-error minimal window stub
+      globalThis.window = { Capacitor: capacitor }
+      const unsub = subscribeWidgetAgentOpen()
+      await Promise.resolve()
+      await Promise.resolve()
+
+      capacitor._fireOpenAgent('s7k2')
+
+      expect(openAgentByIdMock).toHaveBeenCalledWith('s7k2')
+      unsub()
+    })
+
+    it(`[${mode}] removes the listener on unsubscribe`, async () => {
+      const capacitor = makeFakeCapacitor({ addListenerMode: mode })
+      // @ts-expect-error minimal window stub
+      globalThis.window = { Capacitor: capacitor }
+      const unsub = subscribeWidgetAgentOpen()
+      await Promise.resolve()
+      await Promise.resolve()
+
+      unsub()
+
+      expect(capacitor._removeListener).toHaveBeenCalledTimes(1)
+    })
+  }
+
+  it('does not propagate a synchronous throw from addListener out of subscribeWidgetAgentOpen()', () => {
+    const capacitor = makeFakeCapacitor({ addListenerMode: 'throw' })
     // @ts-expect-error minimal window stub
     globalThis.window = { Capacitor: capacitor }
-    const unsub = subscribeWidgetAgentOpen()
-    await Promise.resolve()
-    await Promise.resolve()
-
-    capacitor._fireOpenAgent('s7k2')
-
-    expect(openAgentByIdMock).toHaveBeenCalledWith('s7k2')
-    unsub()
-  })
-
-  it('removes the listener on unsubscribe', async () => {
-    const capacitor = makeFakeCapacitor()
-    // @ts-expect-error minimal window stub
-    globalThis.window = { Capacitor: capacitor }
-    const unsub = subscribeWidgetAgentOpen()
-    await Promise.resolve()
-    await Promise.resolve()
-
-    unsub()
-
-    expect(capacitor._removeListener).toHaveBeenCalledTimes(1)
+    let unsub: (() => void) | undefined
+    expect(() => {
+      unsub = subscribeWidgetAgentOpen()
+    }).not.toThrow()
+    expect(() => unsub?.()).not.toThrow()
+    expect(openAgentByIdMock).not.toHaveBeenCalled()
   })
 })

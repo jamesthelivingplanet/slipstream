@@ -9,6 +9,19 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Fixed
+
+- Android app rendered the desktop layout (overflowing header, panned-off UI)
+  instead of the mobile one. `Plugin.addListener()` became synchronous under
+  Capacitor 7 (this app's shipped version) instead of returning a Promise;
+  `subscribeWidgetAgentOpen()` still unconditionally chained `.then()` on its
+  result, so on Android it threw during `App.svelte`'s `onMount`, aborting
+  everything after it — including the `checkViewport()` call that sets the
+  `mobile`/`drawer` layout stores. Fixed by accepting both the sync (v7) and
+  Promise (v6) return shapes, guarding the call so a native subscription
+  failure can never propagate, and moving the viewport setup to the top of
+  `onMount` so it can no longer be stranded by a later throw.
+
 ## [0.3.0] - 2026-07-23
 
 ### Added
