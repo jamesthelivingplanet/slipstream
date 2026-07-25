@@ -12,6 +12,38 @@
             android:resource="@drawable/ic_stat_notify"
         />
 
+        <!-- FLO-160: receives data-only "slipstreamSummary" FCM messages and
+             maintains the always-visible ongoing notification. Does NOT handle
+             per-session notifications (those carry an FCM `notification` block
+             and are auto-displayed by FCM in the background / dispatched by the
+             Capacitor push-notifications plugin in the foreground).
+
+             Coexistence with @capacitor/push-notifications: that plugin also
+             registers a FirebaseMessagingService for MESSAGING_EVENT. Android
+             delivers each FCM message to exactly one such service, resolved by
+             intent-filter priority (ties broken by manifest declaration order).
+             Firebase's own base service declares priority -500; the plugin's
+             uses the default 0. android:priority="1" here makes THIS service
+             win deterministically so the ongoing notification reliably appears.
+             onMessageReceived early-returns for anything that is not a summary,
+             so non-summary data-only messages are dropped here (the app uses no
+             other data-only messages). Per-session notification messages carry
+             an FCM `notification` block, so they are auto-displayed by the
+             system in the background independent of any service; in the
+             foreground they reach this service's early-return, which is a no-op
+             because the app registers no 'pushNotificationReceived' JS listener.
+             Because this service wins, it also owns onNewToken and forwards it
+             to PushNotificationsPlugin so FCM token rotation still re-saves the
+             token server-side. No functional regression for the existing push
+             flow. -->
+        <service
+            android:name=".SlipstreamMessagingService"
+            android:exported="false">
+            <intent-filter android:priority="1">
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
             android:name=".MainActivity"

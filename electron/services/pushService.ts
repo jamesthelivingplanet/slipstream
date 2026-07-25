@@ -22,11 +22,26 @@ import {
   parseServiceAccount,
   mintAccessToken,
   sendFcmMessage,
+  sendFcmDataMessage,
   type FcmServiceAccount,
 } from './fcm.js'
 import { NOTIFICATION_TITLES, pick, type NotificationKind } from '../shared/mascot.js'
 
 export type { PushSubscriptionRow, FcmTokenRow }
+
+/** Snapshot of an owner's live sessions, used to drive the persistent
+ *  Android "ongoing" notification (FLO-160). Computed on every genuine
+ *  post-dedup transition and sent as a data-only FCM message (no
+ *  `notification` block) so the app's FirebaseMessagingService can render
+ *  and continuously update a single ongoing shade entry. */
+export interface OngoingSnapshot {
+  runningCount: number
+  topAsk: {
+    sessionId: string
+    tid: string
+    message: string
+  } | null
+}
 
 export interface PushStore {
   all(): PushSubscriptionRow[]
@@ -75,6 +90,18 @@ export type FcmTokenMinter = (
   account: FcmServiceAccount,
 ) => Promise<{ accessToken: string; expiresAt: number }>
 
+/** Data-only FCM transport (FLO-160 ongoing summary). Mirrors FcmSender's
+ *  shape but the payload is a bare Record<string, string> with NO title/body
+ *  — fcm.ts's sendFcmDataMessage omits the `notification` block so FCM does
+ *  not auto-display the message, leaving the app's
+ *  SlipstreamMessagingService to render the ongoing notification. */
+export type FcmDataSender = (
+  account: FcmServiceAccount,
+  accessToken: string,
+  deviceToken: string,
+  data: Record<string, string>,
+) => Promise<{ ok: boolean; status: number; unregistered: boolean }>
+
 export interface IPushService {
   getVapidPublicKey(): Promise<string>
   savePushSubscription(sub: PushSubscriptionDTO, prefs: NotifyPrefs): Promise<void>
@@ -96,6 +123,53 @@ export function transitionKind(
   if (next === 'done' && prev !== 'done') return 'done'
   if (next === 'running' && prev !== 'running') return 'running'
   return null
+}
+
+/** Compute the owner's current ongoing-notification snapshot directly from
+ *  the session store. Pure (no I/O, no closure state) so it is unit-testable
+ *  without a live sessionManager — FLO-160's summary sender recomputes this
+ *  on every post-dedup transition.
+ *
+ *  `justTransitionedId` / `justTransitionedMeta` are optional hints for the
+ *  synchronous path (the moment a transition fires, the just-moved session
+ *  is the freshest signal): when the just-transitioned session is now in
+ *  `needs`, it wins as `topAsk` and its `meta.message` (if present) is
+ *  preferred over the session title. When the synchronous path doesn't
+ *  apply (no hint, or the just-transitioned session moved OUT of needs),
+ *  we fall back to the most recently created needs session in the store.
+ *  `ownerId` defaults to 'local' exactly the same way every other
+ *  ownerId read in the codebase does (see IDENTITY-SEAM.md). */
+export function computeOngoingSnapshot(
+  sessionStore: ISessionStore,
+  ownerId: string,
+  justTransitionedId?: string,
+  justTransitionedMeta?: StatusMeta,
+): OngoingSnapshot {
+  const sessions = sessionStore.list().filter((s) => (s.ownerId || 'local') === ownerId)
+  const runningCount = sessions.filter((s) => s.status === 'running').length
+
+  let topAsk: OngoingSnapshot['topAsk'] = null
+  const justTransitioned = justTransitionedId
+    ? sessions.find((s) => s.id === justTransitionedId)
+    : undefined
+  if (justTransitioned && justTransitioned.status === 'needs') {
+    topAsk = {
+      sessionId: justTransitioned.id,
+      tid: justTransitioned.tid,
+      message: justTransitionedMeta?.message ?? justTransitioned.title,
+    }
+  } else {
+    // No fresh needs transition to lead with — fall back to the most
+    // recently created needs session still pending in the store.
+    const needsSessions = sessions
+      .filter((s) => s.status === 'needs')
+      .sort((a, b) => b.createdAt - a.createdAt)
+    if (needsSessions.length > 0) {
+      const top = needsSessions[0]
+      topAsk = { sessionId: top.id, tid: top.tid, message: top.title }
+    }
+  }
+  return { runningCount, topAsk }
 }
 
 export function createDbPushStore(db: Database): PushStore {
@@ -152,6 +226,9 @@ export function createPushService(deps: {
   /** Injected for tests — bypasses real network. Defaults to fcm.ts's
    *  sendFcmMessage over the global fetch. */
   fcmSend?: FcmSender
+  /** Injected for tests — bypasses real network for the FLO-160 data-only
+   *  ongoing-summary transport. Defaults to fcm.ts's sendFcmDataMessage. */
+  fcmDataSend?: FcmDataSender
 }): IPushService {
   const { config, store, sessions, sessionStore } = deps
   const now = deps.now ?? (() => Date.now())
@@ -161,6 +238,10 @@ export function createPushService(deps: {
     deps.fcmSend ??
     ((account, accessToken, deviceToken, notification) =>
       sendFcmMessage(account, accessToken, deviceToken, notification))
+  const fcmDataSend: FcmDataSender =
+    deps.fcmDataSend ??
+    ((account, accessToken, deviceToken, data) =>
+      sendFcmDataMessage(account, accessToken, deviceToken, data))
 
   const lastStatus = new Map<string, SessionStatus>()
   // Kinds already notified during the session's current "episode". The status
@@ -169,6 +250,26 @@ export function createPushService(deps: {
   // kind fires at most once per episode; an episode ends when the user actually
   // types into the session ('input' event), which re-arms all kinds.
   const notified = new Map<string, Set<'needs' | 'done' | 'running'>>()
+
+  // FLO-160 ongoing-summary debounce: one outstanding timer per owner. A
+  // single PTY's status can fire several post-dedup transitions in quick
+  // succession (needs → done + exit, two sessions transitioning in the same
+  // tick, …) and each would otherwise fan out its own summary send. The
+  // throttle coalesces a burst into one send that reads the LATEST snapshot
+  // from the store when it fires. Keyed by owner so two users on the same
+  // daemon never share a timer. The 500ms window is well under the
+  // notification's glanceable staleness budget but long enough to cover a
+  // same-tick burst. Mirrors src/lib/widgetSync.ts's leading-edge/throttled-
+  // trailing-flush reasoning (and the same status-flap gotcha drives both).
+  const ONGOING_SUMMARY_DEBOUNCE_MS = 500
+  const pendingOngoingSummary = new Map<string, ReturnType<typeof setTimeout>>()
+  // Latest transition captured per owner while a timer is outstanding. The
+  // timer reads this at fire time so computeOngoingSnapshot's "just-
+  // transitioned" fast-path still wins for the freshest ask (carrying its
+  // meta.message, which the store-only fallback path can't recover). Only
+  // the most recent transition per owner is kept — earlier ones in the same
+  // burst are superseded, which is the right thing when coalescing.
+  const pendingOngoingTransition = new Map<string, { sessionId: string; meta?: StatusMeta }>()
 
   let _send: PushSender | null = deps.send ?? null
   let _webpush: typeof import('web-push') | null = null
@@ -314,6 +415,83 @@ export function createPushService(deps: {
     }
   }
 
+  /** Fan out one ongoing-summary data-only message to every Android FCM
+   *  token owned by `ownerId`. iOS tokens are deliberately excluded — iOS
+   *  has no "ongoing notification" concept, so a data-only message there is
+   *  a wasted silent push (and would burn APNs budget for nothing). Never
+   *  throws — same best-effort contract as sendFcmForOwner. */
+  async function sendOngoingSummary(ownerId: string, snapshot: OngoingSnapshot): Promise<void> {
+    const account = getFcmAccount()
+    if (!account) return
+
+    const tokens = fcmStore
+      .all()
+      .filter((row) => (row.ownerId || 'local') === ownerId && row.platform === 'android')
+    if (tokens.length === 0) return
+
+    let accessToken: string
+    try {
+      accessToken = await ensureFcmAccessToken(account)
+    } catch {
+      return
+    }
+
+    // Data contract — pinned by mobile/.../SlipstreamMessagingService.java's
+    // parser. `slipstreamSummary: '1'` is the marker that routes the message
+    // to the ongoing-notification path on the device; runningCount is always
+    // present (so the client can cancel when it is 0 and no ask remains);
+    // ask fields ride along only when there is a top ask.
+    const data: Record<string, string> = {
+      slipstreamSummary: '1',
+      runningCount: String(snapshot.runningCount),
+    }
+    if (snapshot.topAsk) {
+      data.askSessionId = snapshot.topAsk.sessionId
+      data.askTid = snapshot.topAsk.tid
+      data.askMessage = snapshot.topAsk.message
+    }
+
+    for (const row of tokens) {
+      try {
+        const result = await fcmDataSend(account, accessToken, row.token, data)
+        if (result.unregistered) fcmStore.delete(row.token, row.ownerId)
+      } catch {
+        // best-effort per-token; swallow and continue
+      }
+    }
+  }
+
+  /** Coalesce a burst of post-dedup transitions into one summary send. Reads
+   *  the LATEST store snapshot when the timer fires (rather than the snapshot
+   *  at schedule time), so two transitions in the same tick produce one send
+   *  reflecting the final state. `justTransitionedId`/`meta` are captured per
+   *  owner and replayed into computeOngoingSnapshot at fire time so the
+   *  freshest needs ask still carries its `meta.message` — the store-only
+   *  fallback path can recover the session but not the sentinel's message.
+   *  sessionPersistence (wired BEFORE this listener in services.ts) has
+   *  already written every recent status into the store by the time the
+   *  timer fires. */
+  function scheduleOngoingSummary(
+    ownerId: string,
+    justTransitionedId: string,
+    meta?: StatusMeta,
+  ): void {
+    pendingOngoingTransition.set(ownerId, { sessionId: justTransitionedId, meta })
+    const existing = pendingOngoingSummary.get(ownerId)
+    if (existing !== undefined) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      pendingOngoingSummary.delete(ownerId)
+      const last = pendingOngoingTransition.get(ownerId)
+      pendingOngoingTransition.delete(ownerId)
+      const snapshot = computeOngoingSnapshot(sessionStore, ownerId, last?.sessionId, last?.meta)
+      // best-effort; never let a send failure poison the next transition
+      sendOngoingSummary(ownerId, snapshot).catch(() => {
+        // swallow — matches sendFcmForOwner's error contract
+      })
+    }, ONGOING_SUMMARY_DEBOUNCE_MS)
+    pendingOngoingSummary.set(ownerId, timer)
+  }
+
   /** Drop all per-session tracking state so the long-lived daemon's maps don't
    *  grow unboundedly with every session ever seen. */
   function forgetSession(sessionId: string) {
@@ -360,6 +538,16 @@ export function createPushService(deps: {
 
     const session = sessionStore.get(sessionId)
     const tid = session?.tid ?? sessionId
+    // Owner scope for both the per-session notification fan-out below AND the
+    // ongoing summary (defaults to 'local', same fallback as every other
+    // ownerId read — see IDENTITY-SEAM.md).
+    const ownerId = session?.ownerId || 'local'
+    // The ongoing summary hangs off THIS dedup check (never a raw status
+    // subscription — see CLAUDE.md's status-flapping gotcha). Only a real,
+    // post-dedup transition schedules a summary refresh, so the persistent
+    // Android notification reflects genuine episode transitions rather than
+    // flickering on every PTY chunk.
+    scheduleOngoingSummary(ownerId, sessionId, meta)
 
     // meta.reason still picks the needs flavor (blocked/approval/plain input);
     // the resulting NotificationKind only selects which mascot.ts pool the
@@ -393,11 +581,6 @@ export function createPushService(deps: {
     })
 
     const subs = store.all()
-    // Native push is delivery-only: the per-episode dedupe above already
-    // decided WHEN to notify; FCM just gets fanned the same decision, scoped
-    // to the transitioning session's own owner (defaults to 'local', same
-    // fallback as every other ownerId read — see IDENTITY-SEAM.md).
-    const ownerId = session?.ownerId || 'local'
     // data rides alongside notification (TASK-F0TYG) so a tap on the native
     // notification can deep-link straight to this session — see fcm.ts and
     // src/lib/push.ts's pushNotificationActionPerformed listener.

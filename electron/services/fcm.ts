@@ -106,6 +106,32 @@ export interface FcmSendResult {
   unregistered: boolean
 }
 
+/** Reduce a fetch Response from the FCM v1 `messages:send` endpoint into the
+ *  shape pushService's fan-out loop expects. Shared by `sendFcmMessage`
+ *  (notification-bearing) and `sendFcmDataMessage` (data-only) so the
+ *  unregistered-detection logic stays in one place: a 404 OR an error body
+ *  with `status: 'UNREGISTERED'|'NOT_FOUND'` means the device token is dead
+ *  and should be pruned, mirroring web-push's 404/410 prune rule.
+ *
+ *  Never throws for an HTTP-level failure (returns { ok:false }) — only a
+ *  network-level fetch rejection propagates, same contract as PushSender. */
+async function parseFcmSendResult(res: Response): Promise<FcmSendResult> {
+  if (res.ok) return { ok: true, status: res.status, unregistered: false }
+
+  let unregistered = res.status === 404
+  if (!unregistered) {
+    try {
+      const body = (await res.json()) as { error?: { status?: string } }
+      if (body?.error?.status === 'UNREGISTERED' || body?.error?.status === 'NOT_FOUND') {
+        unregistered = true
+      }
+    } catch {
+      // non-JSON error body — fall through with unregistered=false
+    }
+  }
+  return { ok: false, status: res.status, unregistered }
+}
+
 /** POST a single notification to one FCM device token via HTTP v1. Never
  *  throws for an HTTP-level failure (returns { ok:false } instead) — only a
  *  network-level fetch rejection propagates, same contract as PushSender.
@@ -148,18 +174,51 @@ export async function sendFcmMessage(
       }),
     },
   )
-  if (res.ok) return { ok: true, status: res.status, unregistered: false }
+  return parseFcmSendResult(res)
+}
 
-  let unregistered = res.status === 404
-  if (!unregistered) {
-    try {
-      const body = (await res.json()) as { error?: { status?: string } }
-      if (body?.error?.status === 'UNREGISTERED' || body?.error?.status === 'NOT_FOUND') {
-        unregistered = true
-      }
-    } catch {
-      // non-JSON error body — fall through with unregistered=false
-    }
-  }
-  return { ok: false, status: res.status, unregistered }
+/** POST a DATA-ONLY message (no top-level `notification` block) to one FCM
+ *  device token via HTTP v1. FLO-160's persistent "ongoing" status
+ *  notification hangs off this transport: a notification block would make
+ *  FCM auto-display the message in the background (and pop a new shade entry
+ *  on every snapshot refresh), which is wrong for an always-visible,
+ *  tap-to-replace ongoing notification. A data-only message instead flows to
+ *  the app's own FirebaseMessagingService.onMessageReceived in BOTH foreground
+ *  and background, where NotificationCompat.Builder with setOngoing(true)
+ *  produces the desired non-dismissible, non-alerting shade entry.
+ *
+ *  `android.priority: 'normal'` (not 'high'): an ongoing glanceable status
+ *  should not pop as a heads-up alert on every refresh — `setOnlyAlertOnce`
+ *  on the client handles the first appearance, and 'normal' priority keeps
+ *  subsequent refreshes silent on the wire too.
+ *
+ *  Same error/unregistered contract as `sendFcmMessage` (shared via
+ *  `parseFcmSendResult`), so pushService's prune-on-unregistered loop works
+ *  identically on both transports. */
+export async function sendFcmDataMessage(
+  account: FcmServiceAccount,
+  accessToken: string,
+  deviceToken: string,
+  data: Record<string, string>,
+  opts: { fetchFn?: typeof fetch } = {},
+): Promise<FcmSendResult> {
+  const fetchFn = opts.fetchFn ?? fetch
+  const res = await fetchFn(
+    `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account.project_id)}/messages:send`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        message: {
+          token: deviceToken,
+          data,
+          android: { priority: 'normal' },
+        },
+      }),
+    },
+  )
+  return parseFcmSendResult(res)
 }
