@@ -9,6 +9,23 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- Android app shows an always-visible "ongoing" notification with the
+  running-agent count and the top pending "needs you" ask, so a user can
+  glance at the notification shade without opening the app (FLO-160). The
+  daemon computes a per-owner snapshot on every genuine post-dedup status
+  transition and fans it out as a data-only FCM message; the app's new
+  `SlipstreamMessagingService` renders it as a non-dismissible, non-alerting
+  shade entry that replaces itself on each refresh and cancels when nothing
+  is running and nothing needs attention. The snapshot path hangs off
+  `pushService.ts`'s existing once-per-episode `transitionKind` dedup (with
+  a 500ms per-owner debounce to coalesce same-tick bursts) — never a raw
+  `status` subscription — so the notification reflects real episode
+  transitions rather than flickering on the idle-TUI status flapping
+  documented in CLAUDE.md's status-flap gotcha. iOS tokens are deliberately
+  excluded (no ongoing-notification concept there).
+
 ## [0.3.1] - 2026-07-24
 
 ### Fixed

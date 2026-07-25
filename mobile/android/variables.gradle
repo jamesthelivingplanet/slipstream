@@ -9,6 +9,14 @@ ext {
     androidxFragmentVersion = '1.8.4'
     coreSplashScreenVersion = '1.0.1'
     androidxWebkitVersion = '1.12.1'
+    // FLO-160: the app declares its own FirebaseMessagingService
+    // (SlipstreamMessagingService) to drive the ongoing-notification flow,
+    // so firebase-messaging must be on the app module's compile classpath.
+    // @capacitor/push-notifications pulls it in as an `implementation` (not
+    // `api`) dep, which hides it from consumers. Declared here so both the
+    // app and the plugin resolve to the same version (the plugin reads this
+    // same rootProject.ext.firebaseMessagingVersion property).
+    firebaseMessagingVersion = '24.1.0'
     junitVersion = '4.13.2'
     androidxJunitVersion = '1.2.1'
     androidxEspressoCoreVersion = '3.6.1'

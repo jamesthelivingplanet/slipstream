@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import { generateKeyPairSync, verify as cryptoVerify } from 'node:crypto'
-import { parseServiceAccount, mintAccessToken, sendFcmMessage } from './fcm.js'
+import { parseServiceAccount, mintAccessToken, sendFcmMessage, sendFcmDataMessage } from './fcm.js'
 import type { FcmServiceAccount } from './fcm.js'
 
 function jsonResponse(body: unknown, ok = true, status = 200): Response {
@@ -294,6 +294,107 @@ describe('sendFcmMessage', () => {
       'tok',
       'some-token',
       { title: 't', body: 'b' },
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+    expect(result).toEqual({ ok: false, status: 500, unregistered: false })
+  })
+})
+
+describe('sendFcmDataMessage', () => {
+  it('posts a data-only message with no top-level notification block', async () => {
+    let capturedUrl: string | undefined
+    let capturedBody: unknown
+    let capturedAuth: string | undefined
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      capturedUrl = url
+      capturedBody = JSON.parse(init!.body as string)
+      capturedAuth = (init!.headers as Record<string, string>).authorization
+      return jsonResponse({ name: 'projects/test-project/messages/abc' })
+    })
+
+    const result = await sendFcmDataMessage(
+      account,
+      'access-tok',
+      'device-tok-1',
+      { slipstreamSummary: '1', runningCount: '2', askSessionId: 's1', askTid: 'FLO-42' },
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+
+    expect(result).toEqual({ ok: true, status: 200, unregistered: false })
+    expect(capturedUrl).toBe('https://fcm.googleapis.com/v1/projects/test-project/messages:send')
+    expect(capturedAuth).toBe('Bearer access-tok')
+    // Critical: NO `notification` key at all — a notification block would
+    // make FCM auto-display the message in the background, defeating the
+    // "tap-to-replace, never heads-up" point of an ongoing notification.
+    expect(capturedBody).toEqual({
+      message: {
+        token: 'device-tok-1',
+        data: { slipstreamSummary: '1', runningCount: '2', askSessionId: 's1', askTid: 'FLO-42' },
+        android: { priority: 'normal' },
+      },
+    })
+    const body = capturedBody as { message: Record<string, unknown> }
+    expect(body.message.notification).toBeUndefined()
+  })
+
+  it('uses android.priority "normal" (not "high") so a refresh does not pop a heads-up', async () => {
+    let capturedBody: unknown
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedBody = JSON.parse(init!.body as string)
+      return jsonResponse({ name: 'msg' })
+    })
+
+    await sendFcmDataMessage(
+      account,
+      'tok',
+      'dev',
+      { slipstreamSummary: '1' },
+      {
+        fetchFn: fetchFn as unknown as typeof fetch,
+      },
+    )
+
+    const body = capturedBody as { message: { android: { priority: string } } }
+    expect(body.message.android.priority).toBe('normal')
+  })
+
+  it('shares the unregistered-detection path with sendFcmMessage (404 → unregistered)', async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse({ error: { code: 404, status: 'NOT_FOUND' } }, false, 404),
+    )
+    const result = await sendFcmDataMessage(
+      account,
+      'tok',
+      'dead-token',
+      { slipstreamSummary: '1' },
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+    expect(result).toEqual({ ok: false, status: 404, unregistered: true })
+  })
+
+  it('flags unregistered when the body carries error.status UNREGISTERED off a non-404 status', async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse({ error: { code: 400, status: 'UNREGISTERED' } }, false, 400),
+    )
+    const result = await sendFcmDataMessage(
+      account,
+      'tok',
+      'dead-token',
+      { slipstreamSummary: '1' },
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+    expect(result.unregistered).toBe(true)
+  })
+
+  it('does not flag unregistered for a 500 (shares the parseFcmSendResult tail)', async () => {
+    const fetchFn = vi.fn(async () =>
+      jsonResponse({ error: { code: 500, status: 'INTERNAL' } }, false, 500),
+    )
+    const result = await sendFcmDataMessage(
+      account,
+      'tok',
+      'flaky-token',
+      { slipstreamSummary: '1' },
       { fetchFn: fetchFn as unknown as typeof fetch },
     )
     expect(result).toEqual({ ok: false, status: 500, unregistered: false })
