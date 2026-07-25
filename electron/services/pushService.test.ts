@@ -1,6 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { transitionKind, createPushService, FCM_SERVICE_ACCOUNT_CONFIG_KEY } from './pushService.js'
-import type { PushStore, PushSender, FcmStore, FcmSender, FcmTokenMinter } from './pushService.js'
+import {
+  transitionKind,
+  createPushService,
+  computeOngoingSnapshot,
+  FCM_SERVICE_ACCOUNT_CONFIG_KEY,
+} from './pushService.js'
+import type {
+  PushStore,
+  PushSender,
+  FcmStore,
+  FcmSender,
+  FcmDataSender,
+  FcmTokenMinter,
+} from './pushService.js'
 import type {
   NotifyPrefs,
   PushSubscriptionDTO,
@@ -190,6 +202,136 @@ describe('transitionKind', () => {
   })
 })
 
+// ── computeOngoingSnapshot tests (FLO-160) ───────────────────────────────────
+
+function sess(overrides: Partial<SessionDTO> & { id: string }): SessionDTO {
+  return {
+    tid: overrides.id,
+    title: '',
+    prompt: '',
+    repoId: 'r1',
+    branch: 'b',
+    status: 'idle',
+    createdAt: 0,
+    ...overrides,
+  }
+}
+
+describe('computeOngoingSnapshot (FLO-160)', () => {
+  it('counts only running sessions for the given owner', () => {
+    const store = makeSessionStore([
+      sess({ id: 'r1', status: 'running', ownerId: 'local' }),
+      sess({ id: 'r2', status: 'running', ownerId: 'local' }),
+      sess({ id: 'n1', status: 'needs', ownerId: 'local' }),
+      sess({ id: 'd1', status: 'done', ownerId: 'local' }),
+      sess({ id: 'i1', status: 'idle', ownerId: 'local' }),
+      sess({ id: 'r3', status: 'running', ownerId: 'alice' }),
+    ])
+    const snap = computeOngoingSnapshot(store, 'local')
+    expect(snap.runningCount).toBe(2)
+  })
+
+  it('returns 0 / null when the owner has no live sessions', () => {
+    const store = makeSessionStore([
+      sess({ id: 'd1', status: 'done', ownerId: 'local' }),
+      sess({ id: 'r1', status: 'running', ownerId: 'alice' }),
+    ])
+    const snap = computeOngoingSnapshot(store, 'local')
+    expect(snap.runningCount).toBe(0)
+    expect(snap.topAsk).toBeNull()
+  })
+
+  it('prefers the just-transitioned needs session as topAsk', () => {
+    const store = makeSessionStore([
+      sess({
+        id: 'old-ask',
+        tid: 'OLD',
+        title: 'old ask',
+        status: 'needs',
+        ownerId: 'local',
+        createdAt: 100,
+      }),
+      sess({
+        id: 'fresh',
+        tid: 'FRESH',
+        title: 'fresh title',
+        status: 'needs',
+        ownerId: 'local',
+        createdAt: 500,
+      }),
+    ])
+    // just-transitioned 'fresh' wins even though the older ask has a larger
+    // createdAt — the freshest signal is the just-fired transition.
+    const snap = computeOngoingSnapshot(store, 'local', 'fresh', {
+      reason: 'input',
+      message: 'which DB?',
+    })
+    expect(snap.topAsk).toEqual({
+      sessionId: 'fresh',
+      tid: 'FRESH',
+      message: 'which DB?',
+    })
+  })
+
+  it('uses session title when meta.message is absent on the just-transitioned ask', () => {
+    const store = makeSessionStore([
+      sess({ id: 's1', tid: 'T-1', title: 'the title', status: 'needs', ownerId: 'local' }),
+    ])
+    const snap = computeOngoingSnapshot(store, 'local', 's1')
+    expect(snap.topAsk?.message).toBe('the title')
+  })
+
+  it('falls back to most recently created needs session when the just-transitioned session is not needs', () => {
+    const store = makeSessionStore([
+      sess({
+        id: 'older',
+        tid: 'OLDER',
+        title: 'older',
+        status: 'needs',
+        ownerId: 'local',
+        createdAt: 100,
+      }),
+      sess({
+        id: 'newest',
+        tid: 'NEWEST',
+        title: 'newest',
+        status: 'needs',
+        ownerId: 'local',
+        createdAt: 900,
+      }),
+      sess({ id: 'just-ran', status: 'running', ownerId: 'local' }),
+    ])
+    // just-ran is now running, not needs — so the fallback scans the store.
+    const snap = computeOngoingSnapshot(store, 'local', 'just-ran')
+    expect(snap.topAsk?.sessionId).toBe('newest')
+  })
+
+  it('excludes sessions of a different owner', () => {
+    const store = makeSessionStore([
+      sess({ id: 'alice-run', status: 'running', ownerId: 'alice' }),
+      sess({
+        id: 'alice-ask',
+        tid: 'ALICE',
+        title: 'alice ask',
+        status: 'needs',
+        ownerId: 'alice',
+      }),
+      sess({ id: 'local-run', status: 'running', ownerId: 'local' }),
+    ])
+    const snap = computeOngoingSnapshot(store, 'local')
+    expect(snap.runningCount).toBe(1)
+    expect(snap.topAsk).toBeNull()
+  })
+
+  it('treats an undefined ownerId on a session as local (the single-user fallback)', () => {
+    const store = makeSessionStore([
+      sess({ id: 'no-owner', status: 'running' }), // ownerId undefined
+    ])
+    const snap = computeOngoingSnapshot(store, 'local')
+    expect(snap.runningCount).toBe(1)
+  })
+})
+
 // ── createPushService tests ────────────────────────────────────────────────────
 
 describe('createPushService', () => {
@@ -217,6 +359,7 @@ describe('createPushService', () => {
       fcmStore?: FcmStore
       fcmMint?: FcmTokenMinter
       fcmSend?: FcmSender
+      fcmDataSend?: FcmDataSender
     } = {},
   ) {
     return createPushService({
@@ -229,6 +372,7 @@ describe('createPushService', () => {
       fcmStore: overrides.fcmStore,
       fcmMint: overrides.fcmMint,
       fcmSend: overrides.fcmSend,
+      fcmDataSend: overrides.fcmDataSend,
     })
   }
 
@@ -897,6 +1041,388 @@ describe('createPushService', () => {
       await new Promise((r) => setTimeout(r, 10))
       expect(fcmMint).not.toHaveBeenCalled()
       expect(fcmSend).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('ongoing summary (FLO-160)', () => {
+    let fcmDataSend: ReturnType<typeof vi.fn>
+    let fcmMint: ReturnType<typeof vi.fn>
+    let fcmSend: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      fcmDataSend = vi.fn().mockResolvedValue({ ok: true, status: 200, unregistered: false })
+      // fcmMint/fcmSend are scoped to THIS describe block — the outer
+      // createPushService-scoped ones live in the FCM block above and don't
+      // cover the ongoing-summary tests. Mirror their setup verbatim.
+      fcmMint = vi.fn().mockResolvedValue({ accessToken: 'tok-1', expiresAt: nowMs + 3600_000 })
+      fcmSend = vi.fn().mockResolvedValue({ ok: true, status: 200, unregistered: false })
+    })
+
+    // Wraps the assertions that need the 500ms debounce to fire and the
+    // resulting async sendOngoingSummary() promise to resolve. Fake timers
+    // keep the debounce deterministic; the microtask flush after advances
+    // the promise chain that scheduleOngoingSummary kicks off.
+    async function flushSummary() {
+      await vi.advanceTimersByTimeAsync(500)
+      await vi.runAllTimersAsync()
+    }
+
+    it('sends a data-only summary to android tokens on a genuine needs transition', async () => {
+      vi.useFakeTimers()
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const sessionStoreWithSession = makeSessionStore([
+        {
+          id: 's1',
+          tid: 'FLO-42',
+          title: 'Do the thing',
+          prompt: 'p',
+          repoId: 'r1',
+          branch: 'b',
+          status: 'needs',
+          createdAt: 0,
+          ownerId: 'local',
+        },
+      ])
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStoreWithSession,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmDataSend: fcmDataSend as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, {
+        reason: 'input',
+        message: 'which DB?',
+      })
+      await flushSummary()
+
+      expect(fcmDataSend).toHaveBeenCalledOnce()
+      const [, , deviceToken, data] = fcmDataSend.mock.calls[0] as [
+        unknown,
+        unknown,
+        string,
+        Record<string, string>,
+      ]
+      expect(deviceToken).toBe('android-1')
+      expect(data.slipstreamSummary).toBe('1')
+      expect(data.runningCount).toBe('0')
+      // The just-transitioned 'needs' session leads the snapshot, and its
+      // meta.message wins over the session title.
+      expect(data.askSessionId).toBe('s1')
+      expect(data.askTid).toBe('FLO-42')
+      expect(data.askMessage).toBe('which DB?')
+      vi.useRealTimers()
+    })
+
+    it('omits ask fields when no needs session exists (running-only snapshot)', async () => {
+      vi.useFakeTimers()
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const sessionStoreWithSession = makeSessionStore([
+        {
+          id: 's1',
+          tid: 'T-1',
+          title: 'running',
+          prompt: 'p',
+          repoId: 'r1',
+          branch: 'b',
+          status: 'running',
+          createdAt: 0,
+          ownerId: 'local',
+        },
+      ])
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStoreWithSession,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmDataSend: fcmDataSend as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'running' satisfies SessionStatus)
+      await flushSummary()
+
+      expect(fcmDataSend).toHaveBeenCalledOnce()
+      const [, , , data] = fcmDataSend.mock.calls[0] as [
+        unknown,
+        unknown,
+        unknown,
+        Record<string, string>,
+      ]
+      expect(data.runningCount).toBe('1')
+      expect(data.askSessionId).toBeUndefined()
+      expect(data.askTid).toBeUndefined()
+      expect(data.askMessage).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('still sends a "clear" summary (runningCount=0, no ask) after a done transition', async () => {
+      vi.useFakeTimers()
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const sessionStoreWithSession = makeSessionStore([
+        {
+          id: 's1',
+          tid: 'T-1',
+          title: 'finished',
+          prompt: 'p',
+          repoId: 'r1',
+          branch: 'b',
+          status: 'done',
+          createdAt: 0,
+          ownerId: 'local',
+        },
+      ])
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStoreWithSession,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmDataSend: fcmDataSend as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'done' satisfies SessionStatus)
+      await flushSummary()
+
+      expect(fcmDataSend).toHaveBeenCalledOnce()
+      const [, , , data] = fcmDataSend.mock.calls[0] as [
+        unknown,
+        unknown,
+        unknown,
+        Record<string, string>,
+      ]
+      // The Android client cancels its ongoing notification when it sees
+      // runningCount=0 with no askSessionId.
+      expect(data.runningCount).toBe('0')
+      expect(data.askSessionId).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('does NOT call fcmDataSend when no service account is configured', async () => {
+      vi.useFakeTimers()
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      makeService({ fcmStore, fcmMint, fcmSend, fcmDataSend: fcmDataSend as FcmDataSender })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await flushSummary()
+      expect(fcmDataSend).not.toHaveBeenCalled()
+      vi.useRealTimers()
+    })
+
+    it('does NOT call fcmDataSend for an ios token (android-only transport)', async () => {
+      vi.useFakeTimers()
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'iphone-1', ownerId: 'local', platform: 'ios', createdAt: 0 },
+      ])
+      makeService({ fcmStore, fcmMint, fcmSend, fcmDataSend: fcmDataSend as FcmDataSender })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await flushSummary()
+      // iOS has no ongoing-notification concept, so the data-only summary
+      // would be a wasted silent push. fcmSend (per-session) is unaffected
+      // by this filter — only the summary path is android-scoped.
+      expect(fcmDataSend).not.toHaveBeenCalled()
+      vi.useRealTimers()
+    })
+
+    it('coalesces two same-tick transitions into one summary send (debounce)', async () => {
+      vi.useFakeTimers()
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const sessionStoreWithSessions = makeSessionStore([
+        {
+          id: 's1',
+          tid: 'T-1',
+          title: 'one',
+          prompt: 'p',
+          repoId: 'r1',
+          branch: 'b',
+          status: 'running',
+          createdAt: 100,
+          ownerId: 'local',
+        },
+        {
+          id: 's2',
+          tid: 'T-2',
+          title: 'two',
+          prompt: 'p',
+          repoId: 'r1',
+          branch: 'b',
+          status: 'running',
+          createdAt: 200,
+          ownerId: 'local',
+        },
+      ])
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStoreWithSessions,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmDataSend: fcmDataSend as FcmDataSender,
+      })
+      // Two post-dedup transitions in the same tick — both for the same
+      // owner. Without the debounce, fcmDataSend would fire twice; with it,
+      // a single send reflects the final state (runningCount=2).
+      sessions._emit('status', 's1', 'running' satisfies SessionStatus)
+      sessions._emit('status', 's2', 'running' satisfies SessionStatus)
+      await flushSummary()
+
+      expect(fcmDataSend).toHaveBeenCalledOnce()
+      const [, , , data] = fcmDataSend.mock.calls[0] as [
+        unknown,
+        unknown,
+        unknown,
+        Record<string, string>,
+      ]
+      expect(data.runningCount).toBe('2')
+      vi.useRealTimers()
+    })
+
+    it('re-arms after input: two separate debounce windows fire twice', async () => {
+      vi.useFakeTimers()
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const sessionStoreWithSession = makeSessionStore([
+        {
+          id: 's1',
+          tid: 'T-1',
+          title: 'one',
+          prompt: 'p',
+          repoId: 'r1',
+          branch: 'b',
+          status: 'needs',
+          createdAt: 100,
+          ownerId: 'local',
+        },
+      ])
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStoreWithSession,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmDataSend: fcmDataSend as FcmDataSender,
+      })
+      // First needs transition: dedup passes, summary scheduled + sent.
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await flushSummary()
+      expect(fcmDataSend).toHaveBeenCalledTimes(1)
+
+      // Without input, a flap idle→needs is suppressed by the per-kind
+      // dedup: scheduleOngoingSummary is NOT called for the second needs.
+      sessions._emit('status', 's1', 'idle' satisfies SessionStatus)
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await flushSummary()
+      expect(fcmDataSend).toHaveBeenCalledTimes(1)
+
+      // input re-arms the per-session dedup; the next needs transition
+      // (a real status change out of and back into needs) now passes and
+      // schedules a second summary send in its own debounce window.
+      sessions._emit('input', 's1')
+      sessions._emit('status', 's1', 'idle' satisfies SessionStatus)
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await flushSummary()
+      expect(fcmDataSend).toHaveBeenCalledTimes(2)
+      vi.useRealTimers()
+    })
+
+    it('does not fire a summary on a same-kind flap within one episode (no scheduleOngoingSummary call)', async () => {
+      vi.useFakeTimers()
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      makeService({ fcmStore, fcmMint, fcmSend, fcmDataSend: fcmDataSend as FcmDataSender })
+      // First needs transition: dedup passes, summary is scheduled.
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      // Same-kind flap inside the same episode: dedup returns early inside
+      // notifyTransition, so scheduleOngoingSummary is NOT called again.
+      // (The already-scheduled timer still fires once.)
+      sessions._emit('status', 's1', 'idle' satisfies SessionStatus)
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await flushSummary()
+      expect(fcmDataSend).toHaveBeenCalledOnce()
+      vi.useRealTimers()
+    })
+
+    it('regression guard: the per-session fcmSend still fires alongside the summary', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      makeService({ fcmStore, fcmMint, fcmSend, fcmDataSend: fcmDataSend as FcmDataSender })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      // fcmSend (per-session notification) flushes on the next microtask,
+      // independent of the 500ms summary debounce. Real timers here so the
+      // microtask + macrotask chain runs naturally.
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmSend).toHaveBeenCalledOnce()
+
+      // Now advance real time past the 500ms debounce and let the summary
+      // send resolve before asserting.
+      await new Promise((r) => setTimeout(r, 600))
+      expect(fcmDataSend).toHaveBeenCalledOnce()
+    })
+
+    it('prunes an android token on an unregistered data-send response', async () => {
+      vi.useFakeTimers()
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'dead', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      const unregisteredSend = vi
+        .fn()
+        .mockResolvedValue({ ok: false, status: 404, unregistered: true })
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmDataSend: unregisteredSend as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await flushSummary()
+      expect(fcmStore.rows).toHaveLength(0)
+      vi.useRealTimers()
     })
   })
 })
