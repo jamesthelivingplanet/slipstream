@@ -11,6 +11,19 @@ specifically (schema versioning, build stamping, release flow).
 
 ### Added
 
+- Typed input is buffered client-side and flushed on reconnect instead of
+  being silently dropped when the WebSocket drops mid-type on a flaky mobile
+  connection (FLO-154). `wsApi.writeSession` previously fire-and-forgot each
+  keystroke and dropped the frame while the transport was down; it now queues
+  per-session bytes (bounded at 256 KB so a runaway paste can't grow memory
+  forever), replays them in arrival order on `onopen`, and exposes
+  `onPendingInputChange` so the UI can show that the input is held. The mobile
+  composer is no longer hard-disabled while disconnected, so the user can keep
+  typing; `TerminalView` shows a visible "Will send once reconnected — N
+  characters queued" banner so the buffered input reads as held rather than
+  vanishing. Builds on the FLO-103 backgrounded-WebSocket reconnect and the
+  FLO-108 daemon-down indicator.
+
 - Android app shows an always-visible "ongoing" notification with the
   running-agent count and the top pending "needs you" ask, so a user can
   glance at the notification shade without opening the app (FLO-160). The

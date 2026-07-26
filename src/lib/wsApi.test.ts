@@ -417,17 +417,50 @@ describe('wsApi', () => {
       expect(req.args).toEqual(['sess-1', 'input data'])
     })
 
-    it('writeSession drops the frame (does not queue) while the socket is down', () => {
+    it('writeSession buffers (does not drop) keystrokes while the socket is down, and flushes them on open (FLO-154)', () => {
       const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
       const ws = getWs()
-      // Socket never opened — writeSession must drop, not queue, stale input.
-      api.writeSession('sess-1', 'stale keystrokes')
+      // Subscribe before writing so we capture the buffered-byte notifications.
+      const seen: Record<string, number>[] = []
+      api.onPendingInputChange((s) => seen.push(structuredClone(s)))
+      // Socket never opened — writeSession must buffer, not drop, so a flaky
+      // mobile connection doesn't silently lose typed input.
+      api.writeSession('sess-1', 'hi')
+      api.writeSession('sess-1', ' there')
       expect(ws.sentMessages.length).toBe(0)
 
-      // Opening the socket later must NOT flush a writeSession frame — it was dropped,
-      // not queued.
+      // onPendingInputChange surfaced the buffered byte count after each write.
+      expect(seen).toEqual([{ 'sess-1': 2 }, { 'sess-1': 8 }])
+
+      // Opening the socket flushes the buffered input as a single coalesced
+      // frame (a PTY sees a byte stream, so per-keystroke framing is irrelevant
+      // to replay) and clears the buffer.
       ws.simulateOpen()
-      expect(ws.sentMessages.some((m) => JSON.parse(m).channel === IPC.writeSession)).toBe(false)
+      const frames = ws.sentMessages.map((m) => JSON.parse(m))
+      expect(frames.every((f) => f.channel === IPC.writeSession)).toBe(true)
+      expect(frames).toEqual([
+        expect.objectContaining({ channel: IPC.writeSession, args: ['sess-1', 'hi there'] }),
+      ])
+      // Buffer is empty again.
+      expect(seen.at(-1)).toEqual({})
+    })
+
+    it('writeSession buffers per-session and flushes each as its own frame', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = getWs()
+      api.writeSession('sess-1', 'a')
+      api.writeSession('sess-2', 'b')
+      api.writeSession('sess-1', 'c')
+      expect(ws.sentMessages.length).toBe(0)
+
+      ws.simulateOpen()
+      const frames = ws.sentMessages.map((m) => JSON.parse(m))
+      expect(frames).toContainEqual(
+        expect.objectContaining({ channel: IPC.writeSession, args: ['sess-1', 'ac'] }),
+      )
+      expect(frames).toContainEqual(
+        expect.objectContaining({ channel: IPC.writeSession, args: ['sess-2', 'b'] }),
+      )
     })
 
     it('resizeSession sends a WireReq but returns void', () => {
@@ -526,6 +559,84 @@ describe('wsApi', () => {
       const ws2 = getWs()
       ws2.simulateOpen()
       expect(ws2.sentMessages.length).toBe(0)
+    })
+  })
+
+  // FLO-154: on a flaky mobile connection the WS can drop mid-type. writeSession
+  // bytes typed during the outage are buffered client-side (not dropped) and
+  // flushed on reconnect, with the buffered set surfaced via onPendingInputChange
+  // so the UI can show a visible "will send once reconnected" state.
+  describe('writeSession input buffering on a flaky connection (FLO-154)', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('buffers input through a failed reconnect and flushes it once a reconnect succeeds', async () => {
+      vi.useFakeTimers()
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws1 = getWs()
+      ws1.simulateOpen()
+      ws1.simulateClose(1006) // connection drops → reconnect scheduled
+
+      // Typed while down: buffered, nothing on the wire.
+      api.writeSession('sess-1', 'reply')
+      api.writeSession('sess-1', '\r')
+
+      // First reconnect attempt fails — buffered input must survive it.
+      await vi.advanceTimersByTimeAsync(500)
+      const ws2 = getWs()
+      expect(ws2).not.toBe(ws1)
+      ws2.simulateClose(1006)
+
+      // Second reconnect attempt succeeds — buffered input flushes in order.
+      await vi.advanceTimersByTimeAsync(1000)
+      const ws3 = getWs()
+      ws3.simulateOpen()
+      const frames = ws3.sentMessages.map((m) => JSON.parse(m))
+      expect(frames).toEqual([
+        expect.objectContaining({ channel: IPC.writeSession, args: ['sess-1', 'reply\r'] }),
+      ])
+    })
+
+    it('drops the newest writes once the buffer exceeds the cap, keeping earlier buffered input', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = getWs() // never opened
+      const big = 'x'.repeat(200_000)
+      api.writeSession('sess-1', big) // 200 KB, under the 256 KB cap
+      api.writeSession('sess-1', big) // would push total to 400 KB — over the cap, dropped
+      // The earlier 200 KB is preserved; the overflow write was dropped.
+      ws.simulateOpen()
+      const frames = ws.sentMessages.map((m) => JSON.parse(m))
+      expect(frames).toEqual([
+        expect.objectContaining({ channel: IPC.writeSession, args: ['sess-1', big] }),
+      ])
+    })
+
+    it('onPendingInputChange fires on queue and on flush, and unsubscribe stops delivery', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = getWs()
+      const seen: Record<string, number>[] = []
+      const unsub = api.onPendingInputChange((s) => seen.push(structuredClone(s)))
+
+      api.writeSession('sess-1', 'ab')
+      api.writeSession('sess-2', 'c')
+      expect(seen).toEqual([{ 'sess-1': 2 }, { 'sess-1': 2, 'sess-2': 1 }])
+
+      unsub()
+      ws.simulateOpen() // flush fires, but we unsubscribed
+      expect(seen.length).toBe(2)
+    })
+
+    it('destroy() drops any buffered input without flushing', () => {
+      const api = createWsApi({ url: 'ws://localhost/rpc', token: 't', WebSocketCtor: FakeWS })
+      const ws = getWs() // never opened
+      api.writeSession('sess-1', 'queued')
+      api.destroy()
+
+      // Even if the socket were later opened, nothing is flushed: destroy
+      // cleared the buffer and the instance is torn down.
+      expect(() => ws.simulateOpen()).not.toThrow()
+      expect(ws.sentMessages.length).toBe(0)
     })
   })
 

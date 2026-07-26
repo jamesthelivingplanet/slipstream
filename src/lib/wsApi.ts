@@ -22,6 +22,13 @@ import { genId } from './id.js'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const RECONNECT_DELAYS = [500, 1000, 2000, 5000, 10000]
+// FLO-154: upper bound on how many bytes of buffered `writeSession` input we
+// hold while the transport is down before starting to drop new writes. Generous
+// relative to anything a human could plausibly type (or paste) during a
+// reconnect backoff, but bounded so a runaway paste can't grow memory forever.
+// Beyond this the newest writes are dropped (same loss as today) rather than
+// evicting already-buffered earlier ones.
+const MAX_PENDING_INPUT_BYTES = 256 * 1024
 // Application-level heartbeat: the browser WebSocket API can't observe ws-protocol
 // ping/pong frames, so we send a JSON { t: 'ping' } and expect a { t: 'pong' } back.
 // If no pong arrives within PONG_TIMEOUT_MS, the connection is treated as half-dead
@@ -128,8 +135,57 @@ export function createWsApi(opts: WsApiOpts): WsApi {
   type ConnectionCb = (connected: boolean) => void
   const connectionListeners = new Set<ConnectionCb>()
 
+  // FLO-154: writeSession bytes queued while the socket was down, keyed by
+  // session id (one coalesced string per session, appended in arrival order).
+  // Persisted across the close→reconnect cycle and flushed in onopen; only
+  // destroy() drops it. A running byte total bounds memory (see
+  // MAX_PENDING_INPUT_BYTES) without re-summing the whole map on each keystroke.
+  const pendingInput = new Map<string, string>()
+  let pendingInputBytes = 0
+  type PendingInputCb = (sessions: Record<string, number>) => void
+  const pendingInputListeners = new Set<PendingInputCb>()
+
   function notifyConnection(connected: boolean) {
     for (const cb of connectionListeners) cb(connected)
+  }
+
+  function snapshotPendingInput(): Record<string, number> {
+    const out: Record<string, number> = {}
+    for (const [id, data] of pendingInput) out[id] = data.length
+    return out
+  }
+
+  function notifyPendingInput() {
+    const snap = snapshotPendingInput()
+    for (const cb of pendingInputListeners) cb(snap)
+  }
+
+  // Queue a writeSession byte chunk for later flush. Best-effort: once the
+  // running total would exceed the cap, the incoming write is dropped (matching
+  // the old drop-on-disconnect behavior for the overflow tail) rather than
+  // evicting earlier buffered input.
+  function bufferInput(id: string, data: string) {
+    if (destroyed) return
+    if (pendingInputBytes + data.length > MAX_PENDING_INPUT_BYTES) return
+    pendingInput.set(id, (pendingInput.get(id) ?? '') + data)
+    pendingInputBytes += data.length
+    notifyPendingInput()
+  }
+
+  // Replay buffered writeSession bytes now that the socket is open again. One
+  // coalesced WireReq per session (a PTY only ever sees a byte stream, so the
+  // per-keystroke framing that produced the buffer is irrelevant to replay).
+  // Order across sessions doesn't matter; within a session the append order in
+  // bufferInput() is preserved.
+  function flushPendingInput() {
+    if (pendingInput.size === 0) return
+    for (const [id, data] of pendingInput) {
+      const req: WireReq = { t: 'req', id: genId(), channel: IPC.writeSession, args: [id, data] }
+      ws!.send(JSON.stringify(req))
+    }
+    pendingInput.clear()
+    pendingInputBytes = 0
+    notifyPendingInput()
   }
 
   function isOpen(): boolean {
@@ -232,6 +288,12 @@ export function createWsApi(opts: WsApiOpts): WsApi {
         armTimeout(req.id)
       }
       queue.length = 0
+      // FLO-154: replay writeSession bytes typed while the socket was down
+      // BEFORE announcing the connection back up — TerminalView's reconnect
+      // resync() (fired off notifyConnection) re-attaches and pulls a fresh
+      // snapshot, so by the time that snapshot is serialized the buffered input
+      // has already reached the PTY and its echo is part of the repaint.
+      flushPendingInput()
       startHeartbeat()
       notifyConnection(true)
     }
@@ -403,6 +465,9 @@ export function createWsApi(opts: WsApiOpts): WsApi {
     }
     pending.clear()
     queue.length = 0
+    pendingInput.clear()
+    pendingInputBytes = 0
+    pendingInputListeners.clear()
     const socket = ws
     ws = null
     socket?.close()
@@ -503,12 +568,17 @@ export function createWsApi(opts: WsApiOpts): WsApi {
     startSession: wire<'startSession'>(IPC.startSession),
 
     writeSession(id: string, data: string): void {
-      // Fire-and-forget: drop the frame while the socket is down instead of queuing
-      // it — replaying stale keystrokes into a live PTY seconds later on reconnect
-      // is worse than silently losing input the user typed while disconnected.
-      if (!isOpen()) return
-      const req: WireReq = { t: 'req', id: genId(), channel: IPC.writeSession, args: [id, data] }
-      send(req)
+      // Fire-and-forget when the socket is up. While it's down, FLO-154 buffers
+      // the bytes per-session instead of dropping them: they're flushed in
+      // onopen so input typed during a flaky-connection drop actually reaches
+      // the PTY on reconnect rather than vanishing. The buffer is bounded (see
+      // bufferInput); past the cap the newest writes drop, same as before.
+      if (isOpen()) {
+        const req: WireReq = { t: 'req', id: genId(), channel: IPC.writeSession, args: [id, data] }
+        ws!.send(JSON.stringify(req))
+      } else {
+        bufferInput(id, data)
+      }
     },
 
     syncClipboardImage: wire<'syncClipboardImage'>(IPC.syncClipboardImage),
@@ -676,6 +746,11 @@ export function createWsApi(opts: WsApiOpts): WsApi {
     onConnectionChange(cb: ConnectionCb): () => void {
       connectionListeners.add(cb)
       return () => connectionListeners.delete(cb)
+    },
+
+    onPendingInputChange(cb: PendingInputCb): () => void {
+      pendingInputListeners.add(cb)
+      return () => pendingInputListeners.delete(cb)
     },
   }
 

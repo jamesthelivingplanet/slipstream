@@ -1054,6 +1054,15 @@ export interface SlipstreamApi {
   /** Subscribe to transport connection state (true = connected). Fires on every
    *  transition; used by the UI to resync terminals after a reconnect. */
   onConnectionChange(cb: (connected: boolean) => void): () => void
+
+  /** Subscribe to the per-session byte count of `writeSession` input that is
+   *  buffered client-side because the transport was down (FLO-154). Fires
+   *  whenever the buffered set changes — keystrokes queued while disconnected,
+   *  or the whole map clearing once they flush on reconnect. The map is empty
+   *  when nothing is pending. Lets the UI show a visible "will send once
+   *  reconnected" state instead of typed input silently vanishing on a flaky
+   *  mobile connection. */
+  onPendingInputChange(cb: (sessions: Record<string, number>) => void): () => void
 }
 
 export const IPC = {
