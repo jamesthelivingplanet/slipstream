@@ -1032,6 +1032,127 @@ describe('createServer', () => {
     })
   })
 
+  // ── FLO-158: Widget summary endpoint ────────────────────────────────────
+
+  function getWidgetSummary(
+    port: number,
+    bearerToken?: string,
+  ): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/api/widget-summary',
+          method: 'GET',
+          headers: bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {},
+        },
+        (res) => {
+          let data = ''
+          res.on('data', (c) => (data += c))
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }))
+        },
+      )
+      req.on('error', reject)
+      req.end()
+    })
+  }
+
+  it('GET /api/widget-summary without a bearer token is rejected (401)', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const { status } = await getWidgetSummary(port)
+    expect(status).toBe(401)
+  })
+
+  it('GET /api/widget-summary with the wrong bearer token is rejected (401)', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const { status } = await getWidgetSummary(port, 'wrong-token')
+    expect(status).toBe(401)
+  })
+
+  it('GET /api/widget-summary with a valid token returns a session snapshot (FLO-158)', async () => {
+    const deps = makeFakeDeps()
+    // Seed a session into the store so the snapshot has something to return
+    deps.sessionStore.upsert({
+      id: 's1',
+      tid: 'FLO-158',
+      title: 'Background refresh',
+      prompt: '',
+      repoId: 'r1',
+      branch: 'flo-158',
+      status: 'needs',
+      createdAt: Date.now(),
+      ownerId: 'local',
+    })
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const { status, body } = await getWidgetSummary(port, 'secret')
+    expect(status).toBe(200)
+    const snapshot = JSON.parse(body)
+    expect(snapshot).toHaveProperty('sessions')
+    expect(snapshot).toHaveProperty('counts')
+    expect(snapshot.counts.needs).toBe(1)
+    expect(snapshot.sessions).toHaveLength(1)
+    expect(snapshot.sessions[0]).toMatchObject({
+      id: 's1',
+      tid: 'FLO-158',
+      title: 'Background refresh',
+      bucket: 'needs',
+      statusLabel: 'Needs you',
+    })
+  })
+
+  it('GET /api/widget-summary scopes sessions by ownerId (FLO-158)', async () => {
+    const deps = makeFakeDeps()
+    // Two sessions for different owners
+    deps.sessionStore.upsert({
+      id: 's-local',
+      tid: 'T1',
+      title: 'Local session',
+      prompt: '',
+      repoId: 'r1',
+      branch: 'b1',
+      status: 'running',
+      createdAt: Date.now(),
+      ownerId: 'local',
+    })
+    deps.sessionStore.upsert({
+      id: 's-other',
+      tid: 'T2',
+      title: 'Other session',
+      prompt: '',
+      repoId: 'r1',
+      branch: 'b2',
+      status: 'running',
+      createdAt: Date.now(),
+      ownerId: 'other-user',
+    })
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const { status, body } = await getWidgetSummary(port, 'secret')
+    expect(status).toBe(200)
+    const snapshot = JSON.parse(body)
+    // Only the 'local' session should appear (the static token resolves to 'local')
+    expect(snapshot.sessions).toHaveLength(1)
+    expect(snapshot.sessions[0].id).toBe('s-local')
+  })
+
   it('session survives across zero connected clients — output replays on reconnect, PTY not reaped', async () => {
     const { deps, seedSession } = makeSurvivalDeps()
     seedSession('s1', 'hello ', 'world', '!')

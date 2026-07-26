@@ -12,6 +12,9 @@ import type { Identity } from '../shared/contract.js'
 import { createTicketStore } from './wsTickets.js'
 import { APP_VERSION, GIT_SHA } from '../shared/version.js'
 import { SCHEMA_VERSION } from '../db/migrations.js'
+import { formatCost } from '../shared/usageFormat.js'
+import type { SessionUsage, PrStatusDTO } from '../shared/contract.js'
+import { readSessionUsage } from '../services/usage.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -29,6 +32,163 @@ function originAllowed(origin: string | undefined, allowlist: string[] | undefin
   if (!allowlist || allowlist.length === 0) return true
   if (origin === undefined) return true
   return allowlist.includes(origin)
+}
+
+// ── FLO-158: Widget summary builder (mirrors src/lib/widgetSync.ts) ───────────
+
+/** Bucket priority for the widget's ordering — mirrors widgetSync.ts's BUCKET_ORDER. */
+const BUCKET_ORDER: Record<'needs' | 'running' | 'done' | 'idle', number> = {
+  needs: 0,
+  running: 1,
+  done: 2,
+  idle: 3,
+}
+
+/** Cap sessions sent to widget — mirrors widgetSync.ts's MAX_WIDGET_SESSIONS. */
+const MAX_WIDGET_SESSIONS = 20
+
+interface WidgetChipDTO {
+  label: string
+  cls: 'done' | 'error' | 'needs' | 'muted'
+}
+
+interface WidgetSessionDTO {
+  id: string
+  tid: string
+  title: string
+  repo: string | null
+  bucket: 'needs' | 'running' | 'done' | 'idle'
+  statusLabel: string
+  prChip: WidgetChipDTO | null
+  ciChip: WidgetChipDTO | null
+  reviewChip: WidgetChipDTO | null
+  costLabel: string | null
+}
+
+interface WidgetCountsDTO {
+  needs: number
+  running: number
+  done: number
+}
+
+interface WidgetSnapshotDTO {
+  sessions: WidgetSessionDTO[]
+  counts: WidgetCountsDTO
+}
+
+function statusBucket(status: string): 'needs' | 'running' | 'done' | 'idle' | null {
+  if (status === 'needs') return 'needs'
+  if (status === 'running') return 'running'
+  if (status === 'done') return 'done'
+  if (status === 'idle') return 'idle'
+  return null
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  idle: 'Idle',
+  running: 'Running',
+  needs: 'Needs you',
+  done: 'Done',
+  errored: 'Errored',
+  interrupted: 'Interrupted',
+  reaped: 'Reaped',
+  queued: 'Queued',
+}
+
+function prChipFor(dto: PrStatusDTO | undefined): WidgetChipDTO | null {
+  if (!dto) return null
+  if (dto.error) return { label: 'PR ?', cls: 'muted' }
+  if (dto.state === 'merged') return { label: 'merged', cls: 'done' }
+  if (dto.state === 'open') return { label: 'open', cls: 'muted' }
+  if (dto.state === 'closed') return { label: 'closed', cls: 'error' }
+  return null
+}
+
+function ciChipFor(dto: PrStatusDTO | undefined): WidgetChipDTO | null {
+  if (!dto || dto.error) return null
+  if (dto.ci === 'passed') return { label: 'CI ✓', cls: 'done' }
+  if (dto.ci === 'failed') return { label: 'CI ✗', cls: 'error' }
+  if (dto.ci === 'pending' || dto.ci === 'running') return { label: 'CI …', cls: 'needs' }
+  return null
+}
+
+function reviewChipFor(dto: PrStatusDTO | undefined): WidgetChipDTO | null {
+  if (!dto || dto.error) return null
+  if (dto.review === 'approved') return { label: 'approved', cls: 'done' }
+  if (dto.review === 'changes_requested') return { label: 'changes', cls: 'error' }
+  return null
+}
+
+function costLabelFor(usage: SessionUsage | undefined): string | null {
+  if (!usage || !usage.exists || usage.turns === 0) return null
+  return formatCost(usage.costUsd)
+}
+
+async function buildWidgetSnapshot(deps: IpcDeps, ownerId: string): Promise<WidgetSnapshotDTO> {
+  // Fetch all sessions owned by this identity
+  const allSessions = deps.sessionStore.list().filter((s) => (s.ownerId || 'local') === ownerId)
+
+  // Build PR status cache for all sessions
+  const prStatusCache: Record<string, PrStatusDTO> = {}
+  for (const session of allSessions) {
+    if (session.prUrl) {
+      try {
+        const dto = await deps.prStatus.get({ id: session.id, prUrl: session.prUrl })
+        if (dto) prStatusCache[session.id] = dto
+      } catch {
+        // leave absent — PR status is advisory
+      }
+    }
+  }
+
+  // Build usage cache for all sessions
+  const usageCache: Record<string, SessionUsage> = {}
+  for (const session of allSessions) {
+    try {
+      const usage = await readSessionUsage(session, { cwd: null })
+      if (usage.exists) usageCache[session.id] = usage
+    } catch {
+      // leave absent — usage is advisory
+    }
+  }
+
+  const counts: WidgetCountsDTO = { needs: 0, running: 0, done: 0 }
+  const entries: WidgetSessionDTO[] = []
+
+  for (const s of allSessions) {
+    const bucket = statusBucket(s.status)
+    if (bucket) counts[bucket] += 1
+
+    // Repo name for display
+    let repoName: string | null = null
+    try {
+      const repo = await deps.repos.get(s.repoId)
+      if (repo) repoName = `${repo.org}/${repo.name}`
+    } catch {
+      // leave null
+    }
+
+    const prDto = prStatusCache[s.id]
+    const usage = usageCache[s.id]
+
+    entries.push({
+      id: s.id,
+      tid: s.tid,
+      title: s.title,
+      repo: repoName,
+      bucket: bucket ?? 'idle',
+      statusLabel: STATUS_LABEL[s.status] ?? s.status,
+      prChip: prChipFor(prDto),
+      ciChip: ciChipFor(prDto),
+      reviewChip: reviewChipFor(prDto),
+      costLabel: costLabelFor(usage),
+    })
+  }
+
+  entries.sort((a, b) => BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket])
+  const trimmed = entries.slice(0, MAX_WIDGET_SESSIONS)
+
+  return { sessions: trimmed, counts }
 }
 
 export interface ServerOptions {
@@ -70,7 +230,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
 
   const ticketStore = createTicketStore(wsTicketTtlMs)
 
-  const httpServer = http.createServer((req, res) => {
+  const httpServer = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
 
     // Health check
@@ -106,6 +266,25 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
       const { ticket, expiresInMs } = ticketStore.issue(identity)
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ ticket, expiresInMs }))
+      return
+    }
+
+    // FLO-158: Lightweight widget summary endpoint for background WorkManager refresh.
+    // Authenticated via Bearer token; returns a session summary matching widgetSync.ts's WidgetSnapshot.
+    if (url.pathname === '/api/widget-summary' && req.method === 'GET') {
+      const authHeader = req.headers['authorization']
+      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined
+      const identity = bearerToken
+        ? resolveIdentity(bearerToken, { staticToken: token, deviceTokens: deps.deviceTokens })
+        : undefined
+      if (!identity) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Unauthorized' }))
+        return
+      }
+      const snapshot = await buildWidgetSnapshot(deps, identity.id)
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify(snapshot))
       return
     }
 

@@ -16,6 +16,13 @@ import android.widget.RemoteViews;
  * .syncWidget() writes (see WidgetPrefs) — no network calls, no auth token,
  * so freshness is tied to the app JS layer having synced (foreground or
  * backgrounded-but-alive). See widgetSync.ts for why that tradeoff was made.
+ *
+ * FLO-158: a periodic WorkManager job (WidgetRefreshWorker) now also writes
+ * this same SharedPreferences snapshot in the background using the
+ * securely-stored token, so the widget stays fresh without the app being
+ * foreground. The token never touches this provider or AgentWidgetService —
+ * it lives only in the worker and the Keystore. This class remains a pure
+ * renderer over the snapshot.
  */
 public class AgentWidgetProvider extends AppWidgetProvider {
 

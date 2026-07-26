@@ -15,11 +15,18 @@ import { formatCost } from '../../electron/shared/usageFormat.js'
 // Capacitor mobile shell, never in a plain browser tab or the Electron
 // renderer loading this same bundle).
 //
-// Freshness ceiling: the snapshot only updates while this page is alive
-// (foreground or backgrounded-but-not-killed). That's an accepted v1
-// tradeoff — it avoids minting any credential the widget process could leak,
-// and avoids a new polling-friendly backend endpoint. The widget shows
-// `updatedAt` so a stale snapshot reads as stale rather than as fact.
+// Freshness: in addition to the foreground sync here (updates while this
+// page is alive — foreground or backgrounded-but-not-killed), FLO-158 adds a
+// periodic Android WorkManager job (WidgetRefreshWorker) that pulls a
+// lightweight status summary from the daemon's /api/widget-summary endpoint
+// every 15 minutes using the securely-stored token (read from the same
+// Keystore-backed SecureStorage this module's WebView reads from) and
+// re-syncs the widget snapshot, so "Updated Xm ago" stays fresh without the
+// user opening the app. The token lives ONLY in the sync job and the
+// Keystore — it never touches the widget's SharedPreferences/RemoteViews
+// render path (see the FLO-158 note on AgentWidgetProvider/Service). The
+// server-side builder (buildWidgetSnapshot in server.ts) mirrors this
+// module's toSnapshot()/chip helpers so the two paths produce identical JSON.
 
 interface AppControlPluginListenerHandle {
   remove(): void | Promise<void>

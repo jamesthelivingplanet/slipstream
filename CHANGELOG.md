@@ -39,6 +39,8 @@ specifically (schema versioning, build stamping, release flow).
   documented in CLAUDE.md's status-flap gotcha. iOS tokens are deliberately
   excluded (no ongoing-notification concept there).
 
+- **FLO-158**: Background widget refresh via Android WorkManager. A periodic job (every 15 minutes) now pulls a lightweight session summary from the daemon using the securely-stored auth token and updates the home-screen widget snapshot, so "Updated Xm ago" stays fresh without the user opening the app. The token never touches the widget's render path — it lives only in the WorkManager job and Android Keystore.
+
 ## [0.3.1] - 2026-07-24
 
 ### Fixed

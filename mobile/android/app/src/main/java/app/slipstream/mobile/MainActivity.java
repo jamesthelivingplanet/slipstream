@@ -7,9 +7,13 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.PeriodicWorkRequest;
+import androidx.work.WorkManager;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.CapConfig;
 import org.json.JSONObject;
+import java.util.concurrent.TimeUnit;
 
 /**
  * TASK-I9S44: the daemon URL is a runtime preference, not just the build-time
@@ -23,6 +27,10 @@ import org.json.JSONObject;
  * is created. Absent/invalid pref => this.config stays null => Bridge falls
  * back to CapConfig.loadDefault(), i.e. today's baked
  * capacitor.config.json server.url. Existing installs are unaffected.
+ *
+ * FLO-158: Schedules a periodic WorkManager job (WidgetRefreshWorker) that
+ * refreshes the home-screen widget snapshot in the background without
+ * requiring the app to be in the foreground.
  */
 public class MainActivity extends BridgeActivity {
 
@@ -51,8 +59,28 @@ public class MainActivity extends BridgeActivity {
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
 
+        // FLO-158: Schedule periodic widget refresh (15 min minimum interval).
+        scheduleWidgetRefresh();
+
         // Cold start from a widget row tap (see AgentWidgetService).
         forwardWidgetSessionId(getIntent());
+    }
+
+    /**
+     * FLO-158: Enqueue the WidgetRefreshWorker for periodic background execution.
+     * Uses enqueueUniquePeriodicWork so only one instance is ever scheduled.
+     */
+    private void scheduleWidgetRefresh() {
+        PeriodicWorkRequest workRequest = new PeriodicWorkRequest.Builder(
+                WidgetRefreshWorker.class,
+                WidgetRefreshWorker.SYNC_INTERVAL_MS,
+                TimeUnit.MILLISECONDS)
+                .build();
+        WorkManager.getInstance(this)
+                .enqueueUniquePeriodicWork(
+                        WidgetRefreshWorker.WORK_NAME,
+                        ExistingPeriodicWorkPolicy.KEEP,
+                        workRequest);
     }
 
     /**
