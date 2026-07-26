@@ -109,6 +109,94 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
       return
     }
 
+    // POST /inline-reply — answer an agent's "needs input" ask without a
+    // WebSocket client, so a notification's RemoteInput reply (FLO-151) can
+    // reach the session even when the app/WebView isn't running. Same bearer
+    // auth as /rpc-ticket (resolveIdentity covers both the static
+    // SLIPSTREAM_TOKEN and per-device tokens, FLO-143); ownership is checked
+    // against the session row so a device token can only write its owner's
+    // sessions (IDENTITY-SEAM.md). Writes go through sessions.write(), which
+    // emits the 'input' event — the same event that re-arms pushService's
+    // per-episode notification dedupe (CLAUDE.md's status-flapping gotcha),
+    // so a genuine later needs transition can notify again. A trailing '\n'
+    // is appended so the reply is submitted as one line, matching what the
+    // PTY line discipline sees when a human presses Enter in the terminal.
+    if (url.pathname === '/inline-reply' && req.method === 'POST') {
+      const authHeader = req.headers['authorization']
+      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined
+      const identity = bearerToken
+        ? resolveIdentity(bearerToken, { staticToken: token, deviceTokens: deps.deviceTokens })
+        : undefined
+      if (!identity) {
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Unauthorized' }))
+        return
+      }
+      // Collect the (small) JSON body. A reply is a few hundred chars at
+      // most; cap at 16 KiB to bound memory if a client streams forever.
+      const chunks: Buffer[] = []
+      let tooLarge = false
+      req.on('data', (c: Buffer) => {
+        if (Buffer.concat(chunks).length + c.length > 16 * 1024) {
+          tooLarge = true
+          req.destroy()
+          return
+        }
+        chunks.push(c)
+      })
+      req.on('end', () => {
+        if (tooLarge) {
+          res.writeHead(413, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Payload too large' }))
+          return
+        }
+        let parsed: { sessionId?: unknown; data?: unknown }
+        try {
+          parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as {
+            sessionId?: unknown
+            data?: unknown
+          }
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid JSON' }))
+          return
+        }
+        const sessionId = parsed.sessionId
+        const data = parsed.data
+        if (typeof sessionId !== 'string' || sessionId.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        if (typeof data !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'data is required' }))
+          return
+        }
+        const session = deps.sessionStore.get(sessionId)
+        // No existence leak: an unknown / not-owned session both 404 (see
+        // IDENTITY-SEAM.md's no-existence-leak convention).
+        if (!session || (session.ownerId || 'local') !== identity.id) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Session not found' }))
+          return
+        }
+        // write() emits 'input' (re-arms push dedupe) regardless of whether
+        // the PTY is still alive; a no-op write to a dead session is
+        // harmless and avoids racing session liveness here.
+        deps.sessions.write(sessionId, `${data}\n`)
+        res.writeHead(204)
+        res.end()
+      })
+      req.on('error', () => {
+        if (!res.headersSent) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Bad request' }))
+        }
+      })
+      return
+    }
+
     // Serve static files from dist/. The URL pathname is still percent-encoded;
     // decode it so assets with encoded characters resolve, then guard that the
     // resolved path cannot escape distDir (e.g. via encoded ../ segments).

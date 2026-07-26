@@ -465,6 +465,39 @@ function postTicket(port: number, bearerToken?: string): Promise<{ status: numbe
   })
 }
 
+/** POST /inline-reply (FLO-151) — the notification RemoteInput write path.
+ *  Mirrors postTicket's shape but carries a JSON body. */
+function postInlineReply(
+  port: number,
+  body: { sessionId?: string; data?: string },
+  bearerToken?: string,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body)
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/inline-reply',
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+          ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+        },
+      },
+      (res) => {
+        let data = ''
+        res.on('data', (c) => (data += c))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }))
+      },
+    )
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
 function getHealthz(port: number): Promise<string> {
   return new Promise((resolve, reject) => {
     http
@@ -841,6 +874,143 @@ describe('createServer', () => {
         schema: SCHEMA_VERSION,
         wsTickets: true,
       })
+    })
+  })
+
+  describe('POST /inline-reply — notification RemoteInput write path (FLO-151)', () => {
+    function makeOwnedSession(id: string, ownerId: string) {
+      return {
+        id,
+        tid: 'T-1',
+        title: 'seeded',
+        prompt: '',
+        repoId: 'r1',
+        branch: 'b',
+        status: 'needs' as const,
+        createdAt: 0,
+        ownerId,
+      }
+    }
+
+    it('rejects without a bearer token', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+      const { status } = await postInlineReply(port, { sessionId: 's1', data: 'hi' })
+      expect(status).toBe(401)
+      expect(deps.sessions.write).not.toHaveBeenCalled()
+    })
+
+    it('rejects with the wrong bearer token', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+      const { status } = await postInlineReply(port, { sessionId: 's1', data: 'hi' }, 'wrong')
+      expect(status).toBe(401)
+      expect(deps.sessions.write).not.toHaveBeenCalled()
+    })
+
+    it('writes the reply (newline-terminated) to an owned session', async () => {
+      const deps = makeFakeDeps()
+      deps.sessionStore.upsert(makeOwnedSession('s1', 'local'))
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+      const { status } = await postInlineReply(
+        port,
+        { sessionId: 's1', data: 'use the staging DB' },
+        'secret',
+      )
+      expect(status).toBe(204)
+      expect(deps.sessions.write).toHaveBeenCalledWith('s1', 'use the staging DB\n')
+    })
+
+    it('returns 404 for a session owned by another identity (no existence leak)', async () => {
+      const deviceTokens = makeFakeDeviceTokenStore()
+      const { token: aliceToken } = deviceTokens.issue('alice', 'alice-phone')
+      const deps = makeFakeDeps()
+      deps.deviceTokens = deviceTokens
+      deps.sessionStore.upsert(makeOwnedSession('s-bob', 'bob'))
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+      const { status } = await postInlineReply(port, { sessionId: 's-bob', data: 'hi' }, aliceToken)
+      expect(status).toBe(404)
+      expect(deps.sessions.write).not.toHaveBeenCalled()
+    })
+
+    it('returns 404 for an unknown session', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+      const { status } = await postInlineReply(port, { sessionId: 'nope', data: 'hi' }, 'secret')
+      expect(status).toBe(404)
+      expect(deps.sessions.write).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 when sessionId is missing', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+      const { status } = await postInlineReply(port, { data: 'hi' }, 'secret')
+      expect(status).toBe(400)
+      expect(deps.sessions.write).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 when data is missing', async () => {
+      const deps = makeFakeDeps()
+      deps.sessionStore.upsert(makeOwnedSession('s1', 'local'))
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+      const { status } = await postInlineReply(port, { sessionId: 's1' }, 'secret')
+      expect(status).toBe(400)
+      expect(deps.sessions.write).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 for invalid JSON', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+      const { status } = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const payload = '{not json'
+        const req = http.request(
+          {
+            host: '127.0.0.1',
+            port,
+            path: '/inline-reply',
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'content-length': Buffer.byteLength(payload),
+              Authorization: 'Bearer secret',
+            },
+          },
+          (res) => {
+            let data = ''
+            res.on('data', (c) => (data += c))
+            res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }))
+          },
+        )
+        req.on('error', reject)
+        req.write(payload)
+        req.end()
+      })
+      expect(status).toBe(400)
+      expect(deps.sessions.write).not.toHaveBeenCalled()
     })
   })
 

@@ -49,6 +49,11 @@ interface CapacitorSecureStoragePlugin {
 
 interface CapacitorAppControlPlugin {
   restart(): Promise<void>
+  /** FLO-151: stash the daemon URL + bearer token the background
+   *  ReplyReceiver reads to POST an inline reply without the app running. */
+  saveReplyCredentials(options: { url: string; token: string }): Promise<void>
+  /** FLO-151: drop the stashed credentials (logout / token rotation). */
+  clearReplyCredentials(): Promise<void>
 }
 
 interface CapacitorGlobal {
@@ -202,6 +207,9 @@ async function get(key: string): Promise<string | null> {
 async function set(key: string, value: string): Promise<void> {
   const wroteNative = await setNativeTier(key, value)
   if (!wroteNative) localStorageSet(key, value)
+  if (key === TOKEN_KEY || key === DAEMON_URL_KEY) {
+    void syncReplyCredentials()
+  }
 }
 
 /** Remove the key from every tier (native + localStorage), so a stale value
@@ -214,6 +222,9 @@ async function remove(key: string, legacyKey?: string): Promise<void> {
   await removeNativeTier(key)
   localStorageRemove(key)
   if (legacyKey) localStorageRemove(legacyKey)
+  if (key === TOKEN_KEY || key === DAEMON_URL_KEY) {
+    void syncReplyCredentials()
+  }
 }
 
 /** One-time migration for a key that used to live under a different
@@ -254,6 +265,43 @@ async function restart(): Promise<void> {
   }
 }
 
+/** FLO-151: keep the native ReplyReceiver's stashed daemon URL + token in
+ *  sync with whatever the SPA is actually using, so a notification
+ *  RemoteInput reply can POST to /inline-reply even when the app process is
+ *  dead. Called from set()/remove() whenever TOKEN_KEY or DAEMON_URL_KEY
+ *  changes, and once at boot (main.ts) to backfill existing installs that
+ *  pre-date this feature. Best-effort and fire-and-forget — a failure here
+ *  must never block a login/server-switch; the worst case is that inline
+ *  reply is unavailable until the next successful sync. No-op outside the
+ *  native shell (web/Electron have no RemoteInput path).
+ *
+ *  URL resolution: an explicit DAEMON_URL_KEY override wins; otherwise the
+ *  mobile shell's location.origin IS the daemon origin (the WebView loads
+ *  the SPA from the daemon, and MainActivity rebuilds the bridge against an
+ *  override before the reload) — so falling back to location.origin is
+ *  correct in the shell. Only http(s) origins qualify (a sandboxed 'null'
+ *  origin is never device-reachable), matching push.ts's nativeAppOrigin(). */
+async function syncReplyCredentials(): Promise<void> {
+  const plugin = appControlPlugin()
+  if (!plugin?.saveReplyCredentials) return
+  try {
+    const token = await get(TOKEN_KEY)
+    const storedUrl = await get(DAEMON_URL_KEY)
+    const origin =
+      typeof location !== 'undefined' && /^https?:\/\//.test(location.origin)
+        ? location.origin
+        : null
+    const url = storedUrl ?? origin
+    if (token && url) {
+      await plugin.saveReplyCredentials({ url, token })
+    } else if (plugin.clearReplyCredentials) {
+      await plugin.clearReplyCredentials()
+    }
+  } catch {
+    // best-effort; swallow
+  }
+}
+
 export const nativeStorage = {
   isAvailable: isNativeShell,
   get,
@@ -261,4 +309,5 @@ export const nativeStorage = {
   remove,
   migrateLegacy,
   restart,
+  syncReplyCredentials,
 }

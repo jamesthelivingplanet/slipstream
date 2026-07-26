@@ -39,6 +39,23 @@ specifically (schema versioning, build stamping, release flow).
   documented in CLAUDE.md's status-flap gotcha. iOS tokens are deliberately
   excluded (no ongoing-notification concept there).
 
+- Answer an agent's "needs input" ask straight from the push notification,
+  without opening the app, via an inline text-reply field on the
+  notification itself (FLO-151). On Android a `needs` transition now fans
+  out a data-only FCM message (instead of a notification-bearing one) so
+  `SlipstreamMessagingService` can build the notification locally and attach
+  a `RemoteInput` reply action; the new `ReplyReceiver` captures the typed
+  reply and POSTs it to a new background-capable `POST /inline-reply`
+  endpoint — bypassing the WebSocket entirely, since the app/WebView may be
+  dead — which reuses `sessions.write` (so the reply also re-arms
+  `pushService`'s per-episode notification dedupe via the `input` event).
+  The daemon URL + bearer token the receiver needs are synced into a private
+  `SharedPreferences` from `nativeStorage` whenever they change. iOS and web
+  stay on the existing transport (no reliable inline-reply support — verify,
+  don't promise); this is an Android-first prototype. Note: the reply-token
+  copy lives in plaintext `MODE_PRIVATE` prefs (within the documented at-rest
+  threat model); Keystore-backing it is the production follow-up.
+
 ## [0.3.1] - 2026-07-24
 
 ### Fixed
