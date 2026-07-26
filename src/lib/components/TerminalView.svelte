@@ -43,6 +43,7 @@
     onSessionExit,
     getPrStatus,
     onConnectionChange,
+    onPendingInputChange,
     syncClipboardImage,
     getChatMessages,
   } from '../ipc'
@@ -90,6 +91,13 @@
   // Set true on a transport disconnect, cleared (and triggers a resync) on
   // the next reconnect — see the onConnectionChange subscription in onMount.
   let wasDisconnected = false
+  // FLO-154: writeSession bytes typed into THIS session while the transport
+  // was down, buffered client-side and flushed on reconnect. Drives the
+  // "will send once reconnected" banner so the buffered input reads as
+  // held, not silently lost. Tracked per-session from the global
+  // onPendingInputChange stream.
+  let pendingInputBytes = 0
+  let offPendingInput: (() => void) | null = null
   // Generation counter so overlapping resync() calls can't interleave —
   // e.g. a reconnect resync racing a scheduleLiveRetry-driven startLive().
   // Each resync resets the terminal and then (after awaits) writes a full
@@ -424,6 +432,15 @@
       }
     })
 
+    // FLO-154: mirror the global per-session buffered-input map into a
+    // per-view counter for THIS session, so the composer banner can show
+    // "will send once reconnected" while bytes are queued and clear the
+    // instant they flush on reconnect. subscribeConnectionChange already
+    // drives the `connected` store used below.
+    offPendingInput = onPendingInputChange((sessions) => {
+      pendingInputBytes = (session.id && sessions[session.id]) || 0
+    })
+
     mounted = true
 
     // TASK-FPH60: seed viewMode from the persisted global preference once it
@@ -437,6 +454,8 @@
       window.removeEventListener('resize', onResize)
       unsub()
       offConnection()
+      offPendingInput?.()
+      offPendingInput = null
       mountEl.removeEventListener('touchstart', onTouchStart)
       mountEl.removeEventListener('touchmove', onTouchMove)
       mountEl.removeEventListener('touchend', onTouchEnd)
@@ -1355,11 +1374,23 @@
   </div>
 {/if}
 
+{#if liveMode && !$connected && pendingInputBytes > 0}
+  <!-- FLO-154: typed input is buffered client-side while the transport is down
+       and flushed on reconnect — show that it's held, not silently lost. -->
+  <div class="alert" role="status">
+    <span class="ic">{@html icons.uploadCloud}</span>
+    <div class="tx">
+      <b>Will send once reconnected</b>
+      <span>{pendingInputBytes} character{pendingInputBytes === 1 ? '' : 's'} queued.</span>
+    </div>
+  </div>
+{/if}
+
 {#if $mobile && liveMode && !exited && !showDiff && effectiveViewMode === 'terminal'}
   <!-- TerminalView is reused across sessions, so key the composer to reset its diff base on switch. -->
   {#key session.id}
     <MobileTermInput
-      disabled={!canWrite || !$connected}
+      disabled={!canWrite}
       onData={(d) => {
         if (!session.id) return
         markSessionInput(session.id)

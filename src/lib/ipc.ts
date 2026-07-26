@@ -344,3 +344,7 @@ export const getPrStatus = call('getPrStatus', () => Promise.resolve(null))
 
 /** Subscribe to backend transport connectivity (reconnects). Returns an unsubscribe fn. */
 export const onConnectionChange = call('onConnectionChange', NOOP_UNSUBSCRIBE)
+
+/** Subscribe to the per-session byte count of writeSession input buffered while
+ *  the transport was down (FLO-154). Returns an unsubscribe fn. */
+export const onPendingInputChange = call('onPendingInputChange', NOOP_UNSUBSCRIBE)
