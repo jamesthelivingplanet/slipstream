@@ -360,6 +360,7 @@ describe('createPushService', () => {
       fcmMint?: FcmTokenMinter
       fcmSend?: FcmSender
       fcmDataSend?: FcmDataSender
+      fcmNeedsReplySend?: FcmDataSender
     } = {},
   ) {
     return createPushService({
@@ -373,6 +374,15 @@ describe('createPushService', () => {
       fcmMint: overrides.fcmMint,
       fcmSend: overrides.fcmSend,
       fcmDataSend: overrides.fcmDataSend,
+      // Default to a resolving mock so an Android needs transition's
+      // data-only needs-reply send never escapes to the real network in a
+      // test that isn't asserting on it (FLO-151). Tests that DO assert on
+      // the needs-reply payload pass their own mock.
+      fcmNeedsReplySend:
+        overrides.fcmNeedsReplySend ??
+        (vi
+          .fn()
+          .mockResolvedValue({ ok: true, status: 200, unregistered: false }) as FcmDataSender),
     })
   }
 
@@ -799,10 +809,15 @@ describe('createPushService', () => {
       expect(fcmSend).not.toHaveBeenCalled()
     })
 
+    // FLO-151: for a `needs` transition, Android now receives a DATA-ONLY
+    // needs-reply message (built locally so a RemoteInput reply action can
+    // attach) instead of a notification-bearing push. So these notification-
+    // bearing needs-path tests use iOS tokens — iOS keeps the auto-displayed
+    // notification path (no RemoteInput equivalent; verify, don't promise).
     it('sends to the transitioning session owner devices once configured', async () => {
       config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
       const fcmStore = makeFcmStore([
-        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+        { token: 'dev-1', ownerId: 'local', platform: 'ios', createdAt: 0 },
       ])
       makeService({ fcmStore, fcmMint, fcmSend })
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
@@ -837,7 +852,7 @@ describe('createPushService', () => {
           {
             token: 'dev-1',
             ownerId: 'local',
-            platform: 'android',
+            platform: 'ios',
             createdAt: 0,
             origin: 'https://slipstream.example.ts.net',
           },
@@ -862,7 +877,7 @@ describe('createPushService', () => {
           {
             token: 'dev-1',
             ownerId: 'local',
-            platform: 'android',
+            platform: 'ios',
             createdAt: 0,
             origin: 'http://192.168.1.50:9091',
           },
@@ -883,7 +898,7 @@ describe('createPushService', () => {
       it('does NOT build an image URL when the token has no stored origin', async () => {
         config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
         const fcmStore = makeFcmStore([
-          { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0, origin: null },
+          { token: 'dev-1', ownerId: 'local', platform: 'ios', createdAt: 0, origin: null },
         ])
         makeService({ fcmStore, fcmMint, fcmSend })
         sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
@@ -904,11 +919,11 @@ describe('createPushService', () => {
           {
             token: 'dev-https',
             ownerId: 'local',
-            platform: 'android',
+            platform: 'ios',
             createdAt: 0,
             origin: 'https://home.example.ts.net',
           },
-          { token: 'dev-none', ownerId: 'local', platform: 'android', createdAt: 0, origin: null },
+          { token: 'dev-none', ownerId: 'local', platform: 'ios', createdAt: 0, origin: null },
         ])
         makeService({ fcmStore, fcmMint, fcmSend })
         sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
@@ -964,7 +979,7 @@ describe('createPushService', () => {
     it('reuses a cached access token across sends within the same episode window', async () => {
       config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
       const fcmStore = makeFcmStore([
-        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+        { token: 'dev-1', ownerId: 'local', platform: 'ios', createdAt: 0 },
       ])
       makeService({ fcmStore, fcmMint, fcmSend })
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
@@ -979,7 +994,7 @@ describe('createPushService', () => {
     it('mints a fresh access token once the cached one is near expiry', async () => {
       config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
       const fcmStore = makeFcmStore([
-        { token: 'dev-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+        { token: 'dev-1', ownerId: 'local', platform: 'ios', createdAt: 0 },
       ])
       let t = nowMs
       // Token "expires" almost immediately, well inside the 5-minute refresh skew.
@@ -998,7 +1013,7 @@ describe('createPushService', () => {
     it('prunes the device token on an unregistered FCM response', async () => {
       config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
       const fcmStore = makeFcmStore([
-        { token: 'dead-token', ownerId: 'local', platform: 'android', createdAt: 0 },
+        { token: 'dead-token', ownerId: 'local', platform: 'ios', createdAt: 0 },
       ])
       const goneFcmSend = vi.fn().mockResolvedValue({ ok: false, status: 404, unregistered: true })
       makeService({ fcmStore, fcmMint, fcmSend: goneFcmSend })
@@ -1010,7 +1025,7 @@ describe('createPushService', () => {
     it('keeps the device token on a non-unregistered FCM failure', async () => {
       config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
       const fcmStore = makeFcmStore([
-        { token: 'flaky-token', ownerId: 'local', platform: 'android', createdAt: 0 },
+        { token: 'flaky-token', ownerId: 'local', platform: 'ios', createdAt: 0 },
       ])
       const failFcmSend = vi.fn().mockResolvedValue({ ok: false, status: 500, unregistered: false })
       makeService({ fcmStore, fcmMint, fcmSend: failFcmSend })
@@ -1044,13 +1059,206 @@ describe('createPushService', () => {
     })
   })
 
+  describe('needs-reply data-only push (FLO-151)', () => {
+    // A `needs` transition splits by platform: Android gets a DATA-ONLY
+    // needs-reply message (built locally on-device so a RemoteInput reply
+    // action can attach), iOS keeps the notification-bearing push (no
+    // RemoteInput equivalent — verify, don't promise). done/running stay
+    // notification-bearing on every platform.
+    let fcmMint: ReturnType<typeof vi.fn>
+    let fcmSend: ReturnType<typeof vi.fn>
+    let fcmNeedsReplySend: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      fcmMint = vi.fn().mockResolvedValue({ accessToken: 'tok-1', expiresAt: nowMs + 3600_000 })
+      fcmSend = vi.fn().mockResolvedValue({ ok: true, status: 200, unregistered: false })
+      fcmNeedsReplySend = vi.fn().mockResolvedValue({ ok: true, status: 200, unregistered: false })
+    })
+
+    it('sends a data-only needs-reply to an Android token on a needs transition (and skips fcmSend)', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const sessionStoreWithSession = makeSessionStore([
+        sess({ id: 's1', tid: 'FLO-42', title: 'Do the thing', ownerId: 'local' }),
+      ])
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStoreWithSession,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmNeedsReplySend: fcmNeedsReplySend as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, {
+        reason: 'input',
+        message: 'which DB should I target?',
+      })
+      await new Promise((r) => setTimeout(r, 10))
+
+      // Android needs → data-only needs-reply, NOT the notification-bearing fcmSend.
+      expect(fcmSend).not.toHaveBeenCalled()
+      expect(fcmNeedsReplySend).toHaveBeenCalledOnce()
+      const [, , deviceToken, data] = fcmNeedsReplySend.mock.calls[0] as [
+        unknown,
+        unknown,
+        string,
+        Record<string, string>,
+      ]
+      expect(deviceToken).toBe('android-1')
+      expect(data.slipstreamNeedsReply).toBe('1')
+      expect(data.sessionId).toBe('s1')
+      expect(data.tid).toBe('FLO-42')
+      expect(typeof data.title).toBe('string')
+      expect(data.title.length).toBeGreaterThan(0)
+      // The agent's own question is the most useful body for a reply prompt.
+      expect(data.message).toBe('which DB should I target?')
+    })
+
+    it('falls back to the session title for the message when the needs ask carries no meta.message', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const sessionStoreWithSession = makeSessionStore([
+        sess({ id: 's1', tid: 'FLO-42', title: 'Do the thing', ownerId: 'local' }),
+      ])
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore: sessionStoreWithSession,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmNeedsReplySend: fcmNeedsReplySend as FcmDataSender,
+      })
+      // No meta at all — falls back to the session title.
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmNeedsReplySend).toHaveBeenCalledOnce()
+      const data = fcmNeedsReplySend.mock.calls[0][3] as Record<string, string>
+      expect(data.message).toBe('Do the thing')
+    })
+
+    it('an iOS needs transition stays on the notification-bearing path (no needs-reply)', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'iphone-1', ownerId: 'local', platform: 'ios', createdAt: 0 },
+      ])
+      makeService({
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmNeedsReplySend: fcmNeedsReplySend as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmSend).toHaveBeenCalledOnce()
+      expect(fcmNeedsReplySend).not.toHaveBeenCalled()
+    })
+
+    it('a done transition on Android still uses the notification-bearing path', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      makeService({
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmNeedsReplySend: fcmNeedsReplySend as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'done' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmSend).toHaveBeenCalledOnce()
+      expect(fcmNeedsReplySend).not.toHaveBeenCalled()
+    })
+
+    it('splits a mixed-platform owner: Android gets needs-reply, iOS gets the notification', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+        { token: 'iphone-1', ownerId: 'local', platform: 'ios', createdAt: 0 },
+      ])
+      makeService({
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmNeedsReplySend: fcmNeedsReplySend as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmNeedsReplySend).toHaveBeenCalledOnce()
+      expect(fcmSend).toHaveBeenCalledOnce()
+      const needsReplyToken = fcmNeedsReplySend.mock.calls[0][2] as string
+      const notifToken = fcmSend.mock.calls[0][2] as string
+      expect(needsReplyToken).toBe('android-1')
+      expect(notifToken).toBe('iphone-1')
+    })
+
+    it('prunes an Android token on an unregistered needs-reply response', async () => {
+      config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
+      const fcmStore = makeFcmStore([
+        { token: 'dead', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      const unregisteredReply = vi
+        .fn()
+        .mockResolvedValue({ ok: false, status: 404, unregistered: true })
+      createPushService({
+        config,
+        store,
+        sessions,
+        sessionStore,
+        send: send as PushSender,
+        now: () => nowMs,
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmNeedsReplySend: unregisteredReply as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmStore.rows).toHaveLength(0)
+    })
+
+    it('does not send a needs-reply when no service account is configured', async () => {
+      const fcmStore = makeFcmStore([
+        { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
+      ])
+      makeService({
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmNeedsReplySend: fcmNeedsReplySend as FcmDataSender,
+      })
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      await new Promise((r) => setTimeout(r, 10))
+      expect(fcmNeedsReplySend).not.toHaveBeenCalled()
+      expect(fcmSend).not.toHaveBeenCalled()
+    })
+  })
+
   describe('ongoing summary (FLO-160)', () => {
     let fcmDataSend: ReturnType<typeof vi.fn>
+    let fcmNeedsReplySend: ReturnType<typeof vi.fn>
     let fcmMint: ReturnType<typeof vi.fn>
     let fcmSend: ReturnType<typeof vi.fn>
 
     beforeEach(() => {
       fcmDataSend = vi.fn().mockResolvedValue({ ok: true, status: 200, unregistered: false })
+      // FLO-151: the needs-reply data-only transport is a distinct seam from
+      // the summary's fcmDataSend, so summary-count assertions stay clean
+      // even on a needs transition (which now also fans out a needs-reply to
+      // Android tokens).
+      fcmNeedsReplySend = vi.fn().mockResolvedValue({ ok: true, status: 200, unregistered: false })
       // fcmMint/fcmSend are scoped to THIS describe block — the outer
       // createPushService-scoped ones live in the FCM block above and don't
       // cover the ongoing-summary tests. Mirror their setup verbatim.
@@ -1379,18 +1587,26 @@ describe('createPushService', () => {
       vi.useRealTimers()
     })
 
-    it('regression guard: the per-session fcmSend still fires alongside the summary', async () => {
+    it('regression guard: the per-session needs-reply + summary both fire (android needs)', async () => {
       config.set(FCM_SERVICE_ACCOUNT_CONFIG_KEY, RAW_FCM_ACCOUNT)
       const fcmStore = makeFcmStore([
         { token: 'android-1', ownerId: 'local', platform: 'android', createdAt: 0 },
       ])
-      makeService({ fcmStore, fcmMint, fcmSend, fcmDataSend: fcmDataSend as FcmDataSender })
+      makeService({
+        fcmStore,
+        fcmMint,
+        fcmSend,
+        fcmDataSend: fcmDataSend as FcmDataSender,
+        fcmNeedsReplySend: fcmNeedsReplySend as FcmDataSender,
+      })
       sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
-      // fcmSend (per-session notification) flushes on the next microtask,
-      // independent of the 500ms summary debounce. Real timers here so the
-      // microtask + macrotask chain runs naturally.
+      // FLO-151: android needs fans out a data-only needs-reply (NOT the
+      // notification-bearing fcmSend, which is iOS-only for needs). It
+      // flushes on the next microtask, independent of the 500ms summary
+      // debounce. Real timers here so the chain runs naturally.
       await new Promise((r) => setTimeout(r, 10))
-      expect(fcmSend).toHaveBeenCalledOnce()
+      expect(fcmNeedsReplySend).toHaveBeenCalledOnce()
+      expect(fcmSend).not.toHaveBeenCalled()
 
       // Now advance real time past the 500ms debounce and let the summary
       // send resolve before asserting.

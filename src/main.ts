@@ -68,6 +68,12 @@ async function bootWeb() {
   await nativeStorage.migrateLegacy(TOKEN_KEY, 'slipstream_token')
   const storedToken = await nativeStorage.get(TOKEN_KEY)
 
+  // FLO-151: backfill the native ReplyReceiver's stashed daemon URL + token
+  // for installs that pre-date the inline-reply feature (where the values
+  // were already in storage before set()/remove() began syncing them). A
+  // no-op outside the mobile shell. Best-effort, fire-and-forget.
+  void nativeStorage.syncReplyCredentials()
+
   // -- Server origin resolution --
   // A stored override (set by the token gate, or the mobile Server settings
   // tab) wins; otherwise default to the SPA's own origin — the historical

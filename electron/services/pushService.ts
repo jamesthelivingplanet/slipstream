@@ -229,6 +229,12 @@ export function createPushService(deps: {
   /** Injected for tests — bypasses real network for the FLO-160 data-only
    *  ongoing-summary transport. Defaults to fcm.ts's sendFcmDataMessage. */
   fcmDataSend?: FcmDataSender
+  /** Injected for tests — bypasses real network for the FLO-151 data-only
+   *  needs-reply transport (Android RemoteInput notification). Defaults to
+   *  fcm.ts's sendFcmDataMessage, the same data-only transport the summary
+   *  uses; kept as a distinct seam so summary vs. needs-reply test
+   *  assertions don't conflate the two message types. */
+  fcmNeedsReplySend?: FcmDataSender
 }): IPushService {
   const { config, store, sessions, sessionStore } = deps
   const now = deps.now ?? (() => Date.now())
@@ -240,6 +246,10 @@ export function createPushService(deps: {
       sendFcmMessage(account, accessToken, deviceToken, notification))
   const fcmDataSend: FcmDataSender =
     deps.fcmDataSend ??
+    ((account, accessToken, deviceToken, data) =>
+      sendFcmDataMessage(account, accessToken, deviceToken, data))
+  const fcmNeedsReplySend: FcmDataSender =
+    deps.fcmNeedsReplySend ??
     ((account, accessToken, deviceToken, data) =>
       sendFcmDataMessage(account, accessToken, deviceToken, data))
 
@@ -379,15 +389,25 @@ export function createPushService(deps: {
 
   /** Fan out one notification to every FCM token owned by `ownerId`. Never
    *  throws — a mint/network failure is swallowed the same way the web-push
-   *  loop swallows per-subscription failures. */
+   *  loop swallows per-subscription failures. `platformFilter` narrows the
+   *  fan-out to one native platform — used by the needs-reply split
+   *  (Android gets a data-only RemoteInput-capable message, FLO-151, while
+   *  iOS keeps the notification-bearing path it can actually display). */
   async function sendFcmForOwner(
     ownerId: string,
     notification: { title: string; body: string; data?: Record<string, string> },
+    platformFilter?: 'android' | 'ios',
   ): Promise<void> {
     const account = getFcmAccount()
     if (!account) return
 
-    const tokens = fcmStore.all().filter((row) => (row.ownerId || 'local') === ownerId)
+    const tokens = fcmStore
+      .all()
+      .filter(
+        (row) =>
+          (row.ownerId || 'local') === ownerId &&
+          (platformFilter === undefined || row.platform === platformFilter),
+      )
     if (tokens.length === 0) return
 
     let accessToken: string
@@ -411,6 +431,58 @@ export function createPushService(deps: {
         if (result.unregistered) fcmStore.delete(row.token, row.ownerId)
       } catch {
         // best-effort per-token; swallow and continue with the rest
+      }
+    }
+  }
+
+  /** Fan out one needs-reply data-only message to every Android FCM token
+   *  owned by `ownerId` (FLO-151). iOS is deliberately excluded — iOS has no
+   *  RemoteInput equivalent, so it keeps the notification-bearing push from
+   *  the split `sendFcmForOwner(..., 'ios')` call (verify, don't promise).
+   *  A data-only message flows to the app's SlipstreamMessagingService in
+   *  BOTH foreground and background, where it builds the notification
+   *  locally so a RemoteInput reply action can be attached — a notification
+   *  block would make FCM auto-display the message with no inline reply.
+   *  Never throws — same best-effort contract as sendOngoingSummary. */
+  async function sendNeedsReplyForAndroid(
+    ownerId: string,
+    needs: { sessionId: string; tid: string; title: string; message: string },
+  ): Promise<void> {
+    const account = getFcmAccount()
+    if (!account) return
+
+    const tokens = fcmStore
+      .all()
+      .filter((row) => (row.ownerId || 'local') === ownerId && row.platform === 'android')
+    if (tokens.length === 0) return
+
+    let accessToken: string
+    try {
+      accessToken = await ensureFcmAccessToken(account)
+    } catch {
+      return
+    }
+
+    // Data contract — pinned by mobile/.../SlipstreamMessagingService.java's
+    // needs-reply parser. `slipstreamNeedsReply: '1'` is the marker that
+    // routes the message to the RemoteInput notification path on the device;
+    // sessionId drives both the notification id (replaceable) and the reply
+    // target; tid+title+message populate the notification (title shows the
+    // ticket, message shows the agent's actual question).
+    const data: Record<string, string> = {
+      slipstreamNeedsReply: '1',
+      sessionId: needs.sessionId,
+      tid: needs.tid,
+      title: needs.title,
+      message: needs.message,
+    }
+
+    for (const row of tokens) {
+      try {
+        const result = await fcmNeedsReplySend(account, accessToken, row.token, data)
+        if (result.unregistered) fcmStore.delete(row.token, row.ownerId)
+      } catch {
+        // best-effort per-token; swallow and continue
       }
     }
   }
@@ -610,7 +682,27 @@ export function createPushService(deps: {
         }
       }
 
-      await sendFcmForOwner(ownerId, fcmNotification)
+      // FLO-151 needs-reply split: Android gets a DATA-ONLY message so the
+      // device can build the notification locally and attach a RemoteInput
+      // reply action (a notification block would auto-display with no inline
+      // reply). iOS keeps the notification-bearing path it can actually show
+      // — RemoteInput has no iOS equivalent (verify, don't promise). Done/
+      // running still fan out to every token unchanged.
+      if (kind === 'needs') {
+        await Promise.all([
+          sendFcmForOwner(ownerId, fcmNotification, 'ios'),
+          sendNeedsReplyForAndroid(ownerId, {
+            sessionId,
+            tid,
+            title,
+            // The agent's own question is the most useful body for a reply
+            // prompt; fall back to the ticket title, then the playful hook.
+            message: detail || title,
+          }),
+        ])
+      } else {
+        await sendFcmForOwner(ownerId, fcmNotification)
+      }
     })().catch(() => {
       // best-effort push; swallow errors
     })

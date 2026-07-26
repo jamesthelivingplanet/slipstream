@@ -81,6 +81,19 @@
             android:name=".AgentWidgetService"
             android:permission="android.permission.BIND_REMOTEVIEWS"
             android:exported="false" />
+
+        <!-- FLO-151: receives the RemoteInput reply from a needs-notification's
+             inline reply action and POSTs it to the daemon's /inline-reply
+             endpoint without launching the app. Only ever fired by the
+             explicit PendingIntent this app's own SlipstreamMessagingService
+             attaches to a needs-reply notification, so exported=false. -->
+        <receiver
+            android:name=".ReplyReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="app.slipstream.mobile.action.REPLY" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->

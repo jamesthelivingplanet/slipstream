@@ -9,6 +9,7 @@ import android.graphics.Color;
 import android.os.Build;
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.RemoteInput;
 import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
@@ -51,6 +52,20 @@ public class SlipstreamMessagingService extends FirebaseMessagingService {
     private static final String SUMMARY_MARKER_KEY = "slipstreamSummary";
     private static final String SUMMARY_MARKER_VALUE = "1";
 
+    /** Marker key the server sets on a needs-reply data message (FLO-151).
+     *  Routed here (not auto-displayed) so this service can build the
+     *  notification locally and attach a RemoteInput reply action — a
+     *  notification block would auto-display with no inline reply. */
+    private static final String NEEDS_REPLY_MARKER_KEY = "slipstreamNeedsReply";
+    private static final String NEEDS_REPLY_MARKER_VALUE = "1";
+
+    /** RemoteInput result key (the typed reply text) + the broadcast action
+     *  the reply PendingIntent fires back into ReplyReceiver. */
+    static final String KEY_REPLY_TEXT = "reply_text";
+    static final String ACTION_REPLY = "app.slipstream.mobile.action.REPLY";
+    static final String EXTRA_SESSION_ID = "sessionId";
+    static final String EXTRA_NOTIF_ID = "notifId";
+
     private static final String DATA_RUNNING_COUNT = "runningCount";
     private static final String DATA_ASK_SESSION_ID = "askSessionId";
     private static final String DATA_ASK_TID = "askTid";
@@ -61,12 +76,26 @@ public class SlipstreamMessagingService extends FirebaseMessagingService {
     static final int ONGOING_NOTIF_ID = 1;
 
     private static final String CHANNEL_ID = "SLIPSTREAM_ONGOING";
+    /** FLO-151: alerting channel for needs-reply notifications. IMPORTANCE_HIGH
+     *  so a needs ask pops as a heads-up (an ask is an alert, not a glanceable
+     *  status like the ongoing channel). */
+    private static final String CHANNEL_ID_ALERTS = "SLIPSTREAM_ALERTS";
 
     /** Running-blue, matches AgentWidgetService's running bucket color. */
     private static final int ACCENT_COLOR = Color.parseColor("#4C8DFF");
 
     @Override
     public void onMessageReceived(RemoteMessage msg) {
+        // FLO-151: a data-only needs-reply message is built locally (with a
+        // RemoteInput reply action) — handled before the summary early-return
+        // below. Checked first because the summary branch early-returns for
+        // anything that isn't a summary.
+        String needsMarker = msg.getData().get(NEEDS_REPLY_MARKER_KEY);
+        if (needsMarker != null && needsMarker.equals(NEEDS_REPLY_MARKER_VALUE)) {
+            handleNeedsReply(msg);
+            return;
+        }
+
         // Only data-only "slipstreamSummary" messages belong to us. Anything
         // else (now or in the future) is left alone; notification-bearing
         // messages never reach onMessageReceived in the background anyway —
@@ -128,6 +157,107 @@ public class SlipstreamMessagingService extends FirebaseMessagingService {
         }
 
         nm.notify(ONGOING_NOTIF_ID, b.build());
+    }
+
+    /** FLO-151: build a needs-reply notification with an inline RemoteInput
+     *  reply action. Unlike the ongoing status notification, this is an
+     *  ALERT (IMPORTANCE_HIGH) — a needs ask is something the user should act
+     *  on now, so it pops as a heads-up. The reply action fires a broadcast
+     *  to {@link ReplyReceiver}, which POSTs the typed text to the daemon's
+     *  /inline-reply endpoint via the stashed credentials (ReplyPrefs) without
+     *  ever launching the app. */
+    private void handleNeedsReply(RemoteMessage msg) {
+        String sessionId = msg.getData().get(EXTRA_SESSION_ID);
+        if (sessionId == null || sessionId.isEmpty()) {
+            // Without a reply target there's nothing actionable; drop silently.
+            return;
+        }
+        String tid = msg.getData().get("tid");
+        String title = msg.getData().get("title");
+        String message = msg.getData().get("message");
+
+        NotificationManager nm =
+            (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) {
+            return;
+        }
+        ensureAlertsChannelExists(nm);
+
+        int notifId = ReplyPrefs.notificationIdFor(sessionId);
+
+        // Lead with the ticket id when available (most recognizable), else
+        // fall back to the playful title the server picked from mascot.ts.
+        String contentTitle = (tid != null && !tid.isEmpty()) ? tid : title;
+        if (contentTitle == null || contentTitle.isEmpty()) {
+            contentTitle = getString(R.string.app_name);
+        }
+        String contentText = (message != null && !message.isEmpty())
+            ? message
+            : getString(R.string.needs_reply_default);
+
+        NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID_ALERTS)
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setColor(ACCENT_COLOR)
+            .setContentTitle(contentTitle)
+            .setContentText(contentText)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(contentText))
+            .setContentIntent(launchIntent(sessionId))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .addAction(buildReplyAction(sessionId, notifId));
+
+        nm.notify(notifId, b.build());
+    }
+
+    /** The "Reply" notification action with an inline RemoteInput text field.
+     *  Tapping it (and typing) fires ACTION_REPLY back into ReplyReceiver,
+     *  carrying the sessionId + notifId so the receiver can both POST the
+     *  reply and update/dismiss this specific notification. */
+    private NotificationCompat.Action buildReplyAction(String sessionId, int notifId) {
+        RemoteInput remoteInput = new RemoteInput.Builder(KEY_REPLY_TEXT)
+            .setLabel(getString(R.string.reply_label))
+            .build();
+
+        Intent intent = new Intent(this, ReplyReceiver.class)
+            .setAction(ACTION_REPLY)
+            .putExtra(EXTRA_SESSION_ID, sessionId)
+            .putExtra(EXTRA_NOTIF_ID, notifId);
+
+        // A distinct requestCode per session so each needs ask gets its own
+        // mutable PendingIntent (a shared one would let a later ask overwrite
+        // an earlier's sessionId extra before it fires).
+        PendingIntent replyPendingIntent = PendingIntent.getBroadcast(
+            this,
+            notifId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE
+        );
+
+        return new NotificationCompat.Action.Builder(
+            R.drawable.ic_stat_notify,
+            getString(R.string.reply_action_label),
+            replyPendingIntent
+        )
+            .addRemoteInput(remoteInput)
+            // Allow the reply to be submitted without dismissing the shade,
+            // matching the RemoteInput UX users expect from messaging apps.
+            .setAllowGeneratedReplies(false)
+            .build();
+    }
+
+    /** Creates the IMPORTANCE_HIGH alerts channel for needs-reply
+     *  notifications (FLO-151). Idempotent on API 26+. */
+    private void ensureAlertsChannelExists(NotificationManager nm) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        NotificationChannel channel =
+            new NotificationChannel(CHANNEL_ID_ALERTS,
+                getString(R.string.notification_channel_alerts_name),
+                NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription(getString(R.string.notification_channel_alerts_desc));
+        nm.createNotificationChannel(channel);
     }
 
     /** Parses the running-count data value defensively; a missing or
