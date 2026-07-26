@@ -22,4 +22,14 @@
         <item quantity="one">%d agent running</item>
         <item quantity="other">%d agents running</item>
     </plurals>
+
+    <!-- FLO-151: inline reply from a push notification (Android RemoteInput) -->
+    <string name="notification_channel_alerts_name">Slipstream alerts</string>
+    <string name="notification_channel_alerts_desc">High-priority notifications when an agent needs your input, with an inline reply field.</string>
+    <string name="needs_reply_default">An agent needs your input</string>
+    <string name="reply_label">Type your reply</string>
+    <string name="reply_action_label">Reply</string>
+    <string name="reply_sent_confirmation">Reply sent</string>
+    <string name="reply_failed_no_connection">Reply failed — couldn’t reach the server</string>
+    <string name="reply_failed_not_signed_in">Reply failed — sign in to the app first</string>
 </resources>

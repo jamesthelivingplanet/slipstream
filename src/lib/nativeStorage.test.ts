@@ -76,7 +76,11 @@ function makeFakeCapacitor(opts: FakeCapacitorOptions = {}) {
     : undefined
 
   const AppControl = opts.withAppControl
-    ? { restart: vi.fn().mockResolvedValue(undefined) }
+    ? {
+        restart: vi.fn().mockResolvedValue(undefined),
+        saveReplyCredentials: vi.fn().mockResolvedValue(undefined),
+        clearReplyCredentials: vi.fn().mockResolvedValue(undefined),
+      }
     : undefined
 
   return {
@@ -90,17 +94,27 @@ function makeFakeCapacitor(opts: FakeCapacitorOptions = {}) {
   }
 }
 
-function stubBrowserGlobals(capacitor?: ReturnType<typeof makeFakeCapacitor>) {
+function stubBrowserGlobals(capacitor?: ReturnType<typeof makeFakeCapacitor>, origin?: string) {
   const win = { Capacitor: capacitor } as unknown
   ;(globalThis as { window?: unknown }).window = win
   ;(globalThis as { localStorage?: unknown }).localStorage = makeFakeLocalStorage()
+  if (origin) {
+    savedLocation = (globalThis as { location?: unknown }).location
+    ;(globalThis as { location?: { origin: string } }).location = { origin }
+  }
 }
+
+let savedLocation: unknown = undefined
 
 afterEach(() => {
   vi.clearAllMocks()
   vi.resetModules()
   delete (globalThis as { window?: unknown }).window
   delete (globalThis as { localStorage?: unknown }).localStorage
+  if (savedLocation !== undefined) {
+    ;(globalThis as { location?: unknown }).location = savedLocation
+    savedLocation = undefined
+  }
 })
 
 async function loadModule() {
@@ -346,5 +360,91 @@ describe('nativeStorage.restart', () => {
     cap._AppControl?.restart.mockRejectedValueOnce(new Error('boom'))
     const { nativeStorage } = await loadModule()
     await expect(nativeStorage.restart()).resolves.toBeUndefined()
+  })
+})
+
+// ── syncReplyCredentials (FLO-151) ─────────────────────────────────────────
+
+describe('nativeStorage.syncReplyCredentials', () => {
+  it('is a no-op when AppControl is unavailable (web/Electron)', async () => {
+    stubBrowserGlobals(makeFakeCapacitor({ withAppControl: false }))
+    const { nativeStorage } = await loadModule()
+    await expect(nativeStorage.syncReplyCredentials()).resolves.toBeUndefined()
+  })
+
+  it('stashes the stored daemon-URL override + token when both are present', async () => {
+    const cap = makeFakeCapacitor({ withAppControl: true })
+    stubBrowserGlobals(cap)
+    const { nativeStorage, TOKEN_KEY, DAEMON_URL_KEY } = await loadModule()
+    await nativeStorage.set(TOKEN_KEY, 'tok-1')
+    await nativeStorage.set(DAEMON_URL_KEY, 'https://slipstream.example.ts.net')
+    vi.clearAllMocks()
+
+    await nativeStorage.syncReplyCredentials()
+    expect(cap._AppControl?.saveReplyCredentials).toHaveBeenCalledWith({
+      url: 'https://slipstream.example.ts.net',
+      token: 'tok-1',
+    })
+    expect(cap._AppControl?.clearReplyCredentials).not.toHaveBeenCalled()
+  })
+
+  it('falls back to location.origin when no daemon-URL override is stored', async () => {
+    const cap = makeFakeCapacitor({ withAppControl: true })
+    stubBrowserGlobals(cap, 'http://100.64.0.1:7421')
+    const { nativeStorage, TOKEN_KEY } = await loadModule()
+    await nativeStorage.set(TOKEN_KEY, 'tok-1')
+    vi.clearAllMocks()
+
+    await nativeStorage.syncReplyCredentials()
+    expect(cap._AppControl?.saveReplyCredentials).toHaveBeenCalledWith({
+      url: 'http://100.64.0.1:7421',
+      token: 'tok-1',
+    })
+  })
+
+  it('clears the stashed credentials when the token is missing', async () => {
+    const cap = makeFakeCapacitor({ withAppControl: true })
+    stubBrowserGlobals(cap)
+    const { nativeStorage, DAEMON_URL_KEY } = await loadModule()
+    // Seed the URL directly in the fake prefs store (not via nativeStorage.set,
+    // which would itself trigger a sync) so the only sync below is explicit.
+    cap._prefsData.set(DAEMON_URL_KEY, 'https://example.com')
+    vi.clearAllMocks()
+
+    await nativeStorage.syncReplyCredentials()
+    expect(cap._AppControl?.saveReplyCredentials).not.toHaveBeenCalled()
+    expect(cap._AppControl?.clearReplyCredentials).toHaveBeenCalledOnce()
+  })
+
+  it('set(TOKEN_KEY) triggers a credential sync', async () => {
+    const cap = makeFakeCapacitor({ withAppControl: true })
+    stubBrowserGlobals(cap, 'http://100.64.0.1:7421')
+    const { nativeStorage, TOKEN_KEY } = await loadModule()
+    await nativeStorage.set(TOKEN_KEY, 'tok-1')
+    // set() fires the sync fire-and-forget; flush it before asserting.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(cap._AppControl?.saveReplyCredentials).toHaveBeenCalled()
+  })
+
+  it('remove(TOKEN_KEY) clears the stashed credentials (logout)', async () => {
+    const cap = makeFakeCapacitor({ withAppControl: true })
+    stubBrowserGlobals(cap, 'http://100.64.0.1:7421')
+    const { nativeStorage, TOKEN_KEY } = await loadModule()
+    await nativeStorage.set(TOKEN_KEY, 'tok-1')
+    await new Promise((r) => setTimeout(r, 0)) // let the set-triggered sync settle
+    vi.clearAllMocks()
+    await nativeStorage.remove(TOKEN_KEY)
+    await new Promise((r) => setTimeout(r, 0)) // flush the remove-triggered sync
+    expect(cap._AppControl?.clearReplyCredentials).toHaveBeenCalled()
+  })
+
+  it('swallows a throw from AppControl.saveReplyCredentials', async () => {
+    const cap = makeFakeCapacitor({ withAppControl: true })
+    stubBrowserGlobals(cap, 'http://100.64.0.1:7421')
+    cap._AppControl?.saveReplyCredentials.mockRejectedValueOnce(new Error('boom'))
+    const { nativeStorage, TOKEN_KEY } = await loadModule()
+    await nativeStorage.set(TOKEN_KEY, 'tok-1')
+    // No throw — the sync is best-effort.
+    await expect(nativeStorage.syncReplyCredentials()).resolves.toBeUndefined()
   })
 })

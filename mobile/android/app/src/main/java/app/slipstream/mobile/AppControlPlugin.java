@@ -56,4 +56,31 @@ public class AppControlPlugin extends Plugin {
         AgentWidgetProvider.requestUpdate(context);
         call.resolve();
     }
+
+    /** FLO-151: stash the daemon URL + bearer token the background
+     *  ReplyReceiver needs to POST an inline reply when the app isn't
+     *  running. Driven from src/lib/nativeStorage.ts whenever either value
+     *  changes. See ReplyPrefs for the security trade-off. */
+    @PluginMethod
+    public void saveReplyCredentials(PluginCall call) {
+        String url = call.getString("url");
+        String token = call.getString("token");
+        if (url == null || url.isEmpty() || token == null || token.isEmpty()) {
+            call.reject("url and token are required");
+            return;
+        }
+        ReplyPrefs.open(getContext())
+            .edit()
+            .putString(ReplyPrefs.DAEMON_URL_KEY, url)
+            .putString(ReplyPrefs.TOKEN_KEY, token)
+            .apply();
+        call.resolve();
+    }
+
+    /** FLO-151: drop the stashed credentials (logout / token rotation). */
+    @PluginMethod
+    public void clearReplyCredentials(PluginCall call) {
+        ReplyPrefs.open(getContext()).edit().clear().apply();
+        call.resolve();
+    }
 }
