@@ -3,7 +3,12 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveSandboxMode, buildBwrapArgs, sandboxSpawnSpec } from './agentSandbox.js'
+import {
+  resolveSandboxMode,
+  buildBwrapArgs,
+  sandboxSpawnSpec,
+  resolveProdPaths,
+} from './agentSandbox.js'
 
 /**
  * Unit-tests the pure bwrap-arg builder and the spawn-decision logic against
@@ -69,6 +74,166 @@ describe('buildBwrapArgs', () => {
 
   it('ends with the -- separator and the wrapped command', () => {
     expect(args.slice(-4)).toEqual(['--', 'claude', '--foo', 'bar'])
+  })
+
+  it("is byte-identical to today's output when no prod params are set", () => {
+    expect(args).toEqual([
+      '--dev-bind',
+      '/',
+      '/',
+      '--tmpfs',
+      '/data',
+      '--ro-bind-try',
+      '/data/bin',
+      '/data/bin',
+      '--bind-try',
+      '/data/sessions/sid1',
+      '/data/sessions/sid1',
+      '--ro-bind-try',
+      '/data/clipboard',
+      '/data/clipboard',
+      '--die-with-parent',
+      '--',
+      'claude',
+      '--foo',
+      'bar',
+    ])
+  })
+})
+
+describe('buildBwrapArgs — production containment (per-worktree dev instances)', () => {
+  it('tmpfs-overmounts prodDataDir when it differs from dataDir', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/dev/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      prodDataDir: '/home/user/.config/slipstream',
+    })
+    const i = args.indexOf('--tmpfs')
+    const j = args.lastIndexOf('--tmpfs')
+    expect(i).toBeGreaterThanOrEqual(0)
+    expect(args[i + 1]).toBe('/dev/data')
+    expect(j).not.toBe(i)
+    expect(args[j + 1]).toBe('/home/user/.config/slipstream')
+  })
+
+  it('does not duplicate the tmpfs when prodDataDir equals dataDir', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      prodDataDir: '/data',
+    })
+    expect(args.filter((a) => a === '--tmpfs')).toHaveLength(1)
+  })
+
+  it('does not tmpfs prodDataDir when it is a PARENT of dataDir', () => {
+    // Mounting a tmpfs over an ancestor of dataDir would shadow dataDir
+    // itself (and the session-dir bind mount below it) — the dev data dir
+    // must never be nested inside the prod data dir in the first place, but
+    // this guards the sandbox layer too in case it ever is.
+    const args = buildBwrapArgs({
+      dataDir: '/home/u/.config/slipstream/dev-slots/x',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      prodDataDir: '/home/u/.config/slipstream',
+    })
+    expect(args.filter((a) => a === '--tmpfs')).toHaveLength(1)
+    const i = args.indexOf('--tmpfs')
+    expect(args[i + 1]).toBe('/home/u/.config/slipstream/dev-slots/x')
+    expect(args).not.toContain('/home/u/.config/slipstream')
+  })
+
+  it('does not duplicate the tmpfs when prodDataDir equals dataDir via a non-normalized path', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      prodDataDir: '/data/',
+    })
+    expect(args.filter((a) => a === '--tmpfs')).toHaveLength(1)
+  })
+
+  it('ro-binds prodRepoRoot when cwd is outside it', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      prodRepoRoot: '/home/user/.repositories/slipstream',
+      cwd: '/home/user/.worktrees/other/TASK-XXX',
+    })
+    // there are two other --ro-bind-try pairs (bin dir, clipboard dir);
+    // find the one whose target is the prod repo root
+    const idx = args.findIndex(
+      (a, k) => a === '--ro-bind-try' && args[k + 1] === '/home/user/.repositories/slipstream',
+    )
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args[idx + 1]).toBe('/home/user/.repositories/slipstream')
+    expect(args[idx + 2]).toBe('/home/user/.repositories/slipstream')
+  })
+
+  it('does not ro-bind prodRepoRoot when cwd is inside it', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      prodRepoRoot: '/home/user/.repositories/slipstream',
+      cwd: '/home/user/.repositories/slipstream/electron',
+    })
+    expect(args).not.toContain('/home/user/.repositories/slipstream')
+  })
+
+  it('does not ro-bind prodRepoRoot when cwd equals it exactly', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      prodRepoRoot: '/home/user/.repositories/slipstream',
+      cwd: '/home/user/.repositories/slipstream',
+    })
+    expect(args).not.toContain('/home/user/.repositories/slipstream')
+  })
+
+  it('omits both prod mounts when prod params are unset (matches the byte-identical case)', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: ['--foo', 'bar'],
+    })
+    expect(args.filter((a) => a === '--tmpfs')).toHaveLength(1)
+    expect(args.filter((a) => a === '--ro-bind-try')).toHaveLength(2)
+  })
+})
+
+describe('resolveProdPaths', () => {
+  it('returns undefined for both when unset', () => {
+    expect(resolveProdPaths({})).toEqual({ prodDataDir: undefined, prodRepoRoot: undefined })
+  })
+
+  it('returns the values when set', () => {
+    expect(
+      resolveProdPaths({
+        SLIPSTREAM_PROD_DATA_DIR: '/home/user/.config/slipstream',
+        SLIPSTREAM_PROD_REPO_ROOT: '/home/user/.repositories/slipstream',
+      }),
+    ).toEqual({
+      prodDataDir: '/home/user/.config/slipstream',
+      prodRepoRoot: '/home/user/.repositories/slipstream',
+    })
+  })
+
+  it('treats empty string as unset', () => {
+    expect(
+      resolveProdPaths({ SLIPSTREAM_PROD_DATA_DIR: '', SLIPSTREAM_PROD_REPO_ROOT: '' }),
+    ).toEqual({ prodDataDir: undefined, prodRepoRoot: undefined })
   })
 })
 

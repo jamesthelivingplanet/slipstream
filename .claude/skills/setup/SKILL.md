@@ -58,15 +58,56 @@ What `pnpm setup` produces:
 - Writes `~/.config/slipstream/server.env` (chmod 600) containing:
   `SLIPSTREAM_TOKEN`, `SLIPSTREAM_BIND=127.0.0.1`, `SLIPSTREAM_PORT=7421`,
   `SLIPSTREAM_SERVE=tailscale|none`, `ELECTRON_RUN_AS_NODE=1`,
-  `SLIPSTREAM_SANDBOX=bwrap` (optional; bwrap agent sandbox, Linux only)
+  `SLIPSTREAM_SANDBOX=bwrap` (optional; bwrap agent sandbox, Linux only — **not** added by
+  default. Enabling the sandbox for production is a manual, one-time step: add that line to
+  `server.env` yourself and restart `slipstream.service`. Without it, agents spawned by the
+  prod daemon run unsandboxed — see "Dev-instance scaffolding" below for where this is
+  on-by-default instead.)
 - On **Linux**: writes `~/.config/systemd/user/slipstream.service` and enables it
   (`systemctl --user daemon-reload && systemctl --user enable slipstream.service`)
 - On **macOS**: writes `~/Library/LaunchAgents/com.slipstream.server.plist` and bootstraps
   it with `launchctl`
+- On **Linux only**: also installs the dev-instance scaffolding shared with `pnpm deploy`'s
+  dev path — see "Dev-instance scaffolding (linked worktrees)" below
 - Prints "Next step: run 'pnpm deploy'" — it does **not** start the service
 
 `pnpm setup` is idempotent and safe to re-run. It never overwrites an existing
 `SLIPSTREAM_TOKEN`.
+
+## Dev-instance scaffolding (linked worktrees)
+
+`pnpm setup` (and, redundantly, every `pnpm deploy` run from a linked worktree — see
+`scripts/lib/devScaffold.sh`, sourced by both so there is exactly one copy of this content)
+materializes the machine-wide scaffolding that every per-worktree dev instance shares. Linux
+only — a no-op with a one-line note on macOS, since per-worktree dev instances aren't wired
+up for launchd yet:
+
+- `~/.config/systemd/user/slipstream-dev@.service` — a systemd **template** unit (the `@`
+  makes it instantiable as `slipstream-dev@<slug>.service` per worktree slug), reading its
+  env from `~/.config/slipstream/dev-slots/%i.env` and executing
+  `~/.config/slipstream/dev-serve.sh`
+- `~/.config/slipstream/dev-serve.sh` — the wrapper the template unit execs; requires
+  `SLIPSTREAM_DEV_ROOT` (the worktree's repo root) in its env and runs that worktree's own
+  built `dist-electron/server.js` via its own `node_modules/electron` binary
+- `~/.config/slipstream/dev-slots/` (chmod 700) — holds one `<slug>.env` per worktree,
+  written by `pnpm deploy`'s dev path (see below)
+
+Because `pnpm deploy` re-materializes this scaffolding on every dev deploy, a fresh worktree
+is self-healing — no `pnpm setup` re-run needed before its first `pnpm deploy`.
+
+`pnpm deploy` is now **target-aware** (`scripts/lib/target.sh`): a linked git worktree always
+resolves to the `dev` target — structurally (git-dir vs git-common-dir), not by path — and
+that resolution is a hard guard that no `--target=prod` flag or `SLIPSTREAM_TARGET=prod` env
+var can override from a worktree. The dev path allocates/reuses an isolated port (from 7431),
+Tailscale port (from 8443), and data dir (`~/.local/share/slipstream-dev/<slug>`, tracked in
+`~/.config/slipstream/dev-slots.json`) via `scripts/dev-slot.mjs`, writes that worktree's
+`dev-slots/<slug>.env`, restarts its own `slipstream-dev@<slug>.service`, health-checks it,
+and publishes it over Tailscale on its own port — never `:443`, and never phase 6 (APK
+publish). New dev slots get `SLIPSTREAM_SANDBOX=bwrap` by default (unlike production, where
+it's the manual opt-in described above). `pnpm dev:slots` lists registered slots; `pnpm
+dev:down` stops+disables the current worktree's unit, removes its env file, and releases its
+slot. Full walkthrough: [docs/DEVELOPMENT.md](../../../docs/DEVELOPMENT.md) §Dev vs prod
+deploy targets.
 
 If native-module or Electron-binary errors appear, see **Troubleshooting native setup** in
 [CLAUDE.md](../../CLAUDE.md).
@@ -94,7 +135,10 @@ rolls the changelog, and pushes a `vX.Y.Z` git tag — see
 [docs/VERSIONING.md](../../../docs/VERSIONING.md). Cut a release first if
 you're publishing a new version, then `pnpm deploy` to run it.)
 
-Phases:
+The phases below are the **prod** path, run from the main checkout. From a **linked git
+worktree**, `pnpm deploy` instead always runs the dev path described in "Dev-instance
+scaffolding" above — its own unit, port, data dir, and Tailscale port, never production's —
+with no flag needed and no way to override it. Phases:
 
 1. **Quality gates** — `pnpm check` (svelte-check) + `pnpm test`
 2. **Build** — `pnpm build`
