@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-27
+
 ### Fixed
 
 - The per-worktree dev deploy target shipped in 0.4.0 could not actually start
