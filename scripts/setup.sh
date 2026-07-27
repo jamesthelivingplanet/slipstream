@@ -10,6 +10,10 @@
 #   c. pnpm install + @electron/rebuild for native ABI; verifies electron binary
 #   d. Generates ~/.config/slipstream/server.env (token + bind + port) if absent
 #   e. Installs systemd unit (Linux) or LaunchAgent plist (macOS); enables but does NOT start
+#   e2. Installs the shared per-worktree "dev" instance scaffolding (Linux/systemd
+#       only) — a linked git worktree deploys ONLY to its own isolated dev instance
+#       (own port, own data dir) and can never touch this machine's production
+#       instance; see scripts/lib/target.sh and scripts/lib/devScaffold.sh
 #   f. Tailscale cert detection + admin-console guidance (informational only)
 #   g. Summary: what's next is 'pnpm deploy'
 
@@ -49,6 +53,8 @@ done
 # ---------------------------------------------------------------------------
 # shellcheck source=lib/node22.sh
 source "$SCRIPT_DIR/lib/node22.sh"
+# shellcheck source=lib/devScaffold.sh
+source "$SCRIPT_DIR/lib/devScaffold.sh"
 
 echo ""
 echo "▶ Slipstream setup"
@@ -367,6 +373,17 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
+# e2. Dev-instance scaffolding — per-linked-worktree isolated dev instances.
+# Idempotent; materializes the slipstream-dev@.service template, the
+# dev-serve.sh wrapper, and ~/.config/slipstream/dev-slots/. Shared with
+# scripts/deploy.sh's dev path via scripts/lib/devScaffold.sh so there is
+# exactly one copy of this content.
+# ---------------------------------------------------------------------------
+echo ""
+echo "▶ Installing dev-instance scaffolding (for linked worktrees)…"
+slipstream_install_dev_scaffold
+
+# ---------------------------------------------------------------------------
 # f. Tailscale cert detection (informational only)
 # ---------------------------------------------------------------------------
 echo ""
@@ -418,5 +435,9 @@ else
 fi
 echo ""
 echo "  For desktop development: 'pnpm dev' (no setup needed for that)."
+echo ""
+echo "  Working from a linked git worktree? 'pnpm deploy' there always targets"
+echo "  its own isolated dev instance (own port, own data dir) and can never"
+echo "  deploy to this machine's production instance — see 'pnpm dev:slots'."
 echo "══════════════════════════════════════════════════════════════"
 echo ""

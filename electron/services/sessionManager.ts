@@ -92,7 +92,7 @@ function defaultSpawnAgent(
   // namespace with the data dir overmounted (daemon.json/slipstream.db/
   // secrets hidden); off by default → spec is cmd/args unchanged. See
   // agentSandbox.ts + docs/SECURITY.md §7.
-  const spec = sandboxSpawnSpec({ cmd, args, env: finalEnv })
+  const spec = sandboxSpawnSpec({ cmd, args, env: finalEnv, cwd })
   return pty.spawn(spec.cmd, spec.args, {
     name: 'xterm-color',
     cols,

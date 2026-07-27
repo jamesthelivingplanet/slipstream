@@ -20,8 +20,10 @@ section into a dated entry, commits, tags `vX.Y.Z`, and pushes — see
 `contract.ts` — every feature extends it, so additive changes collide there.
 
 If a change touches `scripts/setup.sh`, `scripts/deploy.sh`, `package.json` (scripts/engines),
-or how the app is bootstrapped/deployed, check whether `.claude/skills/setup/SKILL.md` still
-describes the current behavior and update it in the same change.
+the dev-target scripts (`scripts/lib/target.sh`, `scripts/lib/devSlots.mjs`,
+`scripts/lib/devScaffold.sh`, `scripts/dev-slot.mjs`, `scripts/dev.mjs`), or how the app is
+bootstrapped/deployed, check whether `.claude/skills/setup/SKILL.md` still describes the
+current behavior and update it in the same change.
 
 ## Conventions
 
@@ -111,3 +113,26 @@ doc only when the symptom matches what you're seeing.
   `slipstreamCommands.test.ts` cross-surface agreement tests). The sentinel consumers
   (`statusDetector.ts`/`statusSentinel.ts`/`agentEventsSentinel.ts`) are unchanged.
   Detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §Session status pipeline.
+- **`pnpm deploy` from a linked worktree always targets dev, never prod.** Target resolution
+  is structural (git-dir vs git-common-dir), not path matching, and is a hard guard — no
+  `--target=prod`/`SLIPSTREAM_TARGET=prod` can override it from a worktree. Symptom if you
+  expected otherwise: "my change isn't on :7421" — it deployed to your worktree's own
+  `slipstream-dev@<slug>.service` on a port from 7431 up instead. Find it with
+  `pnpm dev:slots`. Detail: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) §Dev vs prod deploy
+  targets.
+- **The PreToolUse guard hook can deny raw bash that touches prod.** From a linked worktree,
+  `.claude/settings.json` → `scripts/guard-prod.mjs` → `scripts/lib/prodGuard.mjs` denies
+  mutating `systemctl` on `slipstream.service`, `tailscale serve`/`funnel` on port 443, and
+  writes under `~/.config/slipstream` or `~/.repositories/slipstream`. Symptom: a Bash call
+  gets denied with a "Blocked: ..." reason instead of running. It's a best-effort textual
+  guard (not a shell parser) biased toward false negatives, so it won't catch every bypass —
+  use `pnpm deploy`/`pnpm dev:down` instead of raw `systemctl`/`tailscale`. Detail:
+  [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) §Dev vs prod deploy targets.
+- **bwrap agent-sandbox containment is filesystem-only, and off by default in prod.**
+  `electron/services/agentSandbox.ts` (opt-in via `SLIPSTREAM_SANDBOX=bwrap`, on by default
+  for new dev slots) hides the prod data dir and makes the prod checkout read-only inside a
+  sandboxed agent PTY's mount namespace — it cannot block `systemctl`/`tailscale` (network
+  namespace and systemd user bus stay shared by design). Enabling it for production is a
+  manual step: add `SLIPSTREAM_SANDBOX=bwrap` to `~/.config/slipstream/server.env` and
+  restart the service — without that, agents spawned by the prod daemon are not contained.
+  Detail: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) §Dev vs prod deploy targets.

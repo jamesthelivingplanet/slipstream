@@ -15,7 +15,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['electron/**/*.test.ts', 'src/**/*.test.ts'],
+    include: ['electron/**/*.test.ts', 'src/**/*.test.ts', 'scripts/**/*.test.mjs'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary', 'cobertura'],

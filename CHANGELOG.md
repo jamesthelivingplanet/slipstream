@@ -74,6 +74,32 @@ specifically (schema versioning, build stamping, release flow).
   copy lives in plaintext `MODE_PRIVATE` prefs (within the documented at-rest
   threat model); Keystore-backing it is the production follow-up.
 
+- Isolated per-worktree dev deploy target (TASK-WH96T): `pnpm deploy` from a
+  linked git worktree now always deploys to that worktree's own instance
+  (own systemd unit `slipstream-dev@<slug>.service`, own port from 7431 up,
+  own data dir under `~/.local/share/slipstream-dev/<slug>`, own Tailscale
+  HTTPS port from 8443 up) instead of the shared production instance —
+  target resolution is structural (git-dir vs git-common-dir), not path
+  matching, and is a hard guard that no flag or env var can override from a
+  worktree. `pnpm dev:slots` lists every registered dev slot; `pnpm dev:down`
+  stops+disables the current worktree's unit, removes its env file, and
+  releases its slot.
+
+### Changed
+
+- Production is now protected from worktree deploys by three independent
+  layers (TASK-WH96T): `deploy.sh`'s target guard, a PreToolUse hook that
+  denies raw `systemctl`/`tailscale`/prod-path bash from a linked worktree,
+  and an opt-in bubblewrap sandbox (`SLIPSTREAM_SANDBOX=bwrap`, on by
+  default for new dev slots) that hides production's data dir and checkout
+  from a sandboxed agent's filesystem view. See
+  [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the full division of
+  labour between the three.
+- `pnpm dev` / `pnpm dev:backend` from a linked worktree now set
+  `SLIPSTREAM_DATA_DIR` to that worktree's own dev data dir (TASK-WH96T), so
+  a dev session can no longer open production's `slipstream.db`. Behavior
+  from the main worktree is unchanged.
+
 ## [0.3.1] - 2026-07-24
 
 ### Fixed
