@@ -140,6 +140,7 @@ async function connectWithToken(
         // Only the token is removed — keep the stored server override (if
         // any) so the gate comes back prefilled with the same server.
         await nativeStorage.remove(TOKEN_KEY, 'slipstream_token')
+        clearReplyCredsFromSw()
         await showTokenGate(serverOrigin, 'Token rejected. Please enter a valid token.')
         resolve()
       },
@@ -151,6 +152,10 @@ async function connectWithToken(
     ;(window as unknown as { __slipstreamWeb?: boolean }).__slipstreamWeb = true
     // Web mode only, and only after window.slipstream is assigned (see above).
     registerServiceWorker()
+    // FLO-150: stash the daemon origin + token in the SW so its notification
+    // action buttons can POST /inline-reply with the app closed. Pushed on
+    // every (re)connect so a rotated token replaces the stale one.
+    syncReplyCredsToSw(serverOrigin, token)
 
     // Mount the app — ipc.ts will see window.slipstream = truthy
     mountApp(() => authFailed).then(() => {
@@ -231,6 +236,34 @@ function registerServiceWorker(): void {
       console.warn('[slipstream] service worker registration failed', err)
     })
   })
+}
+
+/**
+ * FLO-150: push the daemon origin + bearer token to the active service worker
+ * so a background notificationclick can POST /inline-reply (Approve/Deny action
+ * buttons) without the app open. The SW has no access to window.slipstream or
+ * localStorage, so it can't read these itself — it stashes them in its own
+ * IndexedDB (see public/sw.js). Idempotent + best-effort: re-pushed on every
+ * successful connect so a rotated token overwrites the stale one, and cleared
+ * by `clearReplyCredsFromSw` on logout / auth failure. Mirrors the native
+ * shell's saveReplyCredentials (FLO-151) for the web/PWA path.
+ */
+function syncReplyCredsToSw(url: string, token: string): void {
+  if (!('serviceWorker' in navigator)) return
+  navigator.serviceWorker.ready
+    .then((reg) => reg.active?.postMessage({ type: 'set-reply-creds', url, token }))
+    .catch(() => {
+      // SW not installed / not supported — quick-reply actions will fall back
+      // to opening the session, so this is non-fatal.
+    })
+}
+
+/** Drop stashed reply credentials (logout / token rotation). */
+function clearReplyCredsFromSw(): void {
+  if (!('serviceWorker' in navigator)) return
+  navigator.serviceWorker.ready
+    .then((reg) => reg.active?.postMessage({ type: 'set-reply-creds', url: '', token: '' }))
+    .catch(() => {})
 }
 
 // ── PWA Install prompt capture ────────────────────────────────────────────────
