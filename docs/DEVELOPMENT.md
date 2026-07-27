@@ -49,13 +49,34 @@ New commands:
 - **`pnpm dev:slots`** — lists every registered dev slot (slug, port, tsPort,
   root, whether the worktree still exists).
 - **`pnpm dev:down`** — stops and disables *this worktree's* systemd unit,
-  removes its env file, and releases its slot from the registry.
+  removes its env file, turns off its `tailscale serve --https=<tsPort>`
+  mapping, and releases its slot from the registry.
+
+Both `pnpm dev:down` and the prune step also reclaim the worktree's Tailscale
+serve mapping (`tailscale serve --https=<tsPort> off`) — best-effort, and
+guarded so a tsPort of 443 (or a missing/invalid one) is skipped rather than
+ever touching production's mapping. Without this, a torn-down worktree leaves
+a dangling `tailnet:<tsPort> -> 127.0.0.1:<dead port>` entry behind.
 
 `pnpm dev` / `pnpm dev:backend` also pick up on this from a linked worktree:
 they run through `scripts/dev.mjs`, which sets `SLIPSTREAM_DATA_DIR` to the
 worktree's own dev data dir — so a `pnpm dev` session in a worktree can no
 longer open production's `slipstream.db`. From the main worktree, behavior is
 unchanged.
+
+**First dev deploy in a new worktree self-heals the native-module ABI.** A
+worktree's `node_modules` comes from `pnpm install`, which builds
+`better-sqlite3`/`node-pty` against plain Node's ABI — but the dev daemon
+runs under Electron's ABI (see [NATIVE-MODULES.md](NATIVE-MODULES.md)).
+`pnpm deploy`'s dev path (`scripts/lib/nativeAbi.sh`) checks this by actually
+attempting the load under `ELECTRON_RUN_AS_NODE=1` before restarting the
+service, and if it fails, runs `pnpm dlx @electron/rebuild --force --only
+better-sqlite3,node-pty` automatically before proceeding — no manual
+`pnpm setup` step required. This rebuild takes a few minutes the first time
+in a given worktree; the check itself is instant on every subsequent deploy
+once the ABI already matches. If the rebuild fails (or still doesn't match
+afterward), the deploy exits 1 with the manual rebuild command rather than
+starting a service that can't open its database.
 
 ### Three enforcement layers — know the division of labour
 
@@ -109,13 +130,15 @@ Tailscale URL restated).
 When you're done with the worktree:
 
 ```sh
-pnpm dev:down               # stops+disables this worktree's unit,
-                             # removes its env file, releases its slot
+pnpm dev:down               # stops+disables this worktree's unit, removes its
+                             # env file, turns off its tailscale serve mapping,
+                             # and releases its slot
 ```
 
-`git worktree remove` also cleans up the slot registry entry automatically on
-the next `pnpm deploy` anywhere (via the prune step), but `pnpm dev:down`
-stops the running service immediately instead of waiting for that.
+`git worktree remove` also cleans up the slot registry entry (and its
+Tailscale serve mapping) automatically on the next `pnpm deploy` anywhere (via
+the prune step), but `pnpm dev:down` stops the running service immediately
+instead of waiting for that.
 
 ### Dev data dirs live outside `~/.config/slipstream` — on purpose
 

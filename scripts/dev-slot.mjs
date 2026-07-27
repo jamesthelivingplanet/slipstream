@@ -26,6 +26,8 @@ import {
   nextSlot,
   pruneRegistry,
   listeningPorts,
+  devUnitName,
+  releaseTsPort,
   CONFIG_DIR,
 } from './lib/devSlots.mjs'
 
@@ -66,15 +68,6 @@ function requireString(args, key, subcommand) {
   return value
 }
 
-function unitNameFor(slug) {
-  try {
-    return execFileSync('systemd-escape', [slug], { encoding: 'utf-8' }).trim()
-  } catch {
-    // systemd-escape unavailable — fall back to the raw slug.
-    return slug
-  }
-}
-
 function cmdAcquire(args) {
   const root = requireString(args, 'root', 'acquire')
   if (!path.isAbsolute(root)) {
@@ -111,11 +104,12 @@ function cmdDown(args) {
   const slug = requireString(args, 'slug', 'down')
 
   const registry = readRegistry()
-  if (!registry.slots[slug]) {
+  const slot = registry.slots[slug]
+  if (!slot) {
     fail(`no such slot: ${slug}`)
   }
 
-  const unit = `slipstream-dev@${unitNameFor(slug)}.service`
+  const unit = devUnitName(slug)
 
   try {
     execFileSync('systemctl', ['--user', 'stop', unit], { stdio: 'ignore' })
@@ -131,11 +125,20 @@ function cmdDown(args) {
   const envFile = path.join(CONFIG_DIR, 'dev-slots', `${slug}.env`)
   rmSync(envFile, { force: true })
 
+  // Read tsPort off the slot BEFORE it's released below — once the slot is
+  // gone from the registry there is no way to recover which tailnet port it
+  // held, and the mapping would leak forever (the bug this fixes).
+  const releasedTsPort = releaseTsPort(slot.tsPort)
+
   const slots = { ...registry.slots }
   delete slots[slug]
   writeRegistry({ version: registry.version, slots })
 
-  console.log(`down: stopped+disabled ${unit}, removed ${envFile}, released slot ${slug}`)
+  const tsSummary =
+    releasedTsPort !== null ? `, turned off tailscale serve --https=${releasedTsPort}` : ''
+  console.log(
+    `down: stopped+disabled ${unit}, removed ${envFile}, released slot ${slug}${tsSummary}`,
+  )
 }
 
 function cmdList() {
@@ -187,7 +190,12 @@ function cmdPrune() {
   const { registry: pruned, removed } = pruneRegistry(registry, (root) => existsSync(root))
   writeRegistry(pruned)
   for (const slug of removed) {
-    console.log(slug)
+    // Look up the tsPort from the PRE-prune registry — `pruned` no longer
+    // has this slug, and a dropped worktree's tailnet mapping would
+    // otherwise leak forever, same as the `down` path above.
+    const releasedTsPort = releaseTsPort(registry.slots[slug]?.tsPort)
+    const tsSummary = releasedTsPort !== null ? ` (tsPort ${releasedTsPort} released)` : ''
+    console.log(`${slug}${tsSummary}`)
   }
 }
 
