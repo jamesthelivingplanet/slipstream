@@ -30,6 +30,50 @@ describe('PWA assets', () => {
     expect(sw).toContain("addEventListener('fetch'")
   })
 
+  describe('FLO-150 — push notification action buttons', () => {
+    const sw = readFileSync(resolve(root, 'public/sw.js'), 'utf8')
+
+    it('adds action buttons to needs notifications', () => {
+      // Approval-shaped asks get quick Approve/Deny; other needs asks get View.
+      expect(sw).toContain("action: 'approve'")
+      expect(sw).toContain("title: 'Approve'")
+      expect(sw).toContain("action: 'deny'")
+      expect(sw).toContain("title: 'Deny'")
+      expect(sw).toContain("action: 'view'")
+      expect(sw).toContain("title: 'View'")
+      // Actions are gated on status==='needs' via actionsFor().
+      expect(sw).toMatch(/status !== 'needs'/)
+      expect(sw).toMatch(/reason === 'approval'/)
+    })
+
+    it('wires notificationclick action handling for approve/deny/view', () => {
+      expect(sw).toContain("event.action === 'approve'")
+      expect(sw).toContain("event.action === 'deny'")
+      // A plain body tap (no action) still deep-links via the open-agent path.
+      expect(sw).toContain("type: 'open-agent'")
+    })
+
+    it('answers approve/deny via the /inline-reply endpoint', () => {
+      expect(sw).toContain('/inline-reply')
+      // Canned yes/no reply values.
+      expect(sw).toMatch(/replyToSession\(sessionId, 'y'\)/)
+      expect(sw).toMatch(/replyToSession\(sessionId, 'n'\)/)
+    })
+
+    it('stashes reply credentials from the page (set-reply-creds message)', () => {
+      expect(sw).toContain("addEventListener('message'")
+      expect(sw).toContain("data.type === 'set-reply-creds'")
+      // Persists them in IndexedDB so a background click survives app close.
+      expect(sw).toContain('indexedDB.open')
+    })
+
+    it('falls back to opening the session on reply failure', () => {
+      // No stashed creds, auth rejection, or network error all route back to
+      // focusOrOpenAgent so the tap is never a silent no-op.
+      expect(sw).toContain('focusOrOpenAgent')
+    })
+  })
+
   it('links the manifest and apple-touch-icon from index.html', () => {
     const html = readFileSync(resolve(root, 'index.html'), 'utf8')
     expect(html).toContain('rel="manifest"')
