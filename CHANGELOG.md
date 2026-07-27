@@ -11,6 +11,27 @@ specifically (schema versioning, build stamping, release flow).
 
 ### Added
 
+- Voice-to-text (dictation) input for the mobile terminal composer (FLO-155).
+  A new mic toggle sits in `MobileTermInput`'s input row and, inside the
+  Capacitor mobile shell, drives the native
+  `@capacitor-community/speech-recognition` plugin — Android WebViews have
+  no usable Web Speech API, so a browser-only implementation would simply
+  never work there. Outside the shell (the installed PWA, a desktop browser
+  tab) it falls back to the standard Web Speech API. Both backends report a
+  replace-everything "best so far" transcript on every partial result rather
+  than an incremental delta, which `speech.ts`'s `appendTranscript` merges
+  onto whatever was already in the composer when dictation started; the
+  merged text is then run through the *same* `ptySequenceForEdit` diff path
+  regular typing uses, so live dictation refinements reach the PTY as cheap
+  minimal edits rather than a wholesale retype. The native path also polls
+  `isListening()` every 2s as a watchdog, since the Android plugin has no
+  error channel once `start()` resolves and a recognizer timeout can strand
+  the UI in "listening" forever without it. The mic button renders only when
+  `dictationAvailable()` finds either backend, so devices with neither (most
+  desktop browsers, some WebViews) see no button at all — `src/` still never
+  imports `@capacitor/*`, feature-detecting `window.Capacitor` at runtime
+  like every other native bridge in this codebase.
+
 - Web push notifications for a "needs input" ask now carry action buttons —
   quick Approve/Deny for approval-shaped asks (sent as a canned `y`/`n` reply)
   and a plain View for other needs asks (FLO-150). The service worker's

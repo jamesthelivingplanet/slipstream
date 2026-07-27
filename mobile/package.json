@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "^7.1.6",
+    "@capacitor-community/speech-recognition": "^7.0.1",
     "@capacitor/android": "^7.6.8",
     "@capacitor/core": "^7.6.8",
     "@capacitor/haptics": "^7.0.5",
