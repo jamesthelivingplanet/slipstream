@@ -8,7 +8,7 @@
 // impure edges that scripts/dev-slot.mjs wires them to disk/the OS.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execSync, execFileSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -58,6 +58,21 @@ function normalizeRegistry(registry) {
 export function slugForRoot(root) {
   const base = path.basename(root)
   return base.replace(/[^A-Za-z0-9_.-]/g, '-').replace(/-+/g, '-')
+}
+
+/**
+ * devUnitName — systemd unit name for a dev slot's slug. The slug from
+ * slugForRoot() is already restricted to [A-Za-z0-9_.-], which is a valid
+ * systemd template instance name verbatim — so it is used raw with `%i`
+ * (NOT `systemd-escape`d, and the unit template must use `%i`, not `%I`).
+ * `systemd-escape` would turn '-' into the literal string '\x2d', which
+ * desyncs the escaped `%i` instance name from the plain-slug env filename
+ * (`dev-slots/<slug>.env`) that deploy.sh writes — that mismatch is exactly
+ * what caused the "Failed to load environment files" restart failure this
+ * function fixes. Keep in sync with scripts/deploy.sh's DEV_UNIT.
+ */
+export function devUnitName(slug) {
+  return `slipstream-dev@${slug}.service`
 }
 
 /**
@@ -115,6 +130,52 @@ export function nextSlot(registry, root, opts = {}) {
   }
 
   return { registry: newRegistry, slot }
+}
+
+/**
+ * shouldReleaseTsPort — true iff `tsPort` is safe to hand to
+ * `tailscale serve --https=<tsPort> off`. This is the one guard standing
+ * between "reclaim a dev slot's tailnet endpoint" and "accidentally tear
+ * down production's `:443` mapping" — kept pure and exported so it can be
+ * unit-tested directly, and so both the `down` and `prune` code paths share
+ * the exact same check (see releaseTsPort below) instead of re-deriving it.
+ *
+ * Rejects: 443 (prod's port, always reserved — see RESERVED_PORTS above),
+ * and anything that isn't a positive integer (undefined/null/0/NaN/etc,
+ * which can show up for a malformed or hand-edited registry entry). Accepts
+ * numeric strings (e.g. '8443') since the registry round-trips through
+ * JSON and callers may hand back a string.
+ */
+export function shouldReleaseTsPort(tsPort) {
+  const n = Number(tsPort)
+  return Number.isInteger(n) && n > 0 && n !== 443
+}
+
+/**
+ * releaseTsPort — best-effort turn off a dev slot's Tailscale HTTPS mapping
+ * (`tailscale serve --https=<tsPort> off`) before the slot itself is
+ * released from the registry. Guarded by shouldReleaseTsPort so a missing or
+ * bogus tsPort (in particular 443) is skipped rather than risking prod's
+ * mapping. Never throws: tailscale may not be installed, or the mapping may
+ * already be gone — teardown (down/prune) must succeed regardless.
+ *
+ * `run` defaults to execFileSync against the real `tailscale` binary but is
+ * injectable so tests can assert on invocation without shelling out.
+ *
+ * Returns the tsPort that was released, or null if it was skipped.
+ */
+export function releaseTsPort(tsPort, run = execFileSync) {
+  if (!shouldReleaseTsPort(tsPort)) {
+    return null
+  }
+  const n = Number(tsPort)
+  try {
+    run('tailscale', ['serve', `--https=${n}`, 'off'], { stdio: 'ignore' })
+  } catch {
+    // best-effort — tailscale may not be installed, or the mapping may
+    // already be gone. Teardown must still succeed.
+  }
+  return n
 }
 
 /**

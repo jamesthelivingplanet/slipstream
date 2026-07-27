@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import path from 'node:path'
 import {
   slugForRoot,
   allocatePort,
   nextSlot,
   pruneRegistry,
+  devUnitName,
+  shouldReleaseTsPort,
+  releaseTsPort,
   PORT_BASE,
   TS_PORT_BASE,
   CONFIG_DIR,
@@ -101,6 +104,101 @@ describe('nextSlot', () => {
     const isNestedInConfigDir =
       relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
     expect(isNestedInConfigDir).toBe(false)
+  })
+})
+
+describe('devUnitName', () => {
+  it('uses the raw slug verbatim, with no systemd-escape sequences', () => {
+    const slug = 'TASK-WH96T-dev-environment'
+    const unit = devUnitName(slug)
+    expect(unit).toBe('slipstream-dev@TASK-WH96T-dev-environment.service')
+    expect(unit).not.toContain('\\x2d')
+  })
+
+  it('keeps the unit instance name identical to the env-file basename deploy.sh writes', () => {
+    // Invariant that broke: systemd-escape'ing the unit instance while
+    // deploy.sh wrote the env file under the raw slug meant `%i` could
+    // never resolve to the file on disk for any hyphenated slug.
+    const slug = slugForRoot('/home/user/.worktrees/TASK-WH96T-dev-environment')
+    const envFileBasename = `${slug}.env`
+    const unit = devUnitName(slug)
+    expect(unit).toBe(`slipstream-dev@${envFileBasename.replace(/\.env$/, '')}.service`)
+    expect(envFileBasename).toBe('TASK-WH96T-dev-environment.env')
+  })
+})
+
+describe('shouldReleaseTsPort', () => {
+  it('allows a normal dev slot tsPort', () => {
+    expect(shouldReleaseTsPort(8443)).toBe(true)
+    expect(shouldReleaseTsPort(8444)).toBe(true)
+  })
+
+  it("rejects 443 — production's tailscale port must never be touched", () => {
+    expect(shouldReleaseTsPort(443)).toBe(false)
+  })
+
+  it('rejects undefined/null/0/NaN', () => {
+    expect(shouldReleaseTsPort(undefined)).toBe(false)
+    expect(shouldReleaseTsPort(null)).toBe(false)
+    expect(shouldReleaseTsPort(0)).toBe(false)
+    expect(shouldReleaseTsPort(NaN)).toBe(false)
+  })
+
+  it('accepts a numeric string, since the registry round-trips through JSON', () => {
+    expect(shouldReleaseTsPort('8443')).toBe(true)
+  })
+
+  it('rejects "443" as a string too', () => {
+    expect(shouldReleaseTsPort('443')).toBe(false)
+  })
+})
+
+describe('releaseTsPort', () => {
+  it('invokes the injected runner with --https=<tsPort> off for a normal port', () => {
+    const run = vi.fn()
+    const result = releaseTsPort(8443, run)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledWith(
+      'tailscale',
+      ['serve', '--https=8443', 'off'],
+      expect.any(Object),
+    )
+    expect(result).toBe(8443)
+  })
+
+  it('never invokes the runner for tsPort 443', () => {
+    const run = vi.fn()
+    const result = releaseTsPort(443, run)
+    expect(run).not.toHaveBeenCalled()
+    expect(result).toBeNull()
+  })
+
+  it('never invokes the runner for a missing/invalid tsPort', () => {
+    const run = vi.fn()
+    expect(releaseTsPort(undefined, run)).toBeNull()
+    expect(releaseTsPort(null, run)).toBeNull()
+    expect(releaseTsPort(0, run)).toBeNull()
+    expect(releaseTsPort(NaN, run)).toBeNull()
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('accepts a numeric-string tsPort and passes the coerced number through', () => {
+    const run = vi.fn()
+    const result = releaseTsPort('8443', run)
+    expect(run).toHaveBeenCalledWith(
+      'tailscale',
+      ['serve', '--https=8443', 'off'],
+      expect.any(Object),
+    )
+    expect(result).toBe(8443)
+  })
+
+  it('swallows a throwing runner — teardown must still succeed', () => {
+    const run = vi.fn(() => {
+      throw new Error('tailscale: command not found')
+    })
+    expect(() => releaseTsPort(8443, run)).not.toThrow()
+    expect(releaseTsPort(8443, run)).toBe(8443)
   })
 })
 

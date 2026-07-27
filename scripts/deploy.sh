@@ -45,7 +45,10 @@
 # --- dev path ---
 # Reuses phases 1-2 (quality gates + build), then allocates/reuses this
 # worktree's dev slot, (re-)materializes the shared dev scaffolding so a
-# fresh worktree is self-healing with no 'pnpm setup' re-run, restarts its
+# fresh worktree is self-healing with no 'pnpm setup' re-run, verifies its
+# native modules (better-sqlite3, node-pty — see scripts/lib/nativeAbi.sh)
+# load under Electron's ABI and rebuilds them if not (a fresh worktree's
+# 'pnpm install' only ever builds them for plain Node's ABI), restarts its
 # own 'slipstream-dev@<slug>.service', health-checks it, and publishes it
 # over Tailscale on its own tsPort. Never runs Phase 6 (APK publish).
 
@@ -72,6 +75,8 @@ source "$SCRIPT_DIR/lib/tailscale.sh"
 source "$SCRIPT_DIR/lib/target.sh"
 # shellcheck source=lib/devScaffold.sh
 source "$SCRIPT_DIR/lib/devScaffold.sh"
+# shellcheck source=lib/nativeAbi.sh
+source "$SCRIPT_DIR/lib/nativeAbi.sh"
 
 # ---------------------------------------------------------------------------
 # Onboarding QR code — printed at the end of each success path so a phone can
@@ -308,14 +313,52 @@ EOF
   echo "✔ Slot env written: ${SLOT_ENV_FILE}"
 
   # -------------------------------------------------------------------------
-  # e. Restart this slot's service instance
+  # e. Verify native modules (better-sqlite3, node-pty) load under Electron's
+  # ABI, and self-heal if not. Every checkout's node_modules comes from
+  # 'pnpm install', which builds these against plain Node's ABI; only an
+  # explicit '@electron/rebuild' (which 'pnpm setup' runs for the main
+  # checkout) targets Electron's ABI instead — and nothing did that for a
+  # freshly-created worktree. Without this, the dev daemon crash-loops in
+  # openDb() with ERR_DLOPEN_FAILED (docs/NATIVE-MODULES.md). Dev path only —
+  # prod's native modules are handled once by 'pnpm setup' on the main
+  # checkout and never touched here.
   # -------------------------------------------------------------------------
-  if command -v systemd-escape &>/dev/null; then
-    DEV_UNIT_INSTANCE="$(systemd-escape "$SLIPSTREAM_SLOT_SLUG")"
+  echo "▶ Checking native modules (better-sqlite3, node-pty) against Electron's ABI…"
+  if ! slipstream_native_abi_ok "$REPO_ROOT"; then
+    echo "  ✗ Native modules are built for Node's ABI, not Electron's — the daemon"
+    echo "    runs under Electron, so it can't load them as-is (ERR_DLOPEN_FAILED)."
+    echo "  ▶ Rebuilding for Electron's ABI (first time in a worktree: a few"
+    echo "    minutes; a no-op check like this one is instant afterward)…"
+    if ! slipstream_native_rebuild "$REPO_ROOT"; then
+      echo ""
+      echo "✗ Native module rebuild failed." >&2
+      echo "  Run manually: pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty" >&2
+      echo "  See docs/NATIVE-MODULES.md for troubleshooting." >&2
+      exit 1
+    fi
+    if ! slipstream_native_abi_ok "$REPO_ROOT"; then
+      echo ""
+      echo "✗ Native modules still don't load under Electron's ABI after rebuilding." >&2
+      echo "  Run manually: pnpm dlx @electron/rebuild --force --only better-sqlite3,node-pty" >&2
+      echo "  See docs/NATIVE-MODULES.md for troubleshooting." >&2
+      exit 1
+    fi
+    echo "  ✔ Native modules now load under Electron's ABI."
   else
-    DEV_UNIT_INSTANCE="$SLIPSTREAM_SLOT_SLUG"
+    echo "  ✔ Native modules already match Electron's ABI."
   fi
-  DEV_UNIT="slipstream-dev@${DEV_UNIT_INSTANCE}.service"
+
+  # -------------------------------------------------------------------------
+  # f. Restart this slot's service instance
+  # -------------------------------------------------------------------------
+  # NOT systemd-escape'd: SLIPSTREAM_SLOT_SLUG (from slugForRoot() in
+  # scripts/lib/devSlots.mjs) is already restricted to [A-Za-z0-9_.-], which
+  # is a valid systemd template instance name verbatim. Escaping it here
+  # would desync the unit's `%i` instance name from the plain-slug env
+  # filename this same function wrote above (dev-slots/<slug>.env) — that
+  # mismatch is exactly what breaks the restart for any hyphenated slug.
+  # Keep in sync with devUnitName() in scripts/lib/devSlots.mjs.
+  DEV_UNIT="slipstream-dev@${SLIPSTREAM_SLOT_SLUG}.service"
 
   echo "▶ Restarting ${DEV_UNIT}…"
   if ! systemctl --user restart "$DEV_UNIT" 2>/dev/null; then
@@ -329,7 +372,7 @@ EOF
   fi
 
   # -------------------------------------------------------------------------
-  # f. Health check
+  # g. Health check
   # -------------------------------------------------------------------------
   DEV_HEALTH_URL="http://127.0.0.1:${SLIPSTREAM_SLOT_PORT}/healthz"
 
@@ -349,7 +392,7 @@ EOF
   fi
 
   # -------------------------------------------------------------------------
-  # g. Tailscale HTTPS serve on this slot's own tsPort — never :443.
+  # h. Tailscale HTTPS serve on this slot's own tsPort — never :443.
   # Best-effort: unlike prod, a missing/failing tailscale does not fail the
   # dev deploy, since the dev instance is already reachable locally.
   # -------------------------------------------------------------------------
@@ -375,7 +418,7 @@ EOF
   fi
 
   # -------------------------------------------------------------------------
-  # h. Summary — no Phase 6 (APK publish) on the dev path.
+  # i. Summary — no Phase 6 (APK publish) on the dev path.
   # -------------------------------------------------------------------------
   echo ""
   echo "══════════════════════════════════════════════════════════════"

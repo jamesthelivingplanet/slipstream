@@ -53,12 +53,20 @@ EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${SLIPSTREAM_DEV_ROOT:?SLIPSTREAM_DEV_ROOT must be set (the worktree's repo root)}"
+if [[ -z "${SLIPSTREAM_DEV_ROOT:-}" ]]; then
+  echo "dev-serve.sh: SLIPSTREAM_DEV_ROOT must be set (the worktree repo root)" >&2
+  exit 1
+fi
 
 cd "$SLIPSTREAM_DEV_ROOT"
 exec "$SLIPSTREAM_DEV_ROOT/node_modules/electron/dist/electron" "$SLIPSTREAM_DEV_ROOT/dist-electron/server.js"
 EOF
   chmod 755 "$serve_script"
+
+  if ! bash -n "$serve_script"; then
+    echo "  ERROR: generated wrapper failed syntax check: $serve_script" >&2
+    return 1
+  fi
 
   mkdir -p "$slots_dir"
   chmod 700 "$slots_dir"

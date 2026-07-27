@@ -109,6 +109,15 @@ dev:down` stops+disables the current worktree's unit, removes its env file, and 
 slot. Full walkthrough: [docs/DEVELOPMENT.md](../../../docs/DEVELOPMENT.md) §Dev vs prod
 deploy targets.
 
+Before restarting the unit, `pnpm deploy`'s dev path also verifies (`scripts/lib/nativeAbi.sh`)
+that `better-sqlite3`/`node-pty` load under **Electron's** ABI — a worktree's
+`node_modules` comes only from `pnpm install`, which builds them for plain Node's ABI, and
+nothing else rebuilds them for a linked worktree the way `pnpm setup` does for the main
+checkout. If the check fails it runs the same `@electron/rebuild --force --only
+better-sqlite3,node-pty` command automatically and re-checks, so the **first** dev deploy in
+a new worktree can take a few extra minutes; every deploy after that is an instant no-op
+check. See [docs/NATIVE-MODULES.md](../../../docs/NATIVE-MODULES.md).
+
 If native-module or Electron-binary errors appear, see **Troubleshooting native setup** in
 [CLAUDE.md](../../CLAUDE.md).
 

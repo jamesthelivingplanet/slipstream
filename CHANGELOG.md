@@ -9,6 +9,24 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Fixed
+
+- The per-worktree dev deploy target shipped in 0.4.0 could not actually start
+  an instance (TASK-WH96T). Four defects, all found by running a real
+  `pnpm deploy` from a worktree rather than by unit tests: the systemd instance
+  name was `systemd-escape`d (`-` → `\x2d`) while the env file was written under
+  the unescaped slug, so `%i` never resolved and systemd reported "Failed to
+  load environment files" for any slug containing a hyphen; the generated
+  `dev-serve.sh` was invalid bash because an apostrophe inside a `${VAR:?word}`
+  expansion opened an unterminated quote; a worktree's native modules were
+  never rebuilt for Electron's ABI, so the daemon died with `ERR_DLOPEN_FAILED`
+  before it could open its database; and `pnpm dev:down` released the slot but
+  left a `tailscale serve` mapping pointing at a dead port. The scaffold now
+  `bash -n`-validates the wrapper it generates, and the dev path verifies the
+  native ABI by really loading `better-sqlite3`/`node-pty` under the repo's own
+  electron binary and rebuilds when that fails, so none of these can reach
+  systemd silently again.
+
 ## [0.4.0] - 2026-07-27
 
 ### Added
