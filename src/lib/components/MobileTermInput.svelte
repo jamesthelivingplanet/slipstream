@@ -1,6 +1,14 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
   import { ptySequenceForEdit, codePointIndex, type PtyEditState } from '../ptyInput'
   import { icons } from '../icons'
+  import {
+    dictationAvailable,
+    startDictation,
+    appendTranscript,
+    type DictationSession,
+  } from '../speech'
+  import { pushToast } from '../toast'
 
   /** Disable typing while another client holds the write lock. */
   export let disabled = false
@@ -20,6 +28,16 @@
   // Picked-but-not-yet-sent image, previewed above the input row.
   let stagedImage: { blob: Blob; previewUrl: string } | null = null
 
+  // FLO-155: computed once at component init — neither backend's
+  // availability changes over the component's lifetime, so there's no need
+  // to re-check on every render.
+  const canDictate = dictationAvailable()
+  let dictating = false
+  let dictSession: DictationSession | null = null
+  // Text already in the input when dictation started — the base onTranscript
+  // appends onto, so refinements replace only what THIS dictation produced.
+  let dictBase = ''
+
   function handleInput() {
     const next: PtyEditState = {
       text: el.value,
@@ -29,6 +47,82 @@
     if (seq) onData(seq)
     prev = next
   }
+
+  /** Safe to call whether or not dictation is active — a no-op when idle.
+   *  stop() triggers onEnd asynchronously (native listeningState event /
+   *  Web Speech API onend), so this is deliberately fire-and-forget; onEnd's
+   *  own `ended` guard makes a repeat call harmless. */
+  function stopDictation() {
+    if (dictating) dictSession?.stop()
+  }
+
+  /** onTranscript: replace-everything transcript for the CURRENT dictation,
+   *  appended onto whatever was in the input when dictation started. Routed
+   *  through the same handleInput() diff path as typing — ptySequenceForEdit
+   *  computes the minimal backspace/retype, so live dictation refinements
+   *  (the engine revising its guess mid-utterance) stay cheap on the wire. */
+  function onTranscript(text: string) {
+    const next = appendTranscript(dictBase, text)
+    if (next === el.value) return
+    el.value = next
+    el.setSelectionRange(next.length, next.length)
+    handleInput()
+  }
+
+  function onEnd(error?: string) {
+    dictating = false
+    dictSession = null
+    // onend fires asynchronously (Web Speech API), so it can land after the
+    // component was destroyed and Svelte has nulled `el` — guard every
+    // el-touching bit rather than let a stray TypeError escape.
+    if (el) {
+      // Base for a second tap: append after what was just dictated rather
+      // than overwriting it.
+      dictBase = el.value
+      el.focus()
+    }
+    if (error) pushToast('error', error)
+  }
+
+  function toggleDictation() {
+    if (dictating) {
+      if (dictSession) {
+        // Don't flip `dictating` here — onEnd (fired once stop() completes)
+        // is the single place that resets dictation state.
+        dictSession.stop()
+      } else {
+        // Still in flight: startDictation hasn't resolved yet, so there's no
+        // session to stop. Flip `dictating` off now so the race guard in the
+        // .then() below stops the session as soon as it arrives, instead of
+        // silently adopting it and leaving the mic stuck on "listening".
+        dictating = false
+      }
+      return
+    }
+    dictBase = el.value
+    dictating = true
+    startDictation({ onTranscript, onEnd })
+      .then((session) => {
+        // Race guard: the user may have toggled off again (fast second tap,
+        // or the component was destroyed) while startDictation was still
+        // resolving. If so, stop the session that just arrived instead of
+        // adopting it.
+        if (!dictating) {
+          session.stop()
+          return
+        }
+        dictSession = session
+      })
+      .catch((err) => {
+        dictating = false
+        dictSession = null
+        pushToast('error', err instanceof Error ? err.message : String(err))
+      })
+  }
+
+  onDestroy(() => {
+    stopDictation()
+  })
 
   async function send() {
     if (stagedImage) {
@@ -41,6 +135,7 @@
         console.warn('Failed to attach image', err)
       }
     }
+    stopDictation()
     onData('\r')
     el.value = ''
     prev = { text: '', cursor: 0 }
@@ -147,6 +242,21 @@
       {@html icons.image}
     </button>
   {/if}
+  {#if canDictate}
+    <button
+      type="button"
+      class="btn btn-outline term-mic"
+      class:listening={dictating}
+      {disabled}
+      aria-pressed={dictating}
+      aria-label={dictating ? 'Stop dictation' : 'Dictate a reply'}
+      title={dictating ? 'Stop dictation' : 'Dictate a reply'}
+      on:mousedown|preventDefault={() => {}}
+      on:click={toggleDictation}
+    >
+      {@html icons.mic}
+    </button>
+  {/if}
   <input
     bind:this={el}
     type="text"
@@ -237,6 +347,36 @@
   .chip {
     flex: 0 0 auto;
     font-family: 'JetBrains Mono', monospace;
+  }
+  /* Mic toggle: sits in the .term-input row, right before the text input —
+     same fixed-size icon-button treatment as .term-attach, but with its own
+     "listening" pulse so it's obvious dictation is live even at a glance. */
+  .term-mic {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    min-height: 40px;
+    justify-content: center;
+  }
+  .term-mic.listening {
+    border-color: hsl(var(--destructive));
+    color: hsl(var(--destructive));
+    animation: term-mic-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes term-mic-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .term-mic.listening {
+      animation: none;
+    }
   }
   /* .term-input's own border-top already separates the composer from
      whatever is above it; .term-actions (app.css) normally adds its own
