@@ -11,6 +11,9 @@ importers:
       '@aparajita/capacitor-secure-storage':
         specifier: ^7.1.6
         version: 7.1.6
+      '@capacitor-community/speech-recognition':
+        specifier: ^7.0.1
+        version: 7.0.1(@capacitor/core@7.6.8)
       '@capacitor/android':
         specifier: ^7.6.8
         version: 7.6.8(@capacitor/core@7.6.8)
@@ -50,6 +53,11 @@ packages:
   '@babel/helper-validator-identifier@7.29.7':
     resolution: {integrity: sha512-qehxGkRj55h/ff8EMaJ+cYhyaKlHIxqYDn682wQD7RNp9UujOQsHog2uS0r2vzr4pW+sXf90NeeayjcNaX3fFg==}
     engines: {node: '>=6.9.0'}
+
+  '@capacitor-community/speech-recognition@7.0.1':
+    resolution: {integrity: sha512-ykpBZziR575X0eURO5vXaD9gVrXXC/7Ra2qql/2KP6/jxWOqAFuw4eKjSPjwdAgGE6a/Z+v8FJm4SVh57MVwDA==}
+    peerDependencies:
+      '@capacitor/core': '>=7.0.0'
 
   '@capacitor/android@7.6.8':
     resolution: {integrity: sha512-N5LXe1ls+TA0mq+RhtyDdP1JISzAAI+OuLGL3G7OWQxfQQOZYkiEjEJMYqMV6JR421IqpRsYj08JOfC0PFC3NA==}
@@ -1579,6 +1587,10 @@ snapshots:
       picocolors: 1.1.1
 
   '@babel/helper-validator-identifier@7.29.7': {}
+
+  '@capacitor-community/speech-recognition@7.0.1(@capacitor/core@7.6.8)':
+    dependencies:
+      '@capacitor/core': 7.6.8
 
   '@capacitor/android@7.6.8(@capacitor/core@7.6.8)':
     dependencies:
