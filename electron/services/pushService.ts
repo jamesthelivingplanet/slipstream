@@ -650,6 +650,10 @@ export function createPushService(deps: {
       title,
       body,
       status: next,
+      // FLO-150: drives the SW's action buttons. 'approval' → quick
+      // Approve/Deny; other needs reasons → plain View; absent on
+      // done/running. See public/sw.js's actionsFor().
+      reason: meta?.reason,
     })
 
     const subs = store.all()

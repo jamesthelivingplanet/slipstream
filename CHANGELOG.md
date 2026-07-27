@@ -11,6 +11,24 @@ specifically (schema versioning, build stamping, release flow).
 
 ### Added
 
+- Web push notifications for a "needs input" ask now carry action buttons —
+  quick Approve/Deny for approval-shaped asks (sent as a canned `y`/`n` reply)
+  and a plain View for other needs asks (FLO-150). The service worker's
+  `showNotification` sets the `actions` array (previously unused);
+  `notificationclick` routes `event.action` to either deep-link the agent
+  (the existing `postMessage({type:'open-agent'})` path) or POST the canned
+  reply to the daemon's existing `/inline-reply` endpoint (added for FLO-151's
+  native RemoteInput path) — reusing its bearer auth and per-owner ownership
+  check rather than adding a new RPC. The SW can't reach the page's in-memory
+  `writeSession`, so the page pushes the daemon origin + bearer token to the
+  SW (postMessage → IndexedDB) on connect and clears them on logout, mirroring
+  the native shell's `saveReplyCredentials`. Android/Chrome render the buttons;
+  Safari/iOS ignore the `actions` field (unsupported there as of 2024) and
+  degrade to the prior single-tap deep-link, so no parity is promised there.
+  Any reply failure (no stashed creds, stale token, network) falls back to
+  opening the session so the tap is never a silent no-op. The push payload now
+  carries `meta.reason` so the SW can pick the right buttons.
+
 - Typed input is buffered client-side and flushed on reconnect instead of
   being silently dropped when the WebSocket drops mid-type on a flaky mobile
   connection (FLO-154). `wsApi.writeSession` previously fire-and-forgot each

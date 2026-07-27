@@ -578,10 +578,20 @@ describe('createPushService', () => {
   })
 
   describe('status meta (FLO-104 reasons)', () => {
-    async function firstPayload(): Promise<{ title: string; body: string }> {
+    async function firstPayload(): Promise<{
+      title: string
+      body: string
+      reason?: string
+      status?: string
+    }> {
       await new Promise((r) => setTimeout(r, 10))
       const [, payload] = send.mock.calls[0] as [PushSubscriptionDTO, string]
-      return JSON.parse(payload) as { title: string; body: string }
+      return JSON.parse(payload) as {
+        title: string
+        body: string
+        reason?: string
+        status?: string
+      }
     }
 
     it('reason blocked → title drawn from the needsBlocked pool', async () => {
@@ -605,6 +615,23 @@ describe('createPushService', () => {
       })
       const payload = await firstPayload()
       expect(isFromPool(payload.title, NOTIFICATION_TITLES.needsApproval)).toBe(true)
+    })
+
+    it('carries meta.reason on the push payload so the SW can pick actions (FLO-150)', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      makeService()
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus, { reason: 'approval' })
+      const payload = await firstPayload()
+      expect(payload.status).toBe('needs')
+      expect(payload.reason).toBe('approval')
+    })
+
+    it('omits reason from the payload when the transition carries no meta', async () => {
+      store.upsert(makeSub(), { needs: true, done: false, running: false }, 0)
+      makeService()
+      sessions._emit('status', 's1', 'needs' satisfies SessionStatus)
+      const payload = await firstPayload()
+      expect(payload.reason).toBeUndefined()
     })
 
     it('reason input (and no reason) → title drawn from the needsInput pool', async () => {
