@@ -1,4 +1,9 @@
 node_modules/
+
+# This repo uses pnpm (pnpm-lock.yaml) — a stray `npm install` shouldn't
+# silently reintroduce a second, unmaintained lockfile.
+package-lock.json
+
 dist/
 dist-electron/
 dist-apk/

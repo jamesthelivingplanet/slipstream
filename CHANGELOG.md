@@ -9,6 +9,20 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Changed
+
+- `package-lock.json` is gone (TASK-N6X4R). Nothing installed from it — CI runs
+  `pnpm install --frozen-lockfile` and the repo is pnpm-only — and the sole
+  script that touched it was `scripts/release.sh`, which bumped only its
+  embedded version field. Because just that field was maintained, its
+  dependency graph had drifted: it was missing `dompurify`, `marked` and
+  `qrcode`, so `npm audit --omit=dev` read it and cheerfully reported "0
+  vulnerabilities" for a runtime tree excluding the markdown parser and the
+  XSS sanitizer. `pnpm audit --prod` agreed on the number, but the npm-side
+  signal could not be trusted to keep agreeing. The release script now bumps
+  and commits `package.json` alone (rollback semantics unchanged), and the
+  file is gitignored so a stray `npm install` cannot silently reintroduce it.
+
 ### Security
 
 - The daemon now sends a `Content-Security-Policy` on HTML/static responses
