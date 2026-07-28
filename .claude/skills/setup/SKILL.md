@@ -49,6 +49,20 @@ Tailscale, or explicitly asked for local-only — run `pnpm setup -- --serve=non
 back to telling the user to run `! pnpm setup` interactively when their preference is
 genuinely unknown and you want them to answer it themselves.
 
+There's a second, independent flag for the bwrap agent-sandbox (Linux only — see
+`SLIPSTREAM_SANDBOX` below):
+
+```sh
+pnpm setup -- --sandbox=bwrap   # default even without the flag — containment on
+pnpm setup -- --sandbox=none    # opt out of production containment
+```
+
+Unlike `--serve=`, this one never prompts — it just picks a default (`bwrap`) unless
+overridden. If you (Claude) already know the user wants production containment off, pass
+`--sandbox=none` yourself; otherwise there's nothing to ask, since `bwrap` is the sane
+default and setup only uses the flag's value when `SLIPSTREAM_SANDBOX` isn't already set in
+`server.env` (see below — the key is sticky once present).
+
 What `pnpm setup` produces:
 
 - Runs `pnpm install` then rebuilds native modules for Electron's ABI:
@@ -57,12 +71,16 @@ What `pnpm setup` produces:
   ```
 - Writes `~/.config/slipstream/server.env` (chmod 600) containing:
   `SLIPSTREAM_TOKEN`, `SLIPSTREAM_BIND=127.0.0.1`, `SLIPSTREAM_PORT=7421`,
-  `SLIPSTREAM_SERVE=tailscale|none`, `ELECTRON_RUN_AS_NODE=1`,
-  `SLIPSTREAM_SANDBOX=bwrap` (optional; bwrap agent sandbox, Linux only — **not** added by
-  default. Enabling the sandbox for production is a manual, one-time step: add that line to
-  `server.env` yourself and restart `slipstream.service`. Without it, agents spawned by the
-  prod daemon run unsandboxed — see "Dev-instance scaffolding" below for where this is
-  on-by-default instead.)
+  `SLIPSTREAM_SERVE=tailscale|none`, `SLIPSTREAM_SANDBOX=bwrap|none`, `ELECTRON_RUN_AS_NODE=1`.
+  `SLIPSTREAM_SANDBOX` (bwrap agent sandbox, Linux only) is now **on by default**: a fresh
+  `server.env` gets `SLIPSTREAM_SANDBOX=bwrap` automatically (or `=none` if `--sandbox=none`
+  was passed), and an *existing* `server.env` missing the key gets it appended the same way.
+  The key is **sticky** once present — including an explicit `SLIPSTREAM_SANDBOX=none` — so a
+  re-run of `pnpm setup` never overwrites an operator's past choice, regardless of what
+  `--sandbox=` is passed on that later run. Takes effect on the next `slipstream.service`
+  restart (e.g. `pnpm deploy`). Without it, agents spawned by the prod daemon run unsandboxed
+  — see "Dev-instance scaffolding" below for where this is on-by-default too (new dev slots
+  always get it, independent of this flag).
 - On **Linux**: writes `~/.config/systemd/user/slipstream.service` and enables it
   (`systemctl --user daemon-reload && systemctl --user enable slipstream.service`)
 - On **macOS**: writes `~/Library/LaunchAgents/com.slipstream.server.plist` and bootstraps
@@ -73,6 +91,19 @@ What `pnpm setup` produces:
 
 `pnpm setup` is idempotent and safe to re-run. It never overwrites an existing
 `SLIPSTREAM_TOKEN`.
+
+**Refuses to touch production from a linked worktree.** If the current checkout is a linked
+git worktree (e.g. one of the per-ticket worktrees under `.claude/worktrees/`,
+`scripts/lib/target.sh` detects this structurally), `pnpm setup` **skips** writing/enabling
+`slipstream.service` (or the macOS LaunchAgent) and **skips** creating or modifying
+`~/.config/slipstream/server.env` entirely — it prints a loud banner explaining this and
+does not silently no-op. This matters for you (Claude): running `pnpm setup` from inside a
+worktree still gets you the prereq checks, `pnpm install`, the native-ABI rebuild, and this
+worktree's dev-instance scaffolding (all genuinely needed there), but it will **not**
+configure a production service, and a subsequent `pnpm deploy` from that same worktree will
+**not** start production — it deploys that worktree's own isolated dev instance (see
+"Dev-instance scaffolding" below and `pnpm dev:slots`). To configure production, `pnpm
+setup` must be run from the main checkout.
 
 ## Dev-instance scaffolding (linked worktrees)
 

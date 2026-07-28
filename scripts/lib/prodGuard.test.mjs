@@ -112,6 +112,79 @@ describe('evaluateCommand', () => {
     })
   })
 
+  describe('positional write-command checking (cp/install/mv/ln/dd)', () => {
+    it('allows cp reading a prod file into scratch', () => {
+      expect(
+        evaluateCommand('cp ~/.config/slipstream/server.env /tmp/scratch/env-copy', linked),
+      ).toBeNull()
+    })
+
+    it('allows cp backing up the prod db to scratch', () => {
+      expect(
+        evaluateCommand('cp ~/.config/slipstream/slipstream.db /tmp/backup.db', linked),
+      ).toBeNull()
+    })
+
+    it('allows cp grabbing a reference copy of a prod checkout file', () => {
+      expect(
+        evaluateCommand('cp $HOME/.repositories/slipstream/scripts/deploy.sh /tmp/ref.sh', linked),
+      ).toBeNull()
+    })
+
+    it('allows dd reading a prod file with if= into scratch', () => {
+      expect(
+        evaluateCommand('dd if=~/.config/slipstream/slipstream.db of=/tmp/backup.db', linked),
+      ).toBeNull()
+    })
+
+    it('denies cp writing into a prod destination', () => {
+      const result = evaluateCommand('cp /tmp/evil.env ~/.config/slipstream/server.env', linked)
+      expect(result).not.toBeNull()
+    })
+
+    it('denies cp -t targeting a prod directory', () => {
+      const result = evaluateCommand('cp -t ~/.config/slipstream /tmp/evil.env', linked)
+      expect(result).not.toBeNull()
+    })
+
+    it('denies mv whose source is a prod file (prod loses the file)', () => {
+      const result = evaluateCommand('mv ~/.config/slipstream/slipstream.db /tmp/stolen.db', linked)
+      expect(result).not.toBeNull()
+    })
+
+    it('denies mv whose destination is a prod file (prod gets overwritten)', () => {
+      const result = evaluateCommand('mv /tmp/x ~/.config/slipstream/slipstream.db', linked)
+      expect(result).not.toBeNull()
+    })
+
+    it('denies dd writing to a prod of= destination', () => {
+      const result = evaluateCommand(
+        'dd if=/tmp/evil of=~/.config/slipstream/slipstream.db',
+        linked,
+      )
+      expect(result).not.toBeNull()
+    })
+
+    it('still denies rm -rf on the prod db', () => {
+      const result = evaluateCommand('rm -rf ~/.config/slipstream/slipstream.db', linked)
+      expect(result).not.toBeNull()
+    })
+
+    it('denies install writing into a prod destination', () => {
+      const result = evaluateCommand('install /tmp/x ~/.config/slipstream/server.env', linked)
+      expect(result).not.toBeNull()
+    })
+
+    it('still denies plain shell redirection into a prod file', () => {
+      const result = evaluateCommand('echo x > ~/.config/slipstream/server.env', linked)
+      expect(result).not.toBeNull()
+    })
+
+    it('allows cp into the dev-slots carve-out destination', () => {
+      expect(evaluateCommand('cp /tmp/x ~/.config/slipstream/dev-slots/foo.env', linked)).toBeNull()
+    })
+  })
+
   describe('pnpm deploy --target=prod', () => {
     it('denies an explicit --target=prod flag', () => {
       expect(evaluateCommand('pnpm deploy --target=prod', linked)).not.toBeNull()
