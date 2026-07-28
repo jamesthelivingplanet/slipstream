@@ -40,6 +40,9 @@ export interface OpencodeMessagePart {
     input?: unknown
     output?: unknown
   }
+  /** Present on `type: 'file'` parts (opencode's `FilePart`). */
+  mime?: string
+  url?: string
 }
 export interface OpencodeMessageInfo {
   id?: string
@@ -231,7 +234,19 @@ export function opencodeStatusFromMessages(messages: OpencodeMessage[]): Session
  * opencode has no transcript file to tail — messages come from its embedded
  * server (fetchOpencodeMessages above), polled by sessionManager. These pure
  * functions map that response shape to SessionChatMessageDTO, mirroring
- * transcriptMessages.ts / piChatMessages.ts. */
+ * transcriptMessages.ts / piChatMessages.ts.
+ *
+ * `reasoning` parts (opencode's `ReasoningPart`, message-v2.ts ~line 113-123:
+ * `{type:'reasoning', text, metadata?, time?}`) map to a `thinking` block —
+ * confirmed against a real captured part
+ * (~/.local/share/opencode/storage/part/msg_.../prt_....json) whose `text`
+ * held real reasoning prose. `file` parts (`FilePart`, message-v2.ts
+ * ~line 160-168: `{type:'file', mime, filename?, url, source?}`) map to an
+ * `image` block via `imageBlockFromFilePart` when `mime` starts with
+ * `image/` and `url` is a base64 data URI — this shape is verified against
+ * the SDK/CLI source and its own parsing code (see that function's doc
+ * comment for the exact source paths), not against a captured instance: no
+ * real `file` part was found in this machine's local opencode storage. */
 
 /** Best-effort stringify of a tool part's output for display: pass strings
  *  through, JSON-stringify anything else, '' for null/undefined/unstringifiable. */
@@ -270,6 +285,25 @@ function blocksFromToolPart(part: OpencodeMessagePart): ChatBlock[] {
   return blocks
 }
 
+/** A `type: 'file'` part's `url` is a `data:<mediaType>;base64,<data>` URI
+ *  for a pasted/uploaded image (confirmed against opencode's own parsing:
+ *  `packages/opencode/src/acp/agent.ts:1645`'s
+ *  `attachment.url.match(/^data:([^;,]+)(?:;[^,]*)*;base64,(.*)$/)`, and
+ *  `image.ts`'s `InvalidDataUrlError` — "Image URL must be a base64 data
+ *  URL"). No real captured `file` part exists in this machine's local
+ *  opencode storage (only reasoning/text/tool/step-* parts do), so this
+ *  mapping is schema/source-verified, not instance-verified. A non-image
+ *  `mime`, or a `file` part whose `url` isn't a base64 data URI (e.g. a
+ *  referenced local path), is skipped — not something the chat view can
+ *  render inline. */
+function imageBlockFromFilePart(part: OpencodeMessagePart): ChatBlock | null {
+  if (typeof part.mime !== 'string' || !part.mime.startsWith('image/')) return null
+  if (typeof part.url !== 'string') return null
+  const match = /^data:([^;,]+)(?:;[^,]*)*;base64,(.+)$/.exec(part.url)
+  if (!match) return null
+  return { type: 'image', mediaType: match[1] || part.mime, data: match[2] }
+}
+
 function blocksFromParts(parts: OpencodeMessagePart[] | undefined): ChatBlock[] {
   const blocks: ChatBlock[] = []
   for (const part of parts ?? []) {
@@ -279,9 +313,16 @@ function blocksFromParts(parts: OpencodeMessagePart[] | undefined): ChatBlock[] 
       }
     } else if (part.type === 'tool') {
       blocks.push(...blocksFromToolPart(part))
+    } else if (part.type === 'reasoning') {
+      if (typeof part.text === 'string' && part.text.length > 0) {
+        blocks.push({ type: 'thinking', text: part.text })
+      }
+    } else if (part.type === 'file') {
+      const img = imageBlockFromFilePart(part)
+      if (img) blocks.push(img)
     }
-    // other part kinds (reasoning, step-start/finish, file, ...) aren't
-    // rendered yet — skipped leniently.
+    // other part kinds (step-start/finish, ...) aren't rendered yet —
+    // skipped leniently.
   }
   return blocks
 }

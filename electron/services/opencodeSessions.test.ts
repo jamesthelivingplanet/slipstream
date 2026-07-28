@@ -482,12 +482,56 @@ describe('opencodeMessageToChat', () => {
     expect(opencodeMessageToChat(msg)).toBeNull()
   })
 
-  it('ignores unrendered part kinds (reasoning, step-start/finish)', () => {
+  it('ignores unrendered part kinds (step-start/finish)', () => {
     const msg: OpencodeMessage = {
       info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
       parts: [{ type: 'step-start' }, { type: 'text', text: 'ok' }, { type: 'step-finish' }],
     }
     expect(opencodeMessageToChat(msg)?.blocks).toEqual([{ type: 'text', text: 'ok' }])
+  })
+
+  it('maps a reasoning part to a thinking block', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
+      parts: [{ type: 'reasoning', text: 'thinking it through' }],
+    }
+    expect(opencodeMessageToChat(msg)?.blocks).toEqual([
+      { type: 'thinking', text: 'thinking it through' },
+    ])
+  })
+
+  it('no longer drops a message with only a reasoning part', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'assistant', time: { created: 1 } },
+      parts: [{ type: 'reasoning', text: 'hmm' }],
+    }
+    expect(opencodeMessageToChat(msg)).not.toBeNull()
+  })
+
+  it('maps an image file part (data URI) to an image block', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'user', time: { created: 1 } },
+      parts: [{ type: 'file', mime: 'image/png', url: 'data:image/png;base64,AAAA' }],
+    }
+    expect(opencodeMessageToChat(msg)?.blocks).toEqual([
+      { type: 'image', mediaType: 'image/png', data: 'AAAA' },
+    ])
+  })
+
+  it('skips a file part with a non-image mime', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'user', time: { created: 1 } },
+      parts: [{ type: 'file', mime: 'text/plain', url: 'data:text/plain;base64,AAAA' }],
+    }
+    expect(opencodeMessageToChat(msg)).toBeNull()
+  })
+
+  it('skips a file part whose url is not a data URI', () => {
+    const msg: OpencodeMessage = {
+      info: { id: 'msg_1', role: 'user', time: { created: 1 } },
+      parts: [{ type: 'file', mime: 'image/png', url: 'file:///tmp/screenshot.png' }],
+    }
+    expect(opencodeMessageToChat(msg)).toBeNull()
   })
 
   it('returns null for a message with no role', () => {

@@ -12,6 +12,7 @@
   import { pushToast } from '../toast'
   import { genId } from '../id.js'
   import { icons } from '../icons'
+  import DiffHunks from './DiffHunks.svelte'
   import type { Session } from '../types'
   import type { DiffFileDTO, DiffLineDTO, WorktreeDiffDTO } from '../../../electron/shared/contract'
 
@@ -204,10 +205,6 @@
         return 'modified'
     }
   }
-
-  function marker(kind: DiffLineDTO['kind']): string {
-    return kind === 'add' ? '+' : kind === 'del' ? '-' : ''
-  }
 </script>
 
 <div class="diffview">
@@ -273,68 +270,41 @@
               {:else if file.hunks.length === 0}
                 <div class="dv-note">No line-level changes to show.</div>
               {:else}
-                {#each file.hunks as hunk, hi (hi)}
-                  <div class="hunk-header mono">{hunk.header}</div>
-                  <div class="hunk-body">
-                    {#each hunk.lines as line, li (li)}
-                      <div
-                        class="dline mono {line.kind}"
-                        role="button"
-                        tabindex="0"
-                        on:click={() => clickLine(file, line)}
-                        on:keydown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            clickLine(file, line)
-                          }
-                        }}
-                      >
-                        <span class="gut old">{line.oldLine ?? ''}</span>
-                        <span class="gut new">{line.newLine ?? ''}</span>
-                        <span class="marker">{marker(line.kind)}</span>
-                        <span class="code">{line.text}</span>
-                      </div>
-                      {#if line.noNewline}
-                        <div class="dline mono nonewline">
-                          <span class="gut old"></span><span class="gut new"></span>
-                          <span class="marker"></span>
-                          <span class="code">\ No newline at end of file</span>
-                        </div>
-                      {/if}
-                      {#if editingKey && editingKey === keyForLine(file.path, line)}
-                        <div class="editor-row">
-                          <textarea
-                            bind:value={draftText}
-                            placeholder="Add a comment for the agent…"
-                            rows="3"
-                          ></textarea>
-                          <div class="editor-actions">
-                            <button
-                              class="btn btn-primary btn-sm"
-                              disabled={!draftText.trim()}
-                              on:click={addComment}>Add</button
-                            >
-                            <button class="btn btn-outline btn-sm" on:click={cancelComment}
-                              >Cancel</button
-                            >
-                          </div>
-                        </div>
-                      {/if}
-                      {#each commentsFor(file.path, line) as c (c.id)}
-                        <div class="comment-card">
-                          <div class="cc-text">{c.text}</div>
+                <DiffHunks hunks={file.hunks} onLineClick={(line) => clickLine(file, line)}>
+                  <svelte:fragment slot="afterLine" let:line>
+                    {#if editingKey && editingKey === keyForLine(file.path, line)}
+                      <div class="editor-row">
+                        <textarea
+                          bind:value={draftText}
+                          placeholder="Add a comment for the agent…"
+                          rows="3"
+                        ></textarea>
+                        <div class="editor-actions">
                           <button
-                            class="btn btn-ghost btn-icon btn-sm"
-                            title="Delete this comment"
-                            on:click={() => removeReviewComment(session.id ?? '', c.id)}
+                            class="btn btn-primary btn-sm"
+                            disabled={!draftText.trim()}
+                            on:click={addComment}>Add</button
                           >
-                            {@html icons.trash}
-                          </button>
+                          <button class="btn btn-outline btn-sm" on:click={cancelComment}
+                            >Cancel</button
+                          >
                         </div>
-                      {/each}
+                      </div>
+                    {/if}
+                    {#each commentsFor(file.path, line) as c (c.id)}
+                      <div class="comment-card">
+                        <div class="cc-text">{c.text}</div>
+                        <button
+                          class="btn btn-ghost btn-icon btn-sm"
+                          title="Delete this comment"
+                          on:click={() => removeReviewComment(session.id ?? '', c.id)}
+                        >
+                          {@html icons.trash}
+                        </button>
+                      </div>
                     {/each}
-                  </div>
-                {/each}
+                  </svelte:fragment>
+                </DiffHunks>
               {/if}
             {/if}
           </div>
@@ -463,71 +433,10 @@
     color: hsl(var(--muted-foreground));
   }
 
-  .hunk-header {
-    padding: 4px 10px;
-    font-size: 12px;
-    color: hsl(var(--muted-foreground));
-    background: hsl(var(--accent-bg));
-  }
-  .hunk-body {
-    overflow-x: auto;
-  }
-  .dline {
-    display: flex;
-    min-width: max-content;
-    cursor: pointer;
-    font-size: 12px;
-    line-height: 1.6;
-  }
-  .dline:hover {
-    filter: brightness(1.08);
-  }
-  .dline.add {
-    background: hsl(var(--st-done) / 0.1);
-  }
-  .dline.del {
-    background: hsl(var(--st-error) / 0.1);
-  }
-  .dline.nonewline {
-    cursor: default;
-    color: hsl(var(--muted-foreground));
-    opacity: 0.65;
-  }
-  .gut {
-    position: sticky;
-    flex: 0 0 3.5ch;
-    width: 3.5ch;
-    text-align: right;
-    padding-right: 6px;
-    color: hsl(var(--muted-foreground));
-    user-select: none;
-    background: inherit;
-  }
-  .gut.old {
-    left: 0;
-  }
-  .gut.new {
-    left: 3.5ch;
-  }
-  .marker {
-    position: sticky;
-    left: 7ch;
-    flex: 0 0 1.5ch;
-    width: 1.5ch;
-    text-align: center;
-    background: inherit;
-  }
-  .dline.add .marker {
-    color: hsl(var(--st-done));
-  }
-  .dline.del .marker {
-    color: hsl(var(--st-error));
-  }
-  .code {
-    flex: 1 1 auto;
-    white-space: pre;
-    padding: 0 10px 0 4px;
-  }
+  /* .hunk-header/.hunk-body/.dline/.gut/.marker/.code now live in
+     DiffHunks.svelte (TASK-N6X4R extraction) — the editor row and comment
+     cards below are DiffView-only and are laid out to align with that
+     component's gutters (7ch = 3.5ch old + 3.5ch new). */
 
   .editor-row {
     padding: 8px 10px;
@@ -571,21 +480,8 @@
     .dv-scroll {
       padding: 8px;
     }
-    .gut {
-      flex: 0 0 3ch;
-      width: 3ch;
-    }
-    .gut.new {
-      left: 3ch;
-    }
-    .marker {
-      left: 6ch;
-    }
     .dv-file-head {
       min-height: 40px;
-    }
-    .dline {
-      min-height: 30px;
     }
   }
 </style>

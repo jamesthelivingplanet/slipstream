@@ -587,6 +587,63 @@ describe('createRpc', () => {
       fs.writeFileSync(path.join(sub, `${id}.jsonl`), lines.join('\n') + '\n')
     }
 
+    // ── TASK-N6X4R: subagent paging fixtures ──────────────────────────────
+    // A main-thread line whose only content block is a `tool_use` call —
+    // stands in for the `Agent` tool_use that spawns a subagent, so a
+    // sidechain root's stamped `parentUuid` (its meta.json `toolUseId`) has
+    // something real to resolve against.
+    function toolUseLine(uuid: string, ts: string, toolUseId: string): string {
+      return JSON.stringify({
+        type: 'assistant',
+        isSidechain: false,
+        uuid,
+        timestamp: ts,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: toolUseId, name: 'Agent', input: {} }],
+        },
+      })
+    }
+
+    // One line of a subagent's own transcript. `parentUuid: null` marks the
+    // chain's root line (sessionChatReader.ts stamps its `parentUuid` from
+    // meta.json's `toolUseId` when unset); any other value chains it to the
+    // previous line in the SAME subagent file, same as a real transcript.
+    function subagentLine(
+      uuid: string,
+      ts: string,
+      parentUuid: string | null,
+      text: string,
+      extraContent: unknown[] = [],
+    ): string {
+      const role = parentUuid === null ? 'user' : 'assistant'
+      return JSON.stringify({
+        type: role,
+        isSidechain: true,
+        uuid,
+        parentUuid,
+        timestamp: ts,
+        message: { role, content: [{ type: 'text', text }, ...extraContent] },
+      })
+    }
+
+    function writeSubagentTranscript(
+      sessionId: string,
+      agentId: string,
+      lines: string[],
+      toolUseId?: string,
+    ): void {
+      const dir = path.join(configDir, 'projects', 'proj-a', sessionId, 'subagents')
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, `agent-${agentId}.jsonl`), lines.join('\n') + '\n')
+      if (toolUseId) {
+        fs.writeFileSync(
+          path.join(dir, `agent-${agentId}.meta.json`),
+          JSON.stringify({ toolUseId }),
+        )
+      }
+    }
+
     beforeEach(() => {
       configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slipstream-rpc-chat-'))
       prevConfigDir = process.env.CLAUDE_CONFIG_DIR
@@ -665,6 +722,154 @@ describe('createRpc', () => {
         { beforeTs: Date.parse('2026-07-19T10:00:02.000Z') },
       ])) as { messages: { uuid: string }[] }
       expect(result.messages.map((m) => m.uuid)).toEqual(['m0', 'm1'])
+    })
+
+    describe('subagent paging (TASK-N6X4R)', () => {
+      it('caps to `limit` main-thread messages regardless of subagent volume, and carries their subagent messages for free', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+        writeTranscript('s1', [
+          chatLine('u0', '2026-07-19T10:00:00.000Z', 'go', 'user'),
+          toolUseLine('a0', '2026-07-19T10:00:01.000Z', 'toolu_1'),
+          chatLine('a1', '2026-07-19T10:00:05.000Z', 'done'),
+        ])
+        // Five subagent lines anchored to a0's Agent tool_use — far more
+        // than `limit`, which must not shrink the main-thread page.
+        writeSubagentTranscript(
+          's1',
+          'agentA',
+          [
+            subagentLine('sub-0', '2026-07-19T10:00:01.100Z', null, 'task'),
+            subagentLine('sub-1', '2026-07-19T10:00:01.200Z', 'sub-0', 'step 1'),
+            subagentLine('sub-2', '2026-07-19T10:00:01.300Z', 'sub-1', 'step 2'),
+            subagentLine('sub-3', '2026-07-19T10:00:01.400Z', 'sub-2', 'step 3'),
+            subagentLine('sub-4', '2026-07-19T10:00:01.500Z', 'sub-3', 'step 4'),
+          ],
+          'toolu_1',
+        )
+
+        const result = (await rpc.handle(IPC.getChatMessages, ['s1', { limit: 2 }])) as {
+          messages: { uuid: string; isSidechain?: boolean }[]
+        }
+        const main = result.messages.filter((m) => !m.isSidechain)
+        const sidechain = result.messages.filter((m) => m.isSidechain)
+        // Exactly the `limit`=2 most recent main-thread messages — the 5
+        // subagent lines did NOT consume any of that budget.
+        expect(main.map((m) => m.uuid)).toEqual(['a0', 'a1'])
+        // a0 (in the page) spawned all 5 subagent lines, so they ride along.
+        expect(sidechain.map((m) => m.uuid).sort()).toEqual([
+          'sub-0',
+          'sub-1',
+          'sub-2',
+          'sub-3',
+          'sub-4',
+        ])
+      })
+
+      it('does not carry subagent messages anchored to a main-thread message outside the page', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+        writeTranscript('s1', [
+          toolUseLine('a0', '2026-07-19T10:00:00.000Z', 'toolu_old'),
+          chatLine('a1', '2026-07-19T10:00:05.000Z', 'later'),
+        ])
+        writeSubagentTranscript(
+          's1',
+          'agentA',
+          [subagentLine('sub-0', '2026-07-19T10:00:00.500Z', null, 'old task')],
+          'toolu_old',
+        )
+
+        // limit:1 keeps only a1 — a0 (and its subagent) fall outside the page.
+        const result = (await rpc.handle(IPC.getChatMessages, ['s1', { limit: 1 }])) as {
+          messages: { uuid: string; isSidechain?: boolean }[]
+        }
+        expect(result.messages.map((m) => m.uuid)).toEqual(['a1'])
+      })
+
+      it('beforeTs pagination still walks main-thread messages correctly, unaffected by interleaved subagent timestamps', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+        writeTranscript('s1', [
+          toolUseLine('m0', '2026-07-19T10:00:00.000Z', 'toolu_1'),
+          chatLine('m1', '2026-07-19T10:00:01.000Z', 'msg 1'),
+          chatLine('m2', '2026-07-19T10:00:02.000Z', 'msg 2'),
+        ])
+        // Subagent ts falls strictly between m0 and m1 — under the old flat
+        // slice this would itself count toward `limit`/the beforeTs cursor;
+        // it must not shift which MAIN-thread messages page in.
+        writeSubagentTranscript(
+          's1',
+          'agentA',
+          [subagentLine('sub-0', '2026-07-19T10:00:00.500Z', null, 'task')],
+          'toolu_1',
+        )
+
+        const result = (await rpc.handle(IPC.getChatMessages, [
+          's1',
+          { beforeTs: Date.parse('2026-07-19T10:00:02.000Z') },
+        ])) as { messages: { uuid: string; isSidechain?: boolean }[] }
+        const main = result.messages.filter((m) => !m.isSidechain)
+        expect(main.map((m) => m.uuid)).toEqual(['m0', 'm1'])
+        // m0 is in-window, so its subagent message rides along.
+        expect(result.messages.some((m) => m.uuid === 'sub-0')).toBe(true)
+      })
+
+      it('behaves exactly like the pre-subagent flat slice when a session has zero sidechain messages (regression guard)', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+        const lines = Array.from({ length: 5 }, (_, i) =>
+          chatLine(`m${i}`, `2026-07-19T10:00:0${i}.000Z`, `msg ${i}`),
+        )
+        writeTranscript('s1', lines)
+
+        const result = (await rpc.handle(IPC.getChatMessages, ['s1', { limit: 2 }])) as {
+          messages: { uuid: string }[]
+        }
+        expect(result.messages.map((m) => m.uuid)).toEqual(['m3', 'm4'])
+      })
+
+      it('nested subagent messages (spawned by another subagent, not the main transcript) anchor to the top-level turn and are not dropped', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+        writeTranscript('s1', [
+          chatLine('u0', '2026-07-19T10:00:00.000Z', 'go', 'user'),
+          toolUseLine('a0', '2026-07-19T10:00:01.000Z', 'toolu_top'),
+          chatLine('a1', '2026-07-19T10:00:10.000Z', 'wrap up'),
+        ])
+        // agentA is spawned directly from the main transcript (toolu_top on
+        // a0). Its own reply line (sub-a1) itself contains an Agent
+        // tool_use (toolu_nested) — a subagent spawning a subagent.
+        writeSubagentTranscript(
+          's1',
+          'agentA',
+          [
+            subagentLine('sub-u1', '2026-07-19T10:00:01.100Z', null, 'delegate'),
+            subagentLine('sub-a1', '2026-07-19T10:00:01.200Z', 'sub-u1', 'spawning nested', [
+              { type: 'tool_use', id: 'toolu_nested', name: 'Agent', input: {} },
+            ]),
+          ],
+          'toolu_top',
+        )
+        // agentB is the NESTED subagent: its root's meta.json toolUseId
+        // (toolu_nested) points at a tool_use INSIDE agentA's transcript,
+        // not the main one.
+        writeSubagentTranscript(
+          's1',
+          'agentB',
+          [
+            subagentLine('sub2-u1', '2026-07-19T10:00:01.300Z', null, 'nested task'),
+            subagentLine('sub2-a1', '2026-07-19T10:00:01.400Z', 'sub2-u1', 'nested done'),
+          ],
+          'toolu_nested',
+        )
+
+        const result = (await rpc.handle(IPC.getChatMessages, ['s1', { limit: 2 }])) as {
+          messages: { uuid: string; isSidechain?: boolean }[]
+        }
+        const main = result.messages.filter((m) => !m.isSidechain)
+        // a0 (spawning turn) and a1 are the 2 most recent main messages.
+        expect(main.map((m) => m.uuid)).toEqual(['a0', 'a1'])
+        const sidechainUuids = result.messages.filter((m) => m.isSidechain).map((m) => m.uuid)
+        // Both the direct subagent (agentA) and the NESTED one (agentB)
+        // transitively resolve to a0 and ride along — neither vanishes.
+        expect(sidechainUuids.sort()).toEqual(['sub-a1', 'sub-u1', 'sub2-a1', 'sub2-u1'])
+      })
     })
 
     it('fans out chatMessage session events on the push channel', () => {
