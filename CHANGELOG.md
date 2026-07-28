@@ -9,6 +9,19 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Fixed
+
+- Mission Control's needs-you cards no longer overflow their container or
+  render at inconsistent widths on phone-width screens. The `.cards` grid's
+  auto-fit track floor was a fixed `300px`, wider than `.mc-inner`'s content
+  box at a 360px viewport, so the grid overflowed by 12px; the floor is now
+  `min(300px, 100%)` so it can shrink with the container without changing
+  desktop's multi-column layout. `.card` buttons were also missing the
+  `width: 100%` that `.row` already carries, so a `<button>`'s shrink-to-fit
+  sizing made cards render at different widths depending on title length.
+  The mobile media query's side padding on `.mc-inner` was also reduced from
+  36px to 16px so it's no longer a disproportionate share of a narrow screen.
+
 ## [0.6.0] - 2026-07-28
 
 ### Added
