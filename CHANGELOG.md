@@ -9,6 +9,64 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- opencode chat history now survives the session ending instead of vanishing
+  the moment the TUI process exits or the daemon restarts. `sessionChatReader.ts`
+  previously read opencode messages only from the live embedded HTTP server's
+  in-memory state — the only source claude-code (JSONL transcript) and pi
+  (session file) never needed, since both were durable from the start. It now
+  falls back to opencode's own durable SQLite store (`~/.local/share/opencode/
+  opencode.db`, `opencodeStore.ts`) keyed by the `opencodeSid` already
+  persisted alongside the session row, reusing the existing opencode→chat
+  mapper so the two sources render identically. The live server is still
+  preferred when reachable — it's the only source for a brand-new session
+  that hasn't been flushed to the durable store yet.
+
+- grok conversations now appear in the chat view; grok was previously
+  terminal-only (`supportsChat: false`), the same as antigravity still is.
+  grok persists every session/message to its own SQLite database at
+  `~/.grok/grok.db` (verified against grok-dev v1.1.7's compiled source); a
+  new reader (`grokStore.ts`) and pure mapper (`grokChatMessages.ts`) surface
+  it through the same `readSessionChat` dispatch the other backends use.
+  Unlike opencode, Slipstream doesn't persist a grok session id on the
+  session row, and grok has no live embedded-server source to capture one
+  from — so selection happens by worktree instead: the reader finds grok's
+  `workspaces` row for the session's cwd and takes the newest `sessions` row
+  under it, mirroring grok's own `--session latest` resume semantics (same
+  idea as pi's newest-file selection, different store shape). grok's stored
+  format is the Vercel AI SDK `ModelMessage` shape (`role: 'system' | 'user'
+  | 'assistant' | 'tool'`), mapped onto the DTO's two-role shape the same way
+  claude-code's transcript is: tool results ride as a synthetic user turn.
+
+- Subagent work is no longer invisible in the chat view. Claude Code writes
+  each Task-style subagent run to its own transcript beside the main one
+  (`<sessionId>/subagents/agent-<agentId>.jsonl`), and Slipstream read only
+  the main file — so the chat showed the spawning call and its final result
+  with everything in between missing. Those files are now read and merged,
+  and each run is threaded back to the `Agent` tool_use that spawned it via
+  the `toolUseId` in its sibling `.meta.json` (this held for 242 of 243 real
+  subagent runs on the development machine; nested subagents anchor through
+  their ancestor). The renderer nests each run under that call, collapsed by
+  default — subagent output can be several times the size of the
+  conversation it belongs to, so inline rendering would bury the thread.
+
+- The chat view renders extended thinking and images, which were previously
+  parsed and then dropped on the floor. Thinking is collapsed and
+  de-emphasized by default; images render inline, closing a longstanding
+  asymmetry where a chat message could carry an image *to* the agent but
+  never show one coming back. Applies to every backend whose store carries
+  them (claude-code, pi, opencode's `reasoning` parts, grok's AI-SDK
+  reasoning/image parts).
+
+- `Edit` and `Write` tool calls render as a real diff instead of a JSON blob
+  containing `old_string`/`new_string`, reusing the diff renderer the review
+  panel already uses, and `TodoWrite` renders as a status-coloured checklist.
+  Tool summaries also now cover the tools that actually appear in practice —
+  `Agent`, `ToolSearch`, `Skill`, `AskUserQuestion`, `TaskCreate`/`TaskUpdate`
+  and the `mcp__<server>__<tool>` naming pattern all previously fell through
+  to a bare "Used <name>".
+
 ### Changed
 
 - Electron upgraded 33.4.11 → 39.8.10, clearing four high-severity advisories
@@ -31,7 +89,6 @@ specifically (schema versioning, build stamping, release flow).
   rebuilding per runtime. Verified directly: with the module built for Node
   (ABI 127) it opens a database and runs queries unchanged under Electron
   (ABI 140).
-
 
 - `package-lock.json` is gone (TASK-N6X4R). Nothing installed from it — CI runs
   `pnpm install --frozen-lockfile` and the repo is pnpm-only — and the sole
@@ -72,6 +129,29 @@ specifically (schema versioning, build stamping, release flow).
   audited and already ordered correctly.
 
 ### Fixed
+
+- The chat view no longer invites you to talk to an agent that has no chat.
+  For a backend with no chat reader (antigravity), the empty state said "No
+  messages yet — start the conversation below" — a message that could never
+  come true, since nothing would ever populate it. The empty state now
+  distinguishes three cases: this agent has no chat view at all (steers to
+  the terminal instead), nothing could be recovered from this backend's
+  store right now, and the conversation is genuinely empty so far. Long tool
+  output in a chat message is also now height-capped with a scroll
+  container instead of rendering in full, which could previously push the
+  rest of the conversation far off-screen.
+
+- Chat pagination counts the conversation, not the subagent transcripts
+  merged into it. Now that a page carries each turn's subagent messages
+  alongside it, a page's raw length and first-element timestamp are both
+  unreliable: on a subagent-heavy session the extra messages outnumber the
+  conversation several times over, which would have left "load older"
+  permanently available and could have paginated from a subagent's
+  timestamp — subagents run *during* the turn that spawns them, so their
+  timestamps can precede it. Both the more-available check and the
+  pagination cursor now consider main-thread messages only, and the page
+  limit applies to the conversation so subagent detail can never crowd it
+  out.
 
 - `server.log` rotation could lose and reorder lines, and never actually
   enforced its 10 MiB cap (TASK-N6X4R). `server()` appended asynchronously but

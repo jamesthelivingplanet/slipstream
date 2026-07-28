@@ -36,67 +36,21 @@
   import {
     mergeChatMessages,
     buildChatView,
-    type ChatViewItem,
-    type ChatTextItem,
-    type ChatActivityRun,
-    type ChatToolActivityItem,
+    buildSubagentGroups,
+    chatEmptyState,
+    mainlineStats,
   } from '../chat'
   import { detectSlashToken, filterSkills, applySlashSelection } from '../chatSlash'
-  import { renderMarkdown } from '../markdown'
   import { agentOption } from '../agents'
   import { floatingAnchor } from '../floating'
   import { icons } from '../icons'
   import { uploadClipboardImage, type ImageUploadDeps } from '../imageUpload'
   import { pushToast } from '../toast'
+  import ChatTurnList from './ChatTurnList.svelte'
 
   export let session: Session
   export let canWrite: boolean
   export let onSwitchToTerminal: () => void
-
-  // ── Turn grouping (renderer-only concern — buildChatView stays pure) ─────
-  // A "turn" pairs an activity run with the assistant text that immediately
-  // follows it (the reply the tool calls were in service of), so the turn
-  // spine can visually connect them. Anything else (a lone activity run still
-  // in flight, a standalone assistant text, a user message) renders as its
-  // own group.
-  interface TurnGroup {
-    kind: 'turn'
-    key: string
-    activity: ChatActivityRun
-    text: ChatTextItem | null
-  }
-  interface UserGroup {
-    kind: 'user'
-    key: string
-    text: ChatTextItem
-  }
-  interface AssistantTextGroup {
-    kind: 'assistant-text'
-    key: string
-    text: ChatTextItem
-  }
-  type RenderGroup = TurnGroup | UserGroup | AssistantTextGroup
-
-  function buildRenderGroups(items: ChatViewItem[]): RenderGroup[] {
-    const groups: RenderGroup[] = []
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]
-      if (item.kind === 'activity') {
-        const next = items[i + 1]
-        if (next && next.kind === 'text' && next.role === 'assistant') {
-          groups.push({ kind: 'turn', key: `${item.turnId}:${i}`, activity: item, text: next })
-          i++ // consumed the paired reply
-        } else {
-          groups.push({ kind: 'turn', key: `${item.turnId}:${i}`, activity: item, text: null })
-        }
-      } else if (item.role === 'user') {
-        groups.push({ kind: 'user', key: item.uuid, text: item })
-      } else {
-        groups.push({ kind: 'assistant-text', key: item.uuid, text: item })
-      }
-    }
-    return groups
-  }
 
   let chatBody: HTMLDivElement
   let messages: SessionChatMessageDTO[] = []
@@ -230,8 +184,56 @@
   let dismissedDraft: string | null = null
 
   $: items = buildChatView(messages)
-  $: renderGroups = buildRenderGroups(items)
-  $: agentIcon = agentOption((session.agentKind ?? 'claude-code') as BackendKind).icon
+  // Subagent turns (isSidechain: true) nested under the Agent tool_use that
+  // spawned them (TASK-N6X4R Task 3) — computed alongside `items` from the
+  // same raw `messages`, since buildSubagentGroups needs both (the raw
+  // messages to find sidechain turns, and `items` to cross-reference which
+  // Agent tool_use ids actually landed in this loaded page).
+  $: subagents = buildSubagentGroups(messages, items)
+  $: agent = agentOption((session.agentKind ?? 'claude-code') as BackendKind)
+  $: agentIcon = agent.icon
+  // Whether this kind has a chat transcript reader at all (TASK-N6X4R) — see
+  // chatEmptyState in ../chat.ts for why this, not `available` alone, decides
+  // the empty-state copy.
+  $: chatSupported = agent.supportsChat
+  $: emptyState = chatEmptyState(chatSupported, available, messages.length > 0)
+
+  // Chat can never populate for a kind with no reader — skip the useless
+  // fetch (the backend would just answer `available:false` anyway) and show
+  // the "not available" state immediately instead of flashing "Loading
+  // messages…" first. Ideally we don't even land here: TerminalView only
+  // mounts ChatView once its own `chatAvailable` probe has confirmed
+  // availability, which never happens for these kinds — this is a
+  // belt-and-suspenders guard for whenever that isn't true (e.g. ChatView
+  // reused elsewhere, or a probe race). A plain function (not inlined in the
+  // `$:` block) — mirrors refreshChatAvailability in TerminalView.svelte,
+  // which avoids eslint-plugin-svelte flagging the synchronous state writes
+  // as a possible infinite reactive loop.
+  function beginLoad(sessionId: string, supportsChat: boolean) {
+    if (supportsChat) {
+      void loadInitial(sessionId)
+    } else {
+      loadedFor = sessionId
+      messages = []
+      available = false
+      hasMore = false
+      firstLoadDone = true
+    }
+  }
+  $: if (session.id && session.id !== loadedFor) beginLoad(session.id, chatSupported)
+
+  // Steer the user straight to the terminal rather than leaving them on a
+  // chat pane that can never show anything — fires once per mount (this
+  // component is recreated per session switch, see the onMount comment
+  // below on the subscribeChat call).
+  let autoSwitchedToTerminal = false
+  function switchToTerminalOnce() {
+    if (autoSwitchedToTerminal) return
+    autoSwitchedToTerminal = true
+    onSwitchToTerminal()
+  }
+  $: if (emptyState === 'unsupported') switchToTerminalOnce()
+
   $: showNeedsCard =
     session.needsSince != null && !messages.some((m) => m.ts >= (session.needsSince as number))
   $: writeDisabledReason = !canWrite ? 'Another client controls this session.' : ''
@@ -289,17 +291,18 @@
     if (loadedFor !== sessionId) return // superseded by another session switch
     available = result.available
     messages = mergeChatMessages([], result.messages)
-    hasMore = result.messages.length >= 50
+    // Count only main-thread messages — a page's subagent messages ride
+    // along on top of `limit` (TASK-N6X4R), so `result.messages.length` alone
+    // would almost always read >= 50 and never stop offering "load older".
+    hasMore = mainlineStats(result.messages).mainCount >= 50
     firstLoadDone = true
     await tick()
     scrollToBottom()
   }
 
   // Re-fires on mount and whenever session.id changes — this component is
-  // reused across session switches like TerminalView/DiffView.
-  $: if (session.id && session.id !== loadedFor) {
-    void loadInitial(session.id)
-  }
+  // reused across session switches like TerminalView/DiffView. (Guarded on
+  // chatSupported up near that flag's definition, above.)
 
   // Per-session draft persistence (TASK-5E5CY): restore the saved draft the
   // moment session.id changes to one we haven't already switched to — this
@@ -322,14 +325,21 @@
     if (loadingOlder || !hasMore || !session.id || messages.length === 0) return
     const sessionId = session.id
     loadingOlder = true
-    const oldestTs = messages[0].ts
+    // A subagent runs during its spawning turn, so its own timestamps can
+    // precede that turn's — paginating from messages[0].ts (which may be a
+    // sidechain message) can skip main-thread messages or stall pagination.
+    // Fall back to messages[0].ts only in the (not normally expected) case
+    // where the loaded list has no main-thread message at all.
+    const oldestTs = mainlineStats(messages).oldestMainTs ?? messages[0].ts
     try {
       const result = await getChatMessages(sessionId, { beforeTs: oldestTs, limit: 50 })
       if (loadedFor !== sessionId) return
       const previousScrollHeight = chatBody.scrollHeight
       const previousScrollTop = chatBody.scrollTop
       messages = mergeChatMessages(messages, result.messages)
-      hasMore = result.messages.length >= 50
+      // See loadInitial — count only main-thread messages when deciding
+      // whether a full page came back (TASK-N6X4R).
+      hasMore = mainlineStats(result.messages).mainCount >= 50
       await tick()
       chatBody.scrollTop = chatBody.scrollHeight - previousScrollHeight + previousScrollTop
     } catch {
@@ -378,12 +388,6 @@
     if (next.has(toolUseId)) next.delete(toolUseId)
     else next.add(toolUseId)
     expandedIds = next
-  }
-
-  function nodeColor(item: ChatToolActivityItem): string {
-    if (item.result === null) return 'hsl(var(--st-run))'
-    if (item.result.isError) return 'hsl(var(--st-error))'
-    return 'hsl(var(--st-done))'
   }
 
   async function submit() {
@@ -449,66 +453,70 @@
 
 {#if !firstLoadDone}
   <div class="chat-view chat-empty">Loading messages…</div>
-{:else if !available}
-  <div class="chat-view chat-empty">No messages yet — start the conversation below.</div>
+{:else if emptyState === 'unsupported'}
+  <!-- TASK-N6X4R: this kind has no chat reader (supportsChat:false) — chat can
+       NEVER populate, so never invite a message here. autoSwitchedToTerminal
+       above already steers away; this button covers the case that doesn't
+       (e.g. onSwitchToTerminal is a no-op in some host). -->
+  <div class="chat-view chat-empty">
+    <p>{agent.label} doesn't have a chat view — its output only shows in the terminal.</p>
+    <button type="button" class="btn btn-outline btn-sm" on:click={onSwitchToTerminal}>
+      Switch to terminal
+    </button>
+  </div>
+{:else if emptyState === 'waiting'}
+  <!-- Chat-capable, but nothing recoverable yet (transcript not written, server
+       not up) — a waiting message, not an invitation to type. -->
+  <div class="chat-view chat-empty">Waiting for chat to become available…</div>
 {:else}
   <div class="chat-view">
     <div class="chat-body" bind:this={chatBody} on:scroll={onScroll}>
-      {#each renderGroups as group (group.key)}
-        {#if group.kind === 'user'}
-          <div class="user-row">
-            <div class="user-bubble">{group.text.text}</div>
-          </div>
-        {:else if group.kind === 'assistant-text'}
-          <div class="turn">
-            <div class="turn-row">
-              <div class="rail">
-                <img class="agent-icon" src={agentIcon} width="20" height="20" alt="" />
-              </div>
-              <div class="row-content assistant-text">{@html renderMarkdown(group.text.text)}</div>
-            </div>
-          </div>
-        {:else}
-          <div class="turn">
-            {#each group.activity.items as toolItem (toolItem.toolUseId)}
-              <div class="turn-row">
-                <div class="rail">
-                  <span class="node" style="background:{nodeColor(toolItem)}"></span>
-                </div>
-                <div class="row-content">
-                  <button
-                    type="button"
-                    class="activity-trigger"
-                    aria-expanded={expandedIds.has(toolItem.toolUseId)}
-                    on:click={() => toggleExpanded(toolItem.toolUseId)}
-                  >
-                    {toolItem.summary}
-                  </button>
-                  {#if expandedIds.has(toolItem.toolUseId)}
-                    <div class="activity-detail">
-                      <pre>{JSON.stringify(toolItem.input, null, 2)}</pre>
-                      {#if toolItem.result}
-                        <pre class="result" class:error={toolItem.result.isError}>{toolItem.result
-                            .content}</pre>
-                      {/if}
-                    </div>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-            {#if group.text}
-              <div class="turn-row">
-                <div class="rail">
-                  <img class="agent-icon" src={agentIcon} width="20" height="20" alt="" />
-                </div>
-                <div class="row-content assistant-text">
-                  {@html renderMarkdown(group.text.text)}
-                </div>
+      {#if emptyState === 'empty'}
+        <div class="chat-empty-inline">No messages yet — start the conversation below.</div>
+      {/if}
+      <ChatTurnList
+        {items}
+        {agentIcon}
+        {expandedIds}
+        {toggleExpanded}
+        subagentsByToolUseId={subagents.byToolUseId}
+      />
+
+      {#if subagents.orphaned.length > 0}
+        <!-- TASK-N6X4R Task 3: subagent transcript whose spawning Agent
+             tool_use isn't in this loaded page (or had no parentUuid at all)
+             — degrade gracefully rather than dropping the content: show it
+             grouped, clearly labeled, collapsed by default. Chronological
+             placement isn't meaningful here (that's the whole reason it's
+             orphaned), so these render together after the main transcript. -->
+        <div class="subagent-orphaned-section">
+          {#each subagents.orphaned as group (group.parentUuid ?? 'orphan-none')}
+            {@const key = `orphan:${group.parentUuid ?? 'none'}`}
+            <button
+              type="button"
+              class="subagent-orphan-trigger"
+              aria-expanded={expandedIds.has(key)}
+              on:click={() => toggleExpanded(key)}
+            >
+              Subagent work (unmatched)
+              <span class="subagent-orphan-badge"
+                >{group.turnCount} {group.turnCount === 1 ? 'turn' : 'turns'}</span
+              >
+            </button>
+            {#if expandedIds.has(key)}
+              <div class="subagent-orphan-body">
+                <ChatTurnList
+                  items={group.items}
+                  {agentIcon}
+                  {expandedIds}
+                  {toggleExpanded}
+                  nested={true}
+                />
               </div>
             {/if}
-          </div>
-        {/if}
-      {/each}
+          {/each}
+        </div>
+      {/if}
 
       {#if showNeedsCard}
         <div class="needs-card">
@@ -627,7 +635,22 @@
   .chat-empty {
     align-items: center;
     justify-content: center;
+    gap: 0.75rem;
     padding: 2rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.85rem;
+    text-align: center;
+  }
+  .chat-empty p {
+    margin: 0;
+    max-width: 32rem;
+  }
+  /* Genuinely-empty conversation (TASK-N6X4R): shown inline above the input
+     bar, not as a full-pane replacement, so "start the conversation below"
+     still points at something visible. */
+  .chat-empty-inline {
+    margin: auto 0;
+    padding: 2rem 0;
     color: hsl(var(--muted-foreground));
     font-size: 0.85rem;
     text-align: center;
@@ -641,108 +664,21 @@
     flex-direction: column;
   }
 
-  /* ── user bubble ── */
-  .user-row {
-    display: flex;
-    margin: 0.4rem 0;
+  /* ── orphaned subagent work (TASK-N6X4R Task 3) — a sidechain group whose
+     spawning Agent tool_use isn't in this loaded page (or had no parentUuid
+     at all). Same trigger/badge language as ChatTurnList's attached-subagent
+     row (kept as a separate, unscoped copy here since Svelte's per-component
+     style scoping means ChatTurnList's `<style>` doesn't reach markup written
+     directly in this file), so it reads consistently whichever case applies. */
+  .subagent-orphaned-section {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px dashed hsl(var(--border));
   }
-  .user-bubble {
-    background: hsl(var(--primary) / 0.12);
-    border: 1px solid hsl(var(--primary) / 0.35);
-    border-radius: var(--radius);
-    max-width: min(78%, 560px);
-    margin-left: auto;
-    padding: 0.5rem 0.75rem;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 0.85rem;
-    line-height: 1.5;
-  }
-
-  /* ── assistant turn: full-width doc flow, spine in the gutter ── */
-  .turn {
-    display: flex;
-    flex-direction: column;
-    margin: 0.5rem 0;
-  }
-  .turn-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.6rem;
-  }
-  .rail {
-    position: relative;
-    flex: 0 0 1.75rem;
-    min-height: 1.75rem;
+  .subagent-orphan-trigger {
     display: flex;
     align-items: center;
-    justify-content: center;
-  }
-  .rail::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    width: 2px;
-    background: hsl(var(--border));
-    transform: translateX(-50%);
-  }
-  .turn-row:first-child .rail::before {
-    top: 50%;
-  }
-  .turn-row:last-child .rail::before {
-    bottom: 50%;
-  }
-  .node {
-    position: relative;
-    z-index: 1;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-  }
-  .agent-icon {
-    position: relative;
-    z-index: 1;
-    border-radius: 5px;
-    object-fit: contain;
-    background: hsl(var(--card));
-    box-shadow: 0 0 0 3px hsl(var(--card));
-  }
-  .row-content {
-    flex: 1;
-    min-width: 0;
-    padding: 0.15rem 0;
-  }
-  .assistant-text {
-    font-size: 0.85rem;
-    line-height: 1.6;
-  }
-  .assistant-text :global(p) {
-    margin: 0.35rem 0;
-  }
-  .assistant-text :global(p:first-child) {
-    margin-top: 0;
-  }
-  .assistant-text :global(p:last-child) {
-    margin-bottom: 0;
-  }
-  .assistant-text :global(pre) {
-    overflow-x: auto;
-    padding: 0.5rem 0.6rem;
-    border-radius: calc(var(--radius) - 3px);
-    background: hsl(var(--accent-bg));
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.78rem;
-  }
-  .assistant-text :global(code) {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85em;
-  }
-
-  /* ── tool activity row ── */
-  .activity-trigger {
-    display: block;
+    gap: 0.4rem;
     width: 100%;
     text-align: left;
     padding: 0.3rem 0.5rem;
@@ -752,38 +688,24 @@
     color: hsl(var(--muted-foreground));
     cursor: pointer;
   }
-  .activity-trigger:hover {
+  .subagent-orphan-trigger:hover {
     color: hsl(var(--foreground));
     background: hsl(var(--accent-bg));
   }
-  @media (prefers-reduced-motion: no-preference) {
-    .activity-trigger {
-      transition:
-        background-color 0.12s ease,
-        color 0.12s ease;
-    }
-  }
-  .activity-detail {
-    padding: 0.4rem 0.5rem 0.6rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-  .activity-detail pre {
-    overflow-x: auto;
-    padding: 0.5rem 0.6rem;
-    border-radius: calc(var(--radius) - 3px);
-    background: hsl(var(--accent-bg));
+  .subagent-orphan-badge {
+    flex: 0 0 auto;
+    font-size: 0.7rem;
+    color: hsl(var(--muted-foreground));
     border: 1px solid hsl(var(--border));
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.76rem;
-    white-space: pre-wrap;
-    word-break: break-word;
+    border-radius: calc(var(--radius) - 4px);
+    padding: 0 0.35rem;
   }
-  .activity-detail pre.result.error {
-    color: hsl(var(--st-error));
-    border-color: hsl(var(--st-error) / 0.4);
-    background: hsl(var(--st-error) / 0.08);
+  .subagent-orphan-body {
+    margin-left: 0.15rem;
+    padding: 0.4rem 0 0.4rem 0.7rem;
+    border-left: 2px solid hsl(var(--border));
+    background: hsl(var(--muted-foreground) / 0.04);
+    border-radius: 0 calc(var(--radius) - 3px) calc(var(--radius) - 3px) 0;
   }
 
   /* ── needs-input fallback card ── */
@@ -955,19 +877,9 @@
     .chat-body {
       padding: 0.6rem 0.65rem;
     }
-    .rail {
-      flex: 0 0 1.3rem;
-      min-height: 1.3rem;
-    }
-    .turn-row {
-      gap: 0.4rem;
-    }
     .chat-input-bar {
       padding: 0.6rem 0.65rem;
       padding-bottom: max(0.6rem, env(safe-area-inset-bottom));
-    }
-    .user-bubble {
-      max-width: 88%;
     }
   }
 </style>
