@@ -3,13 +3,21 @@
 #
 # Usage: pnpm setup   (or: bash scripts/setup.sh)
 #        pnpm setup -- --serve=none|tailscale   (skips the interactive prompt)
+#        pnpm setup -- --sandbox=bwrap|none     (default 'bwrap'; see step d)
 #
 # What it does (prep only — does NOT build or start the service):
-#   a. Detects Linux or macOS; fails on anything else
+#   a. Detects Linux or macOS; fails on anything else. Also detects whether
+#      this checkout is a LINKED git worktree (scripts/lib/target.sh) — if so,
+#      steps d and e below are SKIPPED entirely (never write/modify production
+#      config from a worktree; see the loud notice this script prints).
 #   b. Checks prereqs (pnpm required; node 22+, claude, tailscale, openssl warned/noted)
 #   c. pnpm install + @electron/rebuild for native ABI; verifies electron binary
-#   d. Generates ~/.config/slipstream/server.env (token + bind + port) if absent
-#   e. Installs systemd unit (Linux) or LaunchAgent plist (macOS); enables but does NOT start
+#   d. Generates ~/.config/slipstream/server.env (token + bind + port + sandbox) if
+#      absent; SLIPSTREAM_SANDBOX=bwrap|none is written on a fresh file and, for an
+#      existing file, appended only if absent (sticky — an existing value, including
+#      'none', is never touched). SKIPPED from a linked worktree.
+#   e. Installs systemd unit (Linux) or LaunchAgent plist (macOS); enables but does NOT
+#      start. SKIPPED from a linked worktree.
 #   e2. Installs the shared per-worktree "dev" instance scaffolding (Linux/systemd
 #       only) — a linked git worktree deploys ONLY to its own isolated dev instance
 #       (own port, own data dir) and can never touch this machine's production
@@ -21,12 +29,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$REPO_ROOT"
 
 # ---------------------------------------------------------------------------
 # Argument parsing — lets a caller (e.g. an automated skill) drive the
 # remote-access choice without an interactive terminal.
 # ---------------------------------------------------------------------------
 SERVE_ARG=""
+SANDBOX_ARG=""
 for arg in "$@"; do
   case "$arg" in
     --serve=tailscale|--serve=none)
@@ -36,8 +46,15 @@ for arg in "$@"; do
       echo "✗ Unknown --serve value: '${arg#--serve=}' (expected 'tailscale' or 'none')" >&2
       exit 1
       ;;
+    --sandbox=bwrap|--sandbox=none)
+      SANDBOX_ARG="${arg#--sandbox=}"
+      ;;
+    --sandbox=*)
+      echo "✗ Unknown --sandbox value: '${arg#--sandbox=}' (expected 'bwrap' or 'none')" >&2
+      exit 1
+      ;;
     -h|--help)
-      echo "Usage: pnpm setup [-- --serve=tailscale|none]"
+      echo "Usage: pnpm setup [-- --serve=tailscale|none] [--sandbox=bwrap|none]"
       exit 0
       ;;
     *)
@@ -47,6 +64,11 @@ for arg in "$@"; do
   esac
 done
 
+# SANDBOX_CHOICE is only ever used to pick a value when SLIPSTREAM_SANDBOX is
+# ABSENT from server.env — it's sticky once present (see section d below), so
+# there's no interactive prompt here, just a default.
+SANDBOX_CHOICE="${SANDBOX_ARG:-bwrap}"
+
 # ---------------------------------------------------------------------------
 # Node 22 enforcement — needed for native module ABI compatibility with Electron 39.
 # with_node22 lives in scripts/lib/node22.sh (shared with deploy.sh).
@@ -55,6 +77,8 @@ done
 source "$SCRIPT_DIR/lib/node22.sh"
 # shellcheck source=lib/devScaffold.sh
 source "$SCRIPT_DIR/lib/devScaffold.sh"
+# shellcheck source=lib/target.sh
+source "$SCRIPT_DIR/lib/target.sh"
 
 echo ""
 echo "▶ Slipstream setup"
@@ -78,6 +102,46 @@ case "$OS" in
     exit 1
     ;;
 esac
+
+# ---------------------------------------------------------------------------
+# Linked-worktree guard — a linked git worktree (e.g. a per-ticket worktree
+# under .claude/worktrees/) must NEVER be able to repoint this machine's
+# production Slipstream service at itself. setup.sh derives everything it
+# writes (WorkingDirectory=, server.env) from REPO_ROOT, so unlike deploy.sh
+# (which has an explicit target guard) an unguarded setup.sh run from a
+# worktree would silently reconfigure prod. See scripts/lib/target.sh and
+# docs/DEVELOPMENT.md §Dev vs prod deploy targets.
+# ---------------------------------------------------------------------------
+if slipstream_is_linked_worktree; then
+  IS_WORKTREE=1
+else
+  IS_WORKTREE=0
+fi
+
+if [[ "$IS_WORKTREE" == "1" ]]; then
+  echo ""
+  echo "══════════════════════════════════════════════════════════════"
+  echo "⚠  Linked git worktree detected — production will NOT be configured"
+  echo "══════════════════════════════════════════════════════════════"
+  echo "  This checkout ($REPO_ROOT) is a linked git worktree, not the main"
+  echo "  checkout. Running 'pnpm setup' here will NOT touch this machine's"
+  echo "  production Slipstream service. Skipped:"
+  echo "    - writing/enabling slipstream.service (or the macOS LaunchAgent)"
+  echo "    - creating or modifying ~/.config/slipstream/server.env"
+  echo ""
+  echo "  This is deliberate: setup.sh derives its target from where it's run"
+  echo "  from, and a linked worktree must never be able to repoint production"
+  echo "  at itself."
+  echo ""
+  echo "  Still performed below: prerequisite checks, 'pnpm install', the"
+  echo "  native-ABI rebuild, and this worktree's dev-instance scaffolding —"
+  echo "  everything a linked worktree actually needs. Afterward, 'pnpm deploy'"
+  echo "  here builds and starts THIS worktree's own isolated dev instance"
+  echo "  (never production) — see 'pnpm dev:slots'."
+  echo ""
+  echo "  To configure PRODUCTION, run 'pnpm setup' from the MAIN checkout."
+  echo "══════════════════════════════════════════════════════════════"
+fi
 
 # ---------------------------------------------------------------------------
 # b. Prereq checks
@@ -143,46 +207,51 @@ fi
 # ---------------------------------------------------------------------------
 # b2. Remote access choice (Tailscale HTTPS, or local-only)
 # ---------------------------------------------------------------------------
-echo ""
-echo "▶ Remote access setup"
-
 SERVE_CHOICE="none"
-if [[ -n "$SERVE_ARG" ]]; then
-  SERVE_CHOICE="$SERVE_ARG"
-  echo "  (--serve=$SERVE_CHOICE passed — skipping interactive prompt)"
-elif [[ ! -t 0 ]]; then
-  echo "  (non-interactive shell — defaulting to local-only; SLIPSTREAM_SERVE=none)"
-  echo "  Re-run 'pnpm setup' in a terminal, or pass --serve=tailscale|none, to change this."
-  SERVE_CHOICE="none"
-else
-  printf '  Set up remote phone access via Tailscale HTTPS? [y/N] '
-  read -r _serve_reply || _serve_reply=""
-  case "$_serve_reply" in
-    [yY]|[yY][eE][sS])
-      SERVE_CHOICE="tailscale"
-      ;;
-    *)
-      SERVE_CHOICE="none"
-      ;;
-  esac
-fi
+if [[ "$IS_WORKTREE" == "0" ]]; then
+  echo ""
+  echo "▶ Remote access setup"
 
-if [[ "$SERVE_CHOICE" == "tailscale" ]]; then
-  echo "✔ Remote access: Tailscale HTTPS (SLIPSTREAM_SERVE=tailscale)"
-  if [[ "${TAILSCALE_AVAILABLE:-0}" != "1" ]]; then
-    echo "⚠  tailscale is not on PATH yet."
-    echo "   Tailscale is a system-level CLI, not a pnpm/npm package — install it from:"
-    echo "     https://tailscale.com/download"
-    echo "   You'll also need HTTPS Certificates enabled for your tailnet:"
-    echo "     https://login.tailscale.com/admin/dns"
-    echo "   ('pnpm deploy' will enforce this later; setup just records your choice.)"
+  if [[ -n "$SERVE_ARG" ]]; then
+    SERVE_CHOICE="$SERVE_ARG"
+    echo "  (--serve=$SERVE_CHOICE passed — skipping interactive prompt)"
+  elif [[ ! -t 0 ]]; then
+    echo "  (non-interactive shell — defaulting to local-only; SLIPSTREAM_SERVE=none)"
+    echo "  Re-run 'pnpm setup' in a terminal, or pass --serve=tailscale|none, to change this."
+    SERVE_CHOICE="none"
+  else
+    printf '  Set up remote phone access via Tailscale HTTPS? [y/N] '
+    read -r _serve_reply || _serve_reply=""
+    case "$_serve_reply" in
+      [yY]|[yY][eE][sS])
+        SERVE_CHOICE="tailscale"
+        ;;
+      *)
+        SERVE_CHOICE="none"
+        ;;
+    esac
+  fi
+
+  if [[ "$SERVE_CHOICE" == "tailscale" ]]; then
+    echo "✔ Remote access: Tailscale HTTPS (SLIPSTREAM_SERVE=tailscale)"
+    if [[ "${TAILSCALE_AVAILABLE:-0}" != "1" ]]; then
+      echo "⚠  tailscale is not on PATH yet."
+      echo "   Tailscale is a system-level CLI, not a pnpm/npm package — install it from:"
+      echo "     https://tailscale.com/download"
+      echo "   You'll also need HTTPS Certificates enabled for your tailnet:"
+      echo "     https://login.tailscale.com/admin/dns"
+      echo "   ('pnpm deploy' will enforce this later; setup just records your choice.)"
+    fi
+  else
+    echo "✔ Remote access: local-only (SLIPSTREAM_SERVE=none)"
+    echo "  ▶ The server stays bound to 127.0.0.1 — reachable on this machine only."
+    echo "    To reach it from a phone (PWA install + push need an HTTPS origin), put your"
+    echo "    own HTTPS in front of http://127.0.0.1:\$PORT — e.g. a Cloudflare Tunnel, or a"
+    echo "    reverse proxy (Caddy/nginx) with a Let's Encrypt cert. 'pnpm deploy' will skip Tailscale."
   fi
 else
-  echo "✔ Remote access: local-only (SLIPSTREAM_SERVE=none)"
-  echo "  ▶ The server stays bound to 127.0.0.1 — reachable on this machine only."
-  echo "    To reach it from a phone (PWA install + push need an HTTPS origin), put your"
-  echo "    own HTTPS in front of http://127.0.0.1:\$PORT — e.g. a Cloudflare Tunnel, or a"
-  echo "    reverse proxy (Caddy/nginx) with a Let's Encrypt cert. 'pnpm deploy' will skip Tailscale."
+  echo ""
+  echo "▶ Remote access setup — skipped (linked worktree; see notice above)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -243,6 +312,7 @@ echo ""
 CONFIG_DIR="${HOME}/.config/slipstream"
 ENV_FILE="$CONFIG_DIR/server.env"
 
+if [[ "$IS_WORKTREE" == "0" ]]; then
 mkdir -p "$CONFIG_DIR"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -259,6 +329,24 @@ if [[ -f "$ENV_FILE" ]]; then
     printf 'SLIPSTREAM_SERVE=%s\n' "$SERVE_CHOICE" >> "$ENV_FILE"
     echo "✔ Appended SLIPSTREAM_SERVE=${SERVE_CHOICE} to existing server.env"
   fi
+
+  # SLIPSTREAM_SANDBOX is STICKY — unlike SLIPSTREAM_SERVE above, an existing
+  # value (including an explicit SLIPSTREAM_SANDBOX=none opt-out) is NEVER
+  # overwritten; only append when the key is absent. Decision logic lives in
+  # scripts/lib/serverEnv.mjs (unit-tested) via this CLI shim, rather than a
+  # second grep/append reimplementation in bash.
+  _sandbox_result="$(node "$SCRIPT_DIR/server-env.mjs" apply-sandbox "$ENV_FILE" "$SANDBOX_CHOICE")"
+  if [[ "$_sandbox_result" == "appended" ]]; then
+    echo "✔ Appended SLIPSTREAM_SANDBOX=${SANDBOX_CHOICE} to existing server.env"
+    echo "  Containment takes effect on the next slipstream.service restart (e.g. 'pnpm deploy')."
+    if [[ "$SANDBOX_CHOICE" == "bwrap" ]] && ! command -v bwrap &>/dev/null; then
+      echo "⚠  bwrap is not on PATH — containment will be inert until it's installed."
+      echo "   agentSandbox.ts fails open when bwrap is missing: agents will run"
+      echo "   unsandboxed, not blocked."
+    fi
+  else
+    echo "  SLIPSTREAM_SANDBOX already set in server.env — leaving your existing choice untouched."
+  fi
 else
   echo "▶ Generating $ENV_FILE…"
 
@@ -273,18 +361,28 @@ SLIPSTREAM_TOKEN=${TOKEN}
 SLIPSTREAM_BIND=127.0.0.1
 SLIPSTREAM_PORT=7421
 SLIPSTREAM_SERVE=${SERVE_CHOICE}
+SLIPSTREAM_SANDBOX=${SANDBOX_CHOICE}
 ELECTRON_RUN_AS_NODE=1
 EOF
 
   chmod 600 "$ENV_FILE"
   echo "✔ server.env written and locked to 600: $ENV_FILE"
   echo "  (keep this file safe — it holds your auth token)"
+  if [[ "$SANDBOX_CHOICE" == "bwrap" ]] && ! command -v bwrap &>/dev/null; then
+    echo "⚠  bwrap is not on PATH — containment will be inert until it's installed."
+    echo "   agentSandbox.ts fails open when bwrap is missing: agents will run"
+    echo "   unsandboxed, not blocked."
+  fi
+fi
+else
+  echo "▶ server.env — skipped (linked worktree; see notice above; NOT written)"
 fi
 
 # ---------------------------------------------------------------------------
 # e. Install service definition
 # ---------------------------------------------------------------------------
 echo ""
+if [[ "$IS_WORKTREE" == "0" ]]; then
 echo "▶ Installing service definition…"
 
 SERVE_WRAPPER="$REPO_ROOT/scripts/serve-with-env.sh"
@@ -371,6 +469,9 @@ EOF
   fi
   echo "  Service is NOT started now — run 'pnpm deploy' to build and start it."
 fi
+else
+  echo "▶ Service definition — skipped (linked worktree; see notice above; NOT written)"
+fi
 
 # ---------------------------------------------------------------------------
 # e2. Dev-instance scaffolding — per-linked-worktree isolated dev instances.
@@ -420,24 +521,38 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "══════════════════════════════════════════════════════════════"
-echo "✔ Setup complete!"
-echo ""
-echo "  Config:  $ENV_FILE"
-echo "  Token:   (see SLIPSTREAM_TOKEN in server.env)"
-echo ""
-if [[ "$SERVE_CHOICE" == "tailscale" ]]; then
-  echo "  Next step: run 'pnpm deploy' to build the app, start the"
-  echo "  service, and publish it over Tailscale HTTPS."
+if [[ "$IS_WORKTREE" == "0" ]]; then
+  echo "✔ Setup complete!"
+  echo ""
+  echo "  Config:  $ENV_FILE"
+  echo "  Token:   (see SLIPSTREAM_TOKEN in server.env)"
+  echo ""
+  if [[ "$SERVE_CHOICE" == "tailscale" ]]; then
+    echo "  Next step: run 'pnpm deploy' to build the app, start the"
+    echo "  service, and publish it over Tailscale HTTPS."
+  else
+    echo "  Next step: run 'pnpm deploy' to build the app and start the"
+    echo "  service. Tailscale publishing is OFF (SLIPSTREAM_SERVE=none) —"
+    echo "  the app will be local-only at http://127.0.0.1:7421/."
+  fi
+  echo ""
+  echo "  For desktop development: 'pnpm dev' (no setup needed for that)."
+  echo ""
+  echo "  Working from a linked git worktree? 'pnpm deploy' there always targets"
+  echo "  its own isolated dev instance (own port, own data dir) and can never"
+  echo "  deploy to this machine's production instance — see 'pnpm dev:slots'."
 else
-  echo "  Next step: run 'pnpm deploy' to build the app and start the"
-  echo "  service. Tailscale publishing is OFF (SLIPSTREAM_SERVE=none) —"
-  echo "  the app will be local-only at http://127.0.0.1:7421/."
+  echo "✔ Setup complete for this linked worktree (dev-instance prerequisites only)."
+  echo ""
+  echo "  Production was not touched: no server.env was written or modified, and"
+  echo "  no slipstream.service (or macOS LaunchAgent) was written or enabled."
+  echo ""
+  echo "  Next step: run 'pnpm deploy' here to build and start THIS worktree's own"
+  echo "  isolated dev instance — never production — see 'pnpm dev:slots'."
+  echo ""
+  echo "  For desktop development: 'pnpm dev' (no setup needed for that)."
+  echo ""
+  echo "  To configure PRODUCTION, run 'pnpm setup' from the main checkout."
 fi
-echo ""
-echo "  For desktop development: 'pnpm dev' (no setup needed for that)."
-echo ""
-echo "  Working from a linked git worktree? 'pnpm deploy' there always targets"
-echo "  its own isolated dev instance (own port, own data dir) and can never"
-echo "  deploy to this machine's production instance — see 'pnpm dev:slots'."
 echo "══════════════════════════════════════════════════════════════"
 echo ""

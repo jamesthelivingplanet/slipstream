@@ -78,9 +78,9 @@ once the ABI already matches. If the rebuild fails (or still doesn't match
 afterward), the deploy exits 1 with the manual rebuild command rather than
 starting a service that can't open its database.
 
-### Three enforcement layers — know the division of labour
+### Four enforcement layers — know the division of labour
 
-These are three independent, differently-scoped guards. None of them
+These are four independent, differently-scoped guards. None of them
 individually blocks everything; be precise about which one is doing what:
 
 1. **`deploy.sh` target guard** — stops `pnpm deploy` itself from reaching
@@ -95,16 +95,34 @@ individually blocks everything; be precise about which one is doing what:
    biased toward false negatives so it never wrongly blocks a legitimate
    command. It does **not** stop a determined bypass (`eval`, base64,
    subshells, etc.) — it isn't meant to.
-3. **bwrap** (`electron/services/agentSandbox.ts`, opt-in via
+3. **`setup.sh` worktree guard** (`scripts/lib/target.sh`) — stops `pnpm
+   setup` from *configuring* prod when run from a linked worktree.
+   `setup.sh` derives everything it writes (a systemd unit's
+   `WorkingDirectory=`, `server.env`) from its own script location, so
+   without this guard running `pnpm setup` inside a worktree would silently
+   repoint the machine's production `slipstream.service` at that worktree —
+   a hole none of the other layers catch, since they guard `deploy.sh` and
+   raw bash, not `setup.sh`. From a linked worktree, `setup.sh` now skips
+   writing/enabling `slipstream.service` (or the macOS LaunchAgent) and skips
+   creating or modifying `~/.config/slipstream/server.env` entirely, printing
+   a loud notice explaining what was skipped and why. It still runs the
+   prereq checks, `pnpm install`, the native-ABI rebuild, and this worktree's
+   dev-instance scaffolding — everything a linked worktree actually needs.
+4. **bwrap** (`electron/services/agentSandbox.ts`, opt-in via
    `SLIPSTREAM_SANDBOX=bwrap`) — **filesystem containment only**: hides
    prod's data dir and makes the prod checkout read-only inside a sandboxed
    agent PTY's mount namespace. It **cannot** block `systemctl` or
    `tailscale`, because the systemd user bus and the network namespace stay
    shared by design — a dev deploy launched from inside an agent PTY needs
-   both. New dev slots enable it by default. Enabling it for **production**
-   requires manually adding `SLIPSTREAM_SANDBOX=bwrap` to
-   `~/.config/slipstream/server.env` and restarting the service — without
-   that manual step, agents spawned by the prod daemon are not contained.
+   both. New dev slots enable it by default. For **production**, `pnpm
+   setup` now writes `SLIPSTREAM_SANDBOX=bwrap` by default: a fresh
+   `server.env` gets the line automatically, and an existing `server.env`
+   missing the key gets it appended (both take effect on the next
+   `slipstream.service` restart, e.g. via `pnpm deploy`). Pass
+   `--sandbox=none` to opt out instead. Once a `SLIPSTREAM_SANDBOX=` line
+   exists in `server.env` — including an explicit `none` — it is **sticky**:
+   `pnpm setup` never overwrites it again on a re-run, so an operator's past
+   choice (opt-out included) is always preserved.
 
 ### How do I actually use this
 

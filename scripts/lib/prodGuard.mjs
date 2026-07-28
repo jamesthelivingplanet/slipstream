@@ -22,6 +22,15 @@
  * question), while the missed bypass is still just one bug report away from
  * getting tightened.
  *
+ * Write-command argument checking (`checkWriteAndRedirect`) is POSITIONAL
+ * per command, not "deny if any argument is a prod path". `cp`/`install`
+ * only mutate their destination — treating every argument (including a
+ * prod *source* being read) as a potential write was itself a false
+ * positive (e.g. `cp ~/.config/slipstream/server.env /tmp/backup` was
+ * denied even though it never touches prod). `dd` is the same idea via
+ * `if=`/`of=` operands: only `of=` writes. `mv`/`ln` differ on purpose and
+ * still check every argument — see the comments at each check for why.
+ *
  * Heredoc bodies are stripped before any of the above runs (see
  * `stripHeredocs`). A heredoc body is arbitrary free text — e.g. a commit
  * message piped via `git commit -F - <<'EOF' ... EOF` — and splitting it
@@ -278,6 +287,73 @@ function extractRedirectionTargets(segment) {
   return targets
 }
 
+/**
+ * Value of a `cp`/`install`/`mv` `-t`/`--target-directory` option — the
+ * alternate way of specifying the destination directory, which relocates
+ * it out of its usual "last argument" position (everything else becomes a
+ * source). Handles `-t VALUE`, `--target-directory VALUE`, and
+ * `--target-directory=VALUE`. Returns undefined if the option isn't present.
+ */
+function findTargetDirOption(rest) {
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i]
+    if (t === '-t' || t === '--target-directory') return rest[i + 1]
+    if (t.startsWith('--target-directory=')) return t.slice('--target-directory='.length)
+  }
+  return undefined
+}
+
+function findLastNonFlag(rest) {
+  const nonFlags = rest.filter((t) => !t.startsWith('-'))
+  return nonFlags.length > 0 ? nonFlags[nonFlags.length - 1] : undefined
+}
+
+/**
+ * cp/install only mutate their DESTINATION — every other argument is a
+ * source being read, not written. The destination is ordinarily the last
+ * non-flag argument, but `-t DIR`/`--target-directory=DIR` relocates it
+ * into an option value instead, so that takes priority when present.
+ */
+function checkCpOrInstallWrite(cmd, rest, home) {
+  const targetDir = findTargetDirOption(rest)
+  const destination = targetDir !== undefined ? targetDir : findLastNonFlag(rest)
+  if (destination !== undefined && isProdPath(destination, home)) {
+    return deny(`\`${cmd}\` targeting \`${destination}\` writes to the prod data dir/checkout.`)
+  }
+  return null
+}
+
+/**
+ * dd addresses its files via `if=`/`of=` operands, not bare positional
+ * args — only `of=` (output file) writes; `if=` (input file) is a read.
+ * If neither form is present (an invocation shape we don't recognize),
+ * fall back to the conservative all-argument check every other write
+ * command uses, per this module's false-negatives-over-false-positives bias.
+ */
+function checkDdWrite(rest, home) {
+  let hasIfOrOf = false
+  for (const token of rest) {
+    if (token.startsWith('of=')) {
+      hasIfOrOf = true
+      const target = token.slice('of='.length)
+      if (isProdPath(target, home)) {
+        return deny(`\`dd\` writing to \`${token}\` writes to the prod data dir/checkout.`)
+      }
+    } else if (token.startsWith('if=')) {
+      hasIfOrOf = true
+    }
+  }
+  if (hasIfOrOf) return null
+
+  for (const token of rest) {
+    if (token.startsWith('-')) continue
+    if (isProdPath(token, home)) {
+      return deny(`\`dd\` targeting \`${token}\` writes to the prod data dir/checkout.`)
+    }
+  }
+  return null
+}
+
 function checkWriteAndRedirect(segment, cmd, rest, home) {
   const redirectTargets = extractRedirectionTargets(segment)
   for (const target of redirectTargets) {
@@ -293,6 +369,28 @@ function checkWriteAndRedirect(segment, cmd, rest, home) {
     if (!hasInPlace) return null
   }
 
+  if (cmd === 'cp' || cmd === 'install') {
+    return checkCpOrInstallWrite(cmd, rest, home)
+  }
+
+  if (cmd === 'dd') {
+    return checkDdWrite(rest, home)
+  }
+
+  // mv and ln are NOT like cp/install: every argument can mutate prod, not
+  // just one. mv's source stops existing where it was (prod loses the
+  // file) while its destination gets overwritten, so both matter. ln's
+  // target/link-name argument creates or changes a filesystem entry, so a
+  // prod path there is a mutation too — we keep denying on ANY prod
+  // argument here (not just the link-name) as a deliberate conservative
+  // choice: `ln -s <prodfile> /tmp/x` (reading via a symlink into prod) is
+  // niche enough that leaving it blocked is an acceptable false positive,
+  // and untangling ln's argument order (`ln [-s] TARGET LINK_NAME`, or
+  // multiple targets with `-t DIR`) isn't worth it for that case. Every
+  // other WRITE_COMMANDS entry (rm, rmdir, truncate, chmod, chown, touch,
+  // mkdir, sqlite3, tee, sed -i) also lands here: every argument is an
+  // operand they mutate (or, for sqlite3/tee, can mutate), so all-argument
+  // checking is correct for them too.
   for (const token of rest) {
     if (token.startsWith('-')) continue
     if (isProdPath(token, home)) {

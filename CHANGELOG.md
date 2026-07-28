@@ -22,6 +22,59 @@ specifically (schema versioning, build stamping, release flow).
   The mobile media query's side padding on `.mc-inner` was also reduced from
   36px to 16px so it's no longer a disproportionate share of a narrow screen.
 
+### Added
+
+- `pnpm setup` now manages `SLIPSTREAM_SANDBOX` in `~/.config/slipstream/server.env`
+  automatically, so production's bwrap agent-sandbox containment
+  (`electron/services/agentSandbox.ts`) no longer requires a manual, hand-edited opt-in. A
+  fresh `server.env` gets `SLIPSTREAM_SANDBOX=bwrap` written by default; an *existing*
+  `server.env` missing the key gets it appended the same way — both take effect on the next
+  `slipstream.service` restart (e.g. `pnpm deploy`). Pass `--sandbox=none` to opt out (fresh
+  installs) or leave containment off (existing installs). The key is **sticky**: once a
+  `SLIPSTREAM_SANDBOX=` line exists in `server.env`, including an explicit `none`,
+  `pnpm setup` never touches it again on a re-run — an operator's past choice, opt-out
+  included, always wins over whatever `--sandbox=` value is passed later. The append/leave-
+  alone decision for an existing file is pure logic in the new `scripts/lib/serverEnv.mjs`
+  (unit-tested in `scripts/lib/serverEnv.test.mjs`), invoked via a small CLI shim
+  (`scripts/server-env.mjs`) that mirrors the existing `scripts/dev-slot.mjs` pattern, so
+  `scripts/setup.sh` doesn't have to reimplement the grep/append logic a second time in bash.
+
+### Fixed
+
+- `pnpm setup` could silently repoint this machine's *production* Slipstream service at a
+  linked git worktree — a real security hole, not just a footgun. `scripts/setup.sh` derives
+  everything it writes (a systemd unit's `WorkingDirectory=`, `~/.config/slipstream/server.env`)
+  from its own script location (`REPO_ROOT`), with no target-awareness at all: unlike
+  `scripts/deploy.sh`, which has an explicit `slipstream_is_linked_worktree` guard that
+  refuses to deploy `prod` from a worktree, `setup.sh` had no equivalent check, and neither of
+  the repo's other prod guards covered it — `deploy.sh`'s target guard only runs inside
+  `deploy.sh`, and the PreToolUse hook (`scripts/guard-prod.mjs`/`scripts/lib/prodGuard.mjs`)
+  doesn't recognize `pnpm setup`/`bash scripts/setup.sh` as a deploy action. The practical
+  failure mode: running `pnpm setup` inside a per-ticket worktree under `.claude/worktrees/`
+  would overwrite `~/.config/systemd/user/slipstream.service`'s `WorkingDirectory=` to point
+  at the worktree instead of the main checkout, and would create/modify
+  `~/.config/slipstream/server.env` as if configuring production — so the next
+  `systemctl --user restart slipstream.service` (e.g. from `pnpm deploy` run anywhere, or a
+  reboot) would start production against the wrong, possibly-transient checkout. `setup.sh`
+  now sources `scripts/lib/target.sh` and detects a linked worktree the same structural way
+  `deploy.sh` does (`git rev-parse --absolute-git-dir` vs `--git-common-dir`, not path
+  matching), and when true, skips writing/enabling `slipstream.service` (or the macOS
+  LaunchAgent) and skips creating or modifying `server.env` entirely — printing a loud,
+  unmissable notice explaining what was skipped and why. It still runs everything a worktree
+  genuinely needs: prereq checks, `pnpm install`, the native-ABI rebuild, and the
+  dev-instance scaffolding. Behavior from the main checkout is unchanged apart from the
+  `SLIPSTREAM_SANDBOX` handling described above.
+
+- The PreToolUse prod guard denied `cp <prod-file> <scratch-dest>` — a read — because
+  write-command checking scanned every argument rather than the operand the command
+  actually mutates. That also blocked taking a backup of `slipstream.db`, exactly the
+  kind of false positive `prodGuard.mjs`'s own header calls worse than a missed bypass.
+  Argument checking is now positional per command: `cp`/`install` check the destination
+  (last non-flag argument, or a `-t` target), `dd` checks `of=` rather than `if=`, while
+  `mv`/`ln`/`rm`/`truncate`/`chmod`/`chown`/`touch`/`mkdir`/`sqlite3`/`tee`/`sed -i` keep
+  all-argument checking because every operand there is something they mutate. `mv` stays
+  strict where `cp` relaxed because a prod path as *source* still means prod loses the file.
+
 ## [0.6.0] - 2026-07-28
 
 ### Added
