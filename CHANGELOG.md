@@ -39,6 +39,34 @@ specifically (schema versioning, build stamping, release flow).
   | 'assistant' | 'tool'`), mapped onto the DTO's two-role shape the same way
   claude-code's transcript is: tool results ride as a synthetic user turn.
 
+- Subagent work is no longer invisible in the chat view. Claude Code writes
+  each Task-style subagent run to its own transcript beside the main one
+  (`<sessionId>/subagents/agent-<agentId>.jsonl`), and Slipstream read only
+  the main file — so the chat showed the spawning call and its final result
+  with everything in between missing. Those files are now read and merged,
+  and each run is threaded back to the `Agent` tool_use that spawned it via
+  the `toolUseId` in its sibling `.meta.json` (this held for 242 of 243 real
+  subagent runs on the development machine; nested subagents anchor through
+  their ancestor). The renderer nests each run under that call, collapsed by
+  default — subagent output can be several times the size of the
+  conversation it belongs to, so inline rendering would bury the thread.
+
+- The chat view renders extended thinking and images, which were previously
+  parsed and then dropped on the floor. Thinking is collapsed and
+  de-emphasized by default; images render inline, closing a longstanding
+  asymmetry where a chat message could carry an image *to* the agent but
+  never show one coming back. Applies to every backend whose store carries
+  them (claude-code, pi, opencode's `reasoning` parts, grok's AI-SDK
+  reasoning/image parts).
+
+- `Edit` and `Write` tool calls render as a real diff instead of a JSON blob
+  containing `old_string`/`new_string`, reusing the diff renderer the review
+  panel already uses, and `TodoWrite` renders as a status-coloured checklist.
+  Tool summaries also now cover the tools that actually appear in practice —
+  `Agent`, `ToolSearch`, `Skill`, `AskUserQuestion`, `TaskCreate`/`TaskUpdate`
+  and the `mcp__<server>__<tool>` naming pattern all previously fell through
+  to a bare "Used <name>".
+
 ### Changed
 
 - Electron upgraded 33.4.11 → 39.8.10, clearing four high-severity advisories
@@ -112,6 +140,18 @@ specifically (schema versioning, build stamping, release flow).
   output in a chat message is also now height-capped with a scroll
   container instead of rendering in full, which could previously push the
   rest of the conversation far off-screen.
+
+- Chat pagination counts the conversation, not the subagent transcripts
+  merged into it. Now that a page carries each turn's subagent messages
+  alongside it, a page's raw length and first-element timestamp are both
+  unreliable: on a subagent-heavy session the extra messages outnumber the
+  conversation several times over, which would have left "load older"
+  permanently available and could have paginated from a subagent's
+  timestamp — subagents run *during* the turn that spawns them, so their
+  timestamps can precede it. Both the more-available check and the
+  pagination cursor now consider main-thread messages only, and the page
+  limit applies to the conversation so subagent detail can never crowd it
+  out.
 
 - `server.log` rotation could lose and reorder lines, and never actually
   enforced its 10 MiB cap (TASK-N6X4R). `server()` appended asynchronously but

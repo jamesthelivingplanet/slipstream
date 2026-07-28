@@ -212,6 +212,92 @@ describe('readSessionChat', () => {
     expect(messages).toEqual([])
   })
 
+  it('merges subagent transcripts, ordered by ts, threading the root turn via meta.json toolUseId', async () => {
+    fs.mkdirSync(path.join(tmp, 'claude', 'projects', 'any'), { recursive: true })
+    fs.writeFileSync(
+      path.join(tmp, 'claude', 'projects', 'any', 's1.jsonl'),
+      claudeTranscript,
+      'utf8',
+    )
+    const subagentsDir = path.join(tmp, 'claude', 'projects', 'any', 's1', 'subagents')
+    fs.mkdirSync(subagentsDir, { recursive: true })
+    const subagentTranscript = [
+      JSON.stringify({
+        parentUuid: null,
+        isSidechain: true,
+        agentId: 'agentA',
+        type: 'user',
+        uuid: 'sub-u1',
+        // Between the two main-transcript messages, so ordering across the
+        // merge (not just within one source) is exercised.
+        timestamp: '2024-01-01T00:00:00.500Z',
+        message: { role: 'user', content: 'You are implementing a focused bug fix...' },
+      }),
+      JSON.stringify({
+        parentUuid: 'sub-u1',
+        isSidechain: true,
+        agentId: 'agentA',
+        type: 'assistant',
+        uuid: 'sub-a1',
+        timestamp: '2024-01-01T00:00:02.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+      }),
+    ].join('\n')
+    fs.writeFileSync(path.join(subagentsDir, 'agent-agentA.jsonl'), subagentTranscript, 'utf8')
+    fs.writeFileSync(
+      path.join(subagentsDir, 'agent-agentA.meta.json'),
+      JSON.stringify({ toolUseId: 'toolu_parent_call' }),
+      'utf8',
+    )
+
+    const { available, messages } = await readSessionChat(makeDeps(), makeSession())
+
+    expect(available).toBe(true)
+    expect(messages).toHaveLength(4)
+    // ts-ordered across both sources: main u1, sub-u1, main a1, sub-a1.
+    expect(messages.map((m) => m.uuid)).toEqual(['u1', 'sub-u1', 'a1', 'sub-a1'])
+    const subRoot = messages.find((m) => m.uuid === 'sub-u1')
+    expect(subRoot).toMatchObject({ isSidechain: true, parentUuid: 'toolu_parent_call' })
+    const subReply = messages.find((m) => m.uuid === 'sub-a1')
+    // Non-root sidechain line keeps its own internal parentUuid chain, not
+    // the toolUseId — only the chain's first line gets threaded to the call.
+    expect(subReply).toMatchObject({ isSidechain: true, parentUuid: 'sub-u1' })
+  })
+
+  it('returns just the main transcript when the session has no subagents dir', async () => {
+    fs.mkdirSync(path.join(tmp, 'claude', 'projects', 'any'), { recursive: true })
+    fs.writeFileSync(
+      path.join(tmp, 'claude', 'projects', 'any', 's1.jsonl'),
+      claudeTranscript,
+      'utf8',
+    )
+
+    const { available, messages } = await readSessionChat(makeDeps(), makeSession())
+
+    expect(available).toBe(true)
+    expect(messages).toHaveLength(2)
+  })
+
+  it('still returns the main transcript when a subagent file is malformed/unreadable', async () => {
+    fs.mkdirSync(path.join(tmp, 'claude', 'projects', 'any'), { recursive: true })
+    fs.writeFileSync(
+      path.join(tmp, 'claude', 'projects', 'any', 's1.jsonl'),
+      claudeTranscript,
+      'utf8',
+    )
+    const subagentsDir = path.join(tmp, 'claude', 'projects', 'any', 's1', 'subagents')
+    fs.mkdirSync(subagentsDir, { recursive: true })
+    // Malformed JSON — should be skipped, not thrown.
+    fs.writeFileSync(path.join(subagentsDir, 'agent-bad.jsonl'), 'not json\n{{{', 'utf8')
+    // Unreadable: a directory instead of a file at the expected jsonl path.
+    fs.mkdirSync(path.join(subagentsDir, 'agent-dir.jsonl'))
+
+    const { available, messages } = await readSessionChat(makeDeps(), makeSession())
+
+    expect(available).toBe(true)
+    expect(messages).toHaveLength(2)
+  })
+
   it('reads pi session files (cwd-scoped)', async () => {
     const cwd = '/repos/api'
     const dir = piSessionDirFor(cwd)

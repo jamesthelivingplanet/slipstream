@@ -26,9 +26,19 @@
  *     with the tool's output, and the DTO has no third role to give it.
  *
  * Content is `string | Part[]` for every role. Part kinds handled: `text`,
- * `tool-call`, `tool-result`; `image`, `file`, `reasoning`, and the tool
- * approval parts are skipped leniently, matching the sibling mappers'
- * treatment of thinking/image blocks — not rendered in chat (yet).
+ * `tool-call`, `tool-result`, `reasoning` (→ `thinking` block), `image` and
+ * an image-typed `file` (→ `image` block); the tool approval parts are
+ * still skipped leniently.
+ *
+ * `reasoning`/`image`/`file` shapes below are taken from grok-dev's actual
+ * installed `@ai-sdk/provider-utils` type defs — the same package version
+ * this module already verified the envelope against — at
+ * `node_modules/@ai-sdk/provider-utils/dist/index.d.ts` (`ReasoningPart`
+ * ~line 681, `ImagePart` ~line 627, `FilePart` ~line 652, `DataContent`
+ * ~line 598: `string | Uint8Array | ArrayBuffer | Buffer`). The local
+ * `~/.grok/grok.db` `messages` table is empty on this machine (0 rows), so
+ * this mapping is schema-verified against the installed SDK types, not
+ * instance-verified against a captured row.
  */
 import type { ChatBlock, SessionChatMessageDTO } from '../shared/contract.js'
 
@@ -68,12 +78,40 @@ function blockFromPart(raw: unknown): ChatBlock | null {
       if (isError) block.isError = true
       return block
     }
+    case 'reasoning': {
+      const text = p['text']
+      return typeof text === 'string' ? { type: 'thinking', text } : null
+    }
+    case 'image':
+      return imageBlockFromAiSdkValue(p['image'], p['mediaType'])
+    case 'file': {
+      const mediaType = p['mediaType']
+      if (typeof mediaType !== 'string' || !mediaType.startsWith('image/')) return null
+      return imageBlockFromAiSdkValue(p['data'], mediaType)
+    }
     default:
-      // image / file / reasoning / tool-approval-request / tool-approval-response —
-      // not rendered in chat (yet); same leniency as transcriptMessages'/
-      // piChatMessages' handling of thinking/image blocks.
+      // tool-approval-request / tool-approval-response — not rendered in
+      // chat (yet); no visible content to show for these.
       return null
   }
+}
+
+/** AI SDK v6 image/file bytes are `DataContent | URL`
+ *  (string | Uint8Array | ArrayBuffer | Buffer | URL) — grok's persisted
+ *  message_json only round-trips the plain-string case cleanly through
+ *  JSON.stringify/parse (a Buffer/Uint8Array serializes to a
+ *  `{type:'Buffer',data:[...]}` object, not base64 bytes), so only a string
+ *  value is handled here; anything else is skipped leniently. A
+ *  `data:<mediaType>;base64,<data>` URI is unwrapped; a bare string is
+ *  assumed to already be a base64 payload (the SDK's typical persisted
+ *  form for an already-resolved message). */
+function imageBlockFromAiSdkValue(rawValue: unknown, mediaTypeHint: unknown): ChatBlock | null {
+  if (typeof rawValue !== 'string' || !rawValue) return null
+  const match = /^data:([^;,]+)(?:;[^,]*)*;base64,(.+)$/.exec(rawValue)
+  if (match) return { type: 'image', mediaType: match[1], data: match[2] }
+  const block: ChatBlock = { type: 'image', data: rawValue }
+  if (typeof mediaTypeHint === 'string') block.mediaType = mediaTypeHint
+  return block
 }
 
 /** `ToolResultPart.output` is a discriminated union (ai@6's
@@ -150,7 +188,7 @@ function blocksFromContent(content: unknown): ChatBlock[] {
 
 /** Map one `messages` table row to a chat DTO, or null when the row is
  *  unusable (malformed JSON, unrecognized role, unparseable timestamp) or
- *  has nothing renderable (e.g. a reasoning-only assistant turn).
+ *  has nothing renderable (e.g. a turn with only a tool-approval part).
  *
  *  `ts` unparseable → the row is dropped rather than emitting NaN, same
  *  choice transcriptMessages.ts and piChatMessages.ts make: `ts` is a DTO
@@ -174,7 +212,7 @@ export function mapGrokMessageRow(row: GrokMessageRow): SessionChatMessageDTO | 
   if (role !== 'user' && role !== 'assistant' && role !== 'tool') return null
 
   const blocks = blocksFromContent(msg['content'])
-  if (blocks.length === 0) return null // e.g. a reasoning-only turn — nothing to show
+  if (blocks.length === 0) return null // e.g. a turn whose only part was a tool-approval part — nothing to show
 
   const ts = Date.parse(row.created_at)
   if (!Number.isFinite(ts)) return null

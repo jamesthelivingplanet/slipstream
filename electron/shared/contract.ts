@@ -409,21 +409,42 @@ export interface IAgentEventStore {
 /** One content block of a chat message. `tool_use.input` is passed through
  *  from the transcript as-is (tool-specific shape, e.g. Bash's
  *  `{ command, description }`) — the renderer decides how to display it per
- *  tool name. */
+ *  tool name. `thinking` is the model's chain-of-thought/reasoning text (the
+ *  per-backend field name varies — `thinking` for Claude Code and pi,
+ *  `reasoning`/`text` for opencode's `ReasoningPart`, `reasoning`/`text` for
+ *  grok's AI-SDK `ReasoningPart` — mappers normalize all of them to this one
+ *  shape). `image.data` is a base64 payload with no `data:` prefix;
+ *  `mediaType` is e.g. `image/png` and is omitted when the source didn't
+ *  supply one. An image block can appear as its own top-level block (a
+ *  pasted/attached image) or as a sibling of a `tool_result` block on the
+ *  same message (a tool returned an image, e.g. a screenshot) — mappers emit
+ *  siblings rather than nesting images inside `tool_result.content`, which
+ *  stays a plain string. */
 export type ChatBlock =
   | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string }
+  | { type: 'image'; mediaType?: string; data: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; toolUseId: string; content: string; isError?: boolean }
 
 /** One parsed line of a Claude Code transcript JSONL (TASK-FPH60). One DTO
  *  per transcript `uuid` — a single turn's content blocks can each land on
  *  their own transcript line (chained via `parentUuid`), so `blocks` is
- *  usually length 1; grouping into a full turn is a renderer concern. */
+ *  usually length 1; grouping into a full turn is a renderer concern.
+ *  `isSidechain`/`parentUuid` carry through a Claude Code Task-tool subagent
+ *  turn when a mapper is fed one — the renderer nests these under the parent
+ *  Task call rather than showing them inline in the main transcript. Both
+ *  are optional and absent on an ordinary top-level turn. */
 export interface SessionChatMessageDTO {
   uuid: string
   role: 'user' | 'assistant'
   blocks: ChatBlock[]
   ts: number // epoch ms, parsed from the transcript's ISO `timestamp`
+  /** True for a Task-tool subagent turn — the renderer nests these under the
+   *  parent Task call rather than showing them inline. */
+  isSidechain?: boolean
+  /** Parent transcript uuid, used to thread a sidechain turn to its parent. */
+  parentUuid?: string
 }
 
 /** One discovered skill (`SKILL.md`-convention directory), surfaced via

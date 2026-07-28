@@ -160,6 +160,11 @@ function renderBlock(block: ChatBlock, perBlock: number): string {
   switch (block.type) {
     case 'text':
       return truncate(block.text.replace(/\s+/g, ' ').trim(), perBlock)
+    case 'thinking':
+      return truncate(block.text.replace(/\s+/g, ' ').trim(), perBlock)
+    case 'image':
+      // Bytes aren't useful in a text handoff prompt — note its presence only.
+      return `[image${block.mediaType ? `: ${block.mediaType}` : ''}]`
     case 'tool_use':
       // tool_use.input is tool-specific JSON (e.g. Bash's {command}); a
       // short JSON preview is enough for the new agent to know what was

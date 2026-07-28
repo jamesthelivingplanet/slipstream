@@ -14,6 +14,11 @@
  * rather than failing the caller — a handoff must never abort just because the
  * prior agent's chat couldn't be recovered.
  *
+ * claude-code additionally merges in each subagent's (Task/Agent-tool) own
+ * transcript file — see `readSubagentMessages` below — so the chat view can
+ * show delegated work instead of a black box between "Delegated: ..." and
+ * the result.
+ *
  * opencode-family backends have two sources, tried in order: the embedded
  * TUI server's live in-memory state (freshest, but gone once the process
  * exits or the daemon restarts), then opencode's own durable SQLite store
@@ -40,7 +45,7 @@ import type {
   SessionDTO,
 } from '../shared/contract.js'
 import { usesEmbeddedServer } from './agentBackend.js'
-import { transcriptPathFor } from './transcripts.js'
+import { transcriptPathFor, subagentTranscriptFiles } from './transcripts.js'
 import { parseTranscriptMessages } from './transcriptMessages.js'
 import { parsePiChatMessages } from './piChatMessages.js'
 import { findNewestPiSessionFile, piSessionDirFor, readPiSessionFile } from './piSessions.js'
@@ -88,12 +93,18 @@ export async function readSessionChat(
   if (kind === 'claude-code') {
     const file = transcriptPathFor(session.id)
     if (!file) return { available: false, messages: [] }
+    let messages: SessionChatMessageDTO[]
     try {
       const raw = await fs.promises.readFile(file, 'utf8')
-      return { available: true, messages: parseTranscriptMessages(raw) }
+      messages = parseTranscriptMessages(raw)
     } catch {
       return { available: false, messages: [] }
     }
+    const subagentMessages = await readSubagentMessages(session.id)
+    if (subagentMessages.length > 0) {
+      messages = [...messages, ...subagentMessages].sort((a, b) => a.ts - b.ts)
+    }
+    return { available: true, messages }
   }
 
   if (kind === 'pi') {
@@ -150,4 +161,65 @@ export async function readSessionChat(
 
   // antigravity: no chat reader — terminal-only backend.
   return { available: false, messages: [] }
+}
+
+/**
+ * Read and merge a claude-code session's subagent (Task/Agent-tool)
+ * transcripts — each lives in its own `<sessionId>/subagents/agent-
+ * <agentId>.jsonl` file, sibling to the main transcript (`transcripts.ts`'s
+ * `subagentTranscriptFiles`), never inline in the main transcript itself.
+ * Best-effort like the rest of this module: no subagents dir, or any one
+ * subagent file failing to read/parse, just means fewer/no extra messages —
+ * never throws, and never affects whether the main transcript is returned.
+ *
+ * Threading: each subagent file's sibling `.meta.json` carries `toolUseId`,
+ * the id of the `Agent` tool_use that spawned it — verified against real
+ * transcripts on this machine (242/243 directly-spawned subagents resolve
+ * cleanly to a same-session `Agent` tool_use id; the one miss is a session
+ * whose main transcript no longer contains that turn). `promptId` and
+ * `agentId` were also checked and rejected: `promptId` is shared by every
+ * subagent spawned from the same user turn (not 1:1 with a specific Agent
+ * call), and `agentId` never appears in the main transcript at all. When a
+ * match is found, it's stamped onto the subagent's ROOT message's
+ * `parentUuid` (left unset by the parser for a chain's first line, since its
+ * raw `parentUuid` is `null`) so a renderer can nest that subagent's turns
+ * under the Agent call that spawned it. A subagent spawned by ANOTHER
+ * subagent (nested Task spawn, `spawnDepth` > 1 in the meta file) has no
+ * match in the main transcript — it still merges in `ts` order and carries
+ * `isSidechain: true`, just without a `parentUuid` link.
+ */
+async function readSubagentMessages(sessionId: string): Promise<SessionChatMessageDTO[]> {
+  const files = subagentTranscriptFiles(sessionId)
+  const all: SessionChatMessageDTO[] = []
+  for (const file of files) {
+    let raw: string
+    try {
+      raw = await fs.promises.readFile(file.jsonlPath, 'utf8')
+    } catch {
+      continue
+    }
+    const messages = parseTranscriptMessages(raw)
+    if (messages.length === 0) continue
+    const toolUseId = file.metaPath ? await readToolUseId(file.metaPath) : null
+    if (toolUseId && messages[0].parentUuid === undefined) {
+      messages[0] = { ...messages[0], parentUuid: toolUseId }
+    }
+    all.push(...messages)
+  }
+  return all
+}
+
+/** Best-effort read of a subagent's `.meta.json` `toolUseId` field — the id
+ *  of the `Agent` tool_use that spawned it. Returns null on any read/parse
+ *  failure or when the field is missing/not a string. */
+async function readToolUseId(metaPath: string): Promise<string | null> {
+  try {
+    const raw = await fs.promises.readFile(metaPath, 'utf8')
+    const parsed = JSON.parse(raw) as unknown
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const id = (parsed as Record<string, unknown>)['toolUseId']
+    return typeof id === 'string' && id ? id : null
+  } catch {
+    return null
+  }
 }

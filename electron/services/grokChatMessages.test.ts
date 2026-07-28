@@ -154,18 +154,79 @@ describe('mapGrokMessageRow', () => {
     expect(mapGrokMessageRow(r)).toBeNull()
   })
 
-  it('skips reasoning parts, leniently', () => {
+  it('maps a reasoning part to a thinking block', () => {
     const r = row({
       seq: 9,
       message: { role: 'assistant', content: [{ type: 'reasoning', text: 'thinking...' }] },
     })
+    expect(mapGrokMessageRow(r)?.blocks).toEqual([{ type: 'thinking', text: 'thinking...' }])
+  })
+
+  it('no longer drops a reasoning-only assistant turn', () => {
+    const r = row({
+      seq: 9,
+      message: { role: 'assistant', content: [{ type: 'reasoning', text: 'thinking...' }] },
+    })
+    expect(mapGrokMessageRow(r)).not.toBeNull()
+  })
+
+  it('maps an image part with a plain base64 string to an image block', () => {
+    const r = row({
+      seq: 10,
+      message: {
+        role: 'user',
+        content: [{ type: 'image', image: 'AAAA', mediaType: 'image/png' }],
+      },
+    })
+    expect(mapGrokMessageRow(r)?.blocks).toEqual([
+      { type: 'image', mediaType: 'image/png', data: 'AAAA' },
+    ])
+  })
+
+  it('maps an image part with a data: URI, unwrapping mediaType and data', () => {
+    const r = row({
+      seq: 10,
+      message: {
+        role: 'user',
+        content: [{ type: 'image', image: 'data:image/jpeg;base64,BBBB' }],
+      },
+    })
+    expect(mapGrokMessageRow(r)?.blocks).toEqual([
+      { type: 'image', mediaType: 'image/jpeg', data: 'BBBB' },
+    ])
+  })
+
+  it('maps an image-typed file part to an image block', () => {
+    const r = row({
+      seq: 10,
+      message: {
+        role: 'user',
+        content: [{ type: 'file', mediaType: 'image/png', data: 'CCCC' }],
+      },
+    })
+    expect(mapGrokMessageRow(r)?.blocks).toEqual([
+      { type: 'image', mediaType: 'image/png', data: 'CCCC' },
+    ])
+  })
+
+  it('skips a non-image file part (e.g. a PDF)', () => {
+    const r = row({
+      seq: 10,
+      message: {
+        role: 'user',
+        content: [{ type: 'file', mediaType: 'application/pdf', data: 'DDDD' }],
+      },
+    })
     expect(mapGrokMessageRow(r)).toBeNull()
   })
 
-  it('skips image parts, leniently', () => {
+  it('skips an unknown part kind, leniently', () => {
     const r = row({
       seq: 10,
-      message: { role: 'user', content: [{ type: 'image', image: 'base64...' }] },
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool-approval-request', id: 'x' }],
+      },
     })
     expect(mapGrokMessageRow(r)).toBeNull()
   })

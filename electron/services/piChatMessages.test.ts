@@ -41,11 +41,39 @@ describe('parsePiChatMessages', () => {
     ])
   })
 
-  it('drops thinking-only assistant turns (nothing renderable)', () => {
+  it('emits a thinking block from {type:"thinking", thinking}', () => {
     const raw = JSON.stringify(
       entry({
         id: 'a1',
         message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'hmm' }] },
+      }),
+    )
+    expect(parsePiChatMessages(raw)).toEqual([
+      {
+        uuid: 'a1',
+        role: 'assistant',
+        blocks: [{ type: 'thinking', text: 'hmm' }],
+        ts: Date.parse('2026-07-19T10:00:00.000Z'),
+      },
+    ])
+  })
+
+  it('no longer drops a thinking-only assistant turn', () => {
+    const raw = JSON.stringify(
+      entry({
+        id: 'a1',
+        message: { role: 'assistant', content: [{ type: 'thinking', thinking: '' }] },
+      }),
+    )
+    const [msg] = parsePiChatMessages(raw)
+    expect(msg.blocks).toEqual([{ type: 'thinking', text: '' }])
+  })
+
+  it('skips an unknown block kind without throwing', () => {
+    const raw = JSON.stringify(
+      entry({
+        id: 'a1',
+        message: { role: 'assistant', content: [{ type: 'redacted_thinking', data: 'x' }] },
       }),
     )
     expect(parsePiChatMessages(raw)).toEqual([])
@@ -127,7 +155,7 @@ describe('parsePiChatMessages', () => {
     expect(msg.blocks[0]).toMatchObject({ isError: true })
   })
 
-  it('flattens a multi-part toolResult content array, dropping non-text parts', () => {
+  it('flattens a multi-part toolResult content array, keeping text parts on the tool_result block', () => {
     const raw = JSON.stringify(
       entry({
         id: 'tr1',
@@ -145,6 +173,34 @@ describe('parsePiChatMessages', () => {
     )
     const [msg] = parsePiChatMessages(raw)
     expect(msg.blocks[0]).toMatchObject({ content: 'line one\nline two' })
+  })
+
+  it('produces a tool_result block plus a sibling image block for a toolResult with a text and image part', () => {
+    const raw = JSON.stringify(
+      entry({
+        id: 'tr1',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'call_1',
+          toolName: 'read',
+          content: [
+            { type: 'text', text: 'here is the image' },
+            { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+          ],
+        },
+      }),
+    )
+    expect(parsePiChatMessages(raw)).toEqual([
+      {
+        uuid: 'tr1',
+        role: 'user',
+        blocks: [
+          { type: 'tool_result', toolUseId: 'call_1', content: 'here is the image' },
+          { type: 'image', mediaType: 'image/png', data: 'AAAA' },
+        ],
+        ts: Date.parse('2026-07-19T10:00:00.000Z'),
+      },
+    ])
   })
 
   it('treats a plain-string toolResult content as its own text', () => {

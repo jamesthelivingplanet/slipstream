@@ -21,9 +21,11 @@ describe('parseTranscriptMessages', () => {
     const messages = parseTranscriptMessages(loadFixture())
     expect(messages.map((m) => m.uuid)).toEqual([
       'u1-prompt',
+      'a1-thinking',
       'a2-text',
       'a3-tool-use',
       'u2-tool-result',
+      'sub1-sidechain',
       'a4-final',
     ])
   })
@@ -33,15 +35,47 @@ describe('parseTranscriptMessages', () => {
     expect(parseTranscriptMessages(raw)).toEqual([])
   })
 
-  it('skips isSidechain:true lines (subagent chatter)', () => {
+  it('parses an isSidechain:true line, carrying isSidechain and parentUuid through', () => {
     const raw = JSON.stringify({
       type: 'assistant',
       uuid: 'sub',
       isSidechain: true,
+      parentUuid: 'parent-1',
       timestamp: '2026-07-19T10:00:00.000Z',
       message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
     })
-    expect(parseTranscriptMessages(raw)).toEqual([])
+    expect(parseTranscriptMessages(raw)).toEqual([
+      {
+        uuid: 'sub',
+        role: 'assistant',
+        blocks: [{ type: 'text', text: 'hi' }],
+        ts: Date.parse('2026-07-19T10:00:00.000Z'),
+        isSidechain: true,
+        parentUuid: 'parent-1',
+      },
+    ])
+  })
+
+  it('parses an isSidechain:true line with parentUuid:null, omitting the parentUuid key', () => {
+    const raw = JSON.stringify({
+      type: 'user',
+      uuid: 'sub-first',
+      isSidechain: true,
+      parentUuid: null,
+      timestamp: '2026-07-19T10:00:00.000Z',
+      message: { role: 'user', content: 'subagent prompt' },
+    })
+    const messages = parseTranscriptMessages(raw)
+    expect(messages).toEqual([
+      {
+        uuid: 'sub-first',
+        role: 'user',
+        blocks: [{ type: 'text', text: 'subagent prompt' }],
+        ts: Date.parse('2026-07-19T10:00:00.000Z'),
+        isSidechain: true,
+      },
+    ])
+    expect('parentUuid' in messages[0]).toBe(false)
   })
 
   it('skips a malformed/partial trailing line without throwing', () => {
@@ -57,14 +91,108 @@ describe('parseTranscriptMessages', () => {
     expect(messages[0].uuid).toBe('u1')
   })
 
-  it('drops a line whose only content block is unrenderable (thinking-only)', () => {
+  it('drops a line whose only content block is an unrecognized/future kind', () => {
     const raw = JSON.stringify({
       type: 'assistant',
       uuid: 'a1',
       timestamp: '2026-07-19T10:00:00.000Z',
-      message: { role: 'assistant', content: [{ type: 'thinking', thinking: '...' }] },
+      message: {
+        role: 'assistant',
+        content: [{ type: 'redacted_thinking', data: 'x' }],
+      },
     })
     expect(parseTranscriptMessages(raw)).toEqual([])
+  })
+
+  it('emits a thinking block from {type:"thinking", thinking, signature}', () => {
+    const raw = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: '2026-07-19T10:00:00.000Z',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'reasoning text', signature: 'opaque' }],
+      },
+    })
+    expect(parseTranscriptMessages(raw)).toEqual([
+      {
+        uuid: 'a1',
+        role: 'assistant',
+        blocks: [{ type: 'thinking', text: 'reasoning text' }],
+        ts: Date.parse('2026-07-19T10:00:00.000Z'),
+      },
+    ])
+  })
+
+  it('no longer drops a thinking-only line — it now produces a thinking block', () => {
+    const raw = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a1',
+      timestamp: '2026-07-19T10:00:00.000Z',
+      message: { role: 'assistant', content: [{ type: 'thinking', thinking: '' }] },
+    })
+    expect(parseTranscriptMessages(raw)).toEqual([
+      {
+        uuid: 'a1',
+        role: 'assistant',
+        blocks: [{ type: 'thinking', text: '' }],
+        ts: Date.parse('2026-07-19T10:00:00.000Z'),
+      },
+    ])
+  })
+
+  it('maps a top-level image block to {type:image, mediaType, data}', () => {
+    const raw = JSON.stringify({
+      type: 'user',
+      uuid: 'u1',
+      timestamp: '2026-07-19T10:00:00.000Z',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+        ],
+      },
+    })
+    expect(parseTranscriptMessages(raw)).toEqual([
+      {
+        uuid: 'u1',
+        role: 'user',
+        blocks: [{ type: 'image', mediaType: 'image/png', data: 'AAAA' }],
+        ts: Date.parse('2026-07-19T10:00:00.000Z'),
+      },
+    ])
+  })
+
+  it('produces a tool_result block plus a sibling image block when content has text and image parts', () => {
+    const raw = JSON.stringify({
+      type: 'user',
+      uuid: 'u1',
+      timestamp: '2026-07-19T10:00:00.000Z',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_1',
+            content: [
+              { type: 'text', text: 'here is a screenshot' },
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'BBBB' } },
+            ],
+          },
+        ],
+      },
+    })
+    expect(parseTranscriptMessages(raw)).toEqual([
+      {
+        uuid: 'u1',
+        role: 'user',
+        blocks: [
+          { type: 'tool_result', toolUseId: 'toolu_1', content: 'here is a screenshot' },
+          { type: 'image', mediaType: 'image/png', data: 'BBBB' },
+        ],
+        ts: Date.parse('2026-07-19T10:00:00.000Z'),
+      },
+    ])
   })
 
   it('treats plain-string message content as a single text block', () => {
@@ -209,9 +337,11 @@ describe('createChatCursor', () => {
     const first = cursor.next(complete)
     expect(first.map((m) => m.uuid)).toEqual([
       'u1-prompt',
+      'a1-thinking',
       'a2-text',
       'a3-tool-use',
       'u2-tool-result',
+      'sub1-sidechain',
       'a4-final',
     ])
 
