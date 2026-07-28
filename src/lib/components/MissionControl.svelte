@@ -1008,7 +1008,7 @@
   /* needs-you cards */
   .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
     gap: 12px;
   }
   .card {
@@ -1021,6 +1021,7 @@
     display: flex;
     flex-direction: column;
     gap: 9px;
+    width: 100%;
   }
   .card:hover {
     background: hsl(var(--card-hover));
@@ -1415,6 +1416,9 @@
     .watch img {
       width: 36px;
       height: 36px;
+    }
+    .mc-inner {
+      padding: 24px 16px 40px;
     }
   }
 
