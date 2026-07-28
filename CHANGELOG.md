@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-28
+
 ### Fixed
 
 - Mission Control's needs-you cards no longer overflow their container or
