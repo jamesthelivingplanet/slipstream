@@ -118,8 +118,9 @@ describe('createRunLogger', () => {
       const log = createRunLogger(root)
       log.server('info', 'server starting', { pid: 123 })
       log.server('error', 'uncaughtException', new Error('boom'))
-      // server.log uses async appendFile; wait for it to flush
-      await new Promise((r) => setTimeout(r, 50))
+      // server.log writes are serialized on an internal chain; await it
+      // instead of a timing-based sleep for a deterministic flush point.
+      await log.__flushServerLogForTest!()
       const content = readFileSync(join(root, 'logs', 'server.log'), 'utf8')
       expect(content).toContain('[info] server starting')
       expect(content).toContain('"pid":123')
@@ -133,7 +134,7 @@ describe('createRunLogger', () => {
       const log = createRunLogger(root)
       const err = new TypeError('bad arg')
       log.server('error', 'rejection', err)
-      await new Promise((r) => setTimeout(r, 50))
+      await log.__flushServerLogForTest!()
       const content = readFileSync(join(root, 'logs', 'server.log'), 'utf8')
       expect(content).toContain('"name":"TypeError"')
       expect(content).toContain('"message":"bad arg"')
@@ -165,8 +166,10 @@ describe('createRunLogger', () => {
       for (let i = 0; i < 11; i++) {
         log.server('info', chunk)
       }
-      // server.log uses async appendFile; wait for it to flush
-      await new Promise((r) => setTimeout(r, 200))
+      // Writes are serialized on an internal chain; await it directly rather
+      // than a timing-based sleep -- this is what makes the assertions below
+      // deterministic instead of load-dependent (see FLO-133 race fix).
+      await log.__flushServerLogForTest!()
 
       const rotatedPath = join(root, 'logs', 'server.log.1')
       const currentPath = join(root, 'logs', 'server.log')
@@ -176,6 +179,47 @@ describe('createRunLogger', () => {
       expect(rotatedSize).toBeGreaterThan(9 * 1024 * 1024)
       // rotation actually happened (fresh file), not just appended forever
       expect(currentSize).toBeLessThan(rotatedSize)
+    })
+
+    // Regression test for the FLO-133 race itself: previously, server() paired
+    // a synchronous rotation check/renameSync with fire-and-forget async
+    // appendFile calls, so appends still in flight at rotation time could
+    // resolve *after* the rename and land in the wrong file. That both
+    // undersized the rotated file (reproduced above) and could silently drop
+    // or reorder individual lines across the rotation boundary. Firing many
+    // uniquely-tagged writes back-to-back (no awaiting between them, so they
+    // all queue while earlier ones are still in flight) is what used to
+    // trigger the interleave; asserting every tag appears exactly once across
+    // both files, plus that the rotated file is at/near the cap, is proof
+    // no bytes were lost or misplaced.
+    it('never drops or duplicates lines across a rotation under back-to-back writes', async () => {
+      const log = createRunLogger(root)
+      const N = 12
+      const payloadSize = 1024 * 1024 // ~1 MiB per line, same order as the cap
+      for (let i = 0; i < N; i++) {
+        // Unique marker up front so each line is identifiable regardless of
+        // which file (server.log vs server.log.1) it ends up in.
+        log.server('info', `LINE${i}:` + 'x'.repeat(payloadSize))
+      }
+      await log.__flushServerLogForTest!()
+
+      const rotatedPath = join(root, 'logs', 'server.log.1')
+      const currentPath = join(root, 'logs', 'server.log')
+      const rotated = existsSync(rotatedPath) ? readFileSync(rotatedPath, 'utf8') : ''
+      const current = readFileSync(currentPath, 'utf8')
+      const combined = rotated + current
+
+      for (let i = 0; i < N; i++) {
+        const marker = `LINE${i}:`
+        const occurrences = combined.split(marker).length - 1
+        expect(occurrences).toBe(1) // not 0 (dropped) and not >1 (duplicated)
+      }
+
+      // The race specifically undersized the rotated file by stealing
+      // in-flight bytes into the fresh file post-rename -- assert it's
+      // actually at/near the cap, not short.
+      const rotatedSize = statSync(rotatedPath).size
+      expect(rotatedSize).toBeGreaterThan(9 * 1024 * 1024)
     })
   })
 

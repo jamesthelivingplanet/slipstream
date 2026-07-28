@@ -31,6 +31,46 @@ function originAllowed(origin: string | undefined, allowlist: string[] | undefin
   return allowlist.includes(origin)
 }
 
+// Content-Security-Policy for HTML/static responses only (docs/SECURITY.md
+// §10) — never sent from /healthz, /rpc-ticket, or /inline-reply, which are
+// JSON APIs a browser never renders as a document. This is defense-in-depth
+// behind DOMPurify (src/lib/markdown.ts sanitizes agent-transcript markdown
+// before ChatView.svelte's `{@html}`): if that sanitizer is ever bypassed,
+// script-src blocks the payload from executing anyway.
+//
+//  - script-src 'self' only — no 'unsafe-inline'/'unsafe-eval'. This is the
+//    directive that actually matters for XSS; the Vite build emits only
+//    external <script type=module src=...> tags, no inline script.
+//  - style-src allows 'unsafe-inline' — a deliberate, documented trade-off,
+//    not an oversight. Svelte's scoped styles and Tailwind's arbitrary
+//    values land as inline `style=` attributes, and xterm.js's DomRenderer
+//    injects a `<style>` element at runtime with no CSP nonce plumbed
+//    through — a nonce-based policy would need xterm patched to accept one.
+//    Inline *style* injection can't execute script, so the risk this trades
+//    away is limited to CSS-based data exfiltration/spoofing, not XSS.
+//  - img-src adds data: (QR pairing codes via the `qrcode` package) and
+//    blob: (chat image-attachment previews via URL.createObjectURL).
+//  - connect-src adds ws:/wss: explicitly alongside 'self' for the same-
+//    origin /rpc WebSocket — CSP3 already maps 'self' across the http↔ws
+//    scheme pair, but spelling it out removes any doubt for older engines.
+//  - worker-src 'self' covers the push-notification service worker
+//    (public/sw.js), whose own same-origin fetch('/inline-reply') is
+//    already covered by connect-src 'self'.
+//  - object-src/base-uri/frame-ancestors are locked to 'none' — the app
+//    embeds no plugins, needs no <base> rewriting, and is never framed.
+export const DEFAULT_CSP =
+  "default-src 'self'; " +
+  "script-src 'self'; " +
+  "style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data: blob:; " +
+  "font-src 'self'; " +
+  "connect-src 'self' ws: wss:; " +
+  "worker-src 'self'; " +
+  "manifest-src 'self'; " +
+  "object-src 'none'; " +
+  "base-uri 'none'; " +
+  "frame-ancestors 'none'"
+
 export interface ServerOptions {
   token: string
   bind?: string
@@ -48,6 +88,14 @@ export interface ServerOptions {
   wsTickets?: boolean
   /** Test-only override for the ticket TTL (default: wsTickets.ts's TICKET_TTL_MS, ~10s). */
   wsTicketTtlMs?: number
+  /**
+   * Content-Security-Policy applied to HTML/static responses (docs/SECURITY.md
+   * §10). Defaults to DEFAULT_CSP. Pass `false` to omit the header entirely —
+   * an escape hatch for a deployment whose front door (or a browser quirk)
+   * trips over the default policy, so it can be turned off without a code
+   * change (mirrors SLIPSTREAM_ALLOWED_ORIGINS/SLIPSTREAM_WS_TICKETS below).
+   */
+  csp?: string | false
 }
 
 /**
@@ -63,10 +111,17 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     allowedOrigins,
     wsTickets = false,
     wsTicketTtlMs,
+    csp = DEFAULT_CSP,
   } = opts
 
   // dist/ is the sibling of dist-electron/ (where this server.js runs from)
   const distDir = path.resolve(__dirname, '..', 'dist')
+
+  // Merges the CSP header (docs/SECURITY.md §10) into a static-response
+  // header set, or passes `extra` through unchanged when `csp` is `false`.
+  function staticHeaders(extra: http.OutgoingHttpHeaders): http.OutgoingHttpHeaders {
+    return csp ? { ...extra, 'Content-Security-Policy': csp } : extra
+  }
 
   const ticketStore = createTicketStore(wsTicketTtlMs)
 
@@ -134,22 +189,29 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
       }
       // Collect the (small) JSON body. A reply is a few hundred chars at
       // most; cap at 16 KiB to bound memory if a client streams forever.
+      // Track a running byte total instead of re-concatenating on every
+      // chunk (which would be O(n^2) in chunk count), and respond with 413
+      // instead of destroying the socket — req.destroy() would prevent
+      // 'end' from ever firing, so the client would see ECONNRESET instead
+      // of a real status code.
       const chunks: Buffer[] = []
+      let total = 0
       let tooLarge = false
       req.on('data', (c: Buffer) => {
-        if (Buffer.concat(chunks).length + c.length > 16 * 1024) {
+        if (tooLarge) return
+        total += c.length
+        if (total > 16 * 1024) {
           tooLarge = true
-          req.destroy()
+          if (!res.headersSent) {
+            res.writeHead(413, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Payload too large' }))
+          }
           return
         }
         chunks.push(c)
       })
       req.on('end', () => {
-        if (tooLarge) {
-          res.writeHead(413, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'Payload too large' }))
-          return
-        }
+        if (tooLarge) return
         let parsed: { sessionId?: unknown; data?: unknown }
         try {
           parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as {
@@ -204,14 +266,14 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     try {
       pathname = decodeURIComponent(url.pathname)
     } catch {
-      res.writeHead(400, { 'Content-Type': 'text/plain' })
+      res.writeHead(400, staticHeaders({ 'Content-Type': 'text/plain' }))
       res.end('Bad request')
       return
     }
 
     let filePath = path.resolve(path.join(distDir, pathname))
     if (filePath !== distDir && !filePath.startsWith(distDir + path.sep)) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.writeHead(404, staticHeaders({ 'Content-Type': 'text/plain' }))
       res.end('Not found')
       return
     }
@@ -224,20 +286,23 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
           // referencing chunks from a previous build — serving HTML here
           // causes a MIME mismatch that silently kills the app.
           if (path.extname(pathname)) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' })
+            res.writeHead(404, staticHeaders({ 'Content-Type': 'text/plain' }))
             res.end('Not found')
             return
           }
           fs.readFile(path.join(distDir, 'index.html'), (err2, html) => {
             if (err2) {
-              res.writeHead(404)
+              res.writeHead(404, staticHeaders({}))
               res.end('Not found')
               return
             }
-            res.writeHead(200, {
-              'Content-Type': 'text/html',
-              'Cache-Control': 'no-cache',
-            })
+            res.writeHead(
+              200,
+              staticHeaders({
+                'Content-Type': 'text/html',
+                'Cache-Control': 'no-cache',
+              }),
+            )
             res.end(html)
           })
           return
@@ -277,10 +342,13 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
         //  - /assets/* (content-hashed filenames): immutable, cache for 1 year
         const isHashedAsset = pathname.startsWith('/assets/')
         const cacheControl = isHashedAsset ? 'public, max-age=31536000, immutable' : 'no-cache'
-        res.writeHead(200, {
-          'Content-Type': mime[ext] ?? 'application/octet-stream',
-          'Cache-Control': cacheControl,
-        })
+        res.writeHead(
+          200,
+          staticHeaders({
+            'Content-Type': mime[ext] ?? 'application/octet-stream',
+            'Cache-Control': cacheControl,
+          }),
+        )
         res.end(data)
       })
     }

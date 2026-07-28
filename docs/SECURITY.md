@@ -444,3 +444,54 @@ every origin accepted (unchanged behavior).
   opening a socket for it at all.
 - The `?token=` / `Authorization: Bearer` token check is unchanged and still runs
   after a same-origin (or headerless) upgrade completes.
+
+## 10. Content-Security-Policy on HTML/static responses
+
+`server.ts`'s `DEFAULT_CSP` (applied via the `staticHeaders()` helper to every
+static-file/SPA-fallback response — index.html, JS/CSS/font/image assets — but
+never to `/healthz`, `/rpc-ticket`, or `/inline-reply`, which are JSON APIs a
+browser never renders as a document) is defense-in-depth behind DOMPurify
+(`src/lib/markdown.ts` sanitizes agent-transcript markdown before
+`ChatView.svelte`'s `{@html}`): if that sanitizer is ever bypassed, `script-src`
+blocks the payload from executing anyway.
+
+```
+default-src 'self';
+script-src 'self';
+style-src 'self' 'unsafe-inline';
+img-src 'self' data: blob:;
+font-src 'self';
+connect-src 'self' ws: wss:;
+worker-src 'self';
+manifest-src 'self';
+object-src 'none';
+base-uri 'none';
+frame-ancestors 'none'
+```
+
+- **`script-src 'self'` only** — no `'unsafe-inline'`/`'unsafe-eval'`. This is
+  the directive that actually matters for XSS; the Vite build emits only
+  external `<script type=module src=...>` tags, no inline script.
+- **`style-src` allows `'unsafe-inline'`** — a deliberate, documented
+  trade-off, not an oversight. Svelte's scoped styles and Tailwind's arbitrary
+  values land as inline `style=` attributes, and xterm.js's `DomRenderer`
+  injects a `<style>` element at runtime with no CSP nonce plumbed through — a
+  nonce-based policy would need xterm patched to accept one. Inline *style*
+  injection can't execute script, so the risk this trades away is limited to
+  CSS-based data exfiltration/spoofing, not XSS.
+- **`img-src`** adds `data:` (QR pairing codes via the `qrcode` package) and
+  `blob:` (chat image-attachment previews via `URL.createObjectURL`).
+- **`connect-src`** adds `ws:`/`wss:` explicitly alongside `'self'` for the
+  same-origin `/rpc` WebSocket — CSP3 already maps `'self'` across the
+  http↔ws scheme pair, but spelling it out removes any doubt for older
+  engines.
+- **`worker-src 'self'`** covers the push-notification service worker
+  (`public/sw.js`), whose own same-origin `fetch('/inline-reply')` is already
+  covered by `connect-src 'self'`.
+- **`object-src`/`base-uri`/`frame-ancestors` are locked to `'none'`** — the
+  app embeds no plugins, needs no `<base>` rewriting, and is never framed.
+
+**Escape hatch:** `ServerOptions.csp` accepts `false` to omit the header
+entirely, for a deployment whose front door (or a browser quirk) trips over
+the default policy — mirroring `SLIPSTREAM_ALLOWED_ORIGINS`/
+`SLIPSTREAM_WS_TICKETS` above, this is a config knob, not a code change.

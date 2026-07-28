@@ -3,7 +3,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { IpcDeps } from '../../ipc.js'
 import { IPC, BACKEND_KINDS } from '../../shared/contract.js'
-import type { BackendKind, TicketSource } from '../../shared/contract.js'
+import type { BackendKind, RepoDTO, TicketSource } from '../../shared/contract.js'
 import { branchFor } from '../../shared/branch.js'
 import {
   buildSystemPrompt,
@@ -20,7 +20,16 @@ import type { RpcContext } from '../rpcContext.js'
 import type { ChannelHandlerMap } from './types.js'
 
 export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHandlerMap {
-  const { identity, clientId, coord, ownedByCaller, ownedSession, lockState, resolveOutcome } = ctx
+  const {
+    identity,
+    clientId,
+    coord,
+    ownedByCaller,
+    ownedSession,
+    requireOwnedRepo,
+    lockState,
+    resolveOutcome,
+  } = ctx
 
   return {
     [IPC.startSession]: async (args) => {
@@ -154,14 +163,21 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
     [IPC.cleanupSession]: async (args) => {
       const id = args[0] as string
       const opts = args[1] as { force?: boolean } | undefined
-      // Cancel first: a queued entry must not be able to launch after its
-      // store row is deleted below. (The drain's stale-row guard is the
-      // backstop if this races anyway.)
-      deps.scheduler?.cancel(id)
+      // Ownership first: a caller must not be able to affect the scheduler's
+      // queue for a session it doesn't own (cross-owner DoS on someone
+      // else's queued session) — verify before touching anything.
       const persisted = ownedSession(id)
       if (!persisted) return { removed: false, reason: 'session not found' }
-      const repo = await deps.repos.get(persisted.repoId)
-      if (!repo) return { removed: false, reason: 'session not found' }
+      // Cancel next, still ahead of the store-row delete below: a queued
+      // entry must not be able to launch after its store row is deleted.
+      // (The drain's stale-row guard is the backstop if this races anyway.)
+      deps.scheduler?.cancel(id)
+      let repo: RepoDTO
+      try {
+        repo = await requireOwnedRepo(persisted.repoId)
+      } catch {
+        return { removed: false, reason: 'session not found' }
+      }
       const result = await deps.worktrees.remove(repo, persisted.branch, opts)
       if (result.removed) {
         deps.sessionStore.delete(id)
@@ -203,8 +219,12 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
       const id = args[0] as string
       const persisted = ownedSession(id)
       if (!persisted) return { merged: false }
-      const repo = await deps.repos.get(persisted.repoId)
-      if (!repo) return { merged: false }
+      let repo: RepoDTO
+      try {
+        repo = await requireOwnedRepo(persisted.repoId)
+      } catch {
+        return { merged: false }
+      }
       const probe = await deps.worktrees.isMerged(repo, persisted.branch)
       if (probe.merged) return { merged: true, via: probe.via }
       // Rebase/fast-forward merges leave no merge commit and put the branch's

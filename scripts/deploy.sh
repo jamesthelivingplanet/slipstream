@@ -62,7 +62,7 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
 
 # ---------------------------------------------------------------------------
-# Node 22 enforcement — needed for native module ABI compatibility with Electron 33.
+# Node 22 enforcement — needed for native module ABI compatibility with Electron 39.
 # with_node22 lives in scripts/lib/node22.sh (shared with setup.sh).
 # ---------------------------------------------------------------------------
 # shellcheck source=lib/node22.sh

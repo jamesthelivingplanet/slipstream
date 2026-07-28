@@ -1,6 +1,6 @@
 appId: com.slipstream.app
 productName: Slipstream
-electronVersion: 33.2.1
+electronVersion: 39.8.10
 npmRebuild: true
 
 directories:

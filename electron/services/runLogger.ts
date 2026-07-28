@@ -37,6 +37,14 @@ export interface RunLogger {
   server(level: 'info' | 'warn' | 'error', msg: string, extra?: unknown): void
   /** Delete a session's run log (cleanup on session delete). Best-effort. */
   deleteSessionLog(sessionId: string): void
+  /** @internal Test-only hook: resolves once every server() write enqueued so
+   *  far (append or rotation) has settled. Production code never calls this —
+   *  server() is intentionally fire-and-forget — it exists purely so tests can
+   *  await a deterministic flush point instead of a timing-based sleep.
+   *  Optional so existing hand-rolled RunLogger mocks elsewhere (e.g.
+   *  `{ spawn: vi.fn(), exit: vi.fn(), server: vi.fn(), deleteSessionLog: vi.fn() }`
+   *  in other services' tests) don't need updating for a test-only addition. */
+  __flushServerLogForTest?(): Promise<void>
 }
 
 export interface SpawnInfo {
@@ -119,26 +127,61 @@ export function createRunLogger(root: string): RunLogger {
     }
   }
 
+  // server() was originally: check serverLogBytes (sync) -> maybe
+  // fs.renameSync (sync) -> fs.appendFile (ASYNC, fire-and-forget). That's a
+  // race: appendFile #1 could still be in flight (not yet resolved by libuv)
+  // when appendFile #2's synchronous rotation check decided to renameSync the
+  // current file to server.log.1. Whichever appendFile calls hadn't yet
+  // reached the filesystem at the moment of the rename would then complete
+  // *after* it, writing into the brand-new (post-rotation) server.log instead
+  // of the file they were logically meant to land in. Net effect: the
+  // rotated file ends up smaller than intended (bytes "stolen" by the fresh
+  // file) and sequential process-level lines -- including uncaughtException
+  // context this module's own doc comment promises "survive restarts" --
+  // can be split across the rotation boundary out of order.
+  //
+  // Fix: serialize all server() work (rotation-check + optional rename +
+  // append + byte-count update) through a single promise chain
+  // (serverLogChain). Each call's work only *starts* once the previous
+  // call's work has fully settled, so a rotation can never overlap an
+  // outstanding append and serverLogBytes only ever reflects writes that
+  // have actually completed. server() itself stays synchronous and
+  // non-blocking for the caller -- nothing here is awaited by the caller,
+  // and the chain's own errors are swallowed so they can never surface as an
+  // unhandled rejection. (Alternative: a persistent fs.WriteStream held
+  // across rotation. Rejected -- it needs its own close/reopen dance around
+  // rename and buys no extra ordering guarantee over a plain chain at this
+  // call volume; the chain is simpler and gives the identical guarantee.)
+  let serverLogChain: Promise<void> = Promise.resolve()
+
   function server(level: 'info' | 'warn' | 'error', msg: string, extra?: unknown): void {
     const extraStr = extra !== undefined ? ' ' + safeStringify(extra) : ''
     const line = `${ts()} [${level}] ${msg}${extraStr}\n`
     const lineBytes = Buffer.byteLength(line, 'utf8')
-    if (serverLogBytes + lineBytes > MAX_SERVER_LOG_BYTES) {
+    serverLogChain = serverLogChain.then(async () => {
       try {
-        fs.renameSync(serverLogPath, serverLogPath + '.1')
+        if (serverLogBytes + lineBytes > MAX_SERVER_LOG_BYTES) {
+          try {
+            await fs.promises.rename(serverLogPath, serverLogPath + '.1')
+          } catch {
+            // best-effort: e.g. nothing to rotate yet
+          }
+          serverLogBytes = 0
+        }
+        await fs.promises.appendFile(serverLogPath, line)
+        // Only counted once the write actually landed, so a failed append
+        // (e.g. ENOENT if logDir vanished) never drifts the cap accounting.
+        serverLogBytes += lineBytes
       } catch {
-        // best-effort
+        // best-effort: logging must never crash the process
       }
-      serverLogBytes = 0
-    }
-    try {
-      fs.appendFile(serverLogPath, line, () => {
-        /* fire-and-forget */
-      })
-    } catch {
-      // best-effort
-    }
-    serverLogBytes += lineBytes
+    })
+    // The try/catch above already swallows everything the chain can throw;
+    // this is defense-in-depth so a future edit can't turn a chain rejection
+    // into an unhandled rejection warning.
+    serverLogChain.catch(() => {
+      /* unreachable in practice, see above */
+    })
   }
 
   function deleteSessionLog(sessionId: string): void {
@@ -149,7 +192,14 @@ export function createRunLogger(root: string): RunLogger {
     }
   }
 
-  return { spawn, exit, server, deleteSessionLog }
+  // Test-only: see the RunLogger interface doc for __flushServerLogForTest.
+  // Returning the chain directly is safe -- it never rejects (server()
+  // swallows all errors before they reach it).
+  function __flushServerLogForTest(): Promise<void> {
+    return serverLogChain
+  }
+
+  return { spawn, exit, server, deleteSessionLog, __flushServerLogForTest }
 }
 
 function safeStringify(v: unknown): string {

@@ -3,7 +3,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createServer } from './server.js'
+import { createServer, DEFAULT_CSP } from './server.js'
 import type { IpcDeps } from '../ipc.js'
 import type {
   RepoDTO,
@@ -1368,6 +1368,120 @@ describe('createServer', () => {
       const res = await httpGet(port, '/..%2f..%2fpackage.json')
       expect(res.status).toBe(404)
       expect(res.body).not.toContain('"scripts"')
+    })
+
+    // ── Content-Security-Policy (docs/SECURITY.md §10) ───────────────────────
+    describe('Content-Security-Policy', () => {
+      it('a static/HTML 200 response carries the CSP header', async () => {
+        const port = await startServer()
+        const res = await httpGet(port, '/test%20fixture.js')
+        expect(res.status).toBe(200)
+        expect(res.headers['content-security-policy']).toBe(DEFAULT_CSP)
+      })
+
+      it('the SPA-fallback 200 (index.html) carries the CSP header', async () => {
+        const port = await startServer()
+        // No extension and no matching file -> SPA-fallback to index.html.
+        const res = await httpGet(port, '/some/spa/route')
+        expect(res.status).toBe(200)
+        expect(res.body).toContain('spa-index')
+        expect(res.headers['content-security-policy']).toBe(DEFAULT_CSP)
+      })
+
+      it('csp: false omits the header entirely from a static 200 response', async () => {
+        server = createServer(makeFakeDeps(), { token: 'secret', port: 0, csp: false })
+        const port = await new Promise<number>((res) =>
+          server!.once('listening', () => res(getPort(server!))),
+        )
+        const res = await httpGet(port, '/test%20fixture.js')
+        expect(res.status).toBe(200)
+        expect(res.headers['content-security-policy']).toBeUndefined()
+      })
+    })
+  })
+
+  it('GET /healthz does NOT carry the Content-Security-Policy header', async () => {
+    const deps = makeFakeDeps()
+    server = createServer(deps, { token: 'secret', port: 0 })
+    const port = await new Promise<number>((res) =>
+      server!.once('listening', () => res(getPort(server!))),
+    )
+
+    const headers = await new Promise<http.IncomingHttpHeaders>((resolve, reject) => {
+      http
+        .get(`http://127.0.0.1:${port}/healthz`, (res) => {
+          res.resume()
+          res.on('end', () => resolve(res.headers))
+        })
+        .on('error', reject)
+    })
+    expect(headers['content-security-policy']).toBeUndefined()
+  })
+
+  describe('POST /inline-reply — oversized body (413)', () => {
+    function makeOwnedSession(id: string, ownerId: string) {
+      return {
+        id,
+        tid: 'T-1',
+        title: 'seeded',
+        prompt: '',
+        repoId: 'r1',
+        branch: 'b',
+        status: 'needs' as const,
+        createdAt: 0,
+        ownerId,
+      }
+    }
+
+    it('a body over 16 KiB receives HTTP 413, not a connection reset', async () => {
+      const deps = makeFakeDeps()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const oversized = JSON.stringify({ sessionId: 's1', data: 'x'.repeat(20 * 1024) })
+      const { status } = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request(
+          {
+            host: '127.0.0.1',
+            port,
+            path: '/inline-reply',
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'content-length': Buffer.byteLength(oversized),
+              Authorization: 'Bearer secret',
+            },
+          },
+          (res) => {
+            let data = ''
+            res.on('data', (c) => (data += c))
+            res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }))
+          },
+        )
+        req.on('error', reject)
+        req.write(oversized)
+        req.end()
+      })
+      expect(status).toBe(413)
+      expect(deps.sessions.write).not.toHaveBeenCalled()
+    })
+
+    it('a normal-size body still works unchanged (regression guard)', async () => {
+      const deps = makeFakeDeps()
+      deps.sessionStore.upsert(makeOwnedSession('s1', 'local'))
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+      const { status } = await postInlineReply(
+        port,
+        { sessionId: 's1', data: 'still works' },
+        'secret',
+      )
+      expect(status).toBe(204)
+      expect(deps.sessions.write).toHaveBeenCalledWith('s1', 'still works\n')
     })
   })
 })
