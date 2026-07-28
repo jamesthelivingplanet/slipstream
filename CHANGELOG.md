@@ -11,6 +11,28 @@ specifically (schema versioning, build stamping, release flow).
 
 ### Changed
 
+- Electron upgraded 33.4.11 → 39.8.10, clearing four high-severity advisories
+  that applied to the shipped desktop runtime (TASK-N6X4R): renderer
+  command-line switch injection (GHSA-9wfr-w7mm-pc7f) plus three use-after-frees
+  (GHSA-8337-3p73-46f4, GHSA-jjp3-mq3x-295m, GHSA-532v-xpq5-8h95). The
+  switch-injection one is the reason this was prioritised: `main.ts` passes the
+  daemon bearer token to the renderer via `additionalArguments`, exactly that
+  surface. `electron-builder` moved to 26.15.7 and `electron-builder.yml`'s
+  hardcoded `electronVersion` with it — it pins the packaged runtime
+  independently of `package.json`, so a bump that misses it silently keeps
+  shipping the old version. No application code needed changing: every
+  breaking change across 34→39 was checked against this codebase and none of
+  the affected APIs are used.
+
+- `better-sqlite3` upgraded 11.x → 13.0.1, forced by the above: 11.x fails to
+  compile against Electron 39's V8, which removed the deprecated
+  `Context::GetIsolate()` its binding relied on. 13.0.0 is the first release
+  built on N-API, which is ABI-stable — so the module no longer needs
+  rebuilding per runtime. Verified directly: with the module built for Node
+  (ABI 127) it opens a database and runs queries unchanged under Electron
+  (ABI 140).
+
+
 - `package-lock.json` is gone (TASK-N6X4R). Nothing installed from it — CI runs
   `pnpm install --frozen-lockfile` and the repo is pnpm-only — and the sole
   script that touched it was `scripts/release.sh`, which bumped only its

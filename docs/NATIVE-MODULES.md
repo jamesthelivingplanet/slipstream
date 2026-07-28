@@ -22,7 +22,7 @@ runs scripts on (e.g. switching Node via `mise`/`nvm`) — compiles them against
 the *current Node's* ABI, which Electron then refuses to load.
 
 Symptom: `better_sqlite3.node … compiled against … NODE_MODULE_VERSION 127 …
-requires 130` (127 = Node 22, 130 = Electron 33). That throw happens in
+requires 140` (127 = Node 22, 140 = Electron 39). That throw happens in
 `openDb()`, so `registerIpc()` never runs → `No handler registered for
 'repos:list'`.
 
