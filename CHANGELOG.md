@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-28
+
 ### Fixed
 
 - `node scripts/dev-slot.mjs prune` dropped a slot's registry entry and released its
