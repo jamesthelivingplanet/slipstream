@@ -9,6 +9,54 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Security
+
+- The daemon now sends a `Content-Security-Policy` on HTML/static responses
+  (TASK-N6X4R). The SPA is served to real browsers over Tailscale or a reverse
+  proxy and renders agent-transcript markdown through `{@html}`, so although
+  `src/lib/markdown.ts`'s DOMPurify gate is the real defense, transcript
+  content is attacker-influenced (it is whatever the agent read) and a CSP is
+  the cheap second layer if that sanitizer is ever bypassed. `script-src` is
+  `'self'` with no `'unsafe-inline'`/`'unsafe-eval'` — the directive that
+  actually blocks XSS. `style-src` does allow `'unsafe-inline'`, a deliberate
+  trade-off: Svelte scoped styles, Tailwind arbitrary values, and xterm.js's
+  runtime-injected `<style>` element leave no nonce to plumb through, and
+  inline *style* cannot execute script. JSON endpoints (`/healthz`,
+  `/rpc-ticket`, `/inline-reply`) are excluded, and the whole header can be
+  disabled per-deployment without a code change. See
+  [docs/SECURITY.md](docs/SECURITY.md) §10.
+
+- `cleanupSession` cancelled a queued session in the scheduler *before*
+  checking who owned it (TASK-N6X4R), so a caller holding a per-device token
+  for one owner could drop another owner's queued run and still receive the
+  indistinguishable "session not found" response the no-existence-leak
+  convention requires. The ownership check now runs first; cancellation still
+  precedes the store-row delete, so the scheduler-drain race the original
+  ordering guarded against is unaffected. Every other handler in that file was
+  audited and already ordered correctly.
+
+### Fixed
+
+- `server.log` rotation could lose and reorder lines, and never actually
+  enforced its 10 MiB cap (TASK-N6X4R). `server()` appended asynchronously but
+  tracked size synchronously and rotated with a synchronous `renameSync`, so
+  appends still in flight when the rename fired landed in the fresh
+  `server.log` instead of the rotated `server.log.1` — including the
+  `uncaughtException` context this log exists to preserve across restarts. All
+  rotation and append work is now serialized through one promise chain, so a
+  rotation can never overlap an outstanding write and the byte count only
+  advances once a write has landed. `server()` stays fire-and-forget and
+  non-blocking for callers. This was also the repo's one intermittently
+  failing test: it only failed under full-suite I/O load and passed in
+  isolation, so it read as flake rather than the real race it was.
+
+- An oversized body posted to `/inline-reply` returned a connection reset
+  instead of the `413` the handler intended (TASK-N6X4R). `req.destroy()` was
+  called on exceeding the 16 KiB cap, which meant `'end'` never fired and the
+  `413` branch was unreachable dead code. The response is now written directly
+  when the cap is crossed. The size guard also called `Buffer.concat` on every
+  chunk, making it quadratic in chunk count; it now tracks a running total.
+
 ## [0.5.0] - 2026-07-27
 
 ### Fixed
