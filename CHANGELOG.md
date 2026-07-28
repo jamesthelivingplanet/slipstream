@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-28
+
 ### Added
 
 - opencode chat history now survives the session ending instead of vanishing
