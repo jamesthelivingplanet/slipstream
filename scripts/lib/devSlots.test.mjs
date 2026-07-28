@@ -6,6 +6,7 @@ import {
   nextSlot,
   pruneRegistry,
   devUnitName,
+  isDevUnit,
   shouldReleaseTsPort,
   releaseTsPort,
   PORT_BASE,
@@ -124,6 +125,34 @@ describe('devUnitName', () => {
     const unit = devUnitName(slug)
     expect(unit).toBe(`slipstream-dev@${envFileBasename.replace(/\.env$/, '')}.service`)
     expect(envFileBasename).toBe('TASK-WH96T-dev-environment.env')
+  })
+})
+
+describe('isDevUnit', () => {
+  it('allows a unit name built from a normal slug', () => {
+    expect(isDevUnit(devUnitName('TASK-WH96T-dev-environment'))).toBe(true)
+    expect(isDevUnit('slipstream-dev@my-slug.service')).toBe(true)
+  })
+
+  it('refuses an empty string', () => {
+    expect(isDevUnit('')).toBe(false)
+  })
+
+  it('refuses a slug containing a slash', () => {
+    expect(isDevUnit('a/b')).toBe(false)
+  })
+
+  it('refuses a path-traversal-shaped slug', () => {
+    expect(isDevUnit('../slipstream')).toBe(false)
+  })
+
+  it("refuses production's unit name outright", () => {
+    expect(isDevUnit('slipstream.service')).toBe(false)
+  })
+
+  it('refuses non-string input', () => {
+    expect(isDevUnit(undefined)).toBe(false)
+    expect(isDevUnit(null)).toBe(false)
   })
 })
 
