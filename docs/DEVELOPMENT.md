@@ -42,7 +42,20 @@ Dev instances are tracked in a slot registry,
 and 443 are permanently reserved in that registry so a dev slot can never
 claim prod's. `pnpm deploy` prunes slots whose worktree directory no longer
 exists, so `git worktree remove` cleans up after itself with no git hook
-required.
+required. Pruning a slot reclaims it exactly like `pnpm dev:down` does for the
+current worktree — stops+disables its `slipstream-dev@<slug>.service` unit,
+removes its per-slot env file, and releases its Tailscale mapping, in
+addition to dropping the registry entry — so a deleted worktree's dev
+instance can never keep running (and restart-looping on reboot) against a
+directory that no longer exists. `scripts/dev-slot.mjs`'s `cmdDown` and
+`cmdPrune` share one `reclaimSlot()` helper for this so the two teardown
+paths can't drift out of sync again; every step is independently best-effort
+so one failure (unit already stopped, env file already gone, tailscale not
+installed) can't abort the rest of a slot's teardown or a prune run's
+remaining slots. A pure `isDevUnit()` guard (`scripts/lib/devSlots.mjs`)
+refuses to hand `systemctl` any unit name that doesn't start with
+`slipstream-dev@`, so a malformed or hand-edited registry entry can never
+cause a teardown to touch `slipstream.service`.
 
 New commands:
 
@@ -52,11 +65,12 @@ New commands:
   removes its env file, turns off its `tailscale serve --https=<tsPort>`
   mapping, and releases its slot from the registry.
 
-Both `pnpm dev:down` and the prune step also reclaim the worktree's Tailscale
-serve mapping (`tailscale serve --https=<tsPort> off`) — best-effort, and
-guarded so a tsPort of 443 (or a missing/invalid one) is skipped rather than
-ever touching production's mapping. Without this, a torn-down worktree leaves
-a dangling `tailnet:<tsPort> -> 127.0.0.1:<dead port>` entry behind.
+Both `pnpm dev:down` and the prune step reclaim the worktree's Tailscale serve
+mapping (`tailscale serve --https=<tsPort> off`) as part of the same
+best-effort teardown, guarded so a tsPort of 443 (or a missing/invalid one) is
+skipped rather than ever touching production's mapping. Without this, a
+torn-down worktree leaves a dangling `tailnet:<tsPort> -> 127.0.0.1:<dead
+port>` entry behind.
 
 `pnpm dev` / `pnpm dev:backend` also pick up on this from a linked worktree:
 they run through `scripts/dev.mjs`, which sets `SLIPSTREAM_DATA_DIR` to the

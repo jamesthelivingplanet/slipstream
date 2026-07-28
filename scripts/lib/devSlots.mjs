@@ -76,6 +76,24 @@ export function devUnitName(slug) {
 }
 
 /**
+ * isDevUnit — true iff `unit` is safe to pass to a mutating `systemctl
+ * --user` call (stop/disable) as part of reclaiming a dev slot. This is the
+ * one guard standing between "tear down this dev slot's unit" and
+ * "accidentally target production's `slipstream.service`" if a slug were
+ * ever empty, malformed, or crafted (e.g. containing '/' or '..' so it
+ * doesn't round-trip through devUnitName as expected) — kept pure and
+ * exported so it's unit-testable directly, and so every teardown path
+ * (down, prune) shares the exact same check instead of re-deriving it.
+ *
+ * Deliberately just a prefix check: any string that doesn't start with
+ * 'slipstream-dev@' is refused outright, `slipstream.service` (prod) very
+ * much included.
+ */
+export function isDevUnit(unit) {
+  return typeof unit === 'string' && unit.startsWith('slipstream-dev@')
+}
+
+/**
  * allocatePort — lowest integer >= base that is not present in `taken`
  * (a Set or array of numbers).
  */

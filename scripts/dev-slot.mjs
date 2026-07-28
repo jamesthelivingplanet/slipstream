@@ -12,7 +12,10 @@
 //                                 per-slot env file, and release the slot
 //   list                         human-readable table of all registered slots
 //   prune                        drop slots whose root no longer exists,
-//                                 printing each removed slug on its own line
+//                                 reclaiming each one exactly like `down`
+//                                 (unit stopped+disabled, env file removed,
+//                                 Tailscale mapping released) and printing
+//                                 what was reclaimed for each removed slug
 //
 // Usage (from deploy.sh):
 //   eval "$(node scripts/dev-slot.mjs acquire --root "$REPO_ROOT")"
@@ -27,6 +30,7 @@ import {
   pruneRegistry,
   listeningPorts,
   devUnitName,
+  isDevUnit,
   releaseTsPort,
   CONFIG_DIR,
 } from './lib/devSlots.mjs'
@@ -100,6 +104,73 @@ function cmdRelease(args) {
   console.log(slug)
 }
 
+/**
+ * reclaimSlot — tears down everything a dev slot owns OUTSIDE the registry:
+ * stops+disables its systemd unit, removes its per-slot env file, and
+ * releases its Tailscale mapping. This is the single function `cmdDown` and
+ * `cmdPrune` both call — the drift between two separately-maintained copies
+ * of this logic is exactly what let a pruned slot's unit keep running
+ * against a deleted worktree (still `active`, still holding its port and
+ * tsPort mapping, still enabled so it restart-loops on reboot).
+ *
+ * Every step is best-effort: caught and ignored independently, so one
+ * failure (unit already stopped, env file already gone, tailscale not
+ * installed) can never abort the remaining steps for this slot, nor abort a
+ * caller's loop over other slots.
+ *
+ * `tsPort` must be read from the registry BEFORE the caller removes the
+ * slot — once gone there's no way to recover which tailnet port it held.
+ *
+ * Returns { unit, envFile, releasedTsPort, reclaimed } where `reclaimed` is
+ * a human-readable list of the steps that actually completed, for callers
+ * that want to report it.
+ */
+function reclaimSlot(slug, tsPort) {
+  const unit = devUnitName(slug)
+  const envFile = path.join(CONFIG_DIR, 'dev-slots', `${slug}.env`)
+  const reclaimed = []
+
+  // Safety guard: never let a malformed/hostile slug produce a unit name
+  // that systemctl would apply to something other than a dev slot (in
+  // particular, production's `slipstream.service`).
+  if (isDevUnit(unit)) {
+    try {
+      execFileSync('systemctl', ['--user', 'stop', unit], { stdio: 'ignore' })
+      reclaimed.push(`stopped ${unit}`)
+    } catch {
+      // best-effort — unit may not be running
+    }
+    try {
+      execFileSync('systemctl', ['--user', 'disable', unit], { stdio: 'ignore' })
+      reclaimed.push(`disabled ${unit}`)
+    } catch {
+      // best-effort — unit may not be enabled
+    }
+  } else {
+    reclaimed.push(`skipped systemctl (unsafe unit name: ${JSON.stringify(unit)})`)
+  }
+
+  try {
+    rmSync(envFile, { force: true })
+    reclaimed.push(`removed ${envFile}`)
+  } catch {
+    // best-effort — file may already be gone, or unremovable
+  }
+
+  let releasedTsPort = null
+  try {
+    releasedTsPort = releaseTsPort(tsPort)
+  } catch {
+    // releaseTsPort already swallows internally; belt-and-suspenders so a
+    // future change to it still can't take down the rest of this reclaim.
+  }
+  if (releasedTsPort !== null) {
+    reclaimed.push(`released tailscale serve --https=${releasedTsPort}`)
+  }
+
+  return { unit, envFile, releasedTsPort, reclaimed }
+}
+
 function cmdDown(args) {
   const slug = requireString(args, 'slug', 'down')
 
@@ -109,26 +180,10 @@ function cmdDown(args) {
     fail(`no such slot: ${slug}`)
   }
 
-  const unit = devUnitName(slug)
-
-  try {
-    execFileSync('systemctl', ['--user', 'stop', unit], { stdio: 'ignore' })
-  } catch {
-    // best-effort — unit may not be running
-  }
-  try {
-    execFileSync('systemctl', ['--user', 'disable', unit], { stdio: 'ignore' })
-  } catch {
-    // best-effort — unit may not be enabled
-  }
-
-  const envFile = path.join(CONFIG_DIR, 'dev-slots', `${slug}.env`)
-  rmSync(envFile, { force: true })
-
   // Read tsPort off the slot BEFORE it's released below — once the slot is
   // gone from the registry there is no way to recover which tailnet port it
   // held, and the mapping would leak forever (the bug this fixes).
-  const releasedTsPort = releaseTsPort(slot.tsPort)
+  const { unit, envFile, releasedTsPort } = reclaimSlot(slug, slot.tsPort)
 
   const slots = { ...registry.slots }
   delete slots[slug]
@@ -190,12 +245,26 @@ function cmdPrune() {
   const { registry: pruned, removed } = pruneRegistry(registry, (root) => existsSync(root))
   writeRegistry(pruned)
   for (const slug of removed) {
+    // Reclaim everything this slot owns OUTSIDE the registry the exact same
+    // way `down` does — this is the bug this function fixes: a pruned slot
+    // used to keep its systemd unit running (still active, still enabled,
+    // still holding its port) and its env file behind, because only the
+    // registry entry and the tsPort mapping were ever reclaimed here.
+    //
     // Look up the tsPort from the PRE-prune registry — `pruned` no longer
     // has this slug, and a dropped worktree's tailnet mapping would
-    // otherwise leak forever, same as the `down` path above.
-    const releasedTsPort = releaseTsPort(registry.slots[slug]?.tsPort)
-    const tsSummary = releasedTsPort !== null ? ` (tsPort ${releasedTsPort} released)` : ''
-    console.log(`${slug}${tsSummary}`)
+    // otherwise leak forever.
+    let reclaimed = []
+    try {
+      ;({ reclaimed } = reclaimSlot(slug, registry.slots[slug]?.tsPort))
+    } catch (err) {
+      // Must never abort pruning of the remaining slots over one slot's
+      // teardown failure — reclaimSlot() already swallows its own steps'
+      // errors, so reaching here means something unexpected; report and
+      // move on rather than losing the rest of the batch.
+      reclaimed = [`reclaim failed: ${err.message}`]
+    }
+    console.log(`${slug}: ${reclaimed.join(', ')}`)
   }
 }
 

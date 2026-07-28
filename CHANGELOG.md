@@ -9,6 +9,22 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Fixed
+
+- `node scripts/dev-slot.mjs prune` dropped a slot's registry entry and released its
+  Tailscale mapping when the worktree's directory was gone, but never stopped or disabled
+  that slot's `slipstream-dev@<slug>.service` unit, nor removed its per-slot env file —
+  unlike `dev-slot.mjs down`, which did all four. A worktree deleted right after its MR
+  merged left the dev instance running indefinitely: still holding its port and tsPort
+  mapping, still systemd-enabled, so it would come back on reboot in a `Restart=on-failure`
+  loop against a directory that no longer exists. `prune` and `down` now share one
+  `reclaimSlot()` helper (`scripts/dev-slot.mjs`) that performs all four teardown steps —
+  each independently best-effort so one failure can't abort the rest of a slot's teardown or
+  a prune run's remaining slots — and `prune`'s output now reports what was actually
+  reclaimed per slug. Added `isDevUnit()` (`scripts/lib/devSlots.mjs`) as an explicit,
+  unit-tested guard so a malformed or hostile slug can never produce a unit name that
+  `reclaimSlot()` would hand to `systemctl`, unless it starts with `slipstream-dev@`.
+
 ## [0.7.0] - 2026-07-28
 
 ### Fixed
