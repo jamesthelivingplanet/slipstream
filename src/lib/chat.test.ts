@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { mergeChatMessages, buildChatView, summarizeTool, type ChatActivityRun } from './chat.js'
+import {
+  mergeChatMessages,
+  buildChatView,
+  summarizeTool,
+  chatEmptyState,
+  type ChatActivityRun,
+} from './chat.js'
 import type { SessionChatMessageDTO } from '../../electron/shared/contract.js'
 
 // ─── fixtures ───────────────────────────────────────────────────────────
@@ -298,5 +304,29 @@ describe('summarizeTool', () => {
     expect(summarizeTool('Edit', null)).toBe('Used Edit')
     expect(() => summarizeTool('Bash', 'not an object')).not.toThrow()
     expect(summarizeTool('Bash', 'not an object')).toBe('Used Bash')
+  })
+})
+
+// ─── chatEmptyState ─────────────────────────────────────────────────────
+
+describe('chatEmptyState', () => {
+  it('supportsChat:false always reads as unsupported, regardless of available/hasMessages', () => {
+    expect(chatEmptyState(false, true, true)).toBe('unsupported')
+    expect(chatEmptyState(false, true, false)).toBe('unsupported')
+    expect(chatEmptyState(false, false, true)).toBe('unsupported')
+    expect(chatEmptyState(false, false, false)).toBe('unsupported')
+  })
+
+  it('supportsChat:true, available:false reads as waiting (not unsupported, not empty)', () => {
+    expect(chatEmptyState(true, false, false)).toBe('waiting')
+    expect(chatEmptyState(true, false, true)).toBe('waiting')
+  })
+
+  it('supportsChat:true, available:true, no messages yet reads as empty', () => {
+    expect(chatEmptyState(true, true, false)).toBe('empty')
+  })
+
+  it('supportsChat:true, available:true, messages present renders the transcript (null)', () => {
+    expect(chatEmptyState(true, true, true)).toBeNull()
   })
 })

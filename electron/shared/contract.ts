@@ -402,8 +402,9 @@ export interface IAgentEventStore {
  * terminal instead of re-parsing the PTY stream (TUIs repaint the alternate
  * screen buffer — not messages). pi has a reader too (its session file), and
  * opencode + kilo share a reader via their embedded HTTP server
- * (usesEmbeddedServer). antigravity and grok have no reader, so
- * `getChatMessages` reports `available: false` for them. */
+ * (usesEmbeddedServer). grok has a reader too (its own durable SQLite store,
+ * cwd-scoped like pi's). antigravity has no reader, so `getChatMessages`
+ * reports `available: false` for it. */
 
 /** One content block of a chat message. `tool_use.input` is passed through
  *  from the transcript as-is (tool-specific shape, e.g. Bash's

@@ -11,8 +11,8 @@ export interface AgentMeta {
   /**
    * Whether this kind has a chat transcript reader at all. Must exactly
    * mirror the per-kind branching in `getChatMessages` (electron/core/rpc.ts):
-   * claude-code/pi/opencode/kilo are chat-capable there, antigravity/grok
-   * always return `{available:false}` unconditionally.
+   * claude-code/pi/opencode/kilo/grok are chat-capable there, antigravity
+   * always returns `{available:false}` unconditionally.
    */
   supportsChat: boolean
 }
@@ -56,7 +56,7 @@ const AGENT_META_BY_KIND: Record<BackendKind, Omit<AgentMeta, 'kind'>> = {
     label: 'Grok',
     description: 'Uses grok in a git worktree with auto-discovered AGENTS.md.',
     icon: '/icons/agents/grok.svg',
-    supportsChat: false,
+    supportsChat: true,
   },
   kilo: {
     label: 'Kilo Code',

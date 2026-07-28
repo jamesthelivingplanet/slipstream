@@ -36,6 +36,7 @@
   import {
     mergeChatMessages,
     buildChatView,
+    chatEmptyState,
     type ChatViewItem,
     type ChatTextItem,
     type ChatActivityRun,
@@ -231,7 +232,50 @@
 
   $: items = buildChatView(messages)
   $: renderGroups = buildRenderGroups(items)
-  $: agentIcon = agentOption((session.agentKind ?? 'claude-code') as BackendKind).icon
+  $: agent = agentOption((session.agentKind ?? 'claude-code') as BackendKind)
+  $: agentIcon = agent.icon
+  // Whether this kind has a chat transcript reader at all (TASK-N6X4R) — see
+  // chatEmptyState in ../chat.ts for why this, not `available` alone, decides
+  // the empty-state copy.
+  $: chatSupported = agent.supportsChat
+  $: emptyState = chatEmptyState(chatSupported, available, messages.length > 0)
+
+  // Chat can never populate for a kind with no reader — skip the useless
+  // fetch (the backend would just answer `available:false` anyway) and show
+  // the "not available" state immediately instead of flashing "Loading
+  // messages…" first. Ideally we don't even land here: TerminalView only
+  // mounts ChatView once its own `chatAvailable` probe has confirmed
+  // availability, which never happens for these kinds — this is a
+  // belt-and-suspenders guard for whenever that isn't true (e.g. ChatView
+  // reused elsewhere, or a probe race). A plain function (not inlined in the
+  // `$:` block) — mirrors refreshChatAvailability in TerminalView.svelte,
+  // which avoids eslint-plugin-svelte flagging the synchronous state writes
+  // as a possible infinite reactive loop.
+  function beginLoad(sessionId: string, supportsChat: boolean) {
+    if (supportsChat) {
+      void loadInitial(sessionId)
+    } else {
+      loadedFor = sessionId
+      messages = []
+      available = false
+      hasMore = false
+      firstLoadDone = true
+    }
+  }
+  $: if (session.id && session.id !== loadedFor) beginLoad(session.id, chatSupported)
+
+  // Steer the user straight to the terminal rather than leaving them on a
+  // chat pane that can never show anything — fires once per mount (this
+  // component is recreated per session switch, see the onMount comment
+  // below on the subscribeChat call).
+  let autoSwitchedToTerminal = false
+  function switchToTerminalOnce() {
+    if (autoSwitchedToTerminal) return
+    autoSwitchedToTerminal = true
+    onSwitchToTerminal()
+  }
+  $: if (emptyState === 'unsupported') switchToTerminalOnce()
+
   $: showNeedsCard =
     session.needsSince != null && !messages.some((m) => m.ts >= (session.needsSince as number))
   $: writeDisabledReason = !canWrite ? 'Another client controls this session.' : ''
@@ -296,10 +340,8 @@
   }
 
   // Re-fires on mount and whenever session.id changes — this component is
-  // reused across session switches like TerminalView/DiffView.
-  $: if (session.id && session.id !== loadedFor) {
-    void loadInitial(session.id)
-  }
+  // reused across session switches like TerminalView/DiffView. (Guarded on
+  // chatSupported up near that flag's definition, above.)
 
   // Per-session draft persistence (TASK-5E5CY): restore the saved draft the
   // moment session.id changes to one we haven't already switched to — this
@@ -449,11 +491,27 @@
 
 {#if !firstLoadDone}
   <div class="chat-view chat-empty">Loading messages…</div>
-{:else if !available}
-  <div class="chat-view chat-empty">No messages yet — start the conversation below.</div>
+{:else if emptyState === 'unsupported'}
+  <!-- TASK-N6X4R: this kind has no chat reader (supportsChat:false) — chat can
+       NEVER populate, so never invite a message here. autoSwitchedToTerminal
+       above already steers away; this button covers the case that doesn't
+       (e.g. onSwitchToTerminal is a no-op in some host). -->
+  <div class="chat-view chat-empty">
+    <p>{agent.label} doesn't have a chat view — its output only shows in the terminal.</p>
+    <button type="button" class="btn btn-outline btn-sm" on:click={onSwitchToTerminal}>
+      Switch to terminal
+    </button>
+  </div>
+{:else if emptyState === 'waiting'}
+  <!-- Chat-capable, but nothing recoverable yet (transcript not written, server
+       not up) — a waiting message, not an invitation to type. -->
+  <div class="chat-view chat-empty">Waiting for chat to become available…</div>
 {:else}
   <div class="chat-view">
     <div class="chat-body" bind:this={chatBody} on:scroll={onScroll}>
+      {#if emptyState === 'empty'}
+        <div class="chat-empty-inline">No messages yet — start the conversation below.</div>
+      {/if}
       {#each renderGroups as group (group.key)}
         {#if group.kind === 'user'}
           <div class="user-row">
@@ -627,7 +685,22 @@
   .chat-empty {
     align-items: center;
     justify-content: center;
+    gap: 0.75rem;
     padding: 2rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.85rem;
+    text-align: center;
+  }
+  .chat-empty p {
+    margin: 0;
+    max-width: 32rem;
+  }
+  /* Genuinely-empty conversation (TASK-N6X4R): shown inline above the input
+     bar, not as a full-pane replacement, so "start the conversation below"
+     still points at something visible. */
+  .chat-empty-inline {
+    margin: auto 0;
+    padding: 2rem 0;
     color: hsl(var(--muted-foreground));
     font-size: 0.85rem;
     text-align: center;
@@ -770,6 +843,11 @@
     gap: 0.4rem;
   }
   .activity-detail pre {
+    /* TASK-N6X4R: an expanded Read/Bash result has no size limit from the
+       backend — bound it so one huge result can't blow out the pane (matches
+       the .needs-question-text max-height treatment below). */
+    max-height: 20rem;
+    overflow-y: auto;
     overflow-x: auto;
     padding: 0.5rem 0.6rem;
     border-radius: calc(var(--radius) - 3px);

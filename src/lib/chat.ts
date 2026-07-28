@@ -191,6 +191,31 @@ export function summarizeTool(name: string, input: unknown): string {
   }
 }
 
+/** What ChatView should show in place of the transcript, or `null` to render
+ *  it normally. `available:false` (from the `getChatMessages` RPC) covers two
+ *  different situations that need different copy — a backend with no chat
+ *  reader at all (`supportsChat:false`, e.g. antigravity/grok — chat can
+ *  NEVER populate there) vs. one that has a reader but nothing recoverable
+ *  yet (transcript not written, server not up) — so `supportsChat` must be
+ *  checked first; `available` alone can't tell them apart (TASK-N6X4R). */
+export type ChatEmptyState = 'unsupported' | 'waiting' | 'empty' | null
+
+/**
+ * Pure decision for which empty-state (if any) ChatView renders, given the
+ * agent's chat-support flag, the backend's `available` probe result, and
+ * whether any messages have loaded so far.
+ */
+export function chatEmptyState(
+  supportsChat: boolean,
+  available: boolean,
+  hasMessages: boolean,
+): ChatEmptyState {
+  if (!supportsChat) return 'unsupported' // this kind has no chat reader — never invite a message
+  if (!available) return 'waiting' // has a reader, but nothing recoverable yet
+  if (!hasMessages) return 'empty' // genuinely empty conversation — the invite copy is correct here
+  return null
+}
+
 // Re-export so callers importing purely from this module can still name the
 // block type without reaching into the contract directly.
 export type { ChatBlock }

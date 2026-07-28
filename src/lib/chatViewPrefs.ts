@@ -21,7 +21,7 @@ export function initChatViewPref(): Promise<void> {
         const stored = await nativeStorage.get(CHAT_VIEW_PREF_KEY)
         if (stored !== null) preferChatView.set(stored !== '0')
       } catch {
-        // best-effort; default (false) already set synchronously above
+        // best-effort; default (true) already set synchronously above
       }
     })()
   }
