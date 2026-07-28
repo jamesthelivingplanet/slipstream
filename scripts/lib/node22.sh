@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # node22.sh — single source of truth for Node 22 enforcement.
 #
-# Node 22 is required for native module ABI compatibility with Electron 33.
+# Node 22 is required for native module ABI compatibility with Electron 39.
 # Sourced by scripts/setup.sh and scripts/deploy.sh. Defines with_node22, which
 # runs its arguments under Node 22, switching via mise → nvm → pnpm (pnpm env)
 # if the active node isn't already v22.

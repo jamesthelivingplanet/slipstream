@@ -9,6 +9,90 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Changed
+
+- Electron upgraded 33.4.11 → 39.8.10, clearing four high-severity advisories
+  that applied to the shipped desktop runtime (TASK-N6X4R): renderer
+  command-line switch injection (GHSA-9wfr-w7mm-pc7f) plus three use-after-frees
+  (GHSA-8337-3p73-46f4, GHSA-jjp3-mq3x-295m, GHSA-532v-xpq5-8h95). The
+  switch-injection one is the reason this was prioritised: `main.ts` passes the
+  daemon bearer token to the renderer via `additionalArguments`, exactly that
+  surface. `electron-builder` moved to 26.15.7 and `electron-builder.yml`'s
+  hardcoded `electronVersion` with it — it pins the packaged runtime
+  independently of `package.json`, so a bump that misses it silently keeps
+  shipping the old version. No application code needed changing: every
+  breaking change across 34→39 was checked against this codebase and none of
+  the affected APIs are used.
+
+- `better-sqlite3` upgraded 11.x → 13.0.1, forced by the above: 11.x fails to
+  compile against Electron 39's V8, which removed the deprecated
+  `Context::GetIsolate()` its binding relied on. 13.0.0 is the first release
+  built on N-API, which is ABI-stable — so the module no longer needs
+  rebuilding per runtime. Verified directly: with the module built for Node
+  (ABI 127) it opens a database and runs queries unchanged under Electron
+  (ABI 140).
+
+
+- `package-lock.json` is gone (TASK-N6X4R). Nothing installed from it — CI runs
+  `pnpm install --frozen-lockfile` and the repo is pnpm-only — and the sole
+  script that touched it was `scripts/release.sh`, which bumped only its
+  embedded version field. Because just that field was maintained, its
+  dependency graph had drifted: it was missing `dompurify`, `marked` and
+  `qrcode`, so `npm audit --omit=dev` read it and cheerfully reported "0
+  vulnerabilities" for a runtime tree excluding the markdown parser and the
+  XSS sanitizer. `pnpm audit --prod` agreed on the number, but the npm-side
+  signal could not be trusted to keep agreeing. The release script now bumps
+  and commits `package.json` alone (rollback semantics unchanged), and the
+  file is gitignored so a stray `npm install` cannot silently reintroduce it.
+
+### Security
+
+- The daemon now sends a `Content-Security-Policy` on HTML/static responses
+  (TASK-N6X4R). The SPA is served to real browsers over Tailscale or a reverse
+  proxy and renders agent-transcript markdown through `{@html}`, so although
+  `src/lib/markdown.ts`'s DOMPurify gate is the real defense, transcript
+  content is attacker-influenced (it is whatever the agent read) and a CSP is
+  the cheap second layer if that sanitizer is ever bypassed. `script-src` is
+  `'self'` with no `'unsafe-inline'`/`'unsafe-eval'` — the directive that
+  actually blocks XSS. `style-src` does allow `'unsafe-inline'`, a deliberate
+  trade-off: Svelte scoped styles, Tailwind arbitrary values, and xterm.js's
+  runtime-injected `<style>` element leave no nonce to plumb through, and
+  inline *style* cannot execute script. JSON endpoints (`/healthz`,
+  `/rpc-ticket`, `/inline-reply`) are excluded, and the whole header can be
+  disabled per-deployment without a code change. See
+  [docs/SECURITY.md](docs/SECURITY.md) §10.
+
+- `cleanupSession` cancelled a queued session in the scheduler *before*
+  checking who owned it (TASK-N6X4R), so a caller holding a per-device token
+  for one owner could drop another owner's queued run and still receive the
+  indistinguishable "session not found" response the no-existence-leak
+  convention requires. The ownership check now runs first; cancellation still
+  precedes the store-row delete, so the scheduler-drain race the original
+  ordering guarded against is unaffected. Every other handler in that file was
+  audited and already ordered correctly.
+
+### Fixed
+
+- `server.log` rotation could lose and reorder lines, and never actually
+  enforced its 10 MiB cap (TASK-N6X4R). `server()` appended asynchronously but
+  tracked size synchronously and rotated with a synchronous `renameSync`, so
+  appends still in flight when the rename fired landed in the fresh
+  `server.log` instead of the rotated `server.log.1` — including the
+  `uncaughtException` context this log exists to preserve across restarts. All
+  rotation and append work is now serialized through one promise chain, so a
+  rotation can never overlap an outstanding write and the byte count only
+  advances once a write has landed. `server()` stays fire-and-forget and
+  non-blocking for callers. This was also the repo's one intermittently
+  failing test: it only failed under full-suite I/O load and passed in
+  isolation, so it read as flake rather than the real race it was.
+
+- An oversized body posted to `/inline-reply` returned a connection reset
+  instead of the `413` the handler intended (TASK-N6X4R). `req.destroy()` was
+  called on exceeding the 16 KiB cap, which meant `'end'` never fired and the
+  `413` branch was unreachable dead code. The response is now written directly
+  when the cap is crossed. The size guard also called `Buffer.concat` on every
+  chunk, making it quadratic in chunk count; it now tracks a running total.
+
 ## [0.5.0] - 2026-07-27
 
 ### Fixed

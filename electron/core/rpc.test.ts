@@ -2203,6 +2203,36 @@ describe('createRpc', () => {
       expect(deps.worktrees.remove).not.toHaveBeenCalled()
     })
 
+    it("cleanupSession does not cancel another identity's queued session in the scheduler", async () => {
+      // Regression for the ordering bug: cancel must not run before the
+      // ownership check, or a non-owner could drop another owner's queued
+      // run from the scheduler while still getting the honest-looking
+      // "session not found" no-existence-leak response.
+      const scheduler: ISessionScheduler & { cancel: ReturnType<typeof vi.fn> } = {
+        submit: vi.fn().mockImplementation(async () => makeSession()),
+        cancel: vi.fn().mockReturnValue(false),
+        drain: vi.fn().mockResolvedValue(undefined),
+        start: vi.fn(),
+        stop: vi.fn(),
+        queuedIds: vi.fn().mockReturnValue([]),
+      }
+      deps.scheduler = scheduler
+      deps.sessionStore.upsert(
+        makeSession({
+          id: 's1',
+          ownerId: 'alice',
+          status: 'queued',
+          repoId: 'r1',
+          branch: 't-1-fix-bug',
+        }),
+      )
+
+      const result = await rpc.handle(IPC.cleanupSession, ['s1'])
+
+      expect(result).toEqual({ removed: false, reason: 'session not found' })
+      expect(scheduler.cancel).not.toHaveBeenCalled()
+    })
+
     it("getSessionBuffer throws not-found for another identity's session", async () => {
       deps.sessionStore.upsert(makeSession({ id: 's1', ownerId: 'alice' }))
       await expect(rpc.handle(IPC.getSessionBuffer, ['s1'])).rejects.toThrow(

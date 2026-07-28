@@ -112,11 +112,10 @@ echo "  New version: ${NEW_VERSION}"
 # ---------------------------------------------------------------------------
 echo "▶ Updating CHANGELOG.md…"
 if ! node scripts/bumpChangelog.mjs "$NEW_VERSION"; then
-  # `npm version` bumps both package.json AND package-lock.json's embedded
-  # version field (standard npm behavior, even in this pnpm project) — revert
-  # both or the working tree is left half-reverted and dirty.
+  # `npm version` bumped package.json's version field — revert it or the
+  # working tree is left half-reverted and dirty.
   echo "  Reverting version bump…"
-  git checkout -- package.json package-lock.json
+  git checkout -- package.json
   exit 1
 fi
 
@@ -124,7 +123,7 @@ fi
 # Phase 5: Commit, tag, push
 # ---------------------------------------------------------------------------
 echo "▶ Committing…"
-git add package.json package-lock.json CHANGELOG.md
+git add package.json CHANGELOG.md
 git commit -m "Release v${NEW_VERSION}"
 
 echo "▶ Tagging v${NEW_VERSION}…"
