@@ -8,6 +8,7 @@ import {
   buildBwrapArgs,
   sandboxSpawnSpec,
   resolveProdPaths,
+  SSH_CONFIG_DROPIN_DIR,
 } from './agentSandbox.js'
 
 /**
@@ -213,6 +214,59 @@ describe('buildBwrapArgs — production containment (per-worktree dev instances)
   })
 })
 
+describe('buildBwrapArgs — ssh config drop-in containment', () => {
+  it('omits the ssh tmpfs when sshConfigDir is unset (byte-identical to base recipe)', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+    })
+    expect(args).not.toContain('/etc/ssh/ssh_config.d')
+    expect(args.filter((a) => a === '--tmpfs')).toHaveLength(1) // dataDir only
+  })
+
+  it('tmpfs-overmounts sshConfigDir when provided', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      sshConfigDir: '/etc/ssh/ssh_config.d',
+    })
+    const idx = args.findIndex((a, k) => a === '--tmpfs' && args[k + 1] === '/etc/ssh/ssh_config.d')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(args.filter((a) => a === '--tmpfs')).toHaveLength(2) // dataDir + ssh config dir
+  })
+
+  it('does not touch /etc/ssh/ssh_config or the user ~/.ssh — only the drop-in dir path is ever mounted', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      sshConfigDir: '/etc/ssh/ssh_config.d',
+    })
+    const joined = args.join(' ')
+    expect(joined).not.toContain('/etc/ssh/ssh_config ') // the file, not the drop-in dir
+    expect(joined).not.toContain('.ssh/config')
+  })
+
+  it('composes with prod mounts without interfering with either', () => {
+    const args = buildBwrapArgs({
+      dataDir: '/dev/data',
+      sessionId: 'sid1',
+      cmd: 'claude',
+      args: [],
+      sshConfigDir: '/etc/ssh/ssh_config.d',
+      prodDataDir: '/home/user/.config/slipstream',
+    })
+    expect(args.filter((a) => a === '--tmpfs')).toHaveLength(3) // dataDir + ssh + prodDataDir
+    expect(args).toContain('/etc/ssh/ssh_config.d')
+    expect(args).toContain('/home/user/.config/slipstream')
+  })
+})
+
 describe('resolveProdPaths', () => {
   it('returns undefined for both when unset', () => {
     expect(resolveProdPaths({})).toEqual({ prodDataDir: undefined, prodRepoRoot: undefined })
@@ -251,7 +305,12 @@ describe('sandboxSpawnSpec', () => {
         args: ['--x'],
         env: { SLIPSTREAM_DATA_DIR: '/data', SLIPSTREAM_SESSION_ID: 'sid1' },
       },
-      { mode: 'bwrap', available: true, ensureSessionDir: (d) => ensured.push(d) },
+      {
+        mode: 'bwrap',
+        available: true,
+        ensureSessionDir: (d) => ensured.push(d),
+        sshConfigDirExists: () => false,
+      },
     )
     expect(spec.cmd).toBe('bwrap')
     expect(spec.sandboxed).toBe(true)
@@ -259,6 +318,48 @@ describe('sandboxSpawnSpec', () => {
       buildBwrapArgs({ dataDir: '/data', sessionId: 'sid1', cmd: 'claude', args: ['--x'] }),
     )
     expect(ensured).toEqual(['/data/sessions/sid1'])
+  })
+
+  it('tmpfs-overmounts the ssh config drop-in dir when it exists on the host', () => {
+    const spec = sandboxSpawnSpec(
+      {
+        cmd: 'claude',
+        args: ['--x'],
+        env: { SLIPSTREAM_DATA_DIR: '/data', SLIPSTREAM_SESSION_ID: 'sid1' },
+      },
+      {
+        mode: 'bwrap',
+        available: true,
+        ensureSessionDir: () => {},
+        sshConfigDirExists: (dir) => dir === SSH_CONFIG_DROPIN_DIR,
+      },
+    )
+    expect(spec.args).toEqual(
+      buildBwrapArgs({
+        dataDir: '/data',
+        sessionId: 'sid1',
+        cmd: 'claude',
+        args: ['--x'],
+        sshConfigDir: SSH_CONFIG_DROPIN_DIR,
+      }),
+    )
+  })
+
+  it('omits the ssh tmpfs when the drop-in dir does not exist on the host', () => {
+    const spec = sandboxSpawnSpec(
+      {
+        cmd: 'claude',
+        args: ['--x'],
+        env: { SLIPSTREAM_DATA_DIR: '/data', SLIPSTREAM_SESSION_ID: 'sid1' },
+      },
+      {
+        mode: 'bwrap',
+        available: true,
+        ensureSessionDir: () => {},
+        sshConfigDirExists: () => false,
+      },
+    )
+    expect(spec.args).not.toContain(SSH_CONFIG_DROPIN_DIR)
   })
 
   it('passes through and warns once when bwrap is unavailable', () => {
@@ -334,3 +435,44 @@ describe.skipIf(!realBwrap)('bwrap containment (real)', () => {
     expect(readFileSync(written, 'utf8')).toContain('written')
   })
 })
+
+let realSsh = false
+try {
+  execFileSync('ssh', ['-V'], { stdio: 'ignore' })
+  realSsh = true
+} catch {
+  realSsh = false
+}
+
+// Only meaningful on a host where SSH_CONFIG_DROPIN_DIR exists — that's the
+// same precondition sandboxSpawnSpec itself checks before adding the mount.
+describe.skipIf(!realBwrap || !realSsh || !existsSync(SSH_CONFIG_DROPIN_DIR))(
+  'bwrap ssh containment (real)',
+  () => {
+    let dataDir: string
+
+    afterAll(() => {
+      if (dataDir) rmSync(dataDir, { recursive: true, force: true })
+    })
+
+    it('lets ssh read its config without erroring once the drop-in dir is tmpfs-hidden', () => {
+      dataDir = mkdtempSync(join(tmpdir(), 'slipstream-sandbox-ssh-'))
+      mkdirSync(join(dataDir, 'sessions', 'sid1'), { recursive: true })
+      mkdirSync(join(dataDir, 'bin'), { recursive: true })
+      mkdirSync(join(dataDir, 'clipboard'), { recursive: true })
+
+      const args = buildBwrapArgs({
+        dataDir,
+        sessionId: 'sid1',
+        cmd: 'ssh',
+        args: ['-G', 'localhost'],
+        sshConfigDir: SSH_CONFIG_DROPIN_DIR,
+      })
+      // Throws (non-zero exit) if ssh rejects a config file's ownership —
+      // execFileSync would throw before we ever get output back.
+      const output = execFileSync('bwrap', args, { encoding: 'utf8' })
+      expect(output).not.toContain('Bad owner')
+      expect(output).toContain('hostname')
+    })
+  },
+)

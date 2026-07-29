@@ -213,21 +213,20 @@ function resolveHome(p, home) {
 
 /**
  * Is `p` (a raw path-ish token from the command) inside the prod data dir
- * or the prod checkout — but NOT inside the dev-slots carve-out, which is
- * dev state and must stay writable from a worktree.
+ * or the prod checkout?
+ *
+ * Prior to TASK-WH96T this carved out `~/.config/slipstream/dev-slots` /
+ * `dev-slots.json` as dev state that must stay writable from a worktree.
+ * That carve-out is now obsolete: the dev-slot registry and per-slot env
+ * files moved to `~/.local/share/slipstream-dev` (outside the prod data
+ * dir, so a bwrap-sandboxed agent PTY's tmpfs-over-CONFIG_DIR can't shadow
+ * them — see the DEV_DATA_ROOT comment in scripts/lib/devSlots.mjs).
+ * Nothing legitimate writes under `~/.config/slipstream/dev-slots*` anymore,
+ * so the prod data dir is now protected uniformly with no exception.
  */
 function isProdPath(p, home) {
   if (!home) return false
   const resolved = resolveHome(p, home)
-  const devSlotsDir = `${home}/.config/slipstream/dev-slots`
-  const devSlotsJson = `${home}/.config/slipstream/dev-slots.json`
-  if (
-    resolved === devSlotsJson ||
-    resolved === devSlotsDir ||
-    resolved.startsWith(`${devSlotsDir}/`)
-  ) {
-    return false
-  }
   const prodDataDir = `${home}/.config/slipstream`
   const prodCheckout = `${home}/.repositories/slipstream`
   if (resolved === prodDataDir || resolved.startsWith(`${prodDataDir}/`)) return true

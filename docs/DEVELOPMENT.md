@@ -19,7 +19,7 @@ on port 7421.
 | ------------ | ---------------------------------- | --------------------------------------------- |
 | checkout     | main worktree only                 | any linked worktree                           |
 | systemd unit | `slipstream.service`               | `slipstream-dev@<slug>.service` (template)    |
-| env file     | `~/.config/slipstream/server.env`  | `~/.config/slipstream/dev-slots/<slug>.env`   |
+| env file     | `~/.config/slipstream/server.env`  | `~/.local/share/slipstream-dev/slots/<slug>.env` |
 | port         | 7421                               | allocated from 7431 up                        |
 | data dir     | `~/.config/slipstream`             | `~/.local/share/slipstream-dev/<slug>`        |
 | tailscale    | `serve --https=443`                | `serve --https=<tsPort>`, allocated from 8443 up |
@@ -38,7 +38,25 @@ env var can override it. Production can only ever be deployed from the main
 checkout.
 
 Dev instances are tracked in a slot registry,
-`~/.config/slipstream/dev-slots.json` (slug → port/tsPort/dataDir). Ports 7421
+`~/.local/share/slipstream-dev/slots.json` (slug → port/tsPort/dataDir).
+**Why not `~/.config/slipstream`?** That's prod's data dir, and new dev
+slots run with `SLIPSTREAM_SANDBOX=bwrap` by default (see layer 4 below):
+every sandboxed agent PTY gets a **private tmpfs** overmounted on
+`~/.config/slipstream`, invisible to systemd and every other process on the
+host. A registry or per-slot env file living there would look empty/absent
+from inside a sandboxed agent (`acquire` would see no registry and
+re-allocate ports already in use) while writes made from inside one would
+vanish into that agent's private copy — silently never reaching the host,
+surfacing later as `slipstream-dev@<slug>.service: Failed to load
+environment files: No such file or directory` on restart (TASK-WH96T). The
+registry and the per-slot env files below both live under
+`~/.local/share/slipstream-dev` instead, alongside the data dirs, for
+exactly this reason — nothing under there is ever tmpfs-shadowed. (A
+best-effort migration shim in `scripts/lib/devSlots.mjs`'s `readRegistry()`
+copies over an existing pre-TASK-WH96T registry/env files from the old
+`~/.config/slipstream/dev-slots*` location the first time it's needed, so an
+upgrade doesn't strand a running slot; delete it once every machine has
+moved over.) Ports 7421
 and 443 are permanently reserved in that registry so a dev slot can never
 claim prod's. `pnpm deploy` prunes slots whose worktree directory no longer
 exists, so `git worktree remove` cleans up after itself with no git hook
@@ -172,16 +190,32 @@ Tailscale serve mapping) automatically on the next `pnpm deploy` anywhere (via
 the prune step), but `pnpm dev:down` stops the running service immediately
 instead of waiting for that.
 
-### Dev data dirs live outside `~/.config/slipstream` — on purpose
+### Dev data dirs, the slot registry, and per-slot env files all live outside `~/.config/slipstream` — on purpose
 
-Dev instance **data dirs** live under `~/.local/share/slipstream-dev/<slug>`,
-never nested under `~/.config/slipstream` (prod's data dir). This is required
-for bwrap containment to work correctly: bwrap's `--tmpfs` over prod's data
-dir (see layer 3 above) would shadow anything living underneath it, including
-a dev instance's own `sessions/<sid>` bind mount that the daemon's
-`fs.watch`-based status sentinel depends on. Per-slot **env files** are the
-exception and intentionally stay under
-`~/.config/slipstream/dev-slots/<slug>.env` — only the data dir moves out.
+Dev instance **data dirs**, the **slot registry**, and **per-slot env
+files** all live under `~/.local/share/slipstream-dev` (`<slug>`,
+`slots.json`, and `slots/<slug>.env` respectively), never nested under
+`~/.config/slipstream` (prod's data dir). This is required for bwrap
+containment to work correctly — and, since TASK-WH96T, for the registry and
+env files too:
+
+- **data dir**: bwrap's `--tmpfs` over prod's data dir (see layer 3 above)
+  would shadow anything living underneath it, including a dev instance's own
+  `sessions/<sid>` bind mount that the daemon's `fs.watch`-based status
+  sentinel depends on.
+- **registry + per-slot env files**: that same tmpfs shadow means a
+  sandboxed agent PTY (`SLIPSTREAM_SANDBOX=bwrap`, on by default for dev
+  slots — see layer 4 below) sees its own private, empty view of
+  `~/.config/slipstream`. A registry or env file living there would be
+  invisible to `pnpm deploy` run from inside such an agent (empty registry ⇒
+  `acquire` re-allocates already-used ports) and writes made from inside one
+  would never reach the host, surfacing as `slipstream-dev@<slug>.service:
+  Failed to load environment files` on restart.
+
+`scripts/deploy.sh`'s dev path verifies the per-slot env file it just wrote
+is actually visible at that path (a fresh read-back) before restarting the
+unit, specifically to catch this class of sandbox/tmpfs-shadowing failure
+loudly at deploy time instead of failing later on restart.
 
 ## `pnpm dev` does not hot-reload the backend daemon
 

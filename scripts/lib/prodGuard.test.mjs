@@ -97,9 +97,25 @@ describe('evaluateCommand', () => {
       expect(evaluateCommand('grep -rn slipstream.service scripts/', linked)).toBeNull()
     })
 
-    it('allows writes under the dev-slots carve-out', () => {
-      expect(evaluateCommand('echo x > ~/.config/slipstream/dev-slots/foo.env', linked)).toBeNull()
-      expect(evaluateCommand('touch ~/.config/slipstream/dev-slots/foo.env', linked)).toBeNull()
+    it('denies writes under the now-obsolete ~/.config/slipstream/dev-slots path (TASK-WH96T)', () => {
+      // Prior to TASK-WH96T this was carved out as dev state. The dev-slot
+      // registry and per-slot env files now live under
+      // ~/.local/share/slipstream-dev instead, so this path is prod-dir
+      // state again — nothing legitimate writes here anymore, and the
+      // carve-out is gone.
+      const result = evaluateCommand('echo x > ~/.config/slipstream/dev-slots/foo.env', linked)
+      expect(result).not.toBeNull()
+      const touchResult = evaluateCommand('touch ~/.config/slipstream/dev-slots/foo.env', linked)
+      expect(touchResult).not.toBeNull()
+    })
+
+    it('allows writes under the new ~/.local/share/slipstream-dev/slots location', () => {
+      expect(
+        evaluateCommand('echo x > ~/.local/share/slipstream-dev/slots/foo.env', linked),
+      ).toBeNull()
+      expect(
+        evaluateCommand('touch ~/.local/share/slipstream-dev/slots/foo.env', linked),
+      ).toBeNull()
     })
 
     it('denies sed -i on server.env', () => {
@@ -180,8 +196,15 @@ describe('evaluateCommand', () => {
       expect(result).not.toBeNull()
     })
 
-    it('allows cp into the dev-slots carve-out destination', () => {
-      expect(evaluateCommand('cp /tmp/x ~/.config/slipstream/dev-slots/foo.env', linked)).toBeNull()
+    it('denies cp into the now-obsolete ~/.config/slipstream/dev-slots destination (TASK-WH96T)', () => {
+      const result = evaluateCommand('cp /tmp/x ~/.config/slipstream/dev-slots/foo.env', linked)
+      expect(result).not.toBeNull()
+    })
+
+    it('allows cp into the new ~/.local/share/slipstream-dev/slots destination', () => {
+      expect(
+        evaluateCommand('cp /tmp/x ~/.local/share/slipstream-dev/slots/foo.env', linked),
+      ).toBeNull()
     })
   })
 

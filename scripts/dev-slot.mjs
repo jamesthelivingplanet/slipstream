@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // dev-slot.mjs — CLI over scripts/lib/devSlots.mjs's on-disk dev-slot
-// registry (~/.config/slipstream/dev-slots.json). scripts/deploy.sh's dev
-// path shells out to this to allocate/reclaim the isolated port+dataDir
-// slot for a linked worktree's dev instance.
+// registry (~/.local/share/slipstream-dev/slots.json — moved out from under
+// ~/.config/slipstream in TASK-WH96T so a bwrap-sandboxed agent PTY can't
+// tmpfs-shadow it; see the comment on DEV_DATA_ROOT in devSlots.mjs).
+// scripts/deploy.sh's dev path shells out to this to allocate/reclaim the
+// isolated port+dataDir slot for a linked worktree's dev instance.
 //
 // Subcommands:
 //   acquire --root <abs path>   allocate/reuse a slot for a worktree root;
@@ -32,7 +34,7 @@ import {
   devUnitName,
   isDevUnit,
   releaseTsPort,
-  CONFIG_DIR,
+  SLOT_ENV_DIR,
 } from './lib/devSlots.mjs'
 
 function fail(message) {
@@ -127,7 +129,7 @@ function cmdRelease(args) {
  */
 function reclaimSlot(slug, tsPort) {
   const unit = devUnitName(slug)
-  const envFile = path.join(CONFIG_DIR, 'dev-slots', `${slug}.env`)
+  const envFile = path.join(SLOT_ENV_DIR, `${slug}.env`)
   const reclaimed = []
 
   // Safety guard: never let a malformed/hostile slug produce a unit name

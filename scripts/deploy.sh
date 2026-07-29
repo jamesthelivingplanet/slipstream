@@ -28,7 +28,8 @@
 #   pnpm deploy --skip-checks    # same via CLI flag
 #
 # Environment (optional, sourced from ~/.config/slipstream/server.env for
-# target=prod; the dev path reads its own ~/.config/slipstream/dev-slots/<slug>.env):
+# target=prod; the dev path reads its own
+# ~/.local/share/slipstream-dev/slots/<slug>.env):
 #   SLIPSTREAM_BIND   bind address for the server   (default: 127.0.0.1)
 #   SLIPSTREAM_PORT   port the server listens on     (default: 7421)
 #
@@ -257,8 +258,15 @@ if [[ "$TARGET" == "dev" ]]; then
 
   # -------------------------------------------------------------------------
   # d. Write this slot's env file, preserving an existing SLIPSTREAM_TOKEN
+  #
+  # Lives under ~/.local/share/slipstream-dev/slots — NOT under
+  # ~/.config/slipstream — so a bwrap-sandboxed agent PTY's private tmpfs
+  # over the prod config dir can never shadow it (TASK-WH96T; see the
+  # DEV_DATA_ROOT comment in scripts/lib/devSlots.mjs). Keep in sync with
+  # scripts/lib/devScaffold.sh's EnvironmentFile= template and
+  # scripts/dev-slot.mjs's SLOT_ENV_DIR-derived teardown path.
   # -------------------------------------------------------------------------
-  SLOT_ENV_FILE="${HOME}/.config/slipstream/dev-slots/${SLIPSTREAM_SLOT_SLUG}.env"
+  SLOT_ENV_FILE="${HOME}/.local/share/slipstream-dev/slots/${SLIPSTREAM_SLOT_SLUG}.env"
 
   EXISTING_TOKEN=""
   if [[ -f "$SLOT_ENV_FILE" ]]; then
@@ -313,6 +321,37 @@ EOF
   echo "✔ Slot env written: ${SLOT_ENV_FILE}"
 
   # -------------------------------------------------------------------------
+  # d2. Verify the slot env file is actually visible at the path systemd
+  # will read it from (%h/.local/share/slipstream-dev/slots/%i.env in the
+  # unit template — scripts/lib/devScaffold.sh). This is the check that
+  # would have caught the TASK-WH96T bug at deploy time instead of surfacing
+  # it later as "Failed to load environment files" on restart: a mount
+  # namespace sandbox (e.g. a bwrap-contained agent PTY) can make a write
+  # into this path "succeed" from this process's point of view while
+  # actually landing in a private, host-invisible copy. Read the token back
+  # fresh from disk and require it to match what was just written — a
+  # mismatch (or unreadable file) means this process's view of
+  # SLOT_ENV_FILE is not the host's, i.e. sandbox/tmpfs shadowing, and the
+  # deploy must stop now rather than restart into a unit that can't load
+  # its environment.
+  # -------------------------------------------------------------------------
+  READBACK_TOKEN=""
+  READBACK_TOKEN="$(grep '^SLIPSTREAM_TOKEN=' "$SLOT_ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)" || true
+  if [[ "$READBACK_TOKEN" != "$SLOT_TOKEN" ]]; then
+    echo ""
+    echo "✗ Wrote ${SLOT_ENV_FILE} but a fresh read-back doesn't match what was written." >&2
+    echo "  Likely cause: this process is running inside a mount-namespace sandbox" >&2
+    echo "  (e.g. a bwrap-contained agent PTY, SLIPSTREAM_SANDBOX=bwrap) whose view of" >&2
+    echo "  this path is not the host's — the write landed in a private/shadowed copy," >&2
+    echo "  not the file systemd will actually read on restart." >&2
+    echo "  Refusing to continue: restarting now would fail with" >&2
+    echo "  'Failed to load environment files: No such file or directory'." >&2
+    echo "  Run this deploy from outside the sandbox (a plain shell on the host), or" >&2
+    echo "  fix the sandbox's view of ${HOME}/.local/share/slipstream-dev." >&2
+    exit 1
+  fi
+
+  # -------------------------------------------------------------------------
   # e. Verify native modules (better-sqlite3, node-pty) load under Electron's
   # ABI, and self-heal if not. Every checkout's node_modules comes from
   # 'pnpm install', which builds these against plain Node's ABI; only an
@@ -355,8 +394,9 @@ EOF
   # scripts/lib/devSlots.mjs) is already restricted to [A-Za-z0-9_.-], which
   # is a valid systemd template instance name verbatim. Escaping it here
   # would desync the unit's `%i` instance name from the plain-slug env
-  # filename this same function wrote above (dev-slots/<slug>.env) — that
-  # mismatch is exactly what breaks the restart for any hyphenated slug.
+  # filename this same function wrote above (slots/<slug>.env under
+  # ~/.local/share/slipstream-dev) — that mismatch is exactly what breaks
+  # the restart for any hyphenated slug.
   # Keep in sync with devUnitName() in scripts/lib/devSlots.mjs.
   DEV_UNIT="slipstream-dev@${SLIPSTREAM_SLOT_SLUG}.service"
 

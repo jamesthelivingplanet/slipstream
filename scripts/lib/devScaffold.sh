@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # devScaffold.sh — materializes the per-machine scaffolding shared by every
 # per-worktree "dev" instance: the slipstream-dev@.service systemd template,
-# the dev-serve.sh wrapper it execs, and the ~/.config/slipstream/dev-slots
-# directory where per-slot env files live.
+# the dev-serve.sh wrapper it execs, and the
+# ~/.local/share/slipstream-dev/slots directory where per-slot env files
+# live. That directory lives OUTSIDE ~/.config/slipstream (prod's data dir)
+# on purpose — see the DEV_DATA_ROOT comment in scripts/lib/devSlots.mjs: a
+# bwrap-sandboxed agent PTY gets a private tmpfs over ~/.config/slipstream,
+# which would silently shadow a slots dir living underneath it (TASK-WH96T).
 #
 # Sourced (not executed) by BOTH scripts/setup.sh and scripts/deploy.sh so
 # there is exactly one copy of this content — deploy.sh calls it on every
@@ -28,7 +32,12 @@ slipstream_install_dev_scaffold() {
   local systemd_dir="${HOME}/.config/systemd/user"
   local service_file="${systemd_dir}/slipstream-dev@.service"
   local serve_script="${config_dir}/dev-serve.sh"
-  local slots_dir="${config_dir}/dev-slots"
+  # Per-slot env files live under ~/.local/share/slipstream-dev/slots — NOT
+  # under ~/.config/slipstream — so a bwrap-sandboxed agent PTY's private
+  # tmpfs over the prod config dir can never shadow them (TASK-WH96T). Keep
+  # the raw-slug/`%i` pairing below (no systemd-escape) in sync with
+  # devUnitName()/deploy.sh's SLOT_ENV_FILE.
+  local slots_dir="${HOME}/.local/share/slipstream-dev/slots"
 
   mkdir -p "$systemd_dir" "$config_dir"
 
@@ -40,7 +49,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=%h/.config/slipstream/dev-slots/%i.env
+EnvironmentFile=%h/.local/share/slipstream-dev/slots/%i.env
 ExecStart=%h/.config/slipstream/dev-serve.sh
 Restart=on-failure
 RestartSec=2

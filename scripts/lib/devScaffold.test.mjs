@@ -56,3 +56,27 @@ describe('devScaffold.sh dev-serve.sh wrapper', () => {
     expect(source).not.toMatch(offendingPattern)
   })
 })
+
+describe('devScaffold.sh systemd unit template (TASK-WH96T)', () => {
+  const source = fs.readFileSync(scaffoldPath, 'utf8')
+
+  it('EnvironmentFile= points at the new ~/.local/share/slipstream-dev/slots/%i.env location, not ~/.config/slipstream', () => {
+    expect(source).toMatch(/^EnvironmentFile=%h\/\.local\/share\/slipstream-dev\/slots\/%i\.env$/m)
+    expect(source).not.toMatch(/EnvironmentFile=%h\/\.config\/slipstream\/dev-slots\/%i\.env/)
+  })
+
+  it('creates the new slots dir with mode 700', () => {
+    expect(source).toMatch(/slots_dir="\$\{HOME\}\/\.local\/share\/slipstream-dev\/slots"/)
+    expect(source).toMatch(/mkdir -p "\$slots_dir"/)
+    expect(source).toMatch(/chmod 700 "\$slots_dir"/)
+  })
+
+  it('uses %i (not %I) so the raw slug is not systemd-escaped', () => {
+    // %I would systemd-escape the instance name (turning '-' into literal
+    // '\x2d'), desyncing it from the plain-slug env filename deploy.sh
+    // writes (SLOT_ENV_DIR/<slug>.env) — see devUnitName()'s docstring in
+    // scripts/lib/devSlots.mjs.
+    expect(source).toMatch(/EnvironmentFile=%h\/\.local\/share\/slipstream-dev\/slots\/%i\.env/)
+    expect(source).not.toMatch(/%I/)
+  })
+})

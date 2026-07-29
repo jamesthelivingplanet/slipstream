@@ -7,23 +7,59 @@
 // devSlots.test.mjs. readRegistry/writeRegistry/listeningPorts are the thin
 // impure edges that scripts/dev-slot.mjs wires them to disk/the OS.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  chmodSync,
+  copyFileSync,
+} from 'node:fs'
 import { execSync, execFileSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
+// Prod's data dir — kept as a named constant because it's still the source
+// for the legacy-registry migration below (and callers reference it for
+// documentation/comparisons), even though no dev-slot state lives under it
+// anymore (see TASK-WH96T).
 export const CONFIG_DIR = path.join(homedir(), '.config', 'slipstream')
-export const REGISTRY_PATH = path.join(CONFIG_DIR, 'dev-slots.json')
 
-// Dev instance DATA dirs live OUTSIDE the prod data dir (CONFIG_DIR) — never
-// nested under it. A dataDir nested inside CONFIG_DIR would break bwrap
-// containment: the sandbox's `--tmpfs`-over-CONFIG_DIR (see
-// electron/services/agentSandbox.ts's prodDataDir handling) would shadow
-// anything living underneath it, including the dev instance's own
-// `sessions/<sid>` bind mount that the daemon's fs.watch status sentinel
-// depends on. Per-slot ENV files intentionally stay under
-// CONFIG_DIR/dev-slots/<slug>.env — only the DATA dir moves here.
+// Dev instance DATA dirs, the slot REGISTRY, and per-slot ENV files all live
+// under this root, OUTSIDE the prod data dir (CONFIG_DIR) — never nested
+// under it. Nesting any of them inside CONFIG_DIR breaks bwrap containment
+// two different ways:
+//   1. (dataDir) the sandbox's `--tmpfs`-over-CONFIG_DIR (see
+//      electron/services/agentSandbox.ts's prodDataDir handling) would
+//      shadow anything living underneath it, including the dev instance's
+//      own `sessions/<sid>` bind mount that the daemon's fs.watch status
+//      sentinel depends on.
+//   2. (registry + per-slot env) that SAME tmpfs shadow means any agent PTY
+//      spawned inside a bwrap sandbox (SLIPSTREAM_SANDBOX=bwrap, on by
+//      default for dev slots — see docs/DEVELOPMENT.md) sees its own
+//      PRIVATE, empty view of CONFIG_DIR: writes to a registry/env file
+//      under there land in that agent's tmpfs, invisible to systemd on the
+//      host. `pnpm deploy` from inside such an agent used to fail with
+//      "Failed to load environment files" (env file "written" but never
+//      seen by the host), and `acquire`/`pnpm dev:slots` would see an empty
+//      registry and re-allocate ports already in use. This is the
+//      TASK-WH96T bug — moving the registry and per-slot env files out here
+//      fixes it the same way the dataDir move already did.
 export const DEV_DATA_ROOT = path.join(homedir(), '.local', 'share', 'slipstream-dev')
+
+export const REGISTRY_PATH = path.join(DEV_DATA_ROOT, 'slots.json')
+export const SLOT_ENV_DIR = path.join(DEV_DATA_ROOT, 'slots')
+
+// ---------------------------------------------------------------------------
+// TRANSITIONAL SHIM (TASK-WH96T) — delete once every machine has been
+// redeployed onto the new ~/.local/share/slipstream-dev layout above. Before
+// this change, the registry and per-slot env files lived under CONFIG_DIR
+// (~/.config/slipstream/dev-slots.json, ~/.config/slipstream/dev-slots/);
+// readRegistry() below best-effort migrates from these legacy paths so an
+// existing install doesn't strand a running dev slot on upgrade.
+// ---------------------------------------------------------------------------
+export const LEGACY_REGISTRY_PATH = path.join(CONFIG_DIR, 'dev-slots.json')
+export const LEGACY_SLOT_ENV_DIR = path.join(CONFIG_DIR, 'dev-slots')
 
 export const PORT_BASE = 7431
 export const TS_PORT_BASE = 8443
@@ -67,9 +103,10 @@ export function slugForRoot(root) {
  * (NOT `systemd-escape`d, and the unit template must use `%i`, not `%I`).
  * `systemd-escape` would turn '-' into the literal string '\x2d', which
  * desyncs the escaped `%i` instance name from the plain-slug env filename
- * (`dev-slots/<slug>.env`) that deploy.sh writes — that mismatch is exactly
- * what caused the "Failed to load environment files" restart failure this
- * function fixes. Keep in sync with scripts/deploy.sh's DEV_UNIT.
+ * (`slots/<slug>.env` under SLOT_ENV_DIR) that deploy.sh writes — that
+ * mismatch is exactly what caused the "Failed to load environment files"
+ * restart failure this function fixes. Keep in sync with scripts/deploy.sh's
+ * DEV_UNIT.
  */
 export function devUnitName(slug) {
   return `slipstream-dev@${slug}.service`
@@ -220,19 +257,82 @@ export function pruneRegistry(registry, existsFn) {
 // Impure helpers — thin fs/OS edges, not unit-tested directly.
 // ---------------------------------------------------------------------------
 
-/** readRegistry — loads REGISTRY_PATH, or an empty registry if absent/invalid. */
+/**
+ * readRegistry — loads REGISTRY_PATH, or an empty registry if absent/invalid.
+ *
+ * TRANSITIONAL SHIM (TASK-WH96T, delete once migrated fleet-wide): if the
+ * new registry file is absent, best-effort falls back to migrating the
+ * legacy pre-TASK-WH96T registry (LEGACY_REGISTRY_PATH, under
+ * ~/.config/slipstream) before giving up and returning empty. This must
+ * NEVER throw or treat an unreadable legacy path as an error — inside a
+ * bwrap-sandboxed agent, ~/.config/slipstream is a private tmpfs, so the
+ * legacy path will look absent even when a real registry exists on the
+ * host. That case is indistinguishable from "nothing to migrate" from
+ * inside the sandbox, and must be treated as such rather than failing.
+ */
 export function readRegistry() {
   try {
     const raw = readFileSync(REGISTRY_PATH, 'utf-8')
     return normalizeRegistry(JSON.parse(raw))
   } catch {
+    return migrateLegacyRegistry()
+  }
+}
+
+/**
+ * migrateLegacyRegistry — TRANSITIONAL SHIM (TASK-WH96T, delete once
+ * migrated fleet-wide). Reads LEGACY_REGISTRY_PATH if present/readable,
+ * writes it out to the new REGISTRY_PATH, best-effort copies any legacy
+ * per-slot env files alongside it, and returns the migrated registry.
+ * Returns an empty registry (never throws) if the legacy path is missing,
+ * unreadable, or not valid JSON — all of which are "nothing to migrate",
+ * not errors, per the sandbox note on readRegistry above.
+ */
+function migrateLegacyRegistry() {
+  try {
+    const raw = readFileSync(LEGACY_REGISTRY_PATH, 'utf-8')
+    const registry = normalizeRegistry(JSON.parse(raw))
+    writeRegistry(registry)
+    migrateLegacySlotEnvFiles(registry)
+    return registry
+  } catch {
     return emptyRegistry()
+  }
+}
+
+/**
+ * migrateLegacySlotEnvFiles — TRANSITIONAL SHIM (TASK-WH96T, delete once
+ * migrated fleet-wide). Best-effort copies each slot's legacy per-slot env
+ * file (LEGACY_SLOT_ENV_DIR/<slug>.env) into the new SLOT_ENV_DIR, if it
+ * exists there and hasn't already been copied. Every step is independently
+ * best-effort: a missing/unreadable legacy dir or a single slot's copy
+ * failing must never abort the registry migration itself.
+ */
+function migrateLegacySlotEnvFiles(registry) {
+  try {
+    mkdirSync(SLOT_ENV_DIR, { recursive: true })
+    chmodSync(SLOT_ENV_DIR, 0o700)
+  } catch {
+    return
+  }
+  for (const slug of Object.keys(registry.slots)) {
+    try {
+      const src = path.join(LEGACY_SLOT_ENV_DIR, `${slug}.env`)
+      const dest = path.join(SLOT_ENV_DIR, `${slug}.env`)
+      if (existsSync(src) && !existsSync(dest)) {
+        copyFileSync(src, dest)
+        chmodSync(dest, 0o600)
+      }
+    } catch {
+      // best-effort per slot — one unreadable/uncopyable legacy env file
+      // must not abort migration of the rest.
+    }
   }
 }
 
 /** writeRegistry — persists `registry` to REGISTRY_PATH, mode 600. */
 export function writeRegistry(registry) {
-  mkdirSync(CONFIG_DIR, { recursive: true })
+  mkdirSync(DEV_DATA_ROOT, { recursive: true })
   writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2) + '\n')
   chmodSync(REGISTRY_PATH, 0o600)
 }
