@@ -68,6 +68,19 @@ specifically (schema versioning, build stamping, release flow).
   implemented," when FLO-144 shipped it; reworded in the struck-through "Done (FLO-…)" style
   already used for items 1 and 3, preserving the still-true substance that tickets are minted
   per-token through this same identity seam.
+- Chat view: a single subagent run no longer fragments into a wall of "Subagent work
+  (unmatched)" rows. Its whole transcript is now grouped as one collapsible row, keyed by a
+  stable per-run id the backend stamps on every message of the run — the old bucketing (by
+  walking `parentUuid` chains) broke apart whenever an unrenderable transcript line was
+  dropped mid-chain, splitting one subagent run into many disconnected one-message groups
+  (TASK-1V8H8).
+- Subagent/tool rows in chat now render on a single line (with an ellipsis when the summary
+  is too long to fit) and show their full text plus the nested transcript once expanded
+  (TASK-1V8H8).
+- Orphaned subagent rows are now labeled with the subagent's actual description/agent type
+  instead of the generic "Subagent work (unmatched)" (TASK-1V8H8).
+- Nested subagents — a subagent that itself spawned a further subagent — now render inside
+  their parent's transcript instead of being listed separately as unmatched (TASK-1V8H8).
 
 ## [0.8.1] - 2026-07-29
 

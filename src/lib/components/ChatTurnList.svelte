@@ -37,12 +37,13 @@
   export let expandedIds: Set<string>
   export let toggleExpanded: (id: string) => void
   // Attached subagent groups keyed by the toolUseId of the `Agent` tool_use
-  // that spawned them (TASK-N6X4R Task 3) — only meaningful for the
-  // top-level (main-transcript) instance; a nested instance rendering a
-  // subagent's own transcript is passed an empty map (no support for
-  // recursively nesting a subagent's own further subagent calls — an `Agent`
-  // tool_use inside a subagent transcript still renders, just as a plain
-  // collapsed tool call with the generic JSON detail, degrading gracefully).
+  // that spawned them (TASK-N6X4R Task 3). Passed straight through to the
+  // recursive <svelte:self> for nested rendering (TASK-1V8H8) — a subagent
+  // that itself spawned a further subagent attaches into `byToolUseId` under
+  // its own spawn tool_use id (see buildSubagentGroups), and since the same
+  // map is threaded all the way down, that nested-nested group renders
+  // in-place too, rather than only the top level supporting one level of
+  // nesting.
   export let subagentsByToolUseId: Map<string, ChatSubagentGroup> = new Map()
   // True for a nested (subagent) instance — drives the "someone else's work,
   // not primary conversation" visual treatment (indent, left border, muted).
@@ -199,10 +200,15 @@
                 type="button"
                 class="activity-trigger"
                 class:subagent-trigger={!!attachedSubagent}
+                class:expanded={expandedIds.has(toolItem.toolUseId)}
                 aria-expanded={expandedIds.has(toolItem.toolUseId)}
+                title={toolItem.summary}
                 on:click={() => toggleExpanded(toolItem.toolUseId)}
               >
-                {toolItem.summary}
+                <span class="trigger-label">{toolItem.summary}</span>
+                {#if attachedSubagent?.agentType}
+                  <span class="subagent-type-chip">{attachedSubagent.agentType}</span>
+                {/if}
                 {#if attachedSubagent}
                   <span class="subagent-badge"
                     >{attachedSubagent.turnCount}
@@ -221,6 +227,7 @@
                       {agentIcon}
                       {expandedIds}
                       {toggleExpanded}
+                      {subagentsByToolUseId}
                       nested={true}
                     />
                   </div>
@@ -396,6 +403,31 @@
     font-size: 0.78rem;
     color: hsl(var(--muted-foreground));
     cursor: pointer;
+  }
+  /* Collapsed: always one line, clipped with an ellipsis — never wraps
+     (TASK-1V8H8; was a real bug for long subagent descriptions). Expanded
+     (.expanded): let it wrap and show the full text, on top of the existing
+     expanded detail/nested transcript below. The badge/chip stay pinned at
+     the end and never shrink, in both states. */
+  .trigger-label {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .activity-trigger.expanded .trigger-label {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+  }
+  .subagent-type-chip {
+    flex: 0 0 auto;
+    font-size: 0.68rem;
+    color: hsl(var(--muted-foreground));
+    background: hsl(var(--muted-foreground) / 0.1);
+    border-radius: calc(var(--radius) - 4px);
+    padding: 0 0.35rem;
   }
   .activity-trigger:hover {
     color: hsl(var(--foreground));

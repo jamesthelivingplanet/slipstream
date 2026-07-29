@@ -870,6 +870,112 @@ describe('createRpc', () => {
         // transitively resolve to a0 and ride along — neither vanishes.
         expect(sidechainUuids.sort()).toEqual(['sub-a1', 'sub-u1', 'sub2-a1', 'sub2-u1'])
       })
+
+      it('every message of a subagent file carries the same sidechainId and meta fields (TASK-1V8H8)', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+        writeTranscript('s1', [
+          chatLine('u0', '2026-07-19T10:00:00.000Z', 'go', 'user'),
+          toolUseLine('a0', '2026-07-19T10:00:01.000Z', 'toolu_1'),
+        ])
+        writeSubagentTranscript(
+          's1',
+          'agentA',
+          [
+            subagentLine('sub-0', '2026-07-19T10:00:01.100Z', null, 'task'),
+            subagentLine('sub-1', '2026-07-19T10:00:01.200Z', 'sub-0', 'step 1'),
+          ],
+          'toolu_1',
+        )
+
+        const result = (await rpc.handle(IPC.getChatMessages, ['s1'])) as {
+          messages: {
+            uuid: string
+            isSidechain?: boolean
+            sidechainId?: string
+            sidechainToolUseId?: string
+          }[]
+        }
+        const sub = result.messages.filter((m) => m.isSidechain)
+        expect(sub.map((m) => m.uuid).sort()).toEqual(['sub-0', 'sub-1'])
+        for (const m of sub) {
+          expect(m.sidechainId).toBe('agentA')
+          expect(m.sidechainToolUseId).toBe('toolu_1')
+        }
+      })
+
+      it('a subagent chain broken by a dropped middle line (unrenderable content) still resolves via sidechainId, so the whole run pages together', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+        writeTranscript('s1', [
+          chatLine('u0', '2026-07-19T10:00:00.000Z', 'go', 'user'),
+          toolUseLine('a0', '2026-07-19T10:00:01.000Z', 'toolu_1'),
+          chatLine('a1', '2026-07-19T10:00:10.000Z', 'later 1'),
+          chatLine('a2', '2026-07-19T10:00:20.000Z', 'later 2'),
+        ])
+        // An unrecognized block kind — transcriptMessages.ts's parseLine
+        // returns null for this line (no renderable block), so it's dropped
+        // entirely, breaking the parentUuid chain between sub-0 and sub-1
+        // (whose parentUuid still points at the now-missing uuid).
+        const droppedLine = JSON.stringify({
+          type: 'assistant',
+          isSidechain: true,
+          uuid: 'sub-dropped',
+          parentUuid: 'sub-0',
+          timestamp: '2026-07-19T10:00:01.150Z',
+          message: { role: 'assistant', content: [{ type: 'unknown_future_kind' }] },
+        })
+        writeSubagentTranscript(
+          's1',
+          'agentA',
+          [
+            subagentLine('sub-0', '2026-07-19T10:00:01.100Z', null, 'task'),
+            droppedLine,
+            // ts deliberately AFTER a1 — a per-message ts-nearest fallback
+            // for this (chain-broken) fragment, resolved independently of
+            // sub-0, would land on a1 instead of the run's real anchor a0.
+            subagentLine('sub-1', '2026-07-19T10:00:15.000Z', 'sub-dropped', 'step 1'),
+          ],
+          'toolu_1',
+        )
+
+        // limit:2 keeps only [a1, a2] — a0 (the true spawning turn, and the
+        // whole group's correct anchor via sidechainToolUseId) falls outside
+        // the page, so NEITHER sub-0 nor sub-1 should be carried along.
+        const result = (await rpc.handle(IPC.getChatMessages, ['s1', { limit: 2 }])) as {
+          messages: { uuid: string; isSidechain?: boolean }[]
+        }
+        const main = result.messages.filter((m) => !m.isSidechain)
+        expect(main.map((m) => m.uuid)).toEqual(['a1', 'a2'])
+        const sidechainUuids = result.messages.filter((m) => m.isSidechain).map((m) => m.uuid)
+        expect(sidechainUuids).toEqual([])
+      })
+
+      it('a subagent with no meta.json (no sidechainToolUseId) still resolves ALL its messages to the SAME anchor as one group', async () => {
+        deps.sessionStore.upsert(makeSession({ id: 's1', agentKind: 'claude-code' }))
+        writeTranscript('s1', [
+          chatLine('u0', '2026-07-19T10:00:00.000Z', 'go', 'user'),
+          chatLine('a0', '2026-07-19T10:00:01.000Z', 'ack'),
+          chatLine('a1', '2026-07-19T10:00:10.000Z', 'later 1'),
+          chatLine('a2', '2026-07-19T10:00:20.000Z', 'later 2'),
+        ])
+        // No toolUseId arg — writeSubagentTranscript writes no meta.json.
+        writeSubagentTranscript('s1', 'agentNoMeta', [
+          subagentLine('sub-0', '2026-07-19T10:00:01.500Z', null, 'task'),
+          subagentLine('sub-1', '2026-07-19T10:00:15.000Z', 'sub-0', 'step 1'),
+        ])
+
+        // limit:2 keeps only [a1, a2]. Without sidechainId grouping, a
+        // per-message ts-nearest fallback would anchor sub-0 (ts 1.5) to a0
+        // and sub-1 (ts 15) to a1 independently, splitting the run across
+        // pages — sub-1 would leak onto this page even though its group's
+        // real anchor (a0, nearest to the group's EARLIEST ts) is not in it.
+        const result = (await rpc.handle(IPC.getChatMessages, ['s1', { limit: 2 }])) as {
+          messages: { uuid: string; isSidechain?: boolean }[]
+        }
+        const main = result.messages.filter((m) => !m.isSidechain)
+        expect(main.map((m) => m.uuid)).toEqual(['a1', 'a2'])
+        const sidechainUuids = result.messages.filter((m) => m.isSidechain).map((m) => m.uuid)
+        expect(sidechainUuids).toEqual([])
+      })
     })
 
     it('fans out chatMessage session events on the push channel', () => {
