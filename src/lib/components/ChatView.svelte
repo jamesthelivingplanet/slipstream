@@ -490,15 +490,21 @@
              placement isn't meaningful here (that's the whole reason it's
              orphaned), so these render together after the main transcript. -->
         <div class="subagent-orphaned-section">
-          {#each subagents.orphaned as group (group.parentUuid ?? 'orphan-none')}
-            {@const key = `orphan:${group.parentUuid ?? 'none'}`}
+          {#each subagents.orphaned as group (group.id)}
+            {@const key = `orphan:${group.id}`}
+            {@const label = group.label ?? group.agentType ?? 'Subagent work (unmatched)'}
             <button
               type="button"
               class="subagent-orphan-trigger"
+              class:expanded={expandedIds.has(key)}
               aria-expanded={expandedIds.has(key)}
+              title={label}
               on:click={() => toggleExpanded(key)}
             >
-              Subagent work (unmatched)
+              <span class="trigger-label">{label}</span>
+              {#if group.label && group.agentType}
+                <span class="subagent-type-chip">{group.agentType}</span>
+              {/if}
               <span class="subagent-orphan-badge"
                 >{group.turnCount} {group.turnCount === 1 ? 'turn' : 'turns'}</span
               >
@@ -510,6 +516,7 @@
                   {agentIcon}
                   {expandedIds}
                   {toggleExpanded}
+                  subagentsByToolUseId={subagents.byToolUseId}
                   nested={true}
                 />
               </div>
@@ -691,6 +698,30 @@
   .subagent-orphan-trigger:hover {
     color: hsl(var(--foreground));
     background: hsl(var(--accent-bg));
+  }
+  /* Collapsed: one line, clipped with an ellipsis (TASK-1V8H8, same treatment
+     as ChatTurnList's .activity-trigger — kept as its own copy here since
+     Svelte's per-component style scoping doesn't reach across files).
+     Expanded (.expanded): let it wrap and show the full label. */
+  .subagent-orphan-trigger .trigger-label {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .subagent-orphan-trigger.expanded .trigger-label {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+  }
+  .subagent-orphan-trigger .subagent-type-chip {
+    flex: 0 0 auto;
+    font-size: 0.68rem;
+    color: hsl(var(--muted-foreground));
+    background: hsl(var(--muted-foreground) / 0.1);
+    border-radius: calc(var(--radius) - 4px);
+    padding: 0 0.35rem;
   }
   .subagent-orphan-badge {
     flex: 0 0 auto;

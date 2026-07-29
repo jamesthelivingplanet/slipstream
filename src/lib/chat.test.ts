@@ -536,6 +536,132 @@ describe('buildSubagentGroups', () => {
     expect(result.byToolUseId.get('tu-a')!.items[0]).toMatchObject({ text: 'a-side' })
     expect(result.byToolUseId.get('tu-b')!.items[0]).toMatchObject({ text: 'b-side' })
   })
+
+  // ── sidechainId-based grouping (TASK-1V8H8) ─────────────────────────────
+  // A subagent's own transcript file is grouped by literal parentUuid chain
+  // in older data, but that chain breaks whenever the parser drops an
+  // unrenderable line partway through — sidechainId (stamped by the backend
+  // on every message of one subagent run) is the reliable key, and must
+  // still produce ONE group even when the parentUuid chain is broken.
+
+  it('groups all messages sharing a sidechainId into ONE group even when the parentUuid chain is broken', () => {
+    const messages: SessionChatMessageDTO[] = [
+      toolUseMsg('m1', 'tu-agent', 'Agent', {}, 1),
+      {
+        ...sidechainTextMsg('s1', 'assistant', 'first', 2, 'tu-agent'),
+        sidechainId: 'run-1',
+      },
+      // s2's parentUuid points at a message NOT present in this page (the
+      // dropped-line scenario) — chain-walking would treat this as its own
+      // orphaned island, but sidechainId keeps it in the same group.
+      {
+        ...sidechainTextMsg('s2', 'assistant', 'second', 3, 'missing-middle-uuid'),
+        sidechainId: 'run-1',
+      },
+      {
+        ...sidechainTextMsg('s3', 'assistant', 'third', 4, 's2'),
+        sidechainId: 'run-1',
+      },
+    ]
+    const items = buildChatView(messages)
+    const result = buildSubagentGroups(messages, items)
+    expect(result.orphaned).toEqual([])
+    expect(result.byToolUseId.size).toBe(1)
+    const group = result.byToolUseId.get('tu-agent')
+    expect(group).toBeDefined()
+    expect(group!.items).toHaveLength(3)
+    expect(group!.id).toBe('run-1')
+  })
+
+  it('surfaces sidechainDescription/sidechainAgentType as label/agentType', () => {
+    const messages: SessionChatMessageDTO[] = [
+      toolUseMsg('m1', 'tu-agent', 'Agent', {}, 1),
+      {
+        ...sidechainTextMsg('s1', 'assistant', 'first', 2, 'tu-agent'),
+        sidechainId: 'run-1',
+        sidechainDescription: 'Fix slipstream token re-gate',
+        sidechainAgentType: 'general-purpose',
+      },
+    ]
+    const items = buildChatView(messages)
+    const result = buildSubagentGroups(messages, items)
+    const group = result.byToolUseId.get('tu-agent')
+    expect(group!.label).toBe('Fix slipstream token re-gate')
+    expect(group!.agentType).toBe('general-purpose')
+  })
+
+  it('a nested subagent (spawn tool_use id only inside another group items) attaches via byToolUseId, not orphaned', () => {
+    const messages: SessionChatMessageDTO[] = [
+      toolUseMsg('m1', 'tu-outer', 'Agent', {}, 1),
+      // Outer subagent's own transcript spawns a nested Agent (tu-inner) —
+      // that tool_use only exists inside the outer group's own items, never
+      // in the main transcript's items.
+      {
+        uuid: 's1',
+        role: 'assistant',
+        ts: 2,
+        blocks: [{ type: 'tool_use', id: 'tu-inner', name: 'Agent', input: {} }],
+        isSidechain: true,
+        parentUuid: 'tu-outer',
+        sidechainId: 'run-outer',
+      },
+      {
+        ...sidechainTextMsg('s2', 'assistant', 'inner reply', 3, 'tu-inner'),
+        sidechainId: 'run-inner',
+      },
+    ]
+    const items = buildChatView(messages)
+    const result = buildSubagentGroups(messages, items)
+    expect(result.orphaned).toEqual([])
+    expect(result.byToolUseId.size).toBe(2)
+    expect(result.byToolUseId.get('tu-outer')).toBeDefined()
+    const inner = result.byToolUseId.get('tu-inner')
+    expect(inner).toBeDefined()
+    expect(inner!.items[0]).toMatchObject({ text: 'inner reply' })
+  })
+
+  // ── self-reference guard (TASK-1V8H8) ───────────────────────────────────
+  // The renderer expands an attached group via <svelte:self> keyed by the
+  // SAME toolUseId used for attachment — if a group's own spawn tool_use id
+  // were also present among that group's own nested items, expanding it
+  // would recursively render the group inside itself forever. Malformed data
+  // could produce this shape even though a real transcript can't, so it must
+  // be orphaned rather than attached.
+  it('a self-referential group (its own spawn tool_use id lives inside its own items) is orphaned, not attached', () => {
+    const messages: SessionChatMessageDTO[] = [
+      {
+        uuid: 's1',
+        role: 'assistant',
+        ts: 1,
+        blocks: [{ type: 'tool_use', id: 'tu-self', name: 'Agent', input: {} }],
+        isSidechain: true,
+        sidechainId: 'run-self',
+        sidechainToolUseId: 'tu-self',
+      },
+    ]
+    const items = buildChatView(messages)
+    const result = buildSubagentGroups(messages, items)
+    expect(result.byToolUseId.size).toBe(0)
+    expect(result.orphaned).toHaveLength(1)
+    expect(result.orphaned[0].parentUuid).toBe('tu-self')
+    expect(result.orphaned[0].id).toBe('run-self')
+  })
+
+  it('group id is stable and unique across multiple orphaned groups', () => {
+    const messages = [
+      sidechainTextMsg('m1', 'assistant', 'orphan a', 1, 'tu-does-not-exist-a'),
+      sidechainTextMsg('m2', 'assistant', 'orphan b', 2, 'tu-does-not-exist-b'),
+      sidechainTextMsg('m3', 'assistant', 'no parent 1', 3, undefined),
+      sidechainTextMsg('m4', 'assistant', 'no parent 2', 4, undefined),
+    ]
+    const items = buildChatView(messages)
+    const result = buildSubagentGroups(messages, items)
+    // orphan a, orphan b, and the merged no-parent bucket -> 3 groups
+    expect(result.orphaned).toHaveLength(3)
+    const ids = result.orphaned.map((g) => g.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    ids.forEach((id) => expect(typeof id).toBe('string'))
+  })
 })
 
 // ─── summarizeTool ──────────────────────────────────────────────────────
