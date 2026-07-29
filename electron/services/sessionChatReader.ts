@@ -172,21 +172,39 @@ export async function readSessionChat(
  * subagent file failing to read/parse, just means fewer/no extra messages —
  * never throws, and never affects whether the main transcript is returned.
  *
- * Threading: each subagent file's sibling `.meta.json` carries `toolUseId`,
- * the id of the `Agent` tool_use that spawned it — verified against real
- * transcripts on this machine (242/243 directly-spawned subagents resolve
- * cleanly to a same-session `Agent` tool_use id; the one miss is a session
- * whose main transcript no longer contains that turn). `promptId` and
- * `agentId` were also checked and rejected: `promptId` is shared by every
- * subagent spawned from the same user turn (not 1:1 with a specific Agent
- * call), and `agentId` never appears in the main transcript at all. When a
- * match is found, it's stamped onto the subagent's ROOT message's
+ * Grouping: EVERY message parsed from one subagent file gets `sidechainId`
+ * stamped to that file's `agentId` (the filename's `agent-<agentId>.jsonl`
+ * segment) — this is the reliable grouping key a consumer (rpcHandlers/
+ * chat.ts's `groupSidechainsByMainThreadAnchor`) should use to treat a whole
+ * subagent run as one unit, because `parentUuid` chain-walking can't: a
+ * dropped unrenderable line (transcriptMessages.ts's `parseLine` returns
+ * null for one) breaks the chain at that point in EVERY real transcript file
+ * measured on this machine (2-3 fragments per file), fragmenting one
+ * subagent into multiple disconnected chains. `sidechainId` doesn't have
+ * that failure mode since it's stamped per-message from the filename, not
+ * derived from the chain.
+ *
+ * Threading: each subagent file's sibling `.meta.json` (best-effort, may be
+ * absent) carries `toolUseId` — the id of the `Agent` tool_use that spawned
+ * it — verified against real transcripts on this machine (242/243
+ * directly-spawned subagents resolve cleanly to a same-session `Agent`
+ * tool_use id; the one miss is a session whose main transcript no longer
+ * contains that turn) — plus `description`/`agentType`. `promptId` and
+ * `agentId` were also checked and rejected as the threading key: `promptId`
+ * is shared by every subagent spawned from the same user turn (not 1:1 with
+ * a specific Agent call), and `agentId` never appears in the main transcript
+ * at all. When present, `toolUseId`/`description`/`agentType` are stamped as
+ * `sidechainToolUseId`/`sidechainDescription`/`sidechainAgentType` on EVERY
+ * message of the file (same per-message spread as `sidechainId`) so a
+ * consumer doesn't have to special-case the root line to find them.
+ * `toolUseId` is ADDITIONALLY stamped onto the subagent's ROOT message's
  * `parentUuid` (left unset by the parser for a chain's first line, since its
- * raw `parentUuid` is `null`) so a renderer can nest that subagent's turns
- * under the Agent call that spawned it. A subagent spawned by ANOTHER
- * subagent (nested Task spawn, `spawnDepth` > 1 in the meta file) has no
- * match in the main transcript — it still merges in `ts` order and carries
- * `isSidechain: true`, just without a `parentUuid` link.
+ * raw `parentUuid` is `null`) — kept for back-compat with other code that
+ * still reads `parentUuid` directly. A subagent spawned by ANOTHER subagent
+ * (nested Task spawn, `spawnDepth` > 1 in the meta file) has no match in the
+ * main transcript — it still merges in `ts` order and carries `isSidechain:
+ * true`, just without a `parentUuid` link (its `sidechainToolUseId`, if any,
+ * instead points at a tool_use inside the ANCESTOR subagent's transcript).
  */
 async function readSubagentMessages(sessionId: string): Promise<SessionChatMessageDTO[]> {
   const files = subagentTranscriptFiles(sessionId)
@@ -198,28 +216,51 @@ async function readSubagentMessages(sessionId: string): Promise<SessionChatMessa
     } catch {
       continue
     }
-    const messages = parseTranscriptMessages(raw)
+    let messages = parseTranscriptMessages(raw)
     if (messages.length === 0) continue
-    const toolUseId = file.metaPath ? await readToolUseId(file.metaPath) : null
-    if (toolUseId && messages[0].parentUuid === undefined) {
-      messages[0] = { ...messages[0], parentUuid: toolUseId }
+    const meta = file.metaPath ? await readSubagentMeta(file.metaPath) : null
+    if (meta?.toolUseId && messages[0].parentUuid === undefined) {
+      messages[0] = { ...messages[0], parentUuid: meta.toolUseId }
     }
+    // Stamp the grouping id (and, best-effort, the meta fields) on EVERY
+    // message of this file — not just the root — so a consumer can group by
+    // sidechainId alone without also having to chain-walk to find them.
+    messages = messages.map((m) => ({
+      ...m,
+      sidechainId: file.agentId,
+      ...(meta?.toolUseId ? { sidechainToolUseId: meta.toolUseId } : {}),
+      ...(meta?.description ? { sidechainDescription: meta.description } : {}),
+      ...(meta?.agentType ? { sidechainAgentType: meta.agentType } : {}),
+    }))
     all.push(...messages)
   }
   return all
 }
 
-/** Best-effort read of a subagent's `.meta.json` `toolUseId` field — the id
- *  of the `Agent` tool_use that spawned it. Returns null on any read/parse
- *  failure or when the field is missing/not a string. */
-async function readToolUseId(metaPath: string): Promise<string | null> {
+/** Best-effort per-field parse of a subagent's `.meta.json` — `toolUseId`
+ *  (the id of the `Agent` tool_use that spawned it), `description`, and
+ *  `agentType`. Each field is independently optional; returns nulls (never
+ *  throws) on any read/parse failure or when a field is missing/not a
+ *  string. */
+async function readSubagentMeta(
+  metaPath: string,
+): Promise<{ toolUseId: string | null; description: string | null; agentType: string | null }> {
+  const empty = { toolUseId: null, description: null, agentType: null }
   try {
     const raw = await fs.promises.readFile(metaPath, 'utf8')
     const parsed = JSON.parse(raw) as unknown
-    if (typeof parsed !== 'object' || parsed === null) return null
-    const id = (parsed as Record<string, unknown>)['toolUseId']
-    return typeof id === 'string' && id ? id : null
+    if (typeof parsed !== 'object' || parsed === null) return empty
+    const obj = parsed as Record<string, unknown>
+    const str = (key: string): string | null => {
+      const v = obj[key]
+      return typeof v === 'string' && v ? v : null
+    }
+    return {
+      toolUseId: str('toolUseId'),
+      description: str('description'),
+      agentType: str('agentType'),
+    }
   } catch {
-    return null
+    return empty
   }
 }

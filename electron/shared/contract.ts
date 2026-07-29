@@ -443,8 +443,43 @@ export interface SessionChatMessageDTO {
   /** True for a Task-tool subagent turn — the renderer nests these under the
    *  parent Task call rather than showing them inline. */
   isSidechain?: boolean
-  /** Parent transcript uuid, used to thread a sidechain turn to its parent. */
+  /** Parent transcript uuid, used to thread a sidechain turn to its parent.
+   *  For a claude-code subagent transcript, ONLY the chain's root message
+   *  gets this stamped (to the spawning `Agent` tool_use id, by
+   *  sessionChatReader.ts's `readSubagentMessages`) — every other line
+   *  chains to the previous line in that SAME file. Do not use this as a
+   *  grouping key: `transcriptMessages.ts`'s `parseLine` drops any line with
+   *  no renderable content block, which breaks this chain at that point in
+   *  EVERY real transcript file measured (2-3 fragments per file). Use
+   *  `sidechainId` instead when it's present. */
   parentUuid?: string
+  /** Stable per-subagent-transcript group id for a claude-code subagent
+   *  message — the `agentId` parsed from its `<sessionId>/subagents/agent-
+   *  <agentId>.jsonl` filename, stamped by sessionChatReader.ts's
+   *  `readSubagentMessages` on EVERY message parsed from that file (not just
+   *  the chain root). Unlike `parentUuid`, this survives a chain broken by a
+   *  dropped unrenderable line, so it's the RELIABLE key for grouping one
+   *  subagent run's messages together (see rpcHandlers/chat.ts's
+   *  `groupSidechainsByMainThreadAnchor`). Unset for non-sidechain messages
+   *  and for sidechain messages sessionChatReader didn't produce. */
+  sidechainId?: string
+  /** The id of the `Agent` tool_use (in the main transcript, or in an
+   *  ancestor subagent's transcript for a nested spawn) that spawned this
+   *  subagent run — sessionChatReader.ts's best-effort read of the sibling
+   *  `agent-<agentId>.meta.json`'s `toolUseId` field. Stamped on every
+   *  message of the run alongside `sidechainId`. Unset when the meta.json is
+   *  missing/unreadable/lacks the field. */
+  sidechainToolUseId?: string
+  /** The subagent run's `description` (the Agent tool_use's `description`
+   *  input, as recorded in meta.json at spawn time) — sessionChatReader.ts's
+   *  best-effort read, stamped alongside `sidechainId`. Unset when the
+   *  meta.json is missing/unreadable/lacks the field. */
+  sidechainDescription?: string
+  /** The subagent run's `agentType` (meta.json, e.g. `general-purpose`) —
+   *  sessionChatReader.ts's best-effort read, stamped alongside
+   *  `sidechainId`. Unset when the meta.json is missing/unreadable/lacks the
+   *  field. */
+  sidechainAgentType?: string
 }
 
 /** One discovered skill (`SKILL.md`-convention directory), surfaced via

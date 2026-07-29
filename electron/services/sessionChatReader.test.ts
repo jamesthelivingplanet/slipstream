@@ -212,7 +212,7 @@ describe('readSessionChat', () => {
     expect(messages).toEqual([])
   })
 
-  it('merges subagent transcripts, ordered by ts, threading the root turn via meta.json toolUseId', async () => {
+  it('merges subagent transcripts, ordered by ts, threading the root turn via meta.json toolUseId, and stamps sidechainId + meta fields on EVERY message', async () => {
     fs.mkdirSync(path.join(tmp, 'claude', 'projects', 'any'), { recursive: true })
     fs.writeFileSync(
       path.join(tmp, 'claude', 'projects', 'any', 's1.jsonl'),
@@ -246,7 +246,11 @@ describe('readSessionChat', () => {
     fs.writeFileSync(path.join(subagentsDir, 'agent-agentA.jsonl'), subagentTranscript, 'utf8')
     fs.writeFileSync(
       path.join(subagentsDir, 'agent-agentA.meta.json'),
-      JSON.stringify({ toolUseId: 'toolu_parent_call' }),
+      JSON.stringify({
+        toolUseId: 'toolu_parent_call',
+        description: 'Fix the bug',
+        agentType: 'general-purpose',
+      }),
       'utf8',
     )
 
@@ -257,11 +261,71 @@ describe('readSessionChat', () => {
     // ts-ordered across both sources: main u1, sub-u1, main a1, sub-a1.
     expect(messages.map((m) => m.uuid)).toEqual(['u1', 'sub-u1', 'a1', 'sub-a1'])
     const subRoot = messages.find((m) => m.uuid === 'sub-u1')
-    expect(subRoot).toMatchObject({ isSidechain: true, parentUuid: 'toolu_parent_call' })
+    expect(subRoot).toMatchObject({
+      isSidechain: true,
+      parentUuid: 'toolu_parent_call',
+      sidechainId: 'agentA',
+      sidechainToolUseId: 'toolu_parent_call',
+      sidechainDescription: 'Fix the bug',
+      sidechainAgentType: 'general-purpose',
+    })
     const subReply = messages.find((m) => m.uuid === 'sub-a1')
     // Non-root sidechain line keeps its own internal parentUuid chain, not
     // the toolUseId — only the chain's first line gets threaded to the call.
-    expect(subReply).toMatchObject({ isSidechain: true, parentUuid: 'sub-u1' })
+    // But sidechainId/meta fields are stamped on it too, not just the root.
+    expect(subReply).toMatchObject({
+      isSidechain: true,
+      parentUuid: 'sub-u1',
+      sidechainId: 'agentA',
+      sidechainToolUseId: 'toolu_parent_call',
+      sidechainDescription: 'Fix the bug',
+      sidechainAgentType: 'general-purpose',
+    })
+    // Main-transcript messages are untouched — no sidechain fields at all.
+    const mainMsg = messages.find((m) => m.uuid === 'u1')
+    expect(mainMsg?.sidechainId).toBeUndefined()
+  })
+
+  it('stamps sidechainId on every subagent message even with no meta.json (no sidechainToolUseId)', async () => {
+    fs.mkdirSync(path.join(tmp, 'claude', 'projects', 'any'), { recursive: true })
+    fs.writeFileSync(
+      path.join(tmp, 'claude', 'projects', 'any', 's1.jsonl'),
+      claudeTranscript,
+      'utf8',
+    )
+    const subagentsDir = path.join(tmp, 'claude', 'projects', 'any', 's1', 'subagents')
+    fs.mkdirSync(subagentsDir, { recursive: true })
+    const subagentTranscript = [
+      JSON.stringify({
+        parentUuid: null,
+        isSidechain: true,
+        type: 'user',
+        uuid: 'sub-u1',
+        timestamp: '2024-01-01T00:00:00.500Z',
+        message: { role: 'user', content: 'delegate' },
+      }),
+      JSON.stringify({
+        parentUuid: 'sub-u1',
+        isSidechain: true,
+        type: 'assistant',
+        uuid: 'sub-a1',
+        timestamp: '2024-01-01T00:00:02.000Z',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+      }),
+    ].join('\n')
+    // No sibling agent-agentNoMeta.meta.json written at all.
+    fs.writeFileSync(path.join(subagentsDir, 'agent-agentNoMeta.jsonl'), subagentTranscript, 'utf8')
+
+    const { messages } = await readSessionChat(makeDeps(), makeSession())
+
+    const sub = messages.filter((m) => m.isSidechain)
+    expect(sub).toHaveLength(2)
+    for (const m of sub) {
+      expect(m.sidechainId).toBe('agentNoMeta')
+      expect(m.sidechainToolUseId).toBeUndefined()
+      expect(m.sidechainDescription).toBeUndefined()
+      expect(m.sidechainAgentType).toBeUndefined()
+    }
   })
 
   it('returns just the main transcript when the session has no subagents dir', async () => {

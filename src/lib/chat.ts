@@ -222,70 +222,177 @@ function flattenBlocks(mainline: SessionChatMessageDTO[]): ChatViewItem[] {
 
 /** One nested subagent transcript, keyed to either the `toolUseId` of the
  *  `Agent` tool_use that spawned it (an "attached" group) or standing alone
- *  (an "orphaned" group — see buildSubagentGroups). `turnCount` is the number
- *  of nested ChatViewItems (each is a turn/run boundary — a text, thinking,
- *  image, or activity run) — used by the renderer's collapsed-row label
- *  ("<description> · N turns"). */
+ *  (an "orphaned" group — see buildSubagentGroups). `id` is a stable, unique
+ *  key for this group (`{#each}` key + expand/collapse key in the renderer)
+ *  — derived from `sidechainId` when present, else the group's spawn
+ *  tool_use id, else the deterministic fallback `'none'`. `parentUuid` is
+ *  kept for backward compatibility with existing callers/tests: it's the
+ *  group's spawn tool_use id (same value used to key `byToolUseId`).
+ *  `turnCount` is the number of nested ChatViewItems (each is a turn/run
+ *  boundary — a text, thinking, image, or activity run) — used by the
+ *  renderer's collapsed-row label ("<description> · N turns"). `label`
+ *  (from `sidechainDescription`) and `agentType` (from `sidechainAgentType`)
+ *  surface the run's metadata when the backend stamped it. */
 export interface ChatSubagentGroup {
+  id: string
   parentUuid: string | undefined
   items: ChatViewItem[]
   turnCount: number
+  label?: string
+  agentType?: string
 }
 
 /**
  * Groups `isSidechain: true` messages (a Claude Code subagent's own
- * transcript turns) by `parentUuid` (the toolUseId of the `Agent` tool_use in
- * the MAIN transcript that spawned each group), builds each group's own
- * nested view via `flattenBlocks` — the same block-flattening logic
+ * transcript turns) into per-run `ChatSubagentGroup`s, builds each group's
+ * own nested view via `flattenBlocks` — the same block-flattening logic
  * `buildChatView` uses (a subagent's transcript has the same shape —
  * text/tool_use/tool_result/thinking/image — and its tool_result pairing is
- * self-contained within its own messages), then cross-references each
- * group's `parentUuid` against the tool_use ids
- * actually present in `items` (the main flattened `ChatViewItem[]`, i.e. the
- * output of `buildChatView(messages)` on the same message list) to decide
- * whether it's "attached" (parent tool_use found — returned keyed by
- * toolUseId in `byToolUseId`) or "orphaned" (parent tool_use not in this
- * loaded page, or no `parentUuid` at all — returned in `orphaned`, grouped
+ * self-contained within its own messages) — then decides whether each group
+ * is "attached" (its spawning `Agent` tool_use is present somewhere in this
+ * loaded page — returned keyed by that tool_use id in `byToolUseId`) or
+ * "orphaned" (spawning tool_use not found — returned in `orphaned`, grouped
  * but not chronologically placed, so a partial page or missing parent never
  * silently drops content).
+ *
+ * GROUPING KEY: `sidechainId` (a stable per-subagent-run id the backend
+ * stamps on every message of a subagent transcript file) when present — this
+ * is the reliable key, because a subagent's transcript file can have gaps
+ * (an unrenderable line the parser drops) that break the `parentUuid` chain
+ * partway through, which previously fractured ONE subagent run into many
+ * one-message groups. When `sidechainId` is absent (older data), fall back
+ * to the prior behavior's outcome: walk `parentUuid` through other sidechain
+ * messages in the list to the chain root, and bucket by that root's
+ * `parentUuid` (or by `undefined` when there is none) — this keeps every
+ * message of a still-intact chain in one group, and still buckets multiple
+ * parentUuid-less messages together rather than each getting its own group.
+ *
+ * SPAWN TOOL_USE ID (what a group attaches by): `sidechainToolUseId` if any
+ * message in the group carries it, else the chain root's `parentUuid`.
+ *
+ * ATTACHMENT: a tool_use id is "available" if it's the id of a tool_use
+ * anywhere in the main `items` OR anywhere in any group's own flattened
+ * nested items — the latter is what lets a NESTED subagent (one that
+ * spawned its own subagent) attach inside its parent's transcript instead of
+ * being dumped in `orphaned`; the renderer resolves it by threading
+ * `byToolUseId` down through the recursive nested render.
+ *
+ * SELF-REFERENCE GUARD: the renderer (`ChatTurnList.svelte`) renders an
+ * attached group via `<svelte:self>` keyed by the SAME `toolUseId` used to
+ * expand it — so if a group's own spawn tool_use id were also found among
+ * that group's OWN nested items, expanding it would recursively render the
+ * group inside itself forever (an infinite loop that hangs the tab). A real
+ * transcript can't produce this (a subagent cannot spawn itself), but
+ * malformed/duplicated data could, so a group is never allowed to attach to
+ * a tool_use id that lives inside its own `items` — such a group is treated
+ * as orphaned instead.
  */
 export function buildSubagentGroups(
   messages: SessionChatMessageDTO[],
   items: ChatViewItem[],
 ): { byToolUseId: Map<string, ChatSubagentGroup>; orphaned: ChatSubagentGroup[] } {
-  const toolUseIdsInMain = new Set<string>()
-  for (const item of items) {
-    if (item.kind === 'activity') {
-      for (const toolItem of item.items) toolUseIdsInMain.add(toolItem.toolUseId)
+  const sidechainMessages = messages.filter((msg) => msg.isSidechain === true)
+
+  // For the parentUuid-chain fallback: walk from `msg` through OTHER
+  // sidechain messages (by uuid) to the chain root, returning the root's
+  // own parentUuid. Guards against cycles defensively (malformed transcript)
+  // via `seen`, even though a real transcript should never cycle.
+  const byUuid = new Map<string, SessionChatMessageDTO>()
+  for (const msg of sidechainMessages) byUuid.set(msg.uuid, msg)
+  function chainRootParentUuid(msg: SessionChatMessageDTO): string | undefined {
+    let current = msg
+    const seen = new Set<string>()
+    while (current.parentUuid !== undefined && !seen.has(current.uuid)) {
+      seen.add(current.uuid)
+      const next = byUuid.get(current.parentUuid)
+      if (!next) break
+      current = next
     }
+    return current.parentUuid
   }
 
-  // Bucket sidechain messages by parentUuid. Messages with no parentUuid at
-  // all still need a bucket (grouped under the `undefined` key) rather than
-  // being dropped.
-  const byParentUuid = new Map<string | undefined, SessionChatMessageDTO[]>()
-  for (const msg of messages) {
-    if (msg.isSidechain !== true) continue
-    const bucket = byParentUuid.get(msg.parentUuid)
-    if (bucket) bucket.push(msg)
-    else byParentUuid.set(msg.parentUuid, [msg])
+  // Bucket sidechain messages: sidechainId when present, else the
+  // parentUuid-chain-root fallback (grouped under a key that still collapses
+  // "no parentUuid at all" messages into one bucket, matching prior
+  // behavior).
+  const bucketsByKey = new Map<string, SessionChatMessageDTO[]>()
+  const keyOrder: string[] = []
+  for (const msg of sidechainMessages) {
+    const key =
+      msg.sidechainId !== undefined
+        ? `sc:${msg.sidechainId}`
+        : `root:${chainRootParentUuid(msg) ?? ''}`
+    let bucket = bucketsByKey.get(key)
+    if (!bucket) {
+      bucket = []
+      bucketsByKey.set(key, bucket)
+      keyOrder.push(key)
+    }
+    bucket.push(msg)
+  }
+
+  const groups: ChatSubagentGroup[] = []
+  for (const key of keyOrder) {
+    const groupMessages = bucketsByKey.get(key)!
+    const nestedItems = flattenBlocks(groupMessages)
+    const sidechainToolUseId = groupMessages
+      .map((m) => m.sidechainToolUseId)
+      .find((v) => v !== undefined)
+    const spawnToolUseId = sidechainToolUseId ?? chainRootParentUuid(groupMessages[0])
+    const sidechainId = groupMessages.map((m) => m.sidechainId).find((v) => v !== undefined)
+    const label = groupMessages.map((m) => m.sidechainDescription).find((v) => v !== undefined)
+    const agentType = groupMessages.map((m) => m.sidechainAgentType).find((v) => v !== undefined)
+    groups.push({
+      id: sidechainId ?? spawnToolUseId ?? 'none',
+      parentUuid: spawnToolUseId,
+      items: nestedItems,
+      turnCount: nestedItems.length,
+      label,
+      agentType,
+    })
+  }
+
+  // A tool_use id is "available" (something a group can attach to) if it's
+  // in the main flattened items OR inside any group's own nested items — the
+  // latter makes a nested subagent (one spawned from inside another
+  // subagent's transcript) attach to its parent group instead of orphaning.
+  const availableToolUseIds = new Set<string>()
+  for (const item of items) {
+    if (item.kind === 'activity') {
+      for (const toolItem of item.items) availableToolUseIds.add(toolItem.toolUseId)
+    }
+  }
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (item.kind === 'activity') {
+        for (const toolItem of item.items) availableToolUseIds.add(toolItem.toolUseId)
+      }
+    }
   }
 
   const byToolUseId = new Map<string, ChatSubagentGroup>()
   const orphaned: ChatSubagentGroup[] = []
-
-  for (const [parentUuid, groupMessages] of byParentUuid) {
-    const nestedItems = flattenBlocks(groupMessages)
-    const group: ChatSubagentGroup = {
-      parentUuid,
-      items: nestedItems,
-      turnCount: nestedItems.length,
+  for (const group of groups) {
+    // Per-group set of this group's OWN tool_use ids — used only for the
+    // self-reference guard below (see SELF-REFERENCE GUARD doc above).
+    const ownToolUseIds = new Set<string>()
+    for (const item of group.items) {
+      if (item.kind === 'activity') {
+        for (const toolItem of item.items) ownToolUseIds.add(toolItem.toolUseId)
+      }
     }
-    if (parentUuid !== undefined && toolUseIdsInMain.has(parentUuid)) {
-      byToolUseId.set(parentUuid, group)
+    const selfReferential = group.parentUuid !== undefined && ownToolUseIds.has(group.parentUuid)
+
+    if (
+      !selfReferential &&
+      group.parentUuid !== undefined &&
+      availableToolUseIds.has(group.parentUuid)
+    ) {
+      byToolUseId.set(group.parentUuid, group)
     } else {
-      // Either no parentUuid at all, or its parent tool_use isn't present in
-      // this loaded page — orphaned, but never dropped.
+      // Either no spawn tool_use id at all, it isn't present anywhere in
+      // this loaded page, or it's self-referential (guarded above) — orphaned,
+      // but never dropped.
       orphaned.push(group)
     }
   }

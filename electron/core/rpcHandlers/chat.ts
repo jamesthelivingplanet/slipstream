@@ -72,34 +72,49 @@ function pageChatMessages(
  * to, so `pageChatMessages` can carry a turn's subagent detail along with it
  * without letting it consume `limit`.
  *
- * Association strategy: a subagent transcript is one long parentUuid chain,
- * same one-content-block-per-line model as the main transcript (see
- * transcriptMessages.ts's module doc) — only its FIRST line (the "root") has
- * `parentUuid` stamped with the id of the spawning `Agent` tool_use (done by
- * sessionChatReader.ts's `readSubagentMessages`); every other line's
- * `parentUuid` is the previous line's uuid within that SAME subagent file.
- * So a message is associated by: walk its parentUuid pointers through other
- * sidechain messages to find its chain's root, then resolve the root's
- * `parentUuid` (a tool_use id, NOT a message uuid, at that point) against
- * every message's `tool_use` blocks to find the owning message. Grouping by
- * "which tool_use id a message's blocks contain" rather than assuming a
- * sidechain message's `parentUuid` always points straight at a main-thread
- * message is what makes nested subagents (below) resolve correctly too.
+ * sidechainId-first strategy: sessionChatReader.ts's `readSubagentMessages`
+ * stamps `sidechainId` (the subagent file's `agentId`) on EVERY message it
+ * produces, so messages sharing a `sidechainId` are known — directly, without
+ * any chain-walking — to belong to the same subagent transcript file. This
+ * matters because the OLD strategy (walk `parentUuid` pointers to a chain's
+ * root, then resolve the root's stamped `parentUuid`) breaks when a line in
+ * the middle of that chain gets dropped: transcriptMessages.ts's `parseLine`
+ * drops any line with no renderable content block, which fragments a chain
+ * in EVERY real transcript file measured on this machine (2-3 fragments per
+ * file) — each fragment's "root" (the first surviving line after a gap) has
+ * no `parentUuid` at all, so the walk can't reach the real spawn tool_use and
+ * the fragment falls back to a ts-nearest guess independently of the rest of
+ * its own subagent run, splitting one run across multiple anchors/pages.
+ *
+ * So resolution is now done ONCE PER `sidechainId` group (memoized), not per
+ * message: resolve the group's anchor from its `sidechainToolUseId` (meta.json's
+ * `toolUseId`, stamped on every message of the group) via the `toolUseOwner`
+ * map below, then map every message of the group to that single anchor. A
+ * group with no `sidechainToolUseId` (no meta.json, or it didn't parse) falls
+ * back to the old chain-root-`parentUuid` strategy, scoped to that group's
+ * own root line — unchanged behavior for that case, just no longer able to
+ * silently split a `sidechainId` group across anchors even if part of ITS
+ * OWN chain-walk fails. A sidechain message with no `sidechainId` at all
+ * (shouldn't happen for anything sessionChatReader produced, but keeps old
+ * data/paths working) keeps the original per-message chain-walk path,
+ * unchanged.
  *
  * Nested subagents (spawnDepth > 1, per sessionChatReader.ts's comment) spawn
  * from an `Agent` tool_use call made BY an ancestor subagent, not from the
  * main transcript — so the "owning message" resolved above can itself be a
- * sidechain message. Recurse (memoized, cycle-guarded) through however many
- * nesting levels exist until a main-thread owner is found; that becomes the
- * anchor for the WHOLE nested tree, so a nested subagent's messages page in
- * and out together with the top-level turn that ultimately caused them, and
- * are never asked to render as if they were standalone/orphaned.
+ * sidechain message belonging to a DIFFERENT `sidechainId` group. Recurse
+ * (memoized per group, cycle-guarded) through however many nesting levels
+ * exist until a main-thread owner is found; that becomes the anchor for the
+ * WHOLE nested tree, so a nested subagent's messages page in and out
+ * together with the top-level turn that ultimately caused them.
  *
- * A chain whose root can't be resolved to any owner at all (dangling
- * reference — e.g. a truncated transcript trimmed the owning turn, or a
- * meta.json toolUseId that doesn't match anything in the messages we have)
- * falls back to the nearest main-thread message by `ts` — so it still pages
- * in with SOME turn instead of silently never appearing on any page. */
+ * A group whose owner can't be resolved at all (dangling reference — e.g. a
+ * truncated transcript trimmed the owning turn, or a meta.json toolUseId
+ * that doesn't match anything in the messages we have) falls back to the
+ * nearest main-thread message by `ts` — applied ONCE per group (using the
+ * group's earliest message), so a dangling group still pages in as one unit
+ * with SOME turn instead of being split across pages by per-message ts
+ * fallbacks landing on different pages. */
 function groupSidechainsByMainThreadAnchor(
   messages: SessionChatMessageDTO[],
   mainMessages: SessionChatMessageDTO[],
@@ -113,13 +128,30 @@ function groupSidechainsByMainThreadAnchor(
     }
   }
 
-  const resolved = new Map<string, string | undefined>()
+  // Every sidechain message that carries a sidechainId, grouped by it.
+  const sidechainGroups = new Map<string, SessionChatMessageDTO[]>()
+  for (const m of messages) {
+    if (!m.isSidechain || !m.sidechainId) continue
+    const group = sidechainGroups.get(m.sidechainId)
+    if (group) group.push(m)
+    else sidechainGroups.set(m.sidechainId, [m])
+  }
 
+  const resolvedLegacy = new Map<string, string | undefined>()
+  const resolvedGroup = new Map<string, string | undefined>()
+
+  // Original per-message chain walk — only reached for a sidechain message
+  // with no sidechainId. Also the recursion target when an owner message
+  // turns out to be a sidechain message with no sidechainId of its own.
   function resolveAnchor(uuid: string, guard: Set<string>): string | undefined {
     if (mainUuids.has(uuid)) return uuid
-    if (resolved.has(uuid)) return resolved.get(uuid)
-    if (guard.has(uuid)) return undefined // cycle guard — shouldn't happen with real data
-    guard.add(uuid)
+    const owner = byUuid.get(uuid)
+    if (owner?.isSidechain && owner.sidechainId) {
+      return resolveGroupAnchor(owner.sidechainId, guard)
+    }
+    if (resolvedLegacy.has(uuid)) return resolvedLegacy.get(uuid)
+    if (guard.has(`m:${uuid}`)) return undefined // cycle guard — shouldn't happen with real data
+    guard.add(`m:${uuid}`)
 
     // Walk up this subagent's own chain to its root line (the loop is
     // bounded by that one subagent's chain length, so this stays cheap even
@@ -131,14 +163,62 @@ function groupSidechainsByMainThreadAnchor(
     const spawnToolUseId = root?.parentUuid
     const ownerUuid = spawnToolUseId ? toolUseOwner.get(spawnToolUseId) : undefined
     const anchor = ownerUuid ? resolveAnchor(ownerUuid, guard) : undefined
-    resolved.set(uuid, anchor)
+    resolvedLegacy.set(uuid, anchor)
+    return anchor
+  }
+
+  // sidechainId-first resolution — one lookup per subagent transcript file,
+  // memoized, so every message of that file (even one whose OWN parentUuid
+  // chain got fragmented by a dropped line) resolves to the same anchor.
+  function resolveGroupAnchor(sidechainId: string, guard: Set<string>): string | undefined {
+    if (resolvedGroup.has(sidechainId)) return resolvedGroup.get(sidechainId)
+    if (guard.has(`g:${sidechainId}`)) return undefined // cycle guard
+    guard.add(`g:${sidechainId}`)
+
+    const group = sidechainGroups.get(sidechainId) ?? []
+    const toolUseId = group.find((m) => m.sidechainToolUseId)?.sidechainToolUseId
+    let ownerUuid = toolUseId ? toolUseOwner.get(toolUseId) : undefined
+
+    if (!ownerUuid) {
+      // No (matching) sidechainToolUseId — fall back to the chain-root
+      // parentUuid strategy, same as before sidechainId existed, scoped to
+      // this group's own root line (the message with no parentUuid, or —
+      // defensively, if that's absent too — its earliest by ts).
+      let root: SessionChatMessageDTO | undefined
+      for (const m of group) {
+        if (m.parentUuid === undefined) {
+          root = m
+          break
+        }
+      }
+      if (!root) {
+        for (const m of group) {
+          if (!root || m.ts < root.ts) root = m
+        }
+      }
+      const spawnToolUseId = root?.parentUuid
+      ownerUuid = spawnToolUseId ? toolUseOwner.get(spawnToolUseId) : undefined
+    }
+
+    let anchor = ownerUuid ? resolveAnchor(ownerUuid, guard) : undefined
+    if (anchor === undefined) {
+      // Dangling reference — fall back to the nearest main-thread message by
+      // ts, applied ONCE for the whole group (its earliest message) so the
+      // group is never split across pages by per-message fallbacks.
+      let earliestTs = Infinity
+      for (const m of group) earliestTs = Math.min(earliestTs, m.ts)
+      anchor = nearestMainUuidByTs(earliestTs, mainMessages)
+    }
+    resolvedGroup.set(sidechainId, anchor)
     return anchor
   }
 
   const anchors = new Map<string, string>()
   for (const m of messages) {
     if (!m.isSidechain) continue
-    const anchor = resolveAnchor(m.uuid, new Set()) ?? nearestMainUuidByTs(m.ts, mainMessages)
+    const anchor = m.sidechainId
+      ? resolveGroupAnchor(m.sidechainId, new Set())
+      : (resolveAnchor(m.uuid, new Set()) ?? nearestMainUuidByTs(m.ts, mainMessages))
     if (anchor) anchors.set(m.uuid, anchor)
   }
   return anchors
