@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-29
+
 ### Fixed
 
 - `git` over SSH — and bare `ssh` — was completely broken inside the bwrap agent sandbox,
