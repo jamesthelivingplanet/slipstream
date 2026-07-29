@@ -9,7 +9,9 @@ multi-user identity seam → [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md); the
 versioning/release scheme (semver, build stamping, schema-vs-app version,
 tag/changelog flow) → [docs/VERSIONING.md](docs/VERSIONING.md); deployment
 postures, what each wider one is gated on, and production-cut go/no-go criteria →
-[docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md).
+[docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md); the core-UX half of that
+go/no-go — workstream classifications, the stability bar, and the freeze scope →
+[docs/UX-GO-NO-GO.md](docs/UX-GO-NO-GO.md).
 
 Use **pnpm**. Run `pnpm check` (svelte-check), `pnpm test`, and `pnpm lint` (eslint +
 `prettier --check`) before committing — `pnpm lint` gates the MR, so don't skip it; use

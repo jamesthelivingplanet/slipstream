@@ -8,8 +8,9 @@ one is gated on. Section 2 is the status of the five hardening sub-issues FLO-14
 individually. Section 3 is the explicit go/no-go checklist for declaring a production cut
 — split into what a command can check and what requires a judgement call, because the
 ticket's own scope-stability sub-issue asked for exactly that split rather than an
-implicit "it feels done." Section 4 covers `pnpm readiness`, the command that checks
-which of this hardening is actually *active* on a given host.
+implicit "it feels done." The judgement-call half is worked out in full in
+[docs/UX-GO-NO-GO.md](UX-GO-NO-GO.md) (FLO-148). Section 4 covers `pnpm readiness`, the
+command that checks which of this hardening is actually *active* on a given host.
 
 ## 1. Posture ladder
 
@@ -113,12 +114,15 @@ service:tailscale` translation, and rootless-networking tweaks before the same o
 path works there — see docs/POD-DEPLOY.md's Podman section. It does not block any posture
 above, since Docker remains the supported path for rung 3/4 self-hosting.
 
-**The sixth, unresolved sub-issue is scope stability, not a hardening gap** — quoted from
-the ticket: "Core UX is still actively finding its shape (Night Ops parity, chat interface
-for opencode/pi, chat-by-default). This isn't frozen — factor that in when deciding when to
-declare a production cut." That's a product-scope question, not something a check script
-can answer, which is why it gets its own class of gate below rather than being folded into
-the mechanical ones.
+**The sixth sub-issue was scope stability, not a hardening gap** — quoted from the ticket:
+"Core UX is still actively finding its shape (Night Ops parity, chat interface for
+opencode/pi, chat-by-default). This isn't frozen — factor that in when deciding when to
+declare a production cut." That's a product-scope question no check script can answer, which
+is why it gets its own class of gate below rather than being folded into the mechanical ones.
+FLO-148 resolves it: [docs/UX-GO-NO-GO.md](UX-GO-NO-GO.md) inventories those workstreams with
+a must-land / behind-a-flag / post-prod classification each, states the bar as six checkable
+criteria, and places the UX freeze *after* the five hardening blockers rather than alongside
+them.
 
 ## 3. Go/no-go criteria for a production cut
 
@@ -159,19 +163,30 @@ class to be a real decision with a real answer, not a default.
 
 ### Scope-stability gates
 
+Worked out in full in [docs/UX-GO-NO-GO.md](UX-GO-NO-GO.md) (FLO-148) — the workstream
+inventory, the six-criteria bar, the freeze scope, and a sign-off table to fill in at cut
+time. The three gates that matter most at this level:
+
 - Night Ops parity, the chat interface for opencode/pi, and chat-by-default must each be
   either shipped-and-stable or **explicitly** declared out of the cut and deferred. The
   failure mode this guards against is an implicit "it feels done" — silence on one of these
-  is not the same as a decision to exclude it.
+  is not the same as a decision to exclude it, which is why UX-GO-NO-GO.md makes an
+  unclassified row a hard no-go.
 - **Contract-churn signal**: `electron/shared/contract.ts` and `electron/shared/wire.ts` are
   where breaking changes show up (see docs/VERSIONING.md's MAJOR-bump definition). A cut
   wants a recent stretch with no breaking edits to either file — a MAJOR version bump means
   a coordinated desktop+daemon upgrade, which is exactly the kind of forced-migration event
-  you don't want landing on users right after declaring "production ready."
+  you don't want landing on users right after declaring "production ready." Currently clean:
+  neither file has been touched since v0.6.0.
 - No open security item rated MED or higher without a documented mitigation. (docs/SECURITY.md
   §7 is the current MED-rated item — same-uid agent execution — and its mitigation, the
   opt-in sandbox, is documented there along with its own residual gap; that's the bar every
   other open item needs to clear too.)
+
+The UX freeze itself is sequenced **after** all five hardening blockers are green, not
+alongside them — the dependency runs one way (a UX change can invalidate a hardening
+assumption; hardening does not move the interaction model). See UX-GO-NO-GO.md §3 for the
+frozen path list and the freeze's duration.
 
 ### Decision rule
 
@@ -226,6 +241,7 @@ the shipped question; this answers the active-on-this-host question).
   exits `2` in this mode and the human/`--json` output both say so plainly. Re-run on the
   host (or from an unsandboxed shell) for a verdict that means something.
 
-See also: docs/SECURITY.md (per-mitigation detail), docs/IDENTITY-SEAM.md (the ownership
-model rung 4/5 depend on), docs/VERSIONING.md (the release/versioning mechanics §3
-references), docs/POD-DEPLOY.md (the Docker pod path, and its Podman gap, FLO-57).
+See also: docs/UX-GO-NO-GO.md (the core-UX half of §3's go/no-go, in full), docs/SECURITY.md
+(per-mitigation detail), docs/IDENTITY-SEAM.md (the ownership model rung 4/5 depend on),
+docs/VERSIONING.md (the release/versioning mechanics §3 references), docs/POD-DEPLOY.md (the
+Docker pod path, and its Podman gap, FLO-57).

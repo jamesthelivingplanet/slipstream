@@ -9,6 +9,26 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- `docs/UX-GO-NO-GO.md` (FLO-148) — the core-UX half of the production go/no-go, which
+  FLO-142 named as its one unresolved sub-issue and deliberately left to a judgement call.
+  Inventories every in-flight core-UX workstream (chat-by-default, per-backend chat, the
+  Android/iOS/PWA halves of Night Ops parity, Mission Control, app-store distribution) and
+  classifies each as must-land / behind-a-flag / post-prod rather than leaving it implicit;
+  states the bar as six checkable criteria (no breaking `contract.ts`/`wire.ts` edit in the
+  trailing three releases, no dead-end views, chat-by-default reversible and sticky,
+  per-platform parity stated not implied, every row classified with a ticket, no
+  un-mitigated MED+ UX item); and sequences the UX freeze *after* FLO-142's five hardening
+  blockers rather than alongside them, since a UX change can invalidate a hardening
+  assumption but not the reverse. Names the two concrete open items the inventory turned up:
+  kilo declares `supportsChat: true` but shares the `usesEmbeddedServer` durable fallback,
+  which is hardcoded to opencode's DB path, so its post-exit chat is unverified — verify or
+  demote the flag before a cut; and the Android inline-reply token is still a plaintext
+  `MODE_PRIVATE` copy (`ReplyPrefs.java`), which needs Keystore-backing or a written
+  accepted-risk entry if the cut claims the Android shell. Ends with a sign-off table where
+  an unfilled row is a no-go, so the call is agreed rather than assumed.
+
 ## [0.9.0] - 2026-07-29
 
 ### Added
