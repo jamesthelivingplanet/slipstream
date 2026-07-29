@@ -23,6 +23,7 @@
     "deploy": "bash scripts/deploy.sh",
     "dev:down": "node scripts/dev-slot.mjs down --slug \"$(basename \"$PWD\")\"",
     "dev:slots": "node scripts/dev-slot.mjs list",
+    "readiness": "node scripts/readiness.mjs",
     "release": "bash scripts/release.sh",
     "setup": "bash scripts/setup.sh",
     "lint": "eslint . && prettier --check .",
