@@ -13,6 +13,27 @@ specifically (schema versioning, build stamping, release flow).
 
 ### Fixed
 
+- The dev-slot registry (`~/.config/slipstream/dev-slots.json`) and per-slot env files
+  (`~/.config/slipstream/dev-slots/<slug>.env`) lived under prod's data dir, which every
+  sandboxed agent PTY now gets a private tmpfs over by default (`SLIPSTREAM_SANDBOX=bwrap`,
+  on by default for new dev slots). A `pnpm deploy` run from inside such an agent wrote its
+  slot's env file into that agent's private, host-invisible tmpfs copy, so systemd's
+  `slipstream-dev@<slug>.service` failed to restart with `Failed to load environment files:
+  No such file or directory`; separately, `acquire`/`pnpm dev:slots` saw an empty registry
+  from inside the sandbox and would have re-allocated ports already in use on the host. Both
+  now live under `~/.local/share/slipstream-dev` (`slots.json` and `slots/<slug>.env`,
+  alongside the already-relocated per-slot data dirs), which is never tmpfs-shadowed.
+  `scripts/lib/devSlots.mjs`'s `readRegistry()` best-effort migrates an existing
+  pre-TASK-WH96T registry and its env files from the old location the first time it runs, so
+  upgrading doesn't strand an already-running dev slot. `scripts/deploy.sh`'s dev path now
+  also reads back the per-slot env file immediately after writing it and fails the deploy
+  loudly (naming sandbox/tmpfs shadowing as the likely cause) if the read-back doesn't match
+  what was written, instead of silently proceeding into a restart that can't work.
+  `scripts/lib/prodGuard.mjs`'s now-obsolete `~/.config/slipstream/dev-slots` carve-out
+  (writes there used to be allowed as "dev state") was removed — nothing legitimate writes
+  under prod's data dir anymore, so it's protected uniformly like the rest of
+  `~/.config/slipstream`.
+
 - `node scripts/dev-slot.mjs prune` dropped a slot's registry entry and released its
   Tailscale mapping when the worktree's directory was gone, but never stopped or disabled
   that slot's `slipstream-dev@<slug>.service` unit, nor removed its per-slot env file —

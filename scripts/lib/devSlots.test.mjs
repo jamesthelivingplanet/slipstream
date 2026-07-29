@@ -13,7 +13,62 @@ import {
   TS_PORT_BASE,
   CONFIG_DIR,
   DEV_DATA_ROOT,
+  REGISTRY_PATH,
+  SLOT_ENV_DIR,
+  LEGACY_REGISTRY_PATH,
+  LEGACY_SLOT_ENV_DIR,
 } from './devSlots.mjs'
+
+// NOTE: readRegistry()/writeRegistry() are deliberately NOT exercised here —
+// they're the thin impure edges that read/write REGISTRY_PATH under the
+// REAL $HOME (see the module comment at the top of devSlots.mjs). A test
+// that called them for real would read/overwrite whatever dev-slot registry
+// actually exists on the machine running the suite. Everything below checks
+// the path CONSTANTS and the pure logic only.
+
+/** True if `child` is `parent` itself or nested somewhere underneath it. */
+function isPathInside(child, parent) {
+  const rel = path.relative(parent, child)
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+}
+
+describe('registry and slot-env paths (TASK-WH96T)', () => {
+  // The invariant that broke: a bwrap-sandboxed agent PTY gets a private
+  // tmpfs over ~/.config/slipstream (CONFIG_DIR), so anything living under
+  // it is invisible to systemd/other processes on the host. The dev-slot
+  // registry and per-slot env files must never live there.
+
+  it('REGISTRY_PATH is not nested under CONFIG_DIR', () => {
+    expect(isPathInside(REGISTRY_PATH, CONFIG_DIR)).toBe(false)
+  })
+
+  it('SLOT_ENV_DIR is not nested under CONFIG_DIR', () => {
+    expect(isPathInside(SLOT_ENV_DIR, CONFIG_DIR)).toBe(false)
+  })
+
+  it('REGISTRY_PATH and SLOT_ENV_DIR live under DEV_DATA_ROOT', () => {
+    expect(isPathInside(REGISTRY_PATH, DEV_DATA_ROOT)).toBe(true)
+    expect(isPathInside(SLOT_ENV_DIR, DEV_DATA_ROOT)).toBe(true)
+  })
+
+  it('REGISTRY_PATH is slots.json under DEV_DATA_ROOT', () => {
+    expect(REGISTRY_PATH).toBe(path.join(DEV_DATA_ROOT, 'slots.json'))
+  })
+
+  it('SLOT_ENV_DIR is slots/ under DEV_DATA_ROOT', () => {
+    expect(SLOT_ENV_DIR).toBe(path.join(DEV_DATA_ROOT, 'slots'))
+  })
+
+  it('legacy paths (transitional migration source) are still under CONFIG_DIR', () => {
+    // Sanity check on the migration shim's source paths — these are
+    // EXPECTED to be under CONFIG_DIR (that's the whole point: they're
+    // where the pre-TASK-WH96T registry/env files used to live).
+    expect(isPathInside(LEGACY_REGISTRY_PATH, CONFIG_DIR)).toBe(true)
+    expect(isPathInside(LEGACY_SLOT_ENV_DIR, CONFIG_DIR)).toBe(true)
+    expect(LEGACY_REGISTRY_PATH).toBe(path.join(CONFIG_DIR, 'dev-slots.json'))
+    expect(LEGACY_SLOT_ENV_DIR).toBe(path.join(CONFIG_DIR, 'dev-slots'))
+  })
+})
 
 describe('slugForRoot', () => {
   it('uses the basename of the root path', () => {

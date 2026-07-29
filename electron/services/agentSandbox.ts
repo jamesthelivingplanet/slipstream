@@ -52,6 +52,29 @@
  * agent's view of the filesystem, which is what satisfies the "no read
  * access to the data dir" acceptance bar — see docs/SECURITY.md §7.
  *
+ * SIDE EFFECT OF THE USERNS: `bwrap`'s unprivileged user namespace maps only
+ * the sandboxed uid (`uid_map` is a single `<uid> <uid> 1` line) — every
+ * file owned by any OTHER uid, including root, appears owned by
+ * `nobody`(65534) inside the sandbox, no matter its real owner or mode bits.
+ * OpenSSH's `Include` directive (used by the distro's `/etc/ssh/ssh_config`
+ * to pull in `/etc/ssh/ssh_config.d/*.conf`) refuses to load a file it
+ * doesn't trust the ownership of, so every root-owned client-config
+ * drop-in breaks with "Bad owner or permissions on ..." — which breaks
+ * `ssh`/git-over-SSH entirely for every sandboxed agent, since OpenSSH
+ * aborts rather than skip the untrusted file. The fix is `--tmpfs` over
+ * `/etc/ssh/ssh_config.d` (added only when that directory exists on the
+ * host — fail-open, same tolerance as the rest of this recipe): it removes
+ * only the drop-ins, which are always going to be owned by some non-sandbox
+ * uid in this userns and so were never going to be loadable anyway. Left
+ * untouched: `/etc/ssh/ssh_config` itself (still nobody-owned but NOT
+ * `Include`d, so OpenSSH doesn't apply the ownership check to it — its
+ * `Include /etc/ssh/ssh_config.d/*.conf` line just matches nothing now) and
+ * the user's own `~/.ssh/config`/keys/`known_hosts` (owned by the sandboxed
+ * uid itself, so correctly mapped and untouched by this mount) — host
+ * aliases, per-host `IdentityFile`, `StrictHostKeyChecking`, etc. all keep
+ * working exactly as configured. No `GIT_SSH_COMMAND`/`-F` override is
+ * injected, so this fixes bare `ssh` too, not just `git`.
+ *
  * Pure/Node-only (no node-pty import) so this stays unit-testable under
  * plain Node.
  */
@@ -61,6 +84,11 @@ import * as path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
 export type SandboxMode = 'none' | 'bwrap'
+
+/** Where OpenSSH loads client-config drop-ins from on this system. Not
+ *  configurable — it's a fixed OS path, not something a per-install env var
+ *  should be steering. See the module header for why this needs hiding. */
+export const SSH_CONFIG_DROPIN_DIR = '/etc/ssh/ssh_config.d'
 
 /** `'bwrap'` iff `SLIPSTREAM_SANDBOX=bwrap` is set; `'none'` otherwise
  *  (unset, or any other value). */
@@ -106,6 +134,13 @@ export interface SandboxWrapParams {
    *  `prodRepoRoot` ro-bind applies — an agent legitimately working in the
    *  main checkout must not have it made read-only. */
   cwd?: string
+  /** `SSH_CONFIG_DROPIN_DIR` when it exists on the host, `undefined`
+   *  otherwise (checked by the caller — this function stays pure/no fs).
+   *  Tmpfs'd so root-owned ssh client-config drop-ins — unloadable inside
+   *  the sandbox's userns regardless of their content, see module header —
+   *  don't break `ssh`/git-over-SSH for the sandboxed agent. Omitted
+   *  (no-op) when unset, e.g. on a host with no such directory. */
+  sshConfigDir?: string
 }
 
 /** PURE — builds the argv to pass to `bwrap` (not including the `bwrap`
@@ -127,6 +162,10 @@ export function buildBwrapArgs(p: SandboxWrapParams): string[] {
     path.join(p.dataDir, 'clipboard'),
     path.join(p.dataDir, 'clipboard'),
   ]
+
+  if (p.sshConfigDir) {
+    args.push('--tmpfs', p.sshConfigDir)
+  }
 
   if (p.prodDataDir && !isSameOrParentPath(path.resolve(p.prodDataDir), path.resolve(p.dataDir))) {
     args.push('--tmpfs', p.prodDataDir)
@@ -172,6 +211,9 @@ export interface SandboxDeps {
   available?: boolean
   ensureSessionDir?: (dir: string) => void
   warn?: (msg: string) => void
+  /** Existence check for `SSH_CONFIG_DROPIN_DIR`, injectable so tests don't
+   *  depend on the real host's `/etc/ssh` layout. Defaults to `fs.existsSync`. */
+  sshConfigDirExists?: (dir: string) => boolean
 }
 
 // Dedupes log spam across sessions — a message is only warned once per process.
@@ -222,6 +264,9 @@ export function sandboxSpawnSpec(
 
   const { prodDataDir, prodRepoRoot } = resolveProdPaths(process.env)
 
+  const sshConfigDirExists = deps?.sshConfigDirExists ?? fs.existsSync
+  const sshConfigDir = sshConfigDirExists(SSH_CONFIG_DROPIN_DIR) ? SSH_CONFIG_DROPIN_DIR : undefined
+
   return {
     cmd: 'bwrap',
     args: buildBwrapArgs({
@@ -232,6 +277,7 @@ export function sandboxSpawnSpec(
       prodDataDir,
       prodRepoRoot,
       cwd: input.cwd,
+      sshConfigDir,
     }),
     sandboxed: true,
   }
