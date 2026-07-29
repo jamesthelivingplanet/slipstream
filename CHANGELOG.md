@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-29
+
 ### Added
 
 - `docs/PRODUCTION-READINESS.md` (FLO-142) — the roll-up doc for "is Slipstream
