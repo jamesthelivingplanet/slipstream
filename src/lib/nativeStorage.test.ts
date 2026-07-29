@@ -37,6 +37,9 @@ interface FakeCapacitorOptions {
   withAppControl?: boolean
   secureThrows?: boolean
   preferencesThrows?: boolean
+  // FLO-159: an older APK has AppControl but predates these two methods —
+  // biometricPluginAvailable() (biometric.ts) feature-detects exactly that.
+  withBiometric?: boolean
 }
 
 function makeFakeCapacitor(opts: FakeCapacitorOptions = {}) {
@@ -80,6 +83,14 @@ function makeFakeCapacitor(opts: FakeCapacitorOptions = {}) {
         restart: vi.fn().mockResolvedValue(undefined),
         saveReplyCredentials: vi.fn().mockResolvedValue(undefined),
         clearReplyCredentials: vi.fn().mockResolvedValue(undefined),
+        ...(opts.withBiometric
+          ? {
+              biometricAvailability: vi
+                .fn()
+                .mockResolvedValue({ available: true, status: 'available' }),
+              biometricAuthenticate: vi.fn().mockResolvedValue({ authenticated: true }),
+            }
+          : {}),
       }
     : undefined
 
@@ -446,5 +457,455 @@ describe('nativeStorage.syncReplyCredentials', () => {
     await nativeStorage.set(TOKEN_KEY, 'tok-1')
     // No throw — the sync is best-effort.
     await expect(nativeStorage.syncReplyCredentials()).resolves.toBeUndefined()
+  })
+})
+
+// ── Biometric token lock (FLO-159) ──────────────────────────────────────────
+//
+// Covers the get()-level gate (TOKEN_KEY reads null while locked) and the
+// arm/lock/unlock state machine layered on top of it. Reuses
+// makeFakeCapacitor/stubBrowserGlobals/loadModule from above — withBiometric
+// adds the two AppControl methods biometric.ts feature-detects.
+
+describe('biometric lock: get(TOKEN_KEY) gate', () => {
+  it('returns null while locked, without touching secure storage or Preferences', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+      withSecureStorage: true,
+    })
+    stubBrowserGlobals(cap)
+    const { nativeStorage, TOKEN_KEY } = await loadModule()
+    await nativeStorage.set(TOKEN_KEY, 'secret-token')
+    await nativeStorage.setBiometricLockEnabled(true)
+    await nativeStorage.initBiometricLock()
+    expect(nativeStorage.isTokenLocked()).toBe(true)
+    vi.clearAllMocks()
+
+    expect(await nativeStorage.get(TOKEN_KEY)).toBeNull()
+    expect(cap._SecureStorage?.getItem).not.toHaveBeenCalled()
+    expect(cap._Preferences?.get).not.toHaveBeenCalled()
+  })
+
+  it('leaves other keys unaffected while locked', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    stubBrowserGlobals(cap)
+    const { nativeStorage, TOKEN_KEY, DAEMON_URL_KEY } = await loadModule()
+    await nativeStorage.set(TOKEN_KEY, 'secret-token')
+    await nativeStorage.set(DAEMON_URL_KEY, 'https://example.com')
+    await nativeStorage.setBiometricLockEnabled(true)
+    await nativeStorage.initBiometricLock()
+
+    expect(await nativeStorage.get(DAEMON_URL_KEY)).toBe('https://example.com')
+  })
+})
+
+describe('biometric lock: initBiometricLock', () => {
+  it('does not arm when the "require fingerprint" preference is off', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    stubBrowserGlobals(cap)
+    const { nativeStorage } = await loadModule()
+
+    const armed = await nativeStorage.initBiometricLock()
+
+    expect(armed).toBe(false)
+    expect(nativeStorage.isTokenLocked()).toBe(false)
+  })
+
+  it('does not arm outside the native shell', async () => {
+    stubBrowserGlobals(undefined)
+    const { nativeStorage } = await loadModule()
+
+    const armed = await nativeStorage.initBiometricLock()
+
+    expect(armed).toBe(false)
+    expect(nativeStorage.isTokenLocked()).toBe(false)
+  })
+
+  it('does not arm when the plugin predates the biometric methods (older APK)', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: false,
+      withPreferences: true,
+    })
+    stubBrowserGlobals(cap)
+    const { nativeStorage } = await loadModule()
+    await nativeStorage.setBiometricLockEnabled(true)
+
+    const armed = await nativeStorage.initBiometricLock()
+
+    expect(armed).toBe(false)
+    expect(nativeStorage.isTokenLocked()).toBe(false)
+  })
+
+  it('arms and locks when the shell, preference, and plugin all line up', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    stubBrowserGlobals(cap)
+    const { nativeStorage } = await loadModule()
+    await nativeStorage.setBiometricLockEnabled(true)
+
+    const armed = await nativeStorage.initBiometricLock()
+
+    expect(armed).toBe(true)
+    expect(nativeStorage.isTokenLocked()).toBe(true)
+  })
+})
+
+describe('biometric lock: unlockToken', () => {
+  async function armAndLock(cap: ReturnType<typeof makeFakeCapacitor>) {
+    stubBrowserGlobals(cap)
+    const mod = await loadModule()
+    await mod.nativeStorage.set(mod.TOKEN_KEY, 'secret-token')
+    await mod.nativeStorage.setBiometricLockEnabled(true)
+    await mod.nativeStorage.initBiometricLock()
+    return mod
+  }
+
+  it('a successful unlock restores token reads', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    const { nativeStorage, TOKEN_KEY } = await armAndLock(cap)
+    expect(await nativeStorage.get(TOKEN_KEY)).toBeNull()
+
+    cap._AppControl?.biometricAuthenticate?.mockResolvedValueOnce({ authenticated: true })
+    const result = await nativeStorage.unlockToken()
+
+    expect(result).toEqual({ ok: true })
+    expect(nativeStorage.isTokenLocked()).toBe(false)
+    expect(await nativeStorage.get(TOKEN_KEY)).toBe('secret-token')
+  })
+
+  it('a failed unlock keeps it locked and surfaces the code', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    const { nativeStorage, TOKEN_KEY } = await armAndLock(cap)
+
+    cap._AppControl?.biometricAuthenticate?.mockResolvedValueOnce({
+      authenticated: false,
+      code: 'user-canceled',
+    })
+    const result = await nativeStorage.unlockToken()
+
+    expect(result).toEqual({ ok: false, code: 'user-canceled' })
+    expect(nativeStorage.isTokenLocked()).toBe(true)
+    expect(await nativeStorage.get(TOKEN_KEY)).toBeNull()
+  })
+
+  it('resolves { ok: true } immediately, without prompting, when not locked', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    stubBrowserGlobals(cap)
+    const { nativeStorage } = await loadModule()
+    // Never armed => never locked.
+
+    const result = await nativeStorage.unlockToken()
+
+    expect(result).toEqual({ ok: true })
+    expect(cap._AppControl?.biometricAuthenticate).not.toHaveBeenCalled()
+  })
+
+  it('dedupes concurrent callers onto a single native prompt', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    const { nativeStorage } = await armAndLock(cap)
+
+    let resolveAuth: (v: { authenticated: boolean }) => void = () => {}
+    const authPromise = new Promise<{ authenticated: boolean }>((resolve) => {
+      resolveAuth = resolve
+    })
+    cap._AppControl?.biometricAuthenticate?.mockReturnValueOnce(authPromise)
+
+    const p1 = nativeStorage.unlockToken()
+    const p2 = nativeStorage.unlockToken()
+    resolveAuth({ authenticated: true })
+    const [r1, r2] = await Promise.all([p1, p2])
+
+    expect(cap._AppControl?.biometricAuthenticate).toHaveBeenCalledTimes(1)
+    expect(r1).toEqual({ ok: true })
+    expect(r2).toEqual({ ok: true })
+  })
+})
+
+describe('biometric lock: setBiometricLockEnabled(false)', () => {
+  it('disarms and unlocks immediately, without an app restart', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    const { nativeStorage, TOKEN_KEY } = await armAndLockHelper(cap)
+    expect(nativeStorage.isTokenLocked()).toBe(true)
+
+    await nativeStorage.setBiometricLockEnabled(false)
+
+    expect(nativeStorage.isTokenLocked()).toBe(false)
+    expect(await nativeStorage.get(TOKEN_KEY)).toBe('secret-token')
+    expect(await nativeStorage.isBiometricLockEnabled()).toBe(false)
+  })
+})
+
+// FLO-159 review fix: setBiometricLockEnabled(true) used to only persist the
+// preference, never setting `armed` — so installResumeRelock()'s
+// visibilitychange handler (gated on `armed`) stayed dormant for the rest of
+// the session and a user who enabled the toggle and backgrounded the app
+// wasn't re-locked until the next cold start. Reuses the same fake-document
+// visibilitychange harness as the 'resume re-lock' describe block below.
+describe('biometric lock: setBiometricLockEnabled(true) arms the resume re-lock', () => {
+  function makeFakeDocument(initial: 'visible' | 'hidden' = 'visible') {
+    let visibilityState: 'visible' | 'hidden' = initial
+    const listeners: Array<() => void> = []
+    return {
+      addEventListener(type: string, cb: () => void) {
+        if (type === 'visibilitychange') listeners.push(cb)
+      },
+      removeEventListener() {},
+      get visibilityState() {
+        return visibilityState
+      },
+      _setVisibility(v: 'visible' | 'hidden') {
+        visibilityState = v
+        for (const cb of listeners) cb()
+      },
+    }
+  }
+
+  it('does not lock immediately, but re-locks past RELOCK_GRACE_MS on the next hidden→visible cycle', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    stubBrowserGlobals(cap)
+    const fakeDoc = makeFakeDocument()
+    ;(globalThis as unknown as { document: unknown }).document = fakeDoc
+
+    try {
+      const { nativeStorage, TOKEN_KEY, RELOCK_GRACE_MS } = await loadModule()
+      await nativeStorage.set(TOKEN_KEY, 'secret-token')
+
+      await nativeStorage.setBiometricLockEnabled(true)
+      // Enabling must never itself lock — the user just passed a live
+      // biometric prompt in SettingsSecurity.svelte to get here; locking
+      // them out immediately after opting in would be wrong.
+      expect(nativeStorage.isTokenLocked()).toBe(false)
+
+      const dateSpy = vi.spyOn(Date, 'now')
+      try {
+        dateSpy.mockReturnValueOnce(0)
+        fakeDoc._setVisibility('hidden')
+        dateSpy.mockReturnValueOnce(RELOCK_GRACE_MS)
+        fakeDoc._setVisibility('visible')
+
+        expect(nativeStorage.isTokenLocked()).toBe(true)
+        expect(await nativeStorage.get(TOKEN_KEY)).toBeNull()
+      } finally {
+        dateSpy.mockRestore()
+      }
+    } finally {
+      delete (globalThis as unknown as { document?: unknown }).document
+    }
+  })
+
+  it('does not arm outside the native shell — preference persists, no re-lock on backgrounding', async () => {
+    stubBrowserGlobals(undefined)
+    const fakeDoc = makeFakeDocument()
+    ;(globalThis as unknown as { document: unknown }).document = fakeDoc
+
+    try {
+      const { nativeStorage, RELOCK_GRACE_MS } = await loadModule()
+
+      await nativeStorage.setBiometricLockEnabled(true)
+      expect(await nativeStorage.isBiometricLockEnabled()).toBe(true)
+      expect(nativeStorage.isTokenLocked()).toBe(false)
+
+      const dateSpy = vi.spyOn(Date, 'now')
+      try {
+        dateSpy.mockReturnValueOnce(0)
+        fakeDoc._setVisibility('hidden')
+        dateSpy.mockReturnValueOnce(RELOCK_GRACE_MS)
+        fakeDoc._setVisibility('visible')
+        expect(nativeStorage.isTokenLocked()).toBe(false)
+      } finally {
+        dateSpy.mockRestore()
+      }
+    } finally {
+      delete (globalThis as unknown as { document?: unknown }).document
+    }
+  })
+
+  it('does not arm when the plugin predates the biometric methods (older APK) — preference persists, no re-lock', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: false,
+      withPreferences: true,
+    })
+    stubBrowserGlobals(cap)
+    const fakeDoc = makeFakeDocument()
+    ;(globalThis as unknown as { document: unknown }).document = fakeDoc
+
+    try {
+      const { nativeStorage, RELOCK_GRACE_MS } = await loadModule()
+
+      await nativeStorage.setBiometricLockEnabled(true)
+      expect(await nativeStorage.isBiometricLockEnabled()).toBe(true)
+      expect(nativeStorage.isTokenLocked()).toBe(false)
+
+      const dateSpy = vi.spyOn(Date, 'now')
+      try {
+        dateSpy.mockReturnValueOnce(0)
+        fakeDoc._setVisibility('hidden')
+        dateSpy.mockReturnValueOnce(RELOCK_GRACE_MS)
+        fakeDoc._setVisibility('visible')
+        expect(nativeStorage.isTokenLocked()).toBe(false)
+      } finally {
+        dateSpy.mockRestore()
+      }
+    } finally {
+      delete (globalThis as unknown as { document?: unknown }).document
+    }
+  })
+})
+
+async function armAndLockHelper(cap: ReturnType<typeof makeFakeCapacitor>) {
+  stubBrowserGlobals(cap)
+  const mod = await loadModule()
+  await mod.nativeStorage.set(mod.TOKEN_KEY, 'secret-token')
+  await mod.nativeStorage.setBiometricLockEnabled(true)
+  await mod.nativeStorage.initBiometricLock()
+  return mod
+}
+
+describe('biometric lock: lockToken() event dispatch', () => {
+  it('dispatches slipstream:biometric-locked only on a real unlocked→locked transition', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    stubBrowserGlobals(cap)
+    const win = (globalThis as unknown as { window: Record<string, unknown> }).window
+    const dispatched: string[] = []
+    win.dispatchEvent = vi.fn((event: { type: string }) => {
+      dispatched.push(event.type)
+      return true
+    })
+    const hadCustomEvent = 'CustomEvent' in globalThis
+    if (!hadCustomEvent) {
+      ;(globalThis as unknown as { CustomEvent: unknown }).CustomEvent = class {
+        type: string
+        constructor(type: string) {
+          this.type = type
+        }
+      }
+    }
+
+    try {
+      const { nativeStorage, TOKEN_KEY } = await loadModule()
+      await nativeStorage.set(TOKEN_KEY, 'secret-token')
+      await nativeStorage.setBiometricLockEnabled(true)
+
+      // false -> true: real transition, dispatches.
+      await nativeStorage.initBiometricLock()
+      expect(dispatched).toEqual(['slipstream:biometric-locked'])
+
+      // Already locked: calling again must not re-dispatch.
+      nativeStorage.lockToken()
+      expect(dispatched).toEqual(['slipstream:biometric-locked'])
+
+      cap._AppControl?.biometricAuthenticate?.mockResolvedValueOnce({ authenticated: true })
+      await nativeStorage.unlockToken()
+
+      // false -> true again: another real transition, dispatches a 2nd time.
+      nativeStorage.lockToken()
+      expect(dispatched).toEqual(['slipstream:biometric-locked', 'slipstream:biometric-locked'])
+    } finally {
+      if (!hadCustomEvent) delete (globalThis as unknown as { CustomEvent?: unknown }).CustomEvent
+    }
+  })
+})
+
+describe('biometric lock: resume re-lock (visibilitychange)', () => {
+  function makeFakeDocument(initial: 'visible' | 'hidden' = 'visible') {
+    let visibilityState: 'visible' | 'hidden' = initial
+    const listeners: Array<() => void> = []
+    return {
+      addEventListener(type: string, cb: () => void) {
+        if (type === 'visibilitychange') listeners.push(cb)
+      },
+      removeEventListener() {},
+      get visibilityState() {
+        return visibilityState
+      },
+      _setVisibility(v: 'visible' | 'hidden') {
+        visibilityState = v
+        for (const cb of listeners) cb()
+      },
+    }
+  }
+
+  it('re-locks past RELOCK_GRACE_MS of hidden time, but not before', async () => {
+    const cap = makeFakeCapacitor({
+      withAppControl: true,
+      withBiometric: true,
+      withPreferences: true,
+    })
+    stubBrowserGlobals(cap)
+    const fakeDoc = makeFakeDocument()
+    ;(globalThis as unknown as { document: unknown }).document = fakeDoc
+
+    try {
+      const { nativeStorage, TOKEN_KEY, RELOCK_GRACE_MS } = await loadModule()
+      await nativeStorage.set(TOKEN_KEY, 'secret-token')
+      await nativeStorage.setBiometricLockEnabled(true)
+      await nativeStorage.initBiometricLock() // armed, locked=true
+      cap._AppControl?.biometricAuthenticate?.mockResolvedValueOnce({ authenticated: true })
+      await nativeStorage.unlockToken() // locked=false, armed stays true
+
+      const dateSpy = vi.spyOn(Date, 'now')
+      try {
+        // Hidden at t=0, resumed just under the grace window: must NOT re-lock.
+        dateSpy.mockReturnValueOnce(0)
+        fakeDoc._setVisibility('hidden')
+        dateSpy.mockReturnValueOnce(RELOCK_GRACE_MS - 1)
+        fakeDoc._setVisibility('visible')
+        expect(nativeStorage.isTokenLocked()).toBe(false)
+
+        // Hidden again, resumed at exactly the grace window: must re-lock.
+        dateSpy.mockReturnValueOnce(100_000)
+        fakeDoc._setVisibility('hidden')
+        dateSpy.mockReturnValueOnce(100_000 + RELOCK_GRACE_MS)
+        fakeDoc._setVisibility('visible')
+        expect(nativeStorage.isTokenLocked()).toBe(true)
+      } finally {
+        dateSpy.mockRestore()
+      }
+    } finally {
+      delete (globalThis as unknown as { document?: unknown }).document
+    }
   })
 })

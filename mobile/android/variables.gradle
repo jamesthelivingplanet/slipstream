@@ -17,6 +17,10 @@ ext {
     // app and the plugin resolve to the same version (the plugin reads this
     // same rootProject.ext.firebaseMessagingVersion property).
     firebaseMessagingVersion = '24.1.0'
+    // FLO-159: AppControlPlugin's biometric methods use AndroidX BiometricPrompt
+    // to gate the SPA's stored daemon bearer token behind a fingerprint check,
+    // so androidx.biometric must be on the app module's compile classpath.
+    androidxBiometricVersion = '1.1.0'
     junitVersion = '4.13.2'
     androidxJunitVersion = '1.2.1'
     androidxEspressoCoreVersion = '3.6.1'
