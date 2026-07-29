@@ -39,7 +39,8 @@
   import CliStatus from './lib/components/CliStatus.svelte'
   import OnboardingPager from './lib/components/OnboardingPager.svelte'
   import OnboardingModal from './lib/components/OnboardingModal.svelte'
-  import { nativeStorage } from './lib/nativeStorage'
+  import BiometricGate from './lib/components/BiometricGate.svelte'
+  import { nativeStorage, TOKEN_KEY } from './lib/nativeStorage'
   import { initOnboarding, onboardingMode } from './lib/onboarding'
   import { subscribeWidgetSync, subscribeWidgetAgentOpen } from './lib/widgetSync'
   import {
@@ -53,6 +54,48 @@
   // as a reactive statement — same isAvailable() seam nativeStorage.ts and
   // push.ts already use to detect the mobile shell.
   const onboardingUiMode = onboardingMode(nativeStorage.isAvailable())
+
+  // FLO-159: re-lock while the app is already mounted (main.ts's boot gate
+  // only covers cold start / a fresh mount — see nativeStorage.ts's resume
+  // re-lock, which dispatches 'slipstream:biometric-locked' on `window`).
+  // Seeded from isTokenLocked() too, in case something re-locked between
+  // main.ts resolving the boot gate and this component mounting.
+  let biometricLocked = nativeStorage.isTokenLocked()
+  let biometricError = ''
+
+  function biometricErrorMessage(code: string | undefined, error: string | undefined): string {
+    switch (code) {
+      case 'user-canceled':
+        return 'Unlock canceled.'
+      case 'lockout':
+        return 'Too many attempts. Try again later, or use your device PIN.'
+      case 'no-credential':
+        return 'No screen lock is set up on this device.'
+      default:
+        return error || "Couldn't verify. Try again."
+    }
+  }
+
+  async function handleBiometricUnlock() {
+    const result = await nativeStorage.unlockToken()
+    if (result.ok) {
+      biometricLocked = false
+      biometricError = ''
+      return
+    }
+    biometricError = biometricErrorMessage(result.code, result.error)
+  }
+
+  async function handleBiometricSignOut() {
+    // Mirrors main.ts's showBiometricGate onSignOut: a failed/abandoned
+    // fingerprint must never strand the user re-typing a token they still
+    // have, so this only runs on an explicit "Sign out" tap. Disabling the
+    // lock preference here (not just clearing the token) avoids arming the
+    // gate again on the reload below with nothing left behind it to protect.
+    await nativeStorage.remove(TOKEN_KEY, 'slipstream_token')
+    await nativeStorage.setBiometricLockEnabled(false)
+    location.reload()
+  }
 
   // Mobile drawer state — the sidebar is an overlay on narrow viewports.
   let listOpen = false
@@ -105,6 +148,15 @@
     const offConnection = subscribeConnectionChange()
     const offWidgetSync = subscribeWidgetSync()
     const offWidgetAgentOpen = subscribeWidgetAgentOpen()
+
+    // FLO-159: the resume re-lock (nativeStorage.ts's installResumeRelock,
+    // armed once main.ts's boot gate has resolved) dispatches this on
+    // `window` when it re-locks mid-session — throw the gate overlay back up.
+    const onBiometricLocked = () => {
+      biometricLocked = true
+      biometricError = ''
+    }
+    window.addEventListener('slipstream:biometric-locked', onBiometricLocked)
 
     // First-boot onboarding: independent of the backend/ticket bootstrap
     // below (it only reads its own nativeStorage flag), started alongside it
@@ -190,6 +242,7 @@
       offConnection()
       offWidgetSync()
       offWidgetAgentOpen()
+      window.removeEventListener('slipstream:biometric-locked', onBiometricLocked)
       window.removeEventListener('resize', checkViewport)
       window.removeEventListener('orientationchange', checkViewport)
       window.removeEventListener('focusin', onFocusIn)
@@ -350,6 +403,14 @@
     <OnboardingPager />
   {:else}
     <OnboardingModal />
+  {/if}
+  {#if biometricLocked}
+    <!-- FLO-159: mid-session re-lock overlay — see onBiometricLocked above. -->
+    <BiometricGate
+      error={biometricError}
+      onUnlock={handleBiometricUnlock}
+      onSignOut={handleBiometricSignOut}
+    />
   {/if}
 </div>
 

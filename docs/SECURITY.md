@@ -500,3 +500,92 @@ frame-ancestors 'none'
 entirely, for a deployment whose front door (or a browser quirk) trips over
 the default policy — mirroring `SLIPSTREAM_ALLOWED_ORIGINS`/
 `SLIPSTREAM_WS_TICKETS` above, this is a config knob, not a code change.
+
+## 11. Biometric gate on the mobile app's stored token (FLO-159)
+
+**Threat.** The Android app's saved bearer token (`TOKEN_KEY`, Keystore-backed
+via `@aparajita/capacitor-secure-storage`) is a live credential for the
+user's whole daemon — anyone who can open the app can drive every session
+and repo, and pull whatever `getGitHostConfig` exposes. Before this, the
+only thing standing between an unlocked, handed-over (or lost/stolen and
+unlocked) phone and that token was the OS's own app/device lock: once past
+that, the SPA read the token straight out of storage and connected.
+
+**Mitigation.** Opt-in, off by default — `Settings > Security` (native shell
+only) exposes a "Require fingerprint to unlock" toggle. Turning it on
+requires first passing a real `BiometricPrompt`
+(`SettingsSecurity.svelte`'s `handleEnable()`); only a successful prompt
+persists the preference, so a user can't arm a gate they can't themselves
+pass and lock themselves out of their own saved token. `AppControlPlugin`'s
+`biometricAuthenticate()` requests `BIOMETRIC_STRONG | DEVICE_CREDENTIAL`
+(falling back through `BIOMETRIC_WEAK | DEVICE_CREDENTIAL`, then plain
+`BIOMETRIC_STRONG`, on API 28/29 where the combined check is unsupported —
+see `resolveAuthenticators()` in `AppControlPlugin.java`) — device PIN is
+deliberately allowed as a fallback authenticator so a device with no
+enrolled fingerprint still has a way to unlock, rather than the toggle
+being unusable or the user getting locked out.
+
+The gate is enforced where the token is **read**, not just at boot:
+`nativeStorage.ts`'s `get(TOKEN_KEY)` returns `null` while `locked` is true,
+independent of which caller asked (`src/main.ts`'s boot sequence and
+`SettingsIntegrations.svelte`'s pairing-link section both go through this
+same `get()`). That is a deliberate design choice over gating only the
+app-open path: Android keeps the Capacitor WebView alive across
+backgrounding rather than reloading it, so a boot-only gate would only ever
+fire on a cold start — background the app and switch back and the token
+would just sit there unlocked for as long as the process survives. The
+resume re-lock (`installResumeRelock()`, a `visibilitychange` listener)
+closes that gap: past `RELOCK_GRACE_MS` (60s) of actual hidden time, the
+next resume re-locks the token, and `App.svelte` throws the `BiometricGate`
+overlay up over the already-mounted app. The short grace window is
+deliberate too — switching away to the fingerprint prompt itself, or to the
+OS share sheet/clipboard and straight back, must not immediately re-trigger
+the gate.
+
+A "Sign out" escape hatch on the lock screen (`BiometricGate.svelte`'s
+`onSignOut`, wired in both `main.ts`'s boot gate and `App.svelte`'s resume
+overlay) clears the stored token, drops the FLO-151 reply-credential stash,
+and disables the lock preference. Without it, a failed or abandoned
+fingerprint (no enrollment left, hardware fault, lockout after too many bad
+attempts) would strand the user behind a gate with no way back in short of
+reinstalling.
+
+**Residual gaps — stated plainly, not closed:**
+
+- **The FLO-151 `ReplyPrefs` stash is deliberately NOT behind this gate.**
+  `ReplyPrefs.java` keeps its own copy of the daemon URL + token in
+  app-private (`MODE_PRIVATE`) `SharedPreferences` so the background
+  `ReplyReceiver` can POST `/inline-reply` from a `RemoteInput` action while
+  the app process is dead — a case where there is no running WebView to
+  show a biometric prompt from at all. This copy is unreachable by this
+  gate's threat actor (someone holding the unlocked phone, without root or
+  a debug-enabled build — same-uid reads of app-private storage are a
+  different, already-documented threat, see §6/§7), and gating it would
+  simply break background inline reply rather than add real protection.
+  `ReplyPrefs.java`'s own doc comment already flags the plaintext-at-rest
+  trade-off this implies; this gate does not change that calculus either
+  way.
+- **This is a UI-level gate on a token that stays decryptable by the app
+  process, not a KeyStore-bound key that itself requires biometric auth to
+  unwrap.** `unlockToken()` flips an in-memory `locked` flag after a
+  successful prompt; the underlying secure-storage value was never sealed
+  behind the biometric result in the way, say, a `BIOMETRIC_STRONG`-bound
+  Android Keystore key would be. It raises the bar against someone picking
+  up an unlocked phone and casually opening the app, but it does **not**
+  defend against a rooted device or physical extraction of the Keystore
+  blob — an attacker with that level of access reads the token the same way
+  they would without this feature.
+- **Opt-in and off by default.** Existing installs are unaffected until a
+  user turns the toggle on themselves.
+
+**Why there's no equivalent on web/PWA/Electron.** This gate is built on
+the Capacitor `AppControl` plugin's `BiometricPrompt` bridge, which only
+exists inside the native Android shell (`biometric.ts`'s
+`biometricPluginAvailable()` is `false` everywhere else, mirroring every
+other `window.Capacitor`-gated bridge in this codebase). A plain browser
+tab, the installed PWA, and the Electron desktop have no such bridge to
+call, and their stored-token exposure is a different shape entirely: the
+Electron desktop pins its window to the app origin and never leaves
+`127.0.0.1` (§8), and a browser client's token is scoped to that browser's
+own storage/session, protected by the OS session lock and the CSP/origin
+hardening in §9–§10 rather than by an in-app prompt.

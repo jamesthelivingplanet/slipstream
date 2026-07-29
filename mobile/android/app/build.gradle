@@ -35,6 +35,8 @@ dependencies {
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    // FLO-159: BiometricPrompt for AppControlPlugin's biometric unlock gate.
+    implementation "androidx.biometric:biometric:$androidxBiometricVersion"
     // FLO-160: needed at compile time so the app's own
     // SlipstreamMessagingService can reference FirebaseMessagingService /
     // RemoteMessage directly. See variables.gradle for the version pin.
