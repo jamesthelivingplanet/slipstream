@@ -138,12 +138,13 @@ What's still open for a full multi-user milestone:
    to add a second device of their own without an operator running the CLI.
 3. ~~Revocation granularity.~~ Done (FLO-143, above) — `revoke(id)` disables
    exactly one credential without touching any other.
-4. **Integration with the one-time WS ticket endpoint** ([docs/SECURITY.md](SECURITY.md)
-   §3 — design only, not yet implemented). Tickets must be minted per-token, not
+4. ~~Integration with the one-time WS ticket endpoint.~~ Done (FLO-144,
+   [docs/SECURITY.md](SECURITY.md) §3) — tickets are minted per-token, not
    per-deployment: `POST /rpc-ticket`'s `Authorization: Bearer` check resolves an
    identity via this same seam, and the ticket's stored `identity` field is what
-   the upgrade handler uses on redemption. The ticket design composes with
-   per-user tokens for free now that the token store (item 1) is in place.
+   the upgrade handler redeems on the `?ticket=` branch. The ticket design
+   composed with per-user tokens for free once the token store (item 1) was in
+   place.
 5. **The per-owner-data-dir vs. row-level-isolation decision.** Orthogonal to
    token rotation, but both land in the same multi-user milestone and should be
    designed together rather than sequentially discovering conflicts.

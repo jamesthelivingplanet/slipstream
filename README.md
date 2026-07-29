@@ -63,8 +63,11 @@ Secrets (Linear API key, GitHub/GitLab tokens) are stored in the SQLite `config`
 inside the app's data directory. On desktop, they're encrypted at rest with the OS keychain
 via Electron `safeStorage` when available. The headless server (`pnpm serve`, and the
 detached daemon) runs under `ELECTRON_RUN_AS_NODE`, where safeStorage isn't reachable, so
-there secrets stay plaintext in `<dataDir>/slipstream.db`, protected only by the data
-directory's 0700 permissions. Full detail in [docs/SECURITY.md](docs/SECURITY.md) §6.
+there secrets are encrypted with a server-side AES-256-GCM encryptor instead, keyed either
+by a `SLIPSTREAM_SECRET` passphrase (via scrypt, key never touches disk) or, if that's
+unset, by a file-backed `<dataDir>/secret.key` — which does not survive theft of the whole
+data dir. Neither mode defends against a same-uid reader. Full detail in
+[docs/SECURITY.md](docs/SECURITY.md) §6.
 
 ## Run it on your phone / as a server
 
@@ -210,8 +213,10 @@ prototype.html            original design reference (not used at runtime)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data model, the contract seam, services, daemon/process model, web mode, decisions
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — dev loop: daemon rebuild cycle, tests, agent-run logs, e2e drivers
 - [docs/NATIVE-MODULES.md](docs/NATIVE-MODULES.md) — native ABI rebuild + fresh-machine troubleshooting
-- [docs/SECURITY.md](docs/SECURITY.md) — auth model, `?token=`-in-logs threat + deferred one-time-ticket fix, secrets at rest, sandbox
+- [docs/SECURITY.md](docs/SECURITY.md) — auth model, `?token=`-in-logs threat + shipped one-time-ticket fix, secrets at rest, sandbox
 - [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md) — the `ownerId` seam that keeps a future multi-user tier additive
+- [docs/VERSIONING.md](docs/VERSIONING.md) — semver scheme, schema-vs-app version, build stamping, `pnpm release` flow
+- [docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md) — supported deployment postures, blocker status, go/no-go criteria for a production cut
 - [docs/POD-DEPLOY.md](docs/POD-DEPLOY.md) — one-command Docker + Tailscale pod deploy
 - [docs/VERIFYING-DESKTOP-DAEMON.md](docs/VERIFYING-DESKTOP-DAEMON.md) — manual verify recipe for the thin-client daemon
 - [CLAUDE.md](CLAUDE.md) — contributor notes: commands, conventions, and a gotcha index that links to the above
