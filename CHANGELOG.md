@@ -9,6 +9,64 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- `docs/PRODUCTION-READINESS.md` (FLO-142) — the roll-up doc for "is Slipstream
+  production ready," organized around the idea that the question only means something
+  against a named deployment posture. Lays out a five-rung posture ladder (desktop-only,
+  Tailscale-remote, reverse-proxy-fronted, multi-device operator-provisioned, and public
+  untrusted multi-tenant) with what each wider rung requires and its honest residual gaps;
+  a status table for FLO-142's five hardening sub-issues (multi-user tokens FLO-143,
+  WS tickets FLO-144, secrets at rest FLO-145, the bwrap sandbox FLO-146, and versioning
+  FLO-147 — all shipped, each with a stated residual gap rather than a bare "done"); and
+  go/no-go criteria for declaring a production cut, split into mechanical gates (checked
+  by `pnpm readiness`/`pnpm check`/`pnpm test`/`pnpm lint`/`pnpm release`/`/healthz`) and
+  scope-stability gates (Night Ops parity, the opencode/pi chat interface, and
+  chat-by-default must each be shipped-and-stable or explicitly deferred — not left as an
+  implicit "it feels done," which is what FLO-142's own remaining sub-issue called out).
+- `pnpm readiness` (`scripts/readiness.mjs` + the pure evaluator in
+  `scripts/lib/readiness.mjs`) — inspects a live deployment (`server.env`, the data dir's
+  permissions, and whether `bwrap` is on `PATH`) and reports, one line per check, whether
+  each hardening gate from the FLO-142 blockers is actually *active* on this host, as
+  opposed to merely shipped in the codebase. Nine checks (`auth-token`, `ws-tickets`,
+  `secrets-at-rest`, `agent-sandbox`, `origin-allowlist`, `data-dir-perms`,
+  `daemon-json-perms`, `version-stamp`, `multi-user`), each pass/warn/fail/info with a doc
+  pointer; supports `--json`. Its most important job is catching the sandbox's fail-open
+  case: `SLIPSTREAM_SANDBOX=bwrap` set with no `bwrap` binary on `PATH` silently runs
+  agents unsandboxed (`agentSandbox.ts`'s availability check), which this reports as a
+  `fail` rather than letting it hide behind a config value that merely looks correct.
+  Deliberately can't see inside the DB, so device-token/multi-owner state is out of scope
+  for this command — use `pnpm tokens -- list` for that. Detects when it is itself running
+  inside a bwrap-sandboxed agent PTY — the sandbox overmounts the data dir with a private
+  tmpfs (`server.env`/`daemon.json`/`secret.key`/the real dir mode all invisible), so a
+  naive run would fabricate FAILs (missing token, wrong perms) for a host that's actually
+  fine. When detected, the seven checks that depend on that shadowed view are downgraded
+  to `info`, a synthetic `observation-scope` check is prepended explaining why, and the
+  run is reported as **inconclusive** rather than clean. Exit code is now a triple: `0`
+  no fail, `1` at least one fail, `2` inconclusive (sandbox-shadowed) — a deploy gate
+  should treat any non-zero exit as "not a clean bill of health."
+
+### Fixed
+
+- Three doc surfaces had gone stale relative to shipped hardening work, in ways that
+  actively understated the current security posture rather than just being outdated
+  trivia: README.md's "Secrets & data directory" section still said the headless
+  server/detached daemon kept config-table secrets (Linear key, git tokens) plaintext,
+  protected only by the data dir's 0700 permissions — that was true before FLO-145 shipped
+  server-side `sk1:` AES-256-GCM encryption (keyed by `SLIPSTREAM_SECRET` via scrypt, or a
+  file-backed `secret.key` fallback) and has been stale since. docs/SECURITY.md §7's threat
+  writeup still described those same values as flatly plaintext in its "what a same-uid
+  agent can read" bullet, which would have made the surrounding argument (that the env-scrub
+  in §7 is hygiene, not a boundary) look like it rested on a claim that was no longer true;
+  reworded to state the real residual reason the threat still stands post-FLO-145 — the key
+  material itself (`secret.key`, or `SLIPSTREAM_SECRET` in the daemon's environment) is
+  readable by that same uid, so decryption is one step away rather than zero, but the
+  outcome for a same-uid attacker is unchanged. docs/IDENTITY-SEAM.md's "What's still open"
+  item 4 still described the one-time WS ticket endpoint as "design only, not yet
+  implemented," when FLO-144 shipped it; reworded in the struck-through "Done (FLO-…)" style
+  already used for items 1 and 3, preserving the still-true substance that tickets are minted
+  per-token through this same identity seam.
+
 ## [0.8.1] - 2026-07-29
 
 ### Fixed

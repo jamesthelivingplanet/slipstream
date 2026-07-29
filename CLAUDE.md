@@ -7,7 +7,9 @@ loop (daemon rebuild, tests, logs, e2e) → [docs/DEVELOPMENT.md](docs/DEVELOPME
 the auth/secrets threat model → [docs/SECURITY.md](docs/SECURITY.md); the
 multi-user identity seam → [docs/IDENTITY-SEAM.md](docs/IDENTITY-SEAM.md); the
 versioning/release scheme (semver, build stamping, schema-vs-app version,
-tag/changelog flow) → [docs/VERSIONING.md](docs/VERSIONING.md).
+tag/changelog flow) → [docs/VERSIONING.md](docs/VERSIONING.md); deployment
+postures, what each wider one is gated on, and production-cut go/no-go criteria →
+[docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md).
 
 Use **pnpm**. Run `pnpm check` (svelte-check), `pnpm test`, and `pnpm lint` (eslint +
 `prettier --check`) before committing — `pnpm lint` gates the MR, so don't skip it; use
@@ -136,3 +138,10 @@ doc only when the symptom matches what you're seeing.
   manual step: add `SLIPSTREAM_SANDBOX=bwrap` to `~/.config/slipstream/server.env` and
   restart the service — without that, agents spawned by the prod daemon are not contained.
   Detail: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) §Dev vs prod deploy targets.
+- **`pnpm readiness` from inside a sandboxed agent PTY reports the sandbox's tmpfs, not the
+  host.** `SLIPSTREAM_SANDBOX=bwrap` overmounts the data dir with a private tmpfs, hiding
+  `server.env`/`daemon.json`/`secret.key`/the real dir mode, so a naive run would fabricate
+  FAILs (missing token, wrong perms) for a host that's actually fine. It now detects this
+  (agent PTY + data dir present + no `server.env` found) and reports inconclusive (exit `2`)
+  instead — run it on the host, or from an unsandboxed shell, for a real verdict. Detail:
+  [docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md) §4.

@@ -2,7 +2,9 @@
 
 FLO-84. Design notes for auth-adjacent hardening that's either already shipped or
 deliberately deferred. See [docs/IDENTITY-SEAM.md](IDENTITY-SEAM.md) for the
-per-owner identity model these designs plug into.
+per-owner identity model these designs plug into, and
+[docs/PRODUCTION-READINESS.md](PRODUCTION-READINESS.md) for the roll-up of which
+deployment postures these mitigations gate.
 
 ## 1. Current auth model
 
@@ -310,8 +312,11 @@ malicious agent can:
   the RPC.
 - skip the RPC entirely and read `<dataDir>/slipstream.db` directly for every
   stored git token, the Linear/Jira key, and the raw Firebase service-account
-  private key (see §6 — these are plaintext under the daemon / headless
-  server).
+  private key (see §6 — these are `sk1:`-encrypted under the daemon / headless
+  server post-FLO-145, but the key material that decrypts them — `secret.key`,
+  or `SLIPSTREAM_SECRET` sitting in the daemon's process environment — is
+  readable by that same uid, so a same-uid agent can still decrypt every one
+  of them; the threat stands, just for a different reason than plaintext).
 
 So the scrub's only real effect is to defeat the most casual drive-by (a process
 that happens to `printenv` an inherited token) and to keep the per-session env
