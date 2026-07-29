@@ -7,6 +7,7 @@
   import SettingsBehavior from './settings/SettingsBehavior.svelte'
   import SettingsNotifications from './settings/SettingsNotifications.svelte'
   import SettingsServer from './settings/SettingsServer.svelte'
+  import SettingsSecurity from './settings/SettingsSecurity.svelte'
   import SettingsDiagnostics from './settings/SettingsDiagnostics.svelte'
   import SettingsAbout from './settings/SettingsAbout.svelte'
 
@@ -77,6 +78,14 @@
           >
             Server
           </button>
+          <button
+            type="button"
+            class="tab-item"
+            class:active={activeTab === 'security'}
+            on:click={() => (activeTab = 'security')}
+          >
+            Security
+          </button>
         {/if}
         <button
           type="button"
@@ -115,6 +124,10 @@
 
         {#if activeTab === 'server' && isNative}
           <SettingsServer />
+        {/if}
+
+        {#if activeTab === 'security' && isNative}
+          <SettingsSecurity />
         {/if}
 
         {#if activeTab === 'diagnostics'}

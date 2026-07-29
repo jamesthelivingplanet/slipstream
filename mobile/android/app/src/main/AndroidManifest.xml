@@ -104,4 +104,9 @@
          @capacitor/push-notifications plugin requests it at runtime but does not
          declare it in its own manifest, so it must be declared here. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- FLO-159: a normal permission, granted automatically at install time —
+         no runtime request needed. androidx.biometric handles the legacy
+         USE_FINGERPRINT fallback for older API levels itself. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 </manifest>

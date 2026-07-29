@@ -11,10 +11,16 @@ import '@xterm/xterm/css/xterm.css'
  *      user previously pointed the gate at a different host, else
  *      location.origin (the SPA's own host, the historical default) — and
  *      derive the RPC WS URL from it.
- *   2. Determine the token.
- *   3. If no token → show TokenGate (collects both server URL + token; wait
- *      for user to submit).
- *   4. Create the WS-backed SlipstreamApi and assign window.slipstream BEFORE
+ *   2. FLO-159: arm the biometric lock (native shell + preference on + APK
+ *      new enough) and, if armed, show BiometricGate and wait for it to
+ *      unlock — this must happen BEFORE the token is read, since a locked
+ *      nativeStorage reads TOKEN_KEY as null (see nativeStorage.ts's get()).
+ *   3. Determine the token.
+ *   4. If no token → show TokenGate (collects both server URL + token; wait
+ *      for user to submit). By this point the biometric gate (if armed) has
+ *      already resolved, so a null token here really does mean "no token
+ *      was ever stored" — see isTokenLocked() in nativeStorage.ts.
+ *   5. Create the WS-backed SlipstreamApi and assign window.slipstream BEFORE
  *      importing App (and therefore ipc.ts), so `hasBackend` evaluates true.
  *
  * The dynamic import() approach guarantees that ipc.ts runs its module-level
@@ -66,6 +72,34 @@ async function bootWeb() {
   }
 
   await nativeStorage.migrateLegacy(TOKEN_KEY, 'slipstream_token')
+
+  // -- Server origin resolution --
+  // A stored override (set by the token gate, or the mobile Server settings
+  // tab) wins; otherwise default to the SPA's own origin — the historical
+  // behavior, and the common case when the server serves its own SPA. Moved
+  // ahead of the token read below (independent of TOKEN_KEY) so the
+  // biometric gate's own sign-out path has a server origin to hand
+  // showTokenGate without duplicating this resolution.
+  const storedServer = await nativeStorage.get(DAEMON_URL_KEY)
+  const serverOrigin = storedServer || location.origin
+  const wsUrl = rpcWsUrl(serverOrigin)
+
+  // -- Biometric gate (FLO-159) --
+  // Arms (and immediately locks) the gate only when the native shell, the
+  // "require fingerprint" preference, and a new-enough APK all line up —
+  // see initBiometricLock()'s doc comment. When armed, block boot on
+  // BiometricGate resolving before ever reading TOKEN_KEY, so the token
+  // read a few lines down is the real post-unlock value.
+  const armed = await nativeStorage.initBiometricLock()
+  if (armed) {
+    const outcome = await showBiometricGate(serverOrigin)
+    // Sign-out already ran the full TokenGate → connectWithToken flow; falling
+    // through would connect a second time over the top of it (a second
+    // createWsApi instance stomping window.slipstream and leaking the first
+    // one's visibilitychange/online/pageshow listeners + heartbeat).
+    if (outcome === 'signed-out') return
+  }
+
   const storedToken = await nativeStorage.get(TOKEN_KEY)
 
   // FLO-151: backfill the native ReplyReceiver's stashed daemon URL + token
@@ -74,16 +108,11 @@ async function bootWeb() {
   // no-op outside the mobile shell. Best-effort, fire-and-forget.
   void nativeStorage.syncReplyCredentials()
 
-  // -- Server origin resolution --
-  // A stored override (set by the token gate, or the mobile Server settings
-  // tab) wins; otherwise default to the SPA's own origin — the historical
-  // behavior, and the common case when the server serves its own SPA.
-  const storedServer = await nativeStorage.get(DAEMON_URL_KEY)
-  const serverOrigin = storedServer || location.origin
-  const wsUrl = rpcWsUrl(serverOrigin)
-
   if (!storedToken) {
-    // No token at all — show gate immediately
+    // No token at all. The biometric gate (if armed) has already resolved
+    // above, so nativeStorage.isTokenLocked() is guaranteed false here —
+    // this null really does mean "no token was ever stored", not "locked".
+    // Show TokenGate immediately.
     await showTokenGate(serverOrigin, '')
     return
   }
@@ -211,6 +240,87 @@ async function showTokenGate(serverOrigin: string, errorMsg: string): Promise<vo
           await connectWithToken(rpcWsUrl(server), token, createWsApi, server)
           resolve()
         },
+      },
+    })
+    mounted = gate
+  })
+}
+
+/** Map a failed unlockToken() result to a message a user can act on.
+ *  'user-canceled'/'lockout'/'no-credential' are the codes the native plugin
+ *  itself defines (FLO-159); anything else (a thrown native call, or a
+ *  generic 'canceled'/'error'/'no-activity') falls back to the native
+ *  error string, or a generic retry prompt. */
+function biometricErrorMessage(code: string | undefined, error: string | undefined): string {
+  switch (code) {
+    case 'user-canceled':
+      return 'Unlock canceled.'
+    case 'lockout':
+      return 'Too many attempts. Try again later, or use your device PIN.'
+    case 'no-credential':
+      return 'No screen lock is set up on this device.'
+    default:
+      return error || "Couldn't verify. Try again."
+  }
+}
+
+/** Outcome of showBiometricGate(): 'unlocked' means unlockToken() succeeded
+ *  and the caller should proceed to read TOKEN_KEY as usual; 'signed-out'
+ *  means handleSignOut already drove the full TokenGate → connectWithToken
+ *  flow itself, so the caller must NOT fall through and connect again. */
+type BiometricGateOutcome = 'unlocked' | 'signed-out'
+
+/**
+ * FLO-159: the boot-time biometric gate, mirroring showTokenGate's shape.
+ * Mounts BiometricGate ONCE (never remounts on a failed attempt — its
+ * onMount auto-triggers the native prompt, and remounting would silently
+ * violate the "never auto-retry after a failure" contract) and updates only
+ * its `error` prop via $set on a failed/canceled attempt. Resolves the
+ * returned promise once the gate is fully resolved one way or the other, so
+ * bootWeb()'s caller can tell "unlocked, go read TOKEN_KEY" apart from
+ * "sign-out already connected via TokenGate, do not connect again" — see
+ * BiometricGateOutcome.
+ */
+async function showBiometricGate(serverOrigin: string): Promise<BiometricGateOutcome> {
+  const { default: BiometricGate } = await import('./lib/components/BiometricGate.svelte')
+  clearMount()
+
+  return new Promise<BiometricGateOutcome>((resolve) => {
+    async function handleUnlock() {
+      const { nativeStorage } = await import('./lib/nativeStorage.js')
+      const result = await nativeStorage.unlockToken()
+      if (result.ok) {
+        resolve('unlocked')
+        return
+      }
+      gate.$set({ error: biometricErrorMessage(result.code, result.error) })
+    }
+
+    async function handleSignOut() {
+      const { nativeStorage, TOKEN_KEY } = await import('./lib/nativeStorage.js')
+      // A failed/abandoned fingerprint must never silently strand the user
+      // in TokenGate re-typing a token they still have — signing out here
+      // is an explicit choice, so only then do we actually drop the token
+      // and disable the lock preference (so the next boot doesn't re-arm a
+      // gate with nothing behind it).
+      await nativeStorage.remove(TOKEN_KEY, 'slipstream_token')
+      clearReplyCredsFromSw()
+      await nativeStorage.setBiometricLockEnabled(false)
+      // showTokenGate already resolves after its own onSubmit has run
+      // connectWithToken(...) — resolving 'signed-out' (rather than the bare
+      // void this used to be) tells bootWeb() a connection already happened
+      // here, so it must return instead of reading TOKEN_KEY and connecting
+      // a second time over the top of it.
+      await showTokenGate(serverOrigin, '')
+      resolve('signed-out')
+    }
+
+    const gate = new BiometricGate({
+      target,
+      props: {
+        error: '',
+        onUnlock: handleUnlock,
+        onSignOut: handleSignOut,
       },
     })
     mounted = gate

@@ -9,6 +9,28 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in fingerprint gate on the Android app's saved server token (FLO-159).
+  The mobile app's stored bearer token is a live credential for the whole
+  daemon, and until now the only thing standing between an unlocked, handed-
+  over phone and that token was the OS's own app/device lock. `Settings >
+  Security` (native-shell only) adds a "Require fingerprint to unlock"
+  toggle — off by default — that, once turned on, requires a passing
+  `BiometricPrompt` (`BIOMETRIC_STRONG | DEVICE_CREDENTIAL`, so device PIN
+  still works as a fallback on hardware with no enrolled fingerprint) before
+  the app will read the token back out of storage. The gate is enforced at
+  the storage seam itself — `nativeStorage.ts`'s `get(TOKEN_KEY)` returns
+  `null` while locked — rather than only at boot, so every reader of the
+  token is gated, not just the app-open path. Because Android keeps the
+  Capacitor WebView alive across backgrounding instead of reloading it, the
+  gate also re-arms on resume: coming back from the background past a short
+  grace period re-locks the token even mid-session, not just on a cold
+  start. A "Sign out" escape hatch on the lock screen clears the saved token
+  and disables the preference for anyone who abandons or fails the prompt,
+  so a lost fingerprint match can never stall someone in front of a gate
+  with no way out other than reinstalling.
+
 ## [0.9.0] - 2026-07-29
 
 ### Added

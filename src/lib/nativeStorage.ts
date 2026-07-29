@@ -22,6 +22,12 @@
 // predating one of these plugins must still work — so every native call is
 // wrapped and falls through on absence or failure.
 
+import {
+  biometricPluginAvailable,
+  promptBiometric,
+  type BiometricAppControlPlugin,
+} from './biometric.js'
+
 /** Secure-storage key for the auth token (Keystore-backed on Android). */
 export const TOKEN_KEY = 'slipstream.token'
 /** Preferences key for the server URL override — set by the token gate (web)
@@ -34,6 +40,11 @@ export const FCM_KEY = 'slipstream.fcm'
  *  objects with status 'idle' — so a page reload (which drops the renderer
  *  store entirely) doesn't silently wipe an unsent kickoff prompt (FLO-114). */
 export const DRAFTS_KEY = 'slipstream.drafts'
+/** Preferences key for the "require fingerprint to unlock" toggle (FLO-159),
+ *  value '1'/'0' (see isBiometricLockEnabled/setBiometricLockEnabled below).
+ *  Read once at boot by initBiometricLock() to decide whether TOKEN_KEY
+ *  reads should be gated behind a biometric prompt this session. */
+export const BIOMETRIC_LOCK_KEY = 'slipstream.biometricLock'
 
 interface CapacitorPreferencesPlugin {
   get(options: { key: string }): Promise<{ value: string | null }>
@@ -47,7 +58,11 @@ interface CapacitorSecureStoragePlugin {
   removeItem(key: string): Promise<void>
 }
 
-interface CapacitorAppControlPlugin {
+// FLO-159: biometricAvailability/biometricAuthenticate are typed once in
+// biometric.ts (BiometricAppControlPlugin) and pulled in here via extends —
+// this is the same runtime AppControl plugin object, just one interface
+// declaration for its two newest (optional) methods instead of two.
+interface CapacitorAppControlPlugin extends BiometricAppControlPlugin {
   restart(): Promise<void>
   /** FLO-151: stash the daemon URL + bearer token the background
    *  ReplyReceiver reads to POST an inline reply without the app running. */
@@ -196,6 +211,16 @@ function localStorageRemove(key: string): void {
 
 /** Full 3-tier read: native (secure/Preferences) → localStorage[key]. */
 async function get(key: string): Promise<string | null> {
+  // FLO-159 biometric gate: while `locked` is true, TOKEN_KEY reads as
+  // absent WITHOUT touching any storage tier. This is the actual gate — it's
+  // what binds the lock to every reader of the token (src/main.ts's boot
+  // sequence AND SettingsIntegrations.svelte's pairing-link section, not
+  // just the boot path), because both go through this same get(). A `null`
+  // here means "locked", not "no token was ever set" — callers that need to
+  // tell the two apart (namely main.ts's boot sequence, which decides
+  // whether to show TokenGate) MUST check isTokenLocked() before concluding
+  // "no token, show TokenGate".
+  if (key === TOKEN_KEY && locked) return null
   const native = await getNativeTier(key)
   if (native != null) return native
   return localStorageGet(key)
@@ -302,6 +327,187 @@ async function syncReplyCredentials(): Promise<void> {
   }
 }
 
+// ── Biometric token lock (FLO-159) ──────────────────────────────────────────
+//
+// A settings toggle that gates the saved server token (TOKEN_KEY) behind the
+// device's fingerprint/biometric prompt. The gate itself lives in get()
+// above; everything below is the state machine that decides when `locked`
+// is true and how it gets flipped back to false.
+
+/** True once initBiometricLock() has armed the gate this boot (native shell +
+ *  preference on + plugin available). Distinct from `locked`: `armed` never
+ *  goes back to true on its own — it's what the resume re-lock listener
+ *  checks before re-locking, and what setBiometricLockEnabled(false) clears
+ *  so a mid-session disable takes effect immediately. */
+let armed = false
+/** The actual gate flag get() reads. */
+let locked = false
+/** Dedupes concurrent unlockToken() callers (e.g. the boot gate and a
+ *  settings-tab read racing) onto a single in-flight native prompt — two
+ *  system biometric prompts stacking on top of each other would be broken
+ *  UX and is not something the OS reliably handles. */
+let unlockPromise: Promise<{ ok: boolean; code?: string; error?: string }> | null = null
+/** Set on `visibilitychange` → hidden; read on the matching → visible
+ *  transition to decide whether enough time passed to re-lock. */
+let lastHiddenAt: number | null = null
+/** Guards installResumeRelock() against double-binding — initBiometricLock()
+ *  may run more than once across a boot/regate cycle (e.g. a settings
+ *  change re-entering the boot-like arm sequence). */
+let resumeListenerInstalled = false
+
+/** Grace window (ms) the resume re-lock tolerates between the app being
+ *  hidden and becoming visible again before it forces the gate back up.
+ *  Exported for the test. See installResumeRelock()'s doc comment for why
+ *  this exists at all. */
+export const RELOCK_GRACE_MS = 60_000
+
+async function isBiometricLockEnabled(): Promise<boolean> {
+  return (await get(BIOMETRIC_LOCK_KEY)) === '1'
+}
+
+/** Shared precondition check for "can the gate actually be honored right
+ *  now": native shell + the "require fingerprint" preference on + a
+ *  new-enough APK exposing biometricAuthenticate. Factored out of
+ *  initBiometricLock() so setBiometricLockEnabled(true) can arm the gate for
+ *  the rest of THIS session using the exact same rule, instead of a second
+ *  copy that could drift out of sync (e.g. arming on an old APK that has no
+ *  biometric prompt to actually show later). */
+async function canArmBiometricLock(): Promise<boolean> {
+  if (!isNativeShell()) return false
+  let enabled: boolean
+  try {
+    enabled = await isBiometricLockEnabled()
+  } catch {
+    enabled = false
+  }
+  return enabled && biometricPluginAvailable()
+}
+
+async function setBiometricLockEnabled(enabled: boolean): Promise<void> {
+  if (enabled) {
+    await set(BIOMETRIC_LOCK_KEY, '1')
+    // Arm the gate for the rest of THIS session too, not just future cold
+    // starts — otherwise a user who flips the toggle on and then backgrounds
+    // the app past RELOCK_GRACE_MS is never re-locked, because
+    // installResumeRelock()'s visibilitychange handler is gated on `armed`
+    // and nothing set it true until the next initBiometricLock() at a cold
+    // start. Only do so when the gate can actually be honored (mirrors
+    // initBiometricLock()'s own preconditions) — an older APK or a plain
+    // browser/Electron must never think it's armed.
+    if (await canArmBiometricLock()) {
+      armed = true
+      installResumeRelock()
+    }
+    // Deliberately do NOT call lockToken() here: the user just passed a live
+    // biometric prompt in SettingsSecurity.svelte to get this far, so
+    // locking them out immediately after opting in would be wrong. `armed`
+    // true with `locked` false is the intended state coming out of this
+    // branch — the gate only engages on the next resume/cold start.
+    return
+  }
+  await remove(BIOMETRIC_LOCK_KEY)
+  // Disabling must take effect immediately, without an app restart — drop
+  // any armed/locked state right away so the next get(TOKEN_KEY) (this same
+  // settings tab included) isn't gated behind a preference that no longer
+  // exists.
+  armed = false
+  locked = false
+  unlockPromise = null
+}
+
+function isTokenLocked(): boolean {
+  return locked
+}
+
+/** Force-lock: used by the resume re-lock below, and directly testable/
+ *  callable by anything else that wants to re-arm the gate mid-session.
+ *  Dispatches `slipstream:biometric-locked` on `window` so mounted UI (see
+ *  App.svelte) can throw the gate overlay up — but ONLY on a real
+ *  unlocked→locked transition, so calling this repeatedly while already
+ *  locked doesn't re-trigger listeners/re-mount the overlay. */
+function lockToken(): void {
+  if (locked) return
+  locked = true
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('slipstream:biometric-locked'))
+  }
+}
+
+/** Android keeps the Capacitor WebView alive across backgrounding — this SPA
+ *  keeps running in place, it does not reload — so without a resume re-lock
+ *  the token gate would only ever apply to a cold start: background the app
+ *  and switch back and the token would just sit there unlocked. Installs a
+ *  `visibilitychange` listener (idempotent — see resumeListenerInstalled)
+ *  that records the hidden timestamp, and on the matching resume only
+ *  re-locks past RELOCK_GRACE_MS of actual hidden time. The short grace
+ *  window is deliberate: switching away to the fingerprint prompt itself, or
+ *  to the OS clipboard/share sheet and straight back, must not immediately
+ *  re-trigger the gate. */
+function installResumeRelock(): void {
+  if (resumeListenerInstalled) return
+  if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return
+  resumeListenerInstalled = true
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      lastHiddenAt = Date.now()
+      return
+    }
+    if (armed && lastHiddenAt != null && Date.now() - lastHiddenAt >= RELOCK_GRACE_MS) {
+      lockToken()
+    }
+    lastHiddenAt = null
+  })
+}
+
+/** Call once at boot. Arms (and immediately locks) the gate ONLY when: we're
+ *  inside the native shell, the "require fingerprint" preference is on, and
+ *  the running APK actually exposes biometricAuthenticate. Otherwise leaves
+ *  `locked` false and returns false — an older APK, web/Electron, or the
+ *  preference simply being off must never gate the token. Also installs the
+ *  resume re-lock listener (idempotent), since this is the natural place to
+ *  do it whether or not the gate ends up armed this call. */
+async function initBiometricLock(): Promise<boolean> {
+  installResumeRelock()
+
+  if (!(await canArmBiometricLock())) {
+    armed = false
+    return false
+  }
+
+  armed = true
+  lockToken()
+  return true
+}
+
+/** Resolve the gate. If not locked, resolves { ok:true } immediately — no
+ *  prompt. Otherwise shows the native biometric prompt (deduped: concurrent
+ *  callers share the ONE in-flight promise so a boot gate and a settings
+ *  read can never stack two system prompts). On success, unlocks and
+ *  resolves { ok:true }; on failure/cancel, leaves it locked and resolves
+ *  { ok:false, code, error } so the caller can render a specific message. */
+async function unlockToken(): Promise<{ ok: boolean; code?: string; error?: string }> {
+  if (!locked) return { ok: true }
+  if (unlockPromise) return unlockPromise
+
+  unlockPromise = (async () => {
+    try {
+      const result = await promptBiometric({
+        title: 'Unlock Slipstream',
+        subtitle: 'Confirm your fingerprint to access your saved server token',
+      })
+      if (result.authenticated) {
+        locked = false
+        return { ok: true }
+      }
+      return { ok: false, code: result.code, error: result.error }
+    } finally {
+      unlockPromise = null
+    }
+  })()
+
+  return unlockPromise
+}
+
 export const nativeStorage = {
   isAvailable: isNativeShell,
   get,
@@ -310,4 +516,19 @@ export const nativeStorage = {
   migrateLegacy,
   restart,
   syncReplyCredentials,
+  isBiometricLockEnabled,
+  setBiometricLockEnabled,
+  isTokenLocked,
+  initBiometricLock,
+  unlockToken,
+  lockToken,
+}
+
+export {
+  isBiometricLockEnabled,
+  setBiometricLockEnabled,
+  isTokenLocked,
+  initBiometricLock,
+  unlockToken,
+  lockToken,
 }
