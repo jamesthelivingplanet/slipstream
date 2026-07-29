@@ -9,6 +9,28 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Fixed
+
+- `git` over SSH — and bare `ssh` — was completely broken inside the bwrap agent sandbox,
+  so an agent running under `SLIPSTREAM_SANDBOX=bwrap` could not push, pull, fetch, or open
+  a merge request. bwrap's unprivileged user namespace maps only the sandboxed uid
+  (`uid_map: 1000 1000 1`), so every root-owned file appears owned by `nobody` inside the
+  namespace — including the distro's `/etc/ssh/ssh_config.d/*.conf` client-config drop-ins
+  that `/etc/ssh/ssh_config` pulls in via `Include`. OpenSSH treats a config it cannot
+  vouch for as fatal rather than skipping it, so every SSH invocation died with
+  `Bad owner or permissions on /etc/ssh/ssh_config.d/…` before it ever reached the network.
+  `electron/services/agentSandbox.ts` now adds a `--tmpfs` over `/etc/ssh/ssh_config.d`
+  (that directory only, and only when it exists on the host), so the unloadable drop-ins
+  are simply absent inside the sandbox and the `Include` glob matches nothing. Everything
+  that carries real configuration is left alone: `/etc/ssh/ssh_config` itself, and the
+  user's own `~/.ssh/config`, keys and `known_hosts` — so host aliases, per-host
+  `IdentityFile`, and `StrictHostKeyChecking` keep behaving exactly as configured, and host
+  key checking is not weakened. No `GIT_SSH_COMMAND`/`-F` override is injected into the
+  agent's environment, which is why this fixes plain `ssh` too and not just git, and why it
+  cannot clobber a value the user sets themselves. Note this is daemon-side: the fix
+  reaches running agents only after the next `slipstream.service` restart, since
+  `buildBwrapArgs` runs in the daemon that spawns the PTY.
+
 ## [0.8.0] - 2026-07-28
 
 ### Fixed
