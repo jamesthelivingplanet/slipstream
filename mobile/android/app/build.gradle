@@ -37,6 +37,9 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     // FLO-159: BiometricPrompt for AppControlPlugin's biometric unlock gate.
     implementation "androidx.biometric:biometric:$androidxBiometricVersion"
+    // FLO-151 follow-up: EncryptedSharedPreferences/MasterKey for ReplyPrefs'
+    // Keystore-backed reply-credentials store.
+    implementation "androidx.security:security-crypto:$androidxSecurityCryptoVersion"
     // FLO-160: needed at compile time so the app's own
     // SlipstreamMessagingService can reference FirebaseMessagingService /
     // RemoteMessage directly. See variables.gradle for the version pin.

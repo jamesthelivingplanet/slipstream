@@ -180,6 +180,112 @@
     jiraSettings = { ...jiraSettings, scopeKeys: [...set] }
   }
 
+  // ── GitHub Issues ──────────────────────────────────────────────────────
+  // No credential fields here — github.token is edited only via the
+  // "GitHub Token" git-host card below (shared with git push/PR auth), never
+  // through this ticket-settings path. See githubIssuesProvider.ts's
+  // getSettings/setSettings comments for the same rationale on the backend.
+  let githubSettings: TicketSourceSettings = emptySettings()
+  let githubPending = false
+  let githubScopes: ScopeOption[] = []
+  let githubScopesLoading = false
+  let githubScopesError: string | null = null
+
+  async function loadGithubSettings() {
+    if (!hasBackend) return
+    try {
+      githubSettings = await getTicketSettings('github')
+    } catch {
+      // ignore
+    }
+  }
+
+  async function saveGithubSettings() {
+    if (!hasBackend) return
+    githubPending = true
+    try {
+      await setTicketSettings('github', githubSettings)
+      pushToast('success', 'GitHub Issues settings saved')
+      await loadGithubSettings()
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save GitHub Issues settings')
+    } finally {
+      githubPending = false
+    }
+  }
+
+  async function loadGithubScopes() {
+    if (!hasBackend) return
+    githubScopesLoading = true
+    githubScopesError = null
+    try {
+      githubScopes = await listTicketScopes('github')
+    } catch (e) {
+      githubScopesError = e instanceof Error ? e.message : 'Failed to load repositories'
+    } finally {
+      githubScopesLoading = false
+    }
+  }
+
+  function toggleGithubScope(key: string) {
+    const set = new Set(githubSettings.scopeKeys)
+    if (set.has(key)) set.delete(key)
+    else set.add(key)
+    githubSettings = { ...githubSettings, scopeKeys: [...set] }
+  }
+
+  // ── GitLab Issues ──────────────────────────────────────────────────────
+  // Same rationale as GitHub Issues above: gitlab.token/gitlab.baseUrl are
+  // edited only via the "GitLab Token" git-host card below.
+  let gitlabSettings: TicketSourceSettings = emptySettings()
+  let gitlabPending = false
+  let gitlabScopes: ScopeOption[] = []
+  let gitlabScopesLoading = false
+  let gitlabScopesError: string | null = null
+
+  async function loadGitlabSettings() {
+    if (!hasBackend) return
+    try {
+      gitlabSettings = await getTicketSettings('gitlab')
+    } catch {
+      // ignore
+    }
+  }
+
+  async function saveGitlabSettings() {
+    if (!hasBackend) return
+    gitlabPending = true
+    try {
+      await setTicketSettings('gitlab', gitlabSettings)
+      pushToast('success', 'GitLab Issues settings saved')
+      await loadGitlabSettings()
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save GitLab Issues settings')
+    } finally {
+      gitlabPending = false
+    }
+  }
+
+  async function loadGitlabScopes() {
+    if (!hasBackend) return
+    gitlabScopesLoading = true
+    gitlabScopesError = null
+    try {
+      gitlabScopes = await listTicketScopes('gitlab')
+    } catch (e) {
+      gitlabScopesError = e instanceof Error ? e.message : 'Failed to load projects'
+    } finally {
+      gitlabScopesLoading = false
+    }
+  }
+
+  function toggleGitlabScope(key: string) {
+    const set = new Set(gitlabSettings.scopeKeys)
+    if (set.has(key)) set.delete(key)
+    else set.add(key)
+    gitlabSettings = { ...gitlabSettings, scopeKeys: [...set] }
+  }
+
   // ── Git hosts ──────────────────────────────────────────────────────────
   interface GitHostFormState {
     token: string
@@ -241,6 +347,13 @@
         baseUrl: state.baseUrl.trim(),
       })
       pushToast('success', `${provider.displayName} settings saved`)
+      // GitHub Issues / GitLab Issues have no credential input of their own
+      // (see the "── GitHub Issues ──"/"── GitLab Issues ──" sections above)
+      // — their `configured` flag flips only once the shared token lands
+      // here, so reload it now to unlock the scope picker without requiring
+      // a full page reload.
+      if (provider.id === 'github') await loadGithubSettings()
+      if (provider.id === 'gitlab') await loadGitlabSettings()
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Failed to save token')
     } finally {
@@ -265,6 +378,8 @@
   onMount(() => {
     loadLinearSettings()
     loadJiraSettings()
+    loadGithubSettings()
+    loadGitlabSettings()
     loadGitProviders()
     refreshCliStatus()
     loadPairingLink()
@@ -501,6 +616,128 @@
         class="btn btn-outline btn-sm"
         on:click={saveJiraSettings}
         disabled={jiraPending || !hasBackend}
+      >
+        Save project &amp; filter settings
+      </button>
+    </div>
+  {/if}
+</SettingsSection>
+
+<SettingsSection title="GitHub Issues">
+  <p class="integration-hint">
+    Uses the GitHub token from the GitHub card below — add it there first.
+  </p>
+  {#if !hasBackend}
+    <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+  {:else if githubSettings.configured}
+    <div class="scope-section">
+      <div class="scope-header">
+        <span class="scope-title">Repositories</span>
+        <button
+          class="btn btn-outline btn-sm"
+          on:click={loadGithubScopes}
+          disabled={githubScopesLoading}
+        >
+          {githubScopesLoading
+            ? 'Loading…'
+            : githubScopes.length
+              ? 'Refresh repositories'
+              : 'Load repositories'}
+        </button>
+      </div>
+      <p class="integration-hint">
+        Only tickets from checked repositories are shown. Leave all unchecked to include every
+        repository — but note that with no repositories checked, results are empty unless "Only my
+        tickets" below is also on.
+      </p>
+      {#if githubScopesError}
+        <p class="mcp-settings-error">{githubScopesError}</p>
+      {/if}
+      {#if githubScopes.length}
+        <div class="scope-list">
+          {#each githubScopes as scope (scope.id)}
+            <label class="notify-check">
+              <input
+                type="checkbox"
+                checked={githubSettings.scopeKeys.includes(scope.key)}
+                on:change={() => toggleGithubScope(scope.key)}
+              />
+              <span class="mono">{scope.key}</span> — {scope.name}
+            </label>
+          {/each}
+        </div>
+      {/if}
+      <label class="notify-check">
+        <input type="checkbox" bind:checked={githubSettings.onlyMine} />
+        Only my/unassigned tickets
+      </label>
+      <p class="integration-hint">
+        Hides tickets assigned to teammates; keeps tickets assigned to you or nobody.
+      </p>
+      <button
+        class="btn btn-outline btn-sm"
+        on:click={saveGithubSettings}
+        disabled={githubPending || !hasBackend}
+      >
+        Save repository &amp; filter settings
+      </button>
+    </div>
+  {/if}
+</SettingsSection>
+
+<SettingsSection title="GitLab Issues">
+  <p class="integration-hint">
+    Uses the GitLab token — and base URL, for self-hosted instances — from the GitLab card below.
+  </p>
+  {#if !hasBackend}
+    <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+  {:else if gitlabSettings.configured}
+    <div class="scope-section">
+      <div class="scope-header">
+        <span class="scope-title">Projects</span>
+        <button
+          class="btn btn-outline btn-sm"
+          on:click={loadGitlabScopes}
+          disabled={gitlabScopesLoading}
+        >
+          {gitlabScopesLoading
+            ? 'Loading…'
+            : gitlabScopes.length
+              ? 'Refresh projects'
+              : 'Load projects'}
+        </button>
+      </div>
+      <p class="integration-hint">
+        Only tickets from checked projects are shown. Leave all unchecked to include every project.
+      </p>
+      {#if gitlabScopesError}
+        <p class="mcp-settings-error">{gitlabScopesError}</p>
+      {/if}
+      {#if gitlabScopes.length}
+        <div class="scope-list">
+          {#each gitlabScopes as scope (scope.id)}
+            <label class="notify-check">
+              <input
+                type="checkbox"
+                checked={gitlabSettings.scopeKeys.includes(scope.key)}
+                on:change={() => toggleGitlabScope(scope.key)}
+              />
+              <span class="mono">{scope.key}</span> — {scope.name}
+            </label>
+          {/each}
+        </div>
+      {/if}
+      <label class="notify-check">
+        <input type="checkbox" bind:checked={gitlabSettings.onlyMine} />
+        Only my/unassigned tickets
+      </label>
+      <p class="integration-hint">
+        Hides tickets assigned to teammates; keeps tickets assigned to you or nobody.
+      </p>
+      <button
+        class="btn btn-outline btn-sm"
+        on:click={saveGitlabSettings}
+        disabled={gitlabPending || !hasBackend}
       >
         Save project &amp; filter settings
       </button>

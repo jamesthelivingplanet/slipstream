@@ -60,6 +60,16 @@ public class ReplyReceiver extends BroadcastReceiver {
         }
 
         SharedPreferences prefs = ReplyPrefs.open(context);
+        if (prefs == null) {
+            // EncryptedSharedPreferences couldn't be initialized on this
+            // device (Keystore unavailable/corrupted, etc.). Degrade to
+            // "inline reply doesn't work" — never fall back to reading the
+            // old plaintext file, which would defeat the whole point of
+            // ReplyPrefs. See ReplyPrefs' class doc Failure mode note.
+            updateNotification(context, notifId, "Slipstream",
+                context.getString(R.string.reply_failed_storage_unavailable));
+            return;
+        }
         String url = prefs.getString(ReplyPrefs.DAEMON_URL_KEY, null);
         String token = prefs.getString(ReplyPrefs.TOKEN_KEY, null);
         if (url == null || url.isEmpty() || token == null || token.isEmpty()) {

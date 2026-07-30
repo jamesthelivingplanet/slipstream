@@ -64,7 +64,7 @@ function dtoToTickets(
 ): Ticket[] {
   return dtos.map((d) => ({
     tid: d.tid,
-    src: d.src as 'jira' | 'linear',
+    src: d.src as Source,
     title: d.title,
     repo: d.repoHint ?? '',
     description: d.description,
@@ -103,6 +103,18 @@ export const SESSION_DTO_FIELD_KEYS: Record<keyof SessionDTO, true> = {
   src: true,
   parentId: true,
   mode: true,
+}
+
+/** Display label per ticket source, keyed exhaustively over `Source` (same
+ *  "Record<T, true/value> forces every variant" pattern as
+ *  SESSION_DTO_FIELD_KEYS above) so a new TicketSource can't silently fall
+ *  through cleanupAgent's confirm-dialog copy without a label. Exported for
+ *  unit testing. */
+export const SRC_LABELS: Record<Source, string> = {
+  jira: 'Jira',
+  linear: 'Linear',
+  github: 'GitHub',
+  gitlab: 'GitLab',
 }
 
 /** Map a persisted SessionDTO to the renderer Session model. Exported so the
@@ -963,7 +975,7 @@ export async function cleanupAgent(s: Session, opts?: { auto?: boolean }): Promi
   // touch the tracker, so an in-progress ticket would otherwise go stale.
   if (!opts?.auto) {
     const hasTicket = !s.tid.startsWith('TASK-')
-    const srcLabel = s.src === 'linear' ? 'Linear' : 'Jira'
+    const srcLabel = SRC_LABELS[s.src]
     const ok = await confirmDialog({
       title: 'Clean up agent?',
       message: hasTicket

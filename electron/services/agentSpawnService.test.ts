@@ -8,6 +8,7 @@ import type { AgentResponse } from './agentRequestSentinel.js'
 import type { IConfigStore } from './configStore.js'
 import type {
   AgentRequest,
+  BudgetPolicy,
   ISessionManager,
   ISessionStore,
   IOutcomeStore,
@@ -15,6 +16,7 @@ import type {
   RepoDTO,
   SessionDTO,
   SessionOutcomeDTO,
+  SessionUsage,
   SpawnPolicy,
 } from '../shared/contract.js'
 
@@ -56,10 +58,19 @@ interface Fakes {
    *  returns. Pass undefined to simulate an unset key (falls back to
    *  DEFAULT_SPAWN_POLICY), or a raw string to simulate malformed JSON. */
   setSpawnPolicy: (policy: Partial<SpawnPolicy> | string | undefined) => void
+  /** Set/clear the persisted budget.policy value the fake config store
+   *  returns. Pass undefined to simulate an unset key (falls back to
+   *  DEFAULT_BUDGET_POLICY), or a raw string to simulate malformed JSON. */
+  setBudgetPolicy: (policy: Partial<BudgetPolicy> | string | undefined) => void
   deps: AgentSpawnDeps
 }
 
-function makeFakes(opts: { withScheduler?: boolean } = {}): Fakes {
+function makeFakes(
+  opts: {
+    withScheduler?: boolean
+    getSessionUsage?: (session: SessionDTO) => Promise<SessionUsage & { supportsUsage: boolean }>
+  } = {},
+): Fakes {
   const emitter = new EventEmitter()
   const sessions: Pick<ISessionManager, 'on' | 'off'> = {
     on: (event, listener) => {
@@ -170,17 +181,40 @@ function makeFakes(opts: { withScheduler?: boolean } = {}): Fakes {
       }
     : undefined
 
-  // Fake config store: defaults to no persisted policy (readSpawnPolicy
-  // falls back to DEFAULT_SPAWN_POLICY), overridable per-test via
-  // setSpawnPolicy.
+  // Fake config store: defaults to no persisted policy (readSpawnPolicy /
+  // readBudgetPolicy fall back to their DEFAULT_*), overridable per-test via
+  // setSpawnPolicy / setBudgetPolicy.
   let spawnPolicyRaw: string | undefined
+  let budgetPolicyRaw: string | undefined
   const config: Pick<IConfigStore, 'get'> = {
-    get: (key: string) => (key === 'spawn.policy' ? spawnPolicyRaw : undefined),
+    get: (key: string) => {
+      if (key === 'spawn.policy') return spawnPolicyRaw
+      if (key === 'budget.policy') return budgetPolicyRaw
+      return undefined
+    },
   }
   const setSpawnPolicy = (policy: Partial<SpawnPolicy> | string | undefined): void => {
     spawnPolicyRaw =
       typeof policy === 'string' || policy === undefined ? policy : JSON.stringify(policy)
   }
+  const setBudgetPolicy = (policy: Partial<BudgetPolicy> | string | undefined): void => {
+    budgetPolicyRaw =
+      typeof policy === 'string' || policy === undefined ? policy : JSON.stringify(policy)
+  }
+
+  // Default usage fake: no transcript/usage data for any session, but a
+  // supported backend — matches readSessionUsage's real shape for a
+  // pre-first-turn session. Tests override via opts.getSessionUsage.
+  const getSessionUsage =
+    opts.getSessionUsage ??
+    (async (session: SessionDTO): Promise<SessionUsage & { supportsUsage: boolean }> => ({
+      sessionId: session.id,
+      exists: false,
+      tokens: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 },
+      costUsd: 0,
+      turns: 0,
+      supportsUsage: true,
+    }))
 
   const deps: AgentSpawnDeps = {
     sessions,
@@ -192,9 +226,20 @@ function makeFakes(opts: { withScheduler?: boolean } = {}): Fakes {
     scheduler,
     dataDir: '/data',
     writeResponse,
+    getSessionUsage,
   }
 
-  return { emitter, sessionStore, repoList, outcomeMap, responses, scheduler, setSpawnPolicy, deps }
+  return {
+    emitter,
+    sessionStore,
+    repoList,
+    outcomeMap,
+    responses,
+    scheduler,
+    setSpawnPolicy,
+    setBudgetPolicy,
+    deps,
+  }
 }
 
 /** Emit an agentRequest and wait for its response to land — the handler runs
@@ -742,6 +787,170 @@ describe('agentSpawnService — SpawnPolicy refusal is durable across restart re
     // The seeded refusal is untouched — no second entry was appended.
     expect(fakes.responses['parent-1']).toHaveLength(1)
     expect(fakes.responses['parent-1'][0].ok).toBe(false)
+    service.dispose()
+  })
+})
+
+function fakeUsage(
+  session: SessionDTO,
+  overrides: Partial<SessionUsage & { supportsUsage: boolean }> = {},
+): SessionUsage & { supportsUsage: boolean } {
+  return {
+    sessionId: session.id,
+    exists: true,
+    tokens: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 },
+    costUsd: 0,
+    turns: 1,
+    supportsUsage: true,
+    ...overrides,
+  }
+}
+
+describe('agentSpawnService — daily budget cap', () => {
+  it('proceeds when spend today is under the daily cap', async () => {
+    const fakes = makeFakes({
+      withScheduler: true,
+      getSessionUsage: async (s) => fakeUsage(s, { costUsd: 1 }),
+    })
+    fakes.setBudgetPolicy({ enabled: true, dailyUsdCap: 10, perSessionUsdCap: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', newAgentReq({ id: 'req-daily-ok' }))
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('refuses when spend today is at/over the daily cap', async () => {
+    const fakes = makeFakes({
+      withScheduler: true,
+      getSessionUsage: async (s) => fakeUsage(s, { costUsd: 10 }),
+    })
+    fakes.setBudgetPolicy({ enabled: true, dailyUsdCap: 10, perSessionUsdCap: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'parent-1',
+      newAgentReq({ id: 'req-daily-bad' }),
+    )
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toMatch(/daily cap|estimated api spend/i)
+    expect(fakes.scheduler!.submit).not.toHaveBeenCalled()
+    service.dispose()
+  })
+
+  it('dailyUsdCap: 0 means unlimited, even with huge spend today', async () => {
+    const fakes = makeFakes({
+      withScheduler: true,
+      getSessionUsage: async (s) => fakeUsage(s, { costUsd: 1_000_000 }),
+    })
+    fakes.setBudgetPolicy({ enabled: true, dailyUsdCap: 0, perSessionUsdCap: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'parent-1',
+      newAgentReq({ id: 'req-daily-unlim' }),
+    )
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('enabled: false disables enforcement even with spend over the cap', async () => {
+    const fakes = makeFakes({
+      withScheduler: true,
+      getSessionUsage: async (s) => fakeUsage(s, { costUsd: 1_000_000 }),
+    })
+    fakes.setBudgetPolicy({ enabled: false, dailyUsdCap: 1, perSessionUsdCap: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'parent-1',
+      newAgentReq({ id: 'req-daily-disabled' }),
+    )
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('a malformed stored budget.policy coerces to default (disabled) — spawn proceeds', async () => {
+    const fakes = makeFakes({
+      withScheduler: true,
+      getSessionUsage: async (s) => fakeUsage(s, { costUsd: 1_000_000 }),
+    })
+    fakes.setBudgetPolicy('{not valid json')
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'parent-1',
+      newAgentReq({ id: 'req-daily-malformed' }),
+    )
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('a fleet with supportsUsage:false everywhere computes 0 daily spend without crashing or fabricating a cost', async () => {
+    const fakes = makeFakes({
+      withScheduler: true,
+      // Simulates grok/kilo/antigravity: readSessionUsage's real dispatch
+      // would give exists:false too for these, so computeDailySpendUsd's
+      // `!usage.exists` guard already skips them — this proves that path
+      // doesn't crash and never invents a number.
+      getSessionUsage: async (s) =>
+        fakeUsage(s, { exists: false, turns: 0, costUsd: 0, supportsUsage: false }),
+    })
+    fakes.setBudgetPolicy({ enabled: true, dailyUsdCap: 1, perSessionUsdCap: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'parent-1',
+      newAgentReq({ id: 'req-daily-unsupported' }),
+    )
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('sessions created on a prior day do not count toward the daily total', async () => {
+    const nowMs = Date.now()
+    const yesterdayMs = nowMs - 25 * 60 * 60 * 1000
+    const fakes = makeFakes({
+      withScheduler: true,
+      getSessionUsage: async (s) => fakeUsage(s, { costUsd: s.id === 'old-session' ? 1000 : 0 }),
+    })
+    fakes.setBudgetPolicy({ enabled: true, dailyUsdCap: 10, perSessionUsdCap: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'old-session', createdAt: yesterdayMs }))
+    fakes.repoList.push(makeRepo())
+    const deps: AgentSpawnDeps = { ...fakes.deps, now: () => nowMs }
+    const service = createAgentSpawnService(deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'parent-1',
+      newAgentReq({ id: 'req-daily-prior-day' }),
+    )
+
+    expect(res.ok).toBe(true)
     service.dispose()
   })
 })

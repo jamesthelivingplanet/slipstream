@@ -53,6 +53,7 @@ import type {
   ISessionStore,
   RepoDTO,
   SessionDTO,
+  SessionUsage,
   SpawnPolicy,
 } from '../shared/contract.js'
 import { BACKEND_KINDS, DEFAULT_SPAWN_POLICY } from '../shared/contract.js'
@@ -65,6 +66,9 @@ import {
   type AgentResponse,
 } from './agentRequestSentinel.js'
 import { launchSession, type LaunchDeps, type LaunchRequest } from './sessionLauncher.js'
+import { readBudgetPolicy } from './sessionReaper.js'
+import { readSessionUsage } from './usage.js'
+import { dayKeyFromMs, formatCost } from '../shared/usageFormat.js'
 
 /** Same config key rpcHandlers/config.ts's getSpawnPolicy/setSpawnPolicy
  *  persist under (SPAWN_POLICY_KEY there) — duplicated here rather than
@@ -173,6 +177,33 @@ function checkSpawnPolicy(
   return null
 }
 
+/** Sum today's (UTC) estimated spend across every known session, for
+ *  BudgetPolicy.dailyUsdCap. Global (all owners), not owner-scoped — a
+ *  single daemon-wide daily budget, matching GcPolicy/SchedulerPolicy/
+ *  SpawnPolicy's convention of one global config value. Sessions on a
+ *  backend with no usage reader (supportsUsage:false — grok/kilo/
+ *  antigravity) contribute nothing, not because they're confirmed free but
+ *  because their real cost is unknowable to this app (see usage.ts's own
+ *  doc + sessionReaper.ts's identical stance); a `pi` session's cost is
+ *  also invisible here specifically because its reader needs the worktree
+ *  cwd, which this service has no resolver for. Never fabricates a number
+ *  to fill either gap. */
+async function computeDailySpendUsd(
+  sessionStore: Pick<ISessionStore, 'list'>,
+  getSessionUsage: (session: SessionDTO) => Promise<SessionUsage & { supportsUsage: boolean }>,
+  nowMs: number,
+): Promise<number> {
+  const todayKey = dayKeyFromMs(nowMs)
+  let total = 0
+  for (const session of sessionStore.list()) {
+    if (dayKeyFromMs(session.createdAt) !== todayKey) continue
+    const usage = await getSessionUsage(session)
+    if (!usage.exists || usage.turns === 0) continue
+    total += usage.costUsd
+  }
+  return total
+}
+
 export interface AgentSpawnService {
   /** Remove the daemon-level agentRequest listener. */
   dispose(): void
@@ -221,6 +252,18 @@ export interface AgentSpawnDeps {
    *  filesystem. */
   readResponses?: (parentSessionId: string) => AgentResponse[]
   now?: () => number
+  /** Injectable per-session usage reader for BudgetPolicy.dailyUsdCap.
+   *  Defaults to the real `readSessionUsage(session, { cwd: null })`.
+   *
+   *  Why `cwd: null` always: this file's deps are already deliberately
+   *  interface-only (no repo/worktree resolver — see the module doc above),
+   *  the identical constraint sessionReaper.ts documents for its own
+   *  per-session cap. `pi`'s usage reader is keyed on the session's
+   *  worktree cwd, so a `pi` session's real cost is invisible to this daily
+   *  total in practice even though `pi` has `supportsUsage: true`
+   *  (AGENT_META) — a known, accepted gap, not a bug. Tests inject a fake so
+   *  the cap can be exercised without touching the real filesystem. */
+  getSessionUsage?: (session: SessionDTO) => Promise<SessionUsage & { supportsUsage: boolean }>
 }
 
 /** Real-fs default for `writeResponse`: append-only, mkdir -p'd first, and
@@ -304,6 +347,8 @@ export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService
   const now = deps.now ?? Date.now
   const rawWriteResponse = deps.writeResponse ?? defaultWriteResponse(deps.dataDir)
   const readResponses = deps.readResponses ?? defaultReadResponses(deps.dataDir)
+  const getSessionUsage =
+    deps.getSessionUsage ?? ((s: SessionDTO) => readSessionUsage(s, { cwd: null }))
 
   // Idempotency guard (see class doc): seed already-answered request ids from
   // every currently-known session BEFORE the emitter subscription below can
@@ -378,6 +423,25 @@ export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService
     if (refusal) {
       respond(parentSessionId, err(id, refusal))
       return
+    }
+
+    // Daily cost-budget guardrail (BudgetPolicy.dailyUsdCap) — same priority
+    // tier as the spawn-limit guardrail above, before repo/title validation,
+    // and answered through the same respond()/err() path (never a second
+    // refusal mechanism).
+    const budgetPolicy = readBudgetPolicy(config)
+    if (budgetPolicy.enabled && budgetPolicy.dailyUsdCap > 0) {
+      const spentToday = await computeDailySpendUsd(sessionStore, getSessionUsage, now())
+      if (spentToday >= budgetPolicy.dailyUsdCap) {
+        respond(
+          parentSessionId,
+          err(
+            id,
+            `Spawn refused: today's estimated API spend is ${formatCost(spentToday)} (across backends this app can measure), the daily cap is ${formatCost(budgetPolicy.dailyUsdCap)}. Wait for tomorrow's reset, or ask a human to raise the cap.`,
+          ),
+        )
+        return
+      }
     }
 
     const repoRef = req.repo?.trim()

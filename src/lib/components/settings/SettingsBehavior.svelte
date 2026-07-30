@@ -12,6 +12,8 @@
     setSchedulerPolicy,
     getSpawnPolicy,
     setSpawnPolicy,
+    getBudgetPolicy,
+    setBudgetPolicy,
   } from '../../ipc'
   import { pushToast } from '../../toast'
   import { mobile, settingsOpen, settingsRepoId } from '../../stores'
@@ -30,11 +32,13 @@
     SchedulerPolicy,
     SpawnPolicy,
     AgentArgsConfig,
+    BudgetPolicy,
   } from '../../../../electron/shared/contract.js'
   import {
     DEFAULT_GC_POLICY,
     DEFAULT_SCHEDULER_POLICY,
     DEFAULT_SPAWN_POLICY,
+    DEFAULT_BUDGET_POLICY,
   } from '../../../../electron/shared/contract.js'
 
   let editorCommand = ''
@@ -185,6 +189,36 @@
     }
   }
 
+  let budgetPolicy: BudgetPolicy = { ...DEFAULT_BUDGET_POLICY }
+  let budgetPending = false
+
+  async function loadBudgetPolicy() {
+    if (!hasBackend) return
+    try {
+      budgetPolicy = await getBudgetPolicy()
+    } catch {
+      /* ignore */
+    }
+  }
+  async function saveBudgetPolicy() {
+    if (!hasBackend) return
+    budgetPending = true
+    try {
+      const next: BudgetPolicy = {
+        ...budgetPolicy,
+        dailyUsdCap: Math.max(0, budgetPolicy.dailyUsdCap),
+        perSessionUsdCap: Math.max(0, budgetPolicy.perSessionUsdCap),
+      }
+      await setBudgetPolicy(next)
+      budgetPolicy = next
+      pushToast('success', 'Budget settings saved')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save settings')
+    } finally {
+      budgetPending = false
+    }
+  }
+
   // TASK-EQOP4: closes Settings so the replayed onboarding (pager or modal,
   // per onboardingMode()) isn't stacked underneath the still-open panel.
   function handleReplayOnboarding() {
@@ -207,6 +241,7 @@
     loadGcPolicy()
     loadSchedulerPolicy()
     loadSpawnPolicy()
+    loadBudgetPolicy()
     initFabPrefs()
   })
 </script>
@@ -429,6 +464,61 @@
     style="margin-top:8px"
     on:click={saveSpawnPolicy}
     disabled={spawnPending || !hasBackend}>Save</button
+  >
+  {#if !hasBackend}
+    <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+  {/if}
+</SettingsSection>
+
+<SettingsSection title="Budget">
+  <p class="integration-hint">
+    Cap estimated API spend so a runaway or forgotten agent fleet can't burn cost with no backstop
+    but a human noticing. Costs here are an <b>estimate</b> derived from token counts and list pricing,
+    not an exact invoice — treat these caps as a safety net, not a precise ledger.
+  </p>
+  <p class="integration-hint">
+    Grok, Kilo Code, and Antigravity sessions have no usage reader at all, so their real spend is
+    always reported as unmeasured — it is <b>not</b> counted toward these caps and does not read as "$0
+    confirmed free". A fleet running only those backends will not trip these limits no matter how much
+    it actually costs.
+  </p>
+  <label class="notify-check">
+    <input
+      type="checkbox"
+      bind:checked={budgetPolicy.enabled}
+      disabled={budgetPending || !hasBackend}
+    />
+    Enable budget caps
+  </label>
+  <div class="repo-settings-field" style="margin-top:8px">
+    <label class="lbl-f" for="budget-daily">Daily spend cap, USD (0 = unlimited)</label>
+    <input
+      id="budget-daily"
+      type="number"
+      min="0"
+      step="0.01"
+      class="path-input"
+      bind:value={budgetPolicy.dailyUsdCap}
+      disabled={budgetPending || !hasBackend || !budgetPolicy.enabled}
+    />
+  </div>
+  <div class="repo-settings-field">
+    <label class="lbl-f" for="budget-session">Per-session spend cap, USD (0 = unlimited)</label>
+    <input
+      id="budget-session"
+      type="number"
+      min="0"
+      step="0.01"
+      class="path-input"
+      bind:value={budgetPolicy.perSessionUsdCap}
+      disabled={budgetPending || !hasBackend || !budgetPolicy.enabled}
+    />
+  </div>
+  <button
+    class="btn btn-outline btn-sm"
+    style="margin-top:8px"
+    on:click={saveBudgetPolicy}
+    disabled={budgetPending || !hasBackend}>Save</button
   >
   {#if !hasBackend}
     <p class="integration-hint muted">Backend not available in browser-only mode.</p>

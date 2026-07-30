@@ -36,4 +36,5 @@
     <string name="reply_sent_confirmation">Reply sent</string>
     <string name="reply_failed_no_connection">Reply failed — couldn’t reach the server</string>
     <string name="reply_failed_not_signed_in">Reply failed — sign in to the app first</string>
+    <string name="reply_failed_storage_unavailable">Reply failed — secure storage unavailable on this device</string>
 </resources>

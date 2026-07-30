@@ -21,6 +21,11 @@ ext {
     // to gate the SPA's stored daemon bearer token behind a fingerprint check,
     // so androidx.biometric must be on the app module's compile classpath.
     androidxBiometricVersion = '1.1.0'
+    // FLO-151 follow-up: ReplyPrefs stores the ReplyReceiver's daemon bearer
+    // token copy in EncryptedSharedPreferences (AndroidKeyStore-backed
+    // MasterKey) instead of plaintext, so androidx.security:security-crypto
+    // must be on the app module's compile classpath.
+    androidxSecurityCryptoVersion = '1.1.0'
     junitVersion = '4.13.2'
     androidxJunitVersion = '1.2.1'
     androidxEspressoCoreVersion = '3.6.1'

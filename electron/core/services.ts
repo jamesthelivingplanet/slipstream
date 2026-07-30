@@ -14,6 +14,8 @@ import {
 } from '../services/configStore.js'
 import { createLinearProvider } from '../tickets/linearProvider.js'
 import { createJiraProvider } from '../tickets/jiraProvider.js'
+import { createGithubIssuesProvider } from '../tickets/githubIssuesProvider.js'
+import { createGitlabIssuesProvider } from '../tickets/gitlabIssuesProvider.js'
 import { createCompositeProvider } from '../tickets/compositeProvider.js'
 import { createSessionStore, restoreInterruptedSessions } from '../services/sessionStore.js'
 import { createPromptTemplateStore } from '../services/promptTemplates.js'
@@ -82,7 +84,9 @@ export function createServices(root: string): IpcDeps {
   const sessions = createSessionManager(runLogger, root)
   const linear = createLinearProvider(configStore)
   const jira = createJiraProvider(configStore)
-  const tickets = createCompositeProvider([linear, jira])
+  const github = createGithubIssuesProvider(configStore)
+  const gitlab = createGitlabIssuesProvider(configStore)
+  const tickets = createCompositeProvider([linear, jira, github, gitlab])
   // FLO-98/FLO-69/FLO-97/FLO-104: wires the ticket write-back and session
   // persistence `pr`-event listeners in the one order that keeps the
   // write-back's restart-dedupe correct — see wirePrEventListeners.ts.
@@ -109,7 +113,7 @@ export function createServices(root: string): IpcDeps {
     sessions,
     ports: createPortBroker(),
     tickets,
-    ticketProviders: { linear, jira },
+    ticketProviders: { linear, jira, github, gitlab },
     config: configStore,
     sessionStore,
     promptTemplates: createPromptTemplateStore(db),

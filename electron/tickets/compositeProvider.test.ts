@@ -157,5 +157,23 @@ describe('createCompositeProvider', () => {
       await composite.startTicket('PROJ-1')
       expect(jira.startTicket).toHaveBeenCalledWith('PROJ-1')
     })
+
+    it('routes getTicketStatus to github/gitlab in a full 4-provider composite', async () => {
+      const linear = makeProvider('linear')
+      const jira = makeProvider('jira')
+      const github = makeProvider('github')
+      const gitlab = makeProvider('gitlab')
+      const composite = createCompositeProvider([linear, jira, github, gitlab])
+
+      await composite.getTicketStatus('acme/api#5', 'github')
+      expect(github.getTicketStatus).toHaveBeenCalledWith('acme/api#5')
+      expect(linear.getTicketStatus).not.toHaveBeenCalled()
+      expect(jira.getTicketStatus).not.toHaveBeenCalled()
+      expect(gitlab.getTicketStatus).not.toHaveBeenCalled()
+
+      await composite.getTicketStatus('group/api#3', 'gitlab')
+      expect(gitlab.getTicketStatus).toHaveBeenCalledWith('group/api#3')
+      expect(github.getTicketStatus).toHaveBeenCalledTimes(1)
+    })
   })
 })

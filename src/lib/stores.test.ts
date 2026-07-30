@@ -100,6 +100,7 @@ import {
   bootingId,
   dtoToSession,
   SESSION_DTO_FIELD_KEYS,
+  SRC_LABELS,
   reviewComments,
   addReviewComment,
   removeReviewComment,
@@ -725,6 +726,30 @@ describe('cleanupAgent auto-reconcile', () => {
     expect(killSession).toHaveBeenCalledWith('u1')
   })
 
+  it('manual path: confirm mentions the GitHub label for a github-sourced session', async () => {
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: true })
+    const session = makeSession({ tid: 'acme/api#5', src: 'github' })
+
+    const pending = cleanupAgent(session, { auto: false })
+
+    const req = await resolveConfirm(true)
+    expect(req?.message).toContain('GitHub ticket')
+
+    await pending
+  })
+
+  it('manual path: confirm mentions the GitLab label for a gitlab-sourced session', async () => {
+    vi.mocked(cleanupSession).mockResolvedValue({ removed: true })
+    const session = makeSession({ tid: 'group/api#3', src: 'gitlab' })
+
+    const pending = cleanupAgent(session, { auto: false })
+
+    const req = await resolveConfirm(true)
+    expect(req?.message).toContain('GitLab ticket')
+
+    await pending
+  })
+
   it('manual path: confirm omits the ticket note for a blank (TASK-) session', async () => {
     vi.mocked(cleanupSession).mockResolvedValue({ removed: true })
     const session = makeSession({ tid: 'TASK-AB123' })
@@ -897,6 +922,36 @@ describe('dtoToSession (FLO-83 src round-trip)', () => {
     expect(dtoToSession(dto).src).toBe('linear')
   })
 
+  it('maps a github-sourced session DTO to a Session with src intact', () => {
+    const dto: SessionDTO = {
+      id: 's1b',
+      tid: 'acme/api#5',
+      title: 't',
+      prompt: 'p',
+      repoId: 'r',
+      branch: 'b',
+      status: 'idle',
+      createdAt: 0,
+      src: 'github',
+    }
+    expect(dtoToSession(dto).src).toBe('github')
+  })
+
+  it('maps a gitlab-sourced session DTO to a Session with src intact', () => {
+    const dto: SessionDTO = {
+      id: 's1c',
+      tid: 'group/api#3',
+      title: 't',
+      prompt: 'p',
+      repoId: 'r',
+      branch: 'b',
+      status: 'idle',
+      createdAt: 0,
+      src: 'gitlab',
+    }
+    expect(dtoToSession(dto).src).toBe('gitlab')
+  })
+
   it('defaults a legacy session DTO with no persisted src to jira', () => {
     const dto: SessionDTO = {
       id: 's2',
@@ -1004,6 +1059,17 @@ describe('dtoToSession (FLO-83 src round-trip)', () => {
       src: 'jira',
     }
     expect(dtoToSession(dto).mode).toBeUndefined()
+  })
+})
+
+describe('SRC_LABELS', () => {
+  it('has a display label for every TicketSource, including github/gitlab', () => {
+    expect(SRC_LABELS).toEqual({
+      jira: 'Jira',
+      linear: 'Linear',
+      github: 'GitHub',
+      gitlab: 'GitLab',
+    })
   })
 })
 

@@ -36,14 +36,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * AndroidX BiometricPrompt directly rather than a separate Capacitor plugin.
  * Deliberate residual gap: the ReplyPrefs token stash (FLO-151, used by the
  * background ReplyReceiver for inline replies when the app process is dead)
- * is NOT behind this gate. That copy lives in this app's own private-mode
- * SharedPreferences, which the threat actor this gate defends against
- * (someone holding the unlocked phone, poking at the UI) cannot read —
- * reading it requires the same OS-level same-uid access the documented
- * at-rest threat model already excludes (docs/SECURITY.md §6). Gating it too
- * would require a live fingerprint check inside a headless BroadcastReceiver
- * with no UI to prompt against, which would just break background inline
- * reply outright.
+ * is NOT behind this gate. That copy now lives in Keystore-backed
+ * EncryptedSharedPreferences (see ReplyPrefs), not plaintext, but it is
+ * still not gated behind a fingerprint check the way the SPA's copy is:
+ * ReplyReceiver runs unattended from a BroadcastReceiver with no UI to
+ * prompt against, so a presence/biometric-bound key would break background
+ * inline reply outright. Reading it back out still requires the same
+ * OS-level same-uid access the documented at-rest threat model already
+ * excludes (docs/SECURITY.md §6).
  *
  * FLO-162: consumePendingWidgetAction() is the other half of the same
  * token-free design as syncWidget() — it's how a Stop/Restart tap on a
@@ -141,7 +141,10 @@ public class AppControlPlugin extends Plugin {
     /** FLO-151: stash the daemon URL + bearer token the background
      *  ReplyReceiver needs to POST an inline reply when the app isn't
      *  running. Driven from src/lib/nativeStorage.ts whenever either value
-     *  changes. See ReplyPrefs for the security trade-off. */
+     *  changes. See ReplyPrefs for the security posture. Rejects (rather
+     *  than silently no-op'ing) if the Keystore-backed encrypted store can't
+     *  be opened on this device, since that means inline reply won't work
+     *  until the caller retries. */
     @PluginMethod
     public void saveReplyCredentials(PluginCall call) {
         String url = call.getString("url");
@@ -150,7 +153,12 @@ public class AppControlPlugin extends Plugin {
             call.reject("url and token are required");
             return;
         }
-        ReplyPrefs.open(getContext())
+        SharedPreferences prefs = ReplyPrefs.open(getContext());
+        if (prefs == null) {
+            call.reject("Secure storage unavailable on this device; inline reply will not work");
+            return;
+        }
+        prefs
             .edit()
             .putString(ReplyPrefs.DAEMON_URL_KEY, url)
             .putString(ReplyPrefs.TOKEN_KEY, token)
@@ -161,7 +169,7 @@ public class AppControlPlugin extends Plugin {
     /** FLO-151: drop the stashed credentials (logout / token rotation). */
     @PluginMethod
     public void clearReplyCredentials(PluginCall call) {
-        ReplyPrefs.open(getContext()).edit().clear().apply();
+        ReplyPrefs.clearAll(getContext());
         call.resolve();
     }
 

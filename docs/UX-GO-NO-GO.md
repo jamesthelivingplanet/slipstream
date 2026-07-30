@@ -31,16 +31,15 @@ the cut and deferred).
 | Chat interface: kilo | Declares `supportsChat: true`; routed through the `usesEmbeddedServer` branch of `readSessionChat` | **Behind-a-flag, verify-or-demote.** That branch's durable fallback is `opencodeDbPath()`, hardcoded to `~/.local/share/opencode/opencode.db`. Kilo chat after the process exits is therefore unverified and likely reads as "nothing recovered". Either verify it end-to-end or flip `supportsChat` to `false` for kilo before the cut — do not ship the claim untested. |
 | Chat interface: antigravity | `supportsChat: false`; `getChatMessages` returns `available:false` unconditionally; honest empty state steers to the terminal (0.6.0) | **Post-prod.** Terminal is the supported surface for this backend, stated not implied. |
 | Night Ops: Android shell | FLO-150 (push action buttons), FLO-151 (inline reply), FLO-154 (input buffering across reconnects), FLO-155 (voice-to-text), FLO-160 (ongoing notification) | **Must-land — landed**, with the one exception on the next row. |
-| Night Ops: Android reply-token at rest | `mobile/android/app/src/main/java/app/slipstream/mobile/ReplyPrefs.java` keeps the daemon bearer token in plaintext `MODE_PRIVATE` prefs; the source comment calls Keystore-backing a follow-up | **Must-land *if* the cut claims the Android shell.** Otherwise post-prod with the shell explicitly out of the cut. See B6 — this is the live instance of that gate. |
+| Night Ops: Android reply-token at rest | `mobile/android/app/src/main/java/app/slipstream/mobile/ReplyPrefs.java` stores the daemon bearer token in `EncryptedSharedPreferences`, keyed by an AndroidKeyStore-backed `MasterKey` (not user-presence/biometric-bound, since `ReplyReceiver` runs unattended); an existing install's plaintext copy is migrated in and deleted on first access | **Must-land — landed.** Keystore-backed per B6; the residual same-uid-reader exposure is the same one the documented at-rest threat model already excludes (docs/SECURITY.md §6). |
 | Night Ops: iOS | Notification `actions` unsupported (degrades to a single-tap deep link); no inline reply; ongoing notification deliberately excluded — no iOS tokens | **Post-prod, explicitly out.** iOS gets the deep-link path only. No Night Ops parity is promised there, and this row is the statement required by B4. |
 | Night Ops: installed PWA / desktop browser | Web Push with action buttons where the browser supports them; no inline reply, no ongoing notification (both are native-shell mechanisms) | **Ship as-is.** Stated, not implied — see B4. |
 | Mission Control / responsive two-pane shell | `MissionControl.svelte`, `ResponsivePanel.svelte`, `MobileTermInput.svelte`; phone-width grid fixed in FLO-153 | **Must-land — landed.** One SPA serves desktop, PWA and the Capacitor WebView, so this surface has no per-platform fork to keep in parity. |
 | Mobile app-store distribution | [docs/plans/TASK-I9S44-mobile-apps.md](plans/TASK-I9S44-mobile-apps.md) phases 3–5 (store compliance, signing, beta→production) | **Post-prod.** A separate cut with its own gates; the daemon's self-served APK over Tailscale is what this cut covers. |
 
-**Three post-prod rows do not yet name a ticket** — antigravity chat, iOS Night Ops parity,
-and the Android reply-token row if the cut ends up excluding the Android shell. Under B5
-that makes them intentions rather than deferrals, so cutting those tickets is itself a
-prerequisite to a go, not a nice-to-have. The kilo row is not a deferral at all: it is a
+**Two post-prod rows do not yet name a ticket** — antigravity chat and iOS Night Ops parity.
+Under B5 that makes them intentions rather than deferrals, so cutting those tickets is itself
+a prerequisite to a go, not a nice-to-have. The kilo row is not a deferral at all: it is a
 verify-or-demote before the cut.
 
 ## 2. The bar: what "stable enough to support" means
@@ -89,10 +88,12 @@ deferral.
 
 **B6 — No open interaction-surface item rated MED or higher without a documented
 mitigation.** This mirrors docs/PRODUCTION-READINESS.md §3's security gate, applied to the
-UX surfaces. The live instance is the Android reply-token copy in `ReplyPrefs.java`: it sits
-inside the documented at-rest threat model, but if the cut claims the Android shell, it
-needs either Keystore-backing or a written, accepted-risk entry in docs/SECURITY.md — not a
-source comment calling it a follow-up.
+UX surfaces. The live instance was the Android reply-token copy in `ReplyPrefs.java`: it sat
+inside the documented at-rest threat model, but a source comment calling it a follow-up was
+not an acceptable mitigation on its own — it needed either Keystore-backing or a written,
+accepted-risk entry in docs/SECURITY.md. It is now Keystore-backed (EncryptedSharedPreferences
+with an AndroidKeyStore `MasterKey`), satisfying this gate; see the Night Ops: Android
+reply-token at rest row in §1.
 
 ## 3. Freeze point relative to the other FLO-142 blockers
 
