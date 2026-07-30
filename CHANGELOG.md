@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-30
+
 ### Added
 
 - Agents can now delegate work by spawning independent sibling agents, and the app gains a
