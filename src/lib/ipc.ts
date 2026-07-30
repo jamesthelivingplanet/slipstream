@@ -14,6 +14,7 @@ import type {
 } from '../../electron/shared/contract.js'
 import type { SlipstreamApi } from '../../electron/shared/contract.js'
 import {
+  DEFAULT_BUDGET_POLICY,
   DEFAULT_GC_POLICY,
   DEFAULT_SCHEDULER_POLICY,
   DEFAULT_SPAWN_POLICY,
@@ -244,6 +245,14 @@ export const getSpawnPolicy = call('getSpawnPolicy', () =>
 )
 
 export const setSpawnPolicy = call('setSpawnPolicy', NO_BACKEND)
+
+// ── Session cost-budget guardrail policy ────────────────────────────────────
+
+export const getBudgetPolicy = call('getBudgetPolicy', () =>
+  Promise.resolve({ ...DEFAULT_BUDGET_POLICY }),
+)
+
+export const setBudgetPolicy = call('setBudgetPolicy', NO_BACKEND)
 
 // ── MCP status ───────────────────────────────────────────────────────────
 

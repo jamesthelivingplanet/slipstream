@@ -13,7 +13,7 @@
 
 export type SessionStatus =
   'idle' | 'running' | 'needs' | 'done' | 'errored' | 'interrupted' | 'reaped' | 'queued'
-export type TicketSource = 'jira' | 'linear'
+export type TicketSource = 'jira' | 'linear' | 'github' | 'gitlab'
 export type BackendKind = 'claude-code' | 'opencode' | 'pi' | 'antigravity' | 'grok' | 'kilo'
 /** Runtime-enumerable list mirroring BackendKind — reused for validation
  *  (e.g. rpc.ts's handoffSession) instead of a hardcoded string check. */
@@ -75,6 +75,22 @@ export const DEFAULT_SPAWN_POLICY: SpawnPolicy = {
   maxDepth: 2,
   maxChildrenPerSession: 5,
   maxSpawnsPerHour: 20,
+}
+/** Session cost-budget guardrail policy: caps against SessionUsage's
+ *  ESTIMATED costUsd (see SessionUsage) — a budget built on an estimate must
+ *  not claim more precision than its input. 0 means unlimited for each cap,
+ *  matching SpawnPolicy/SchedulerPolicy's convention. Defaults to disabled
+ *  with 0 caps, so this is opt-in and changes nothing for existing
+ *  deployments. Plumbing only here — enforcement lives elsewhere. */
+export interface BudgetPolicy {
+  dailyUsdCap: number // 0 = unlimited
+  perSessionUsdCap: number // 0 = unlimited
+  enabled: boolean // master switch
+}
+export const DEFAULT_BUDGET_POLICY: BudgetPolicy = {
+  dailyUsdCap: 0,
+  perSessionUsdCap: 0,
+  enabled: false,
 }
 /** Result of an out-of-band self-test of the agent-facing `slipstream` CLI
  *  (electron/cli/slipstream.ts). Never run inside an agent session — see
@@ -1096,6 +1112,9 @@ export interface SlipstreamApi {
   getSpawnPolicy(): Promise<SpawnPolicy>
   setSpawnPolicy(policy: SpawnPolicy): Promise<void>
 
+  getBudgetPolicy(): Promise<BudgetPolicy>
+  setBudgetPolicy(policy: BudgetPolicy): Promise<void>
+
   /** Out-of-band self-test of the agent-facing `slipstream` CLI: spawns it
    *  directly (`slipstream help`) outside of any agent session, so it never
    *  adds anything to an agent's context. */
@@ -1262,6 +1281,8 @@ export const IPC = {
   setSchedulerPolicy: 'scheduler:setPolicy',
   getSpawnPolicy: 'spawn:getPolicy',
   setSpawnPolicy: 'spawn:setPolicy',
+  getBudgetPolicy: 'budget:getPolicy',
+  setBudgetPolicy: 'budget:setPolicy',
   getCliStatus: 'cli:status',
   getDiagnostics: 'diag:get',
   checkAgentCli: 'agent:checkCli',

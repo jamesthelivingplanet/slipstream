@@ -2,13 +2,14 @@ import type { IpcDeps } from '../../ipc.js'
 import { IPC, BACKEND_KINDS } from '../../shared/contract.js'
 import type {
   AgentArgsConfig,
+  BudgetPolicy,
   EditorConfig,
   GcPolicy,
   GitHost,
   SchedulerPolicy,
   SpawnPolicy,
 } from '../../shared/contract.js'
-import { DEFAULT_SPAWN_POLICY } from '../../shared/contract.js'
+import { DEFAULT_BUDGET_POLICY, DEFAULT_SPAWN_POLICY } from '../../shared/contract.js'
 import { GIT_PROVIDERS } from '../../services/gitProviders/registry.js'
 import { parseAgentArgs } from '../../shared/agentCli.js'
 import { readGcPolicy, writeGcPolicy } from '../../services/sessionReaper.js'
@@ -59,6 +60,42 @@ function writeSpawnPolicy(
   policy: SpawnPolicy,
 ): void {
   config.set(SPAWN_POLICY_KEY, JSON.stringify(coerceSpawnPolicy(policy)))
+}
+
+// Session cost-budget guardrail policy (seam only — no enforcement here).
+// Persisted under a single JSON config key, same pattern as the policies
+// above. Caps are USD amounts (not counts), so they are clamped at 0 without
+// being floored to an integer like SpawnPolicy's fields.
+const BUDGET_POLICY_KEY = 'budget.policy'
+
+function coerceBudgetPolicy(partial: unknown): BudgetPolicy {
+  const p = (partial ?? {}) as Partial<BudgetPolicy>
+  const cap = (raw: unknown, def: number): number => {
+    const n = typeof raw === 'number' && Number.isFinite(raw) ? raw : def
+    return Math.max(0, n)
+  }
+  return {
+    dailyUsdCap: cap(p.dailyUsdCap, DEFAULT_BUDGET_POLICY.dailyUsdCap),
+    perSessionUsdCap: cap(p.perSessionUsdCap, DEFAULT_BUDGET_POLICY.perSessionUsdCap),
+    enabled: typeof p.enabled === 'boolean' ? p.enabled : DEFAULT_BUDGET_POLICY.enabled,
+  }
+}
+
+function readBudgetPolicy(config: { get(key: string): string | undefined }): BudgetPolicy {
+  const raw = config.get(BUDGET_POLICY_KEY)
+  if (!raw) return { ...DEFAULT_BUDGET_POLICY }
+  try {
+    return coerceBudgetPolicy(JSON.parse(raw))
+  } catch {
+    return { ...DEFAULT_BUDGET_POLICY }
+  }
+}
+
+function writeBudgetPolicy(
+  config: { set(key: string, value: string): void },
+  policy: BudgetPolicy,
+): void {
+  config.set(BUDGET_POLICY_KEY, JSON.stringify(coerceBudgetPolicy(policy)))
 }
 
 export function createConfigHandlers(deps: IpcDeps, _ctx: RpcContext): ChannelHandlerMap {
@@ -162,6 +199,15 @@ export function createConfigHandlers(deps: IpcDeps, _ctx: RpcContext): ChannelHa
 
     [IPC.setSpawnPolicy]: async (args) => {
       writeSpawnPolicy(deps.config, args[0] as SpawnPolicy)
+      return undefined
+    },
+
+    [IPC.getBudgetPolicy]: async () => {
+      return readBudgetPolicy(deps.config)
+    },
+
+    [IPC.setBudgetPolicy]: async (args) => {
+      writeBudgetPolicy(deps.config, args[0] as BudgetPolicy)
       return undefined
     },
   }

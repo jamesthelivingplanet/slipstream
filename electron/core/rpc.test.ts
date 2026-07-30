@@ -3039,5 +3039,38 @@ describe('createRpc', () => {
         JSON.stringify({ maxDepth: 0, maxChildrenPerSession: 5, maxSpawnsPerHour: 0 }),
       )
     })
+
+    it('setBudgetPolicy persists the normalized policy via config.set', async () => {
+      await rpc.handle(IPC.setBudgetPolicy, [
+        { dailyUsdCap: 10, perSessionUsdCap: 2.5, enabled: true },
+      ])
+      expect(deps.config.set).toHaveBeenCalledWith(
+        'budget.policy',
+        JSON.stringify({ dailyUsdCap: 10, perSessionUsdCap: 2.5, enabled: true }),
+      )
+    })
+
+    it('getBudgetPolicy reads the policy back through config.get', async () => {
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+        JSON.stringify({ dailyUsdCap: 10, perSessionUsdCap: 2.5, enabled: true }),
+      )
+      const result = await rpc.handle(IPC.getBudgetPolicy, [])
+      expect(result).toEqual({ dailyUsdCap: 10, perSessionUsdCap: 2.5, enabled: true })
+    })
+
+    it('getBudgetPolicy returns the default when unset', async () => {
+      const result = await rpc.handle(IPC.getBudgetPolicy, [])
+      expect(result).toEqual({ dailyUsdCap: 0, perSessionUsdCap: 0, enabled: false })
+    })
+
+    it('setBudgetPolicy normalizes negative/non-finite caps to the default, clamped at 0, and coerces enabled', async () => {
+      await rpc.handle(IPC.setBudgetPolicy, [
+        { dailyUsdCap: -5, perSessionUsdCap: Number.NaN, enabled: 'yes' },
+      ])
+      expect(deps.config.set).toHaveBeenCalledWith(
+        'budget.policy',
+        JSON.stringify({ dailyUsdCap: 0, perSessionUsdCap: 0, enabled: false }),
+      )
+    })
   })
 })
