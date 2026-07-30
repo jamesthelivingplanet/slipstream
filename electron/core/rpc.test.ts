@@ -2009,6 +2009,36 @@ describe('createRpc', () => {
     expect(result.id).toBe('s1')
   })
 
+  describe('blank chat sessions (TASK-CIOEQ)', () => {
+    it('mode: "chat" uses the chat system prompt', async () => {
+      await rpc.handle(IPC.startSession, [
+        { tid: 'CHAT-1', title: 'Chat', prompt: '', repoId: 'r1', mode: 'chat' },
+      ])
+      expect(deps.sessions.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemPrompt: expect.stringContaining('conversational assistant'),
+        }),
+      )
+    })
+
+    it('mode: "chat" skips the ticket-provider startTicket side effect', async () => {
+      await rpc.handle(IPC.startSession, [
+        { tid: 'CHAT-1', title: 'Chat', prompt: '', repoId: 'r1', mode: 'chat' },
+      ])
+      expect(deps.tickets.startTicket).not.toHaveBeenCalled()
+    })
+
+    it('omitting mode preserves the existing ticket-agent behavior unchanged', async () => {
+      await rpc.handle(IPC.startSession, [
+        { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
+      ])
+      expect(deps.tickets.startTicket).toHaveBeenCalledWith('T-1', undefined)
+      expect(deps.sessions.start).toHaveBeenCalledWith(
+        expect.objectContaining({ systemPrompt: expect.stringContaining('autonomous agent') }),
+      )
+    })
+  })
+
   it('startSession calls repos.resolvePath (not get) before creating the worktree', async () => {
     await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },

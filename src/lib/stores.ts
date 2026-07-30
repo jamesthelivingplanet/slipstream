@@ -104,6 +104,11 @@ export function dtoToSession(dto: SessionDTO): Session {
     port: dto.port,
     agentKind: dto.agentKind,
     prUrl: dto.prUrl,
+    // TASK-CIOEQ: the session that spawned this one via `slipstream new-agent`.
+    // dtoToSession silently drops any field left unmapped here, and the gap
+    // only shows up after a reload/reconnect — see dtoToSession's own doc
+    // comment above.
+    parentId: dto.parentId,
     activity: {
       text:
         uiStatus === 'interrupted'
@@ -204,6 +209,10 @@ export const selectedId = writable<string | null>(null)
 export const filter = writable<Filter>('all')
 export const query = writable<string>('')
 export const dialogOpen = writable<boolean>(false)
+// TASK-CIOEQ: the "New chat" panel — deliberately separate from `dialogOpen`
+// (the New Agent dialog) so the two entry points never fight over the same
+// open/close state.
+export const chatDialogOpen = writable<boolean>(false)
 export const settingsOpen = writable<boolean>(false)
 export const settingsRepoId = writable<string | null>(null)
 // FLO-97: the Run history view, toggled from the header.
@@ -607,6 +616,11 @@ export async function startAgent(
   prompt: string,
   agentKind?: BackendKind,
   extraArgs?: string,
+  // TASK-CIOEQ: 'chat' tells the daemon to launch a blank, conversational
+  // session (no ticket framing, no ticket-provider transition) instead of
+  // the default ticket-flavoured start. Threaded straight through to
+  // startSession's input below.
+  mode?: 'chat',
 ) {
   const s = get(sessions).find((x) => x.id === id)
   if (!s) return
@@ -641,6 +655,7 @@ export async function startAgent(
         sessionId: id,
         src: s.src,
         extraArgs,
+        mode,
       })
       patch(id, (s) => ({
         ...s,
@@ -682,6 +697,32 @@ export async function startAgent(
     }))
     persistDraftsNow()
   }
+}
+
+/** Readable "Chat" title stamped with a short local date/time, e.g.
+ *  "Chat Jul 29, 3:45 PM" — TASK-CIOEQ's one-click blank-chat entry point. */
+function chatSessionTitle(now: Date = new Date()): string {
+  const datePart = now.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const timePart = now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return `Chat ${datePart}, ${timePart}`
+}
+
+/**
+ * TASK-CIOEQ: one-click "New chat" — mint a blank, chat-flavoured draft (tid
+ * `CHAT-XXXXX`, a readable timestamped title, no ticket, no kickoff prompt)
+ * and start it immediately against the chosen repo. Reuses createBlankAgent
+ * (draft row + select) and startAgent (optimistic row + bootingId + error
+ * handling) rather than duplicating their logic — the only new bit is
+ * threading `mode: 'chat'` through so the backend launches a blank
+ * conversational session instead of a ticket-framed one. The backend already
+ * treats an empty prompt as "no positional arg, open interactively", so no
+ * placeholder prompt is invented here.
+ */
+export async function startChatAgent(repoId: string): Promise<void> {
+  const tid = `CHAT-${Math.random().toString(36).slice(2, 7).toUpperCase()}`
+  const title = chatSessionTitle()
+  const id = createBlankAgent(title, '', tid)
+  await startAgent(id, repoId, '', undefined, undefined, 'chat')
 }
 
 /** FLO-95 batch flow: launch agents for every ticket whose repo hint matches a

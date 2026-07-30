@@ -61,6 +61,16 @@ export interface LaunchRequest {
   ownerId: string
   /** Extra CLI args passthrough (TASK-UQF55). */
   extraArgs?: string
+  /** The session that spawned this one via the agent-spawn request channel
+   *  (TASK-CIOEQ). Undefined for a session started directly by a human. */
+  parentId?: string
+  /** Skip the ticket-provider `startTicket` transition (TASK-CIOEQ): a
+   *  "blank chat" session's tid is synthetic (minted client-side, see
+   *  rpcHandlers/sessions.ts) — there is no real ticket to move to
+   *  "in progress", so calling startTicket would either no-op against an
+   *  unknown tid or, worse, collide with an unrelated real ticket that
+   *  happens to share the id. Undefined/false preserves today's behavior. */
+  skipTicket?: boolean
 }
 
 export interface LaunchDeps {
@@ -89,6 +99,8 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     src,
     ownerId,
     extraArgs,
+    parentId,
+    skipTicket,
   } = req
 
   const repo = await deps.repos.resolvePath(repoId)
@@ -127,6 +139,7 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     sessionId,
     src,
     extraArgs,
+    parentId,
   })
 
   deps.sessionStore.upsert({
@@ -134,6 +147,7 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     port,
     agentKind: agentKind ?? 'claude-code',
     ownerId,
+    parentId,
   })
 
   if (usesEmbeddedServer(agentKind)) {
@@ -150,11 +164,15 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
   // FLO-26: move the linked ticket to the provider's "In Progress" state
   // when the agent starts. Best-effort — a ticket-API failure must not
   // break the agent launch. Follow-up: handle stop/complete/error
-  // transitions (out of scope for FLO-26).
-  try {
-    await deps.tickets.startTicket(tid, src)
-  } catch {
-    // ignore: ticket provider unavailable or transition not applicable
+  // transitions (out of scope for FLO-26). Skipped entirely for a "blank
+  // chat" session (TASK-CIOEQ, skipTicket) — its tid is synthetic, not a
+  // real ticket to transition.
+  if (!skipTicket) {
+    try {
+      await deps.tickets.startTicket(tid, src)
+    } catch {
+      // ignore: ticket provider unavailable or transition not applicable
+    }
   }
 
   return { ...session, port }

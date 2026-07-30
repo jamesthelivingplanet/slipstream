@@ -137,6 +137,32 @@ output substrings (`promptComposer.test.ts`, `slipstream.test.ts`, `cliSkillDoc.
 plus `slipstreamCommands.test.ts`'s cross-surface agreement checks), so prose wording
 changes ripple there — but command/exit-code facts no longer do.
 
+### Agent-spawn request/response channel (TASK-CIOEQ)
+
+Alongside the one-way sentinels above, an agent session sometimes needs to ask the daemon
+to do something privileged it has no other channel for: resolve a repo it can target,
+launch a brand-new sibling agent through the same worktree/port/PTY path the UI's own
+`startSession` RPC uses, or list the agents it has already spawned. The `slipstream` CLI's
+`new-agent`/`repos`/`agents` commands answer this by appending a line to the session's own
+`requests.ndjson` (`electron/services/agentRequestSentinel.ts` — dependency-free like
+`agentEventsSentinel.ts`, so it's usable from both the CLI process and the daemon) and then
+polling `responses.ndjson` for a line matching the request's `id` (60s timeout for
+`new-agent`, 15s for `repos`/`agents`). `sentinelWatcher.ts` tails `requests.ndjson`
+alongside the existing sentinel files and emits `agentRequest`; `agentSpawnService.ts` is
+the sole consumer, resolving the requesting session's owner and answering by appending to
+that session's `responses.ndjson`.
+
+Idempotency here is load-bearing in a way the other sentinels aren't: after a daemon
+restart, `sentinelWatcher`'s ts-cursor resets to 0 and replays every line in every
+session's `requests.ndjson` (the same behavior `events.ndjson` relies on, deduped there by
+the DB's `INSERT OR IGNORE`) — but launching a new agent is NOT idempotent, so blindly
+reprocessing an already-answered request would double-spawn it. `agentSpawnService.ts`
+seeds a set of already-answered request ids by reading every currently-known session's
+`responses.ndjson` once, up front, before it subscribes to the `agentRequest` event, and
+skips any request whose id is already in that set. This is a per-request-`id` check, not a
+ts-cursor: a ts-cursor answers "is this newer than the last one I saw", which is exactly
+wrong after a restart replays the whole file from the top.
+
 ## Renderer
 
 - **Stores** (`lib/stores.ts`): `repos`, `sessions`, `tickets`, `selectedId`, plus

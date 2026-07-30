@@ -431,6 +431,11 @@ export function createSessionManager(
             reportedAt: outcome.ts,
           }),
         onAgentEvent: (event) => emit('agentEvent', id, { sessionId: id, ...event }),
+        // TASK-CIOEQ: id here is the REQUESTING (parent) session — the same
+        // one whose sentinel dir this watcher is installed on — not any
+        // session the request might go on to create. agentSpawnService.ts is
+        // the sole consumer.
+        onAgentRequest: (request) => emit('agentRequest', id, request),
         onStatus: (status, meta, activityMessage) => {
           rec.dto.status = status
           rec.activityMessage = activityMessage
@@ -483,6 +488,7 @@ export function createSessionManager(
       agentKind: input.agentKind,
       createdAt: Date.now(),
       src: input.src,
+      parentId: input.parentId,
     }
 
     return launch({
