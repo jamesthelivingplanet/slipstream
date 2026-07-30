@@ -22,6 +22,10 @@ export default tseslint.config(
       // Gradle-intermediate JS bundles like native-bridge.js) — not
       // hand-written code, not ours to lint.
       'mobile/android/**',
+      // Capacitor-generated native iOS project (Swift/Xcode project files
+      // plus bundled Cordova/public JS) — not hand-written code, not ours to
+      // lint.
+      'mobile/ios/**',
     ],
   },
   js.configs.recommended,

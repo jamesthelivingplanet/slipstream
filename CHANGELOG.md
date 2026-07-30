@@ -9,6 +9,23 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- Slipstream now has an iOS app (FLO-149), a Capacitor kiosk shell alongside the existing
+  Android app — same daemon-served SPA in a WebView, no on-device backend. Push
+  notifications work end to end via APNs-through-FCM (one Firebase project covers both
+  platforms), and biometric unlock (Face ID/Touch ID) mirrors the Android fingerprint gate.
+  The home-screen widget and inline notification reply are deliberately Android-only for
+  v1 — see [docs/MOBILE-IOS.md](docs/MOBILE-IOS.md) for the full rundown of what's
+  supported and what isn't.
+- `electron/services/fcm.ts` sends an `apns` block (sound + `apns-priority: 10`) alongside
+  the existing `android` block on notification-bearing pushes, so the iOS app now actually
+  receives them.
+- Fastlane (`mobile/fastlane/`) and a Codemagic pipeline (`codemagic.yaml`) automate iOS
+  builds and TestFlight uploads on every version tag — see
+  [docs/MOBILE-IOS.md](docs/MOBILE-IOS.md) for the release flow and the manual App Store
+  Connect steps that can't be automated.
+
 ## [0.10.0] - 2026-07-30
 
 ### Added

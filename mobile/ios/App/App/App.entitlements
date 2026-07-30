@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- FLO-149: required for the FCM-bridged APNs registration in
+	     AppDelegate.swift. `development` is correct for local/simulator and
+	     ad-hoc/TestFlight-via-Xcode builds; Xcode's automatic signing (and
+	     Fastlane's `update_code_signing_settings`/match, for CI/App Store
+	     builds) rewrites this to `production` at archive time to match the
+	     provisioning profile's environment — do not hand-edit this value to
+	     "production" here, the build tooling owns that flip. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

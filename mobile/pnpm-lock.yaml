@@ -23,6 +23,9 @@ importers:
       '@capacitor/haptics':
         specifier: ^7.0.5
         version: 7.0.5(@capacitor/core@7.6.8)
+      '@capacitor/ios':
+        specifier: ^7.6.8
+        version: 7.6.8(@capacitor/core@7.6.8)
       '@capacitor/preferences':
         specifier: ^7.0.4
         version: 7.0.4(@capacitor/core@7.6.8)

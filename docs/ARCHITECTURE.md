@@ -387,6 +387,17 @@ transmits the daemon token on either channel. Rationale, threat model, and the r
 designs (widget-held credential; short-lived action grants) are in
 [docs/SECURITY.md](SECURITY.md) §12.
 
+### Mobile shell: Android + iOS (FLO-149)
+
+Both mobile platforms (`mobile/android`, `mobile/ios`) are the same Capacitor kiosk shell
+around the daemon-served SPA — no on-device backend on either. iOS ships without the
+home-screen widget above (and without inline notification reply) since both are
+Android-only mechanisms with no iOS equivalent wired up yet; the daemon reflects this by
+sending Android's data-only "needs reply" push (`sendNeedsReplyForAndroid()`,
+`electron/services/pushService.ts`) only to `platform === 'android'` tokens. Full
+build/ship runbook, push (APNs-through-FCM), ATS, and App Store review notes:
+[docs/MOBILE-IOS.md](MOBILE-IOS.md).
+
 ## Key decisions
 
 - **Electron + Svelte** over Tauri — `node-pty` is the proven path for many concurrent
