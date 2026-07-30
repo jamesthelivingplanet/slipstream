@@ -25,6 +25,37 @@ specifically (schema versioning, build stamping, release flow).
   builds and TestFlight uploads on every version tag — see
   [docs/MOBILE-IOS.md](docs/MOBILE-IOS.md) for the release flow and the manual App Store
   Connect steps that can't be automated.
+- Agent-initiated spawning is now bounded by a configurable `SpawnPolicy` (`maxDepth` /
+  `maxChildrenPerSession` / `maxSpawnsPerHour`, 0 = unlimited), enforced in
+  `electron/services/agentSpawnService.ts`'s `checkSpawnPolicy` before an agent-requested
+  spawn is allowed to launch, and editable under Settings → Behavior. Previously a spawned
+  agent's system prompt encouraged delegation and nothing capped the resulting recursion, so
+  a single runaway agent could fan out an unbounded number of PTYs and API cost;
+  `maxSpawnsPerHour` is scoped per requesting session (counted from that session's own
+  children's `createdAt`, reusing the persisted DB row rather than an in-memory counter, so
+  the window survives a daemon restart).
+
+### Fixed
+
+- A "blank chat" session's `mode` is now persisted directly on the `sessions` row by
+  `db.ts`'s `upsertSession` (the column was added by migration 10 in
+  `electron/db/migrations.ts`), so it survives a daemon restart; handing a chat session off
+  to a different agent now composes a chat-flavored takeover prompt
+  (`buildChatHandoffPrompt`, `electron/shared/promptComposer.ts`) instead of the ticket one,
+  which previously carried a ticket tid, base branch, and open-a-merge-request framing that
+  the chat system prompt deliberately strips out.
+- Kilo chat now reads kilo's own `kilo.db` instead of opencode's `opencodeDb`. Kilo is an
+  opencode fork with a schema-identical store, so the message reader
+  (`electron/services/sessionChatReader.ts`) is shared rather than forked between the two
+  backends; previously a kilo session's id was looked up in the wrong database and the chat
+  panel always reported "no chat available". Note that the JSON shape of kilo's `data`
+  column has only been verified against the schema so far, not yet against a recorded kilo
+  session.
+- Backend capability claims (chat / usage / skills support) are now a single matrix,
+  `AGENT_META_BY_KIND` in `electron/shared/agents.ts`, that `usage.ts`, `agentSkills.ts`, and
+  `sessionChatReader.ts` all read from, replacing three separately-maintained restatements of
+  the same per-backend truth that had drifted out of sync with each other. Several stale
+  capability claims in `contract.ts`'s own doc comments were corrected at the same time.
 
 ## [0.10.0] - 2026-07-30
 

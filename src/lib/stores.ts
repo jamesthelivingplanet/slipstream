@@ -73,6 +73,38 @@ function dtoToTickets(
   }))
 }
 
+/**
+ * Every field on SessionDTO, mapped to `true`. This has no behavior of its
+ * own — its only job is to force a compile error the moment SessionDTO
+ * (electron/shared/contract.ts) gains a field, since TS requires every key of
+ * SessionDTO to be present here. That is the guard: dtoToSession below is a
+ * hand-maintained mapper, and a field left out of it silently vanishes with
+ * no error, surfacing only after a reload/reconnect (this is exactly how
+ * `mode` was originally missed — TASK-CIOEQ). When this object fails to
+ * compile, decide whether the new field belongs on Session too (map it below)
+ * or is legitimately server-only (list it here with a comment explaining why,
+ * same as systemPrompt/opencodeSid/createdAt/ownerId already are).
+ */
+export const SESSION_DTO_FIELD_KEYS: Record<keyof SessionDTO, true> = {
+  id: true,
+  tid: true,
+  title: true,
+  prompt: true,
+  repoId: true,
+  branch: true,
+  status: true,
+  port: true,
+  systemPrompt: true, // server-only: the launch-time prompt text, never shown in the UI
+  agentKind: true,
+  opencodeSid: true, // server-only: opencode/kilo embedded-server session id
+  createdAt: true, // not surfaced on Session (relative "ago" is computed live elsewhere)
+  ownerId: true, // server-only: identity-seam owner, irrelevant on the single-user client
+  prUrl: true,
+  src: true,
+  parentId: true,
+  mode: true,
+}
+
 /** Map a persisted SessionDTO to the renderer Session model. Exported so the
  *  src round-trip is unit-testable. Legacy rows with no persisted source
  *  default to 'jira'. */
@@ -107,8 +139,14 @@ export function dtoToSession(dto: SessionDTO): Session {
     // TASK-CIOEQ: the session that spawned this one via `slipstream new-agent`.
     // dtoToSession silently drops any field left unmapped here, and the gap
     // only shows up after a reload/reconnect — see dtoToSession's own doc
-    // comment above.
+    // comment above (and SESSION_DTO_FIELD_KEYS, the compile-time guard
+    // against forgetting one).
     parentId: dto.parentId,
+    // 'chat' selects a "blank chat" session (TASK-CIOEQ); undefined is the
+    // existing ticket-backed flow. This is the field that motivated
+    // SESSION_DTO_FIELD_KEYS above — it round-tripped through the backend
+    // (migrations.ts/sessionStore.ts) but was originally never mapped here.
+    mode: dto.mode,
     activity: {
       text:
         uiStatus === 'interrupted'

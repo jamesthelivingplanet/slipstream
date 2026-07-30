@@ -8,7 +8,9 @@ import {
   buildUsageSummary,
   familyForModel,
 } from './usage.js'
+import { BACKEND_KINDS } from '../shared/contract.js'
 import type { SessionDTO } from '../shared/contract.js'
+import { AGENT_META } from '../shared/agents.js'
 
 let projectsDir: string
 
@@ -364,5 +366,49 @@ describe('readSessionUsage', () => {
     )
     expect(grokUsage.exists).toBe(false)
     expect(grokUsage.sessionId).toBe(idGrok)
+  })
+
+  // ─── supportsUsage capability reconciliation ───────────────────────────
+
+  it.each(BACKEND_KINDS)(
+    "%s: supportsUsage matches AGENT_META's capability matrix",
+    async (kind) => {
+      const expected = AGENT_META.find((m) => m.kind === kind)?.supportsUsage
+      expect(expected).not.toBeUndefined() // every BackendKind must have an AGENT_META entry
+
+      const usage = await readSessionUsage(
+        { ...dto(`sess-cap-${kind}`, 'repo-1', 0), agentKind: kind },
+        { projectsDir },
+      )
+      expect(usage.supportsUsage).toBe(expected)
+    },
+  )
+
+  it('supportsUsage is true for claude-code even when no transcript exists yet (reader exists, just no data)', async () => {
+    const usage = await readSessionUsage(
+      { ...dto('sess-cap-pre-turn', 'repo-1', 0), agentKind: 'claude-code' },
+      { projectsDir },
+    )
+    expect(usage.exists).toBe(false)
+    expect(usage.supportsUsage).toBe(true)
+  })
+
+  it('distinguishes "no reader" (kilo, supportsUsage:false) from "reader exists, genuinely zero so far" (claude-code, supportsUsage:true) — both currently show exists:false, but supportsUsage differs', async () => {
+    const kiloUsage = await readSessionUsage(
+      { ...dto('sess-kilo-cap', 'repo-1', 0), agentKind: 'kilo' },
+      { projectsDir },
+    )
+    const claudeUsage = await readSessionUsage(
+      { ...dto('sess-claude-cap', 'repo-1', 0), agentKind: 'claude-code' },
+      { projectsDir },
+    )
+    expect(kiloUsage.exists).toBe(false)
+    expect(claudeUsage.exists).toBe(false)
+    expect(kiloUsage.supportsUsage).toBe(false)
+    expect(claudeUsage.supportsUsage).toBe(true)
+    // Neither fabricates cost data — both still read as real zero, not a
+    // made-up number.
+    expect(kiloUsage.costUsd).toBe(0)
+    expect(claudeUsage.costUsd).toBe(0)
   })
 })

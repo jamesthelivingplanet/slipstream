@@ -156,6 +156,56 @@ The worktree already contains all progress so far — review it before doing any
 Then continue the task to completion, following the system-prompt instructions (report your state via the \`slipstream\` CLI — \`task-started\` now, then the lifecycle commands — and open the merge request via \`slipstream open-mr\` when done).`
 }
 
+export interface ChatHandoffContext {
+  /** Label of the agent being handed off FROM, e.g. "Claude Code". */
+  fromAgent: string
+  /** The original kickoff prompt for the session, when there was one — a
+   *  "blank chat" session (TASK-CIOEQ's one-click "New chat" entry point)
+   *  commonly starts with an empty prompt, so this is often absent. */
+  prompt?: string
+  /** The previous agent's reported outcome summary, when one exists. */
+  outcomeSummary?: string
+  /** The prior agent's recent conversation, rendered via
+   *  {@link formatChatExcerpt} — see {@link HandoffContext.priorConversation}. */
+  priorConversation?: string
+}
+
+/**
+ * Chat counterpart to {@link buildHandoffPrompt} (TASK-CIOEQ). A "blank chat"
+ * session (`mode: 'chat'`) has no ticket and no merge-request obligation, so
+ * handing it off must not carry the ticket-takeover framing that
+ * buildChatSystemPrompt deliberately strips out of the original system
+ * prompt: no synthetic tid, no base-branch diff review, no "open the merge
+ * request" instruction. It keeps the two parts of a handoff that stay useful
+ * either way — the prior agent's outcome summary and conversation excerpt —
+ * so the new agent can pick up the thread instead of starting cold, and
+ * reports its state with the same stance buildChatSystemPrompt takes:
+ * waiting on the user (`request-input`) is this agent's normal resting
+ * state, not a sign of being stuck.
+ */
+export function buildChatHandoffPrompt(ctx: ChatHandoffContext): string {
+  const { fromAgent, prompt, outcomeSummary, priorConversation } = ctx
+  const promptSection = prompt && prompt.trim().length > 0 ? `\n\n${prompt}` : ''
+  const outcomeSection =
+    outcomeSummary && outcomeSummary.trim().length > 0
+      ? `\n\n## Previous agent's last reported summary\n\n${outcomeSummary}`
+      : ''
+  const conversationSection =
+    priorConversation && priorConversation.trim().length > 0
+      ? `\n\n## Conversation so far (from ${fromAgent})\n\nThis is the prior agent's recent conversation — its reasoning, the tools it ran, and where it left off. Use it to pick up the thread; don't redo work it already finished.\n\n${priorConversation}`
+      : ''
+
+  return `You are taking over a conversation from another agent (${fromAgent}) that became unavailable (e.g. it hit its usage limits). Do not start over — pick up where it left off.
+
+There is no ticket for this session, and no merge request to open unless the user explicitly asks you to open one. This is not an autonomous ticket-runner — the user talks to you directly, turn by turn, and you respond to what they actually ask for.${promptSection}${outcomeSection}${conversationSection}
+
+## How to pick up the thread
+
+${priorConversation ? 'The conversation excerpt above is your fastest path to understanding where things stand — read it before doing anything else.' : 'The terminal scrollback from before is not available to you; `git status` and `git diff` against the worktree can help you get oriented if there is uncommitted or committed work.'}
+
+Waiting on the user is your normal resting state here, not something reserved for being stuck — report it the same way the system prompt already told you to: run \`slipstream task-started\` now, then \`slipstream request-input --message "..."\` every time you hand the turn back.`
+}
+
 export function buildAgentsMdContent(systemPrompt: string): string {
   return systemPrompt
 }

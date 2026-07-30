@@ -61,6 +61,21 @@ export interface SchedulerPolicy {
   maxConcurrent: number // 0 = unlimited: every start fires immediately (pre-FLO-95 behavior)
 }
 export const DEFAULT_SCHEDULER_POLICY: SchedulerPolicy = { maxConcurrent: 0 }
+/** Agent-spawn guardrail policy: bounds the agent-spawn request/response
+ *  channel (TASK-CIOEQ) that lets a running session ask the daemon to launch
+ *  a new sibling/child agent. 0 means unlimited for every field, matching
+ *  SchedulerPolicy's convention. Plumbing only here — enforcement lives in
+ *  the spawn-request handling path. */
+export interface SpawnPolicy {
+  maxDepth: number // longest allowed parentId chain from a human-started root; 0 = unlimited
+  maxChildrenPerSession: number // direct children a single session may spawn; 0 = unlimited
+  maxSpawnsPerHour: number // spawns allowed per rolling hour, scoped per requesting session (counted from that session's own children); 0 = unlimited
+}
+export const DEFAULT_SPAWN_POLICY: SpawnPolicy = {
+  maxDepth: 2,
+  maxChildrenPerSession: 5,
+  maxSpawnsPerHour: 20,
+}
 /** Result of an out-of-band self-test of the agent-facing `slipstream` CLI
  *  (electron/cli/slipstream.ts). Never run inside an agent session — see
  *  CliHealthParams / checkSlipstreamCli — so it adds no agent context. */
@@ -241,6 +256,11 @@ export interface SessionDTO {
    *  (TASK-CIOEQ), e.g. an agent asking the daemon for a new sibling agent.
    *  Undefined for a session started directly by a human via the UI. */
   parentId?: string
+  /** Selects a "blank chat" session (TASK-CIOEQ): a different system prompt
+   *  and skipping ticket-provider side effects (no ticket to transition).
+   *  Undefined/omitted is the existing ticket-backed flow. Persisted so it
+   *  round-trips on reload. */
+  mode?: 'chat'
 }
 
 export interface WorkflowState {
@@ -972,10 +992,10 @@ export interface SlipstreamApi {
      *  the server always minting a fresh one. Passed through to rpc.ts's
      *  LaunchRequest.sessionId, falling back to a random UUID when omitted. */
     sessionId?: string
-    /** Selects a "blank chat" session (TASK-CIOEQ phase 3, not yet wired):
-     *  a different system prompt and skipping ticket-provider side effects
-     *  (no ticket to transition). Undefined/omitted is the existing
-     *  ticket-backed flow. */
+    /** Selects a "blank chat" session (TASK-CIOEQ, shipped v0.10.0): a
+     *  different system prompt and skipping ticket-provider side effects (no
+     *  ticket to transition). Undefined/omitted is the existing ticket-backed
+     *  flow. */
     mode?: 'chat'
   }): Promise<SessionDTO>
   writeSession(id: string, data: string): void
@@ -1042,8 +1062,10 @@ export interface SlipstreamApi {
   getGitToken(host: GitHost): Promise<string | null>
   setGitToken(host: GitHost, token: string): Promise<void>
   /** All registered git providers (TASK-7LGAO) — drives the Settings →
-   *  Integrations git-host cards, including the Phase-1 Bitbucket/Gitea
-   *  stubs (listed, but their action methods reject until Phase 2). */
+   *  Integrations git-host cards. Bitbucket/Gitea are fully implemented
+   *  (real PR creation and status fetching, gitea.ts/bitbucket.ts) same as
+   *  GitHub/GitLab; their action methods reject only when the host is
+   *  unconfigured (no baseUrl/token). */
   listGitProviders(): Promise<GitProviderInfoDTO[]>
   /** Full per-host config (token/username/baseUrl). Superset of getGitToken —
    *  kept alongside it since getGitToken/setGitToken remain the CLI/slipstream
@@ -1070,6 +1092,9 @@ export interface SlipstreamApi {
 
   getSchedulerPolicy(): Promise<SchedulerPolicy>
   setSchedulerPolicy(policy: SchedulerPolicy): Promise<void>
+
+  getSpawnPolicy(): Promise<SpawnPolicy>
+  setSpawnPolicy(policy: SpawnPolicy): Promise<void>
 
   /** Out-of-band self-test of the agent-facing `slipstream` CLI: spawns it
    *  directly (`slipstream help`) outside of any agent session, so it never
@@ -1123,15 +1148,19 @@ export interface SlipstreamApi {
   /** Live agent-event push for sessions this client can see. Returns unsubscribe fn. */
   onSessionAgentEvent(cb: (event: SessionAgentEventDTO) => void): () => void
 
-  /** Chat view (TASK-FPH60, extended to pi/opencode): `available` is false
-   *  when the session's backend has no chat reader (antigravity/grok/kilo) or
-   *  the reader has nothing yet (no transcript/session-file, or the opencode
-   *  sid/port hasn't been captured) — the UI falls back to terminal-only.
+  /** Chat view (TASK-FPH60, extended to pi/opencode/grok): `available` is
+   *  false when the session's backend has no chat reader at all (antigravity
+   *  is the only one) or the reader has nothing yet (no transcript/
+   *  session-file, or the opencode sid/port hasn't been captured) — the UI
+   *  falls back to terminal-only. kilo/opencode's durable read path depends
+   *  on the backend's own SQLite store rather than a session file.
    *  `opts.beforeTs` pages older messages; `opts.limit` caps the page
-   *  (default: the most recent 50). */
+   *  (default: the most recent 50). `opts.includeSidechains` defaults to
+   *  included; pass `false` as an escape hatch for callers wanting only the
+   *  main conversation (excludes sub-agent/sidechain messages). */
   getChatMessages(
     id: string,
-    opts?: { beforeTs?: number; limit?: number },
+    opts?: { beforeTs?: number; limit?: number; includeSidechains?: boolean },
   ): Promise<{ available: boolean; messages: SessionChatMessageDTO[] }>
   /** Live chat-message push for sessions this client can see (TASK-FPH60).
    *  Returns unsubscribe fn. */
@@ -1231,6 +1260,8 @@ export const IPC = {
   setGcPolicy: 'gc:setPolicy',
   getSchedulerPolicy: 'scheduler:getPolicy',
   setSchedulerPolicy: 'scheduler:setPolicy',
+  getSpawnPolicy: 'spawn:getPolicy',
+  setSpawnPolicy: 'spawn:setPolicy',
   getCliStatus: 'cli:status',
   getDiagnostics: 'diag:get',
   checkAgentCli: 'agent:checkCli',

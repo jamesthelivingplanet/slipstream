@@ -17,7 +17,9 @@ import { claudeProjectsDir, transcriptPathFor } from './transcripts.js'
 import { dayKeyFromMs } from '../shared/usageFormat.js'
 import { readOpencodeUsage } from './opencodeUsage.js'
 import { readPiUsage } from './piUsage.js'
+import { AGENT_META } from '../shared/agents.js'
 import type {
+  BackendKind,
   SessionDTO,
   SessionUsage,
   UsageBucket,
@@ -223,11 +225,35 @@ function emptyUsage(sessionId: string): SessionUsage {
   return { sessionId, exists: false, tokens: { ...ZERO_TOKENS }, costUsd: 0, turns: 0 }
 }
 
+/** Single source of truth for "does this kind have a usage reader at all" —
+ *  reads AGENT_META (electron/shared/agents.ts) rather than restating the
+ *  per-kind list here, so this can't silently drift from the capability
+ *  matrix the way a hand-maintained switch/comment could. */
+function usageSupportedFor(kind: BackendKind): boolean {
+  return AGENT_META.find((m) => m.kind === kind)?.supportsUsage ?? false
+}
+
 /**
  * Dispatch to the right per-backend usage reader based on `session.agentKind`
  * (defaults to 'claude-code' for legacy sessions with no recorded kind), so
  * every backend produces the same SessionUsage contract shape (FLO-94 parity
  * gap: opencode/pi sessions always showed usage:null).
+ *
+ * Return shape is `SessionUsage` (the typed contract) PLUS an untyped-in-
+ * contract.ts `supportsUsage` field. `exists:false` alone is ambiguous: it
+ * means BOTH "reader exists, session just hasn't produced a turn yet"
+ * (claude-code/opencode/pi pre-first-turn — transient, will flip true) AND
+ * "no reader exists for this kind at all" (grok/kilo/antigravity — permanent,
+ * $0.00 forever regardless of real cost). Collapsing those into identical
+ * output makes Mission Control silently under-report a grok/kilo/antigravity
+ * session's real (unknowable to us) cost as a genuine zero. `supportsUsage`
+ * — driven by AGENT_META, not a fabricated number — lets a caller distinguish
+ * "we know this is zero" from "we don't have a way to know". Deliberately
+ * NOT added to contract.ts's `SessionUsage` interface this round (out of
+ * scope / owned elsewhere this pass); it rides along as a genuine extra
+ * property on the real returned object — every caller in this codebase
+ * returns `readSessionUsage`'s result directly (or via JSON over the RPC
+ * transport), so it survives without needing the DTO itself to declare it.
  */
 export async function readSessionUsage(
   session: SessionDTO,
@@ -237,23 +263,22 @@ export async function readSessionUsage(
     piRoot?: string
     cwd?: string | null
   } = {},
-): Promise<SessionUsage> {
+): Promise<SessionUsage & { supportsUsage: boolean }> {
   const kind = session.agentKind ?? 'claude-code'
-  switch (kind) {
-    case 'claude-code':
-      return readTranscriptUsage(session.id, opts.projectsDir)
-    case 'opencode':
-      return readOpencodeUsage(session.id, session.opencodeSid, opts.opencodeRoot)
-    case 'pi':
-      return readPiUsage(session.id, opts.cwd ?? null, opts.piRoot)
-    default:
-      // 'antigravity' / 'grok': no documented on-disk usage format yet.
-      // 'kilo': stores sessions in a SQLite `~/.local/share/kilo/kilo.db`
-      // (not opencode's file-per-message store), so `readOpencodeUsage` can't
-      // be reused as-is — a reader can be added later (e.g. via `kilo export
-      // <sessionID>` / `kilo stats`), same shape as the others once it exists.
-      return emptyUsage(session.id)
-  }
+  const usage = await (async (): Promise<SessionUsage> => {
+    switch (kind) {
+      case 'claude-code':
+        return readTranscriptUsage(session.id, opts.projectsDir)
+      case 'opencode':
+        return readOpencodeUsage(session.id, session.opencodeSid, opts.opencodeRoot)
+      case 'pi':
+        return readPiUsage(session.id, opts.cwd ?? null, opts.piRoot)
+      default:
+        // 'antigravity' / 'grok' / 'kilo': no reader — see usageSupportedFor.
+        return emptyUsage(session.id)
+    }
+  })()
+  return { ...usage, supportsUsage: usageSupportedFor(kind) }
 }
 
 /**

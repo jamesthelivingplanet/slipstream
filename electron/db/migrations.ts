@@ -158,6 +158,12 @@ CREATE UNIQUE INDEX idx_device_tokens_hash ON device_tokens (tokenHash)
   // request channel (a token-free CLI agent asking the daemon for a new
   // sibling agent). NULL for a session started directly by a human.
   (db) => db.exec(`ALTER TABLE sessions ADD COLUMN parentId TEXT`),
+  // 10 — TASK-CIOEQ: persists the "blank chat" session flag (previously
+  // consumed once at start time — buildChatSystemPrompt/skipTicket — and then
+  // thrown away) so it survives a reload/reconnect and later calls (e.g.
+  // handoff) can tell a chat session apart from a ticket session. NULL/'chat'
+  // — NULL is the existing ticket-backed flow.
+  (db) => db.exec(`ALTER TABLE sessions ADD COLUMN mode TEXT`),
 ]
 
 /**

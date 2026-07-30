@@ -99,6 +99,7 @@ import {
   stopAppForSession,
   bootingId,
   dtoToSession,
+  SESSION_DTO_FIELD_KEYS,
   reviewComments,
   addReviewComment,
   removeReviewComment,
@@ -972,6 +973,122 @@ describe('dtoToSession (FLO-83 src round-trip)', () => {
       src: 'jira',
     }
     expect(dtoToSession(dto).parentId).toBeUndefined()
+  })
+
+  it('TASK-CIOEQ: maps mode: "chat" so a blank-chat session survives a reload/reconnect', () => {
+    const dto: SessionDTO = {
+      id: 's7',
+      tid: 'CHAT-1',
+      title: 'Chat Jul 30, 3:45 PM',
+      prompt: '',
+      repoId: 'r',
+      branch: 'b',
+      status: 'running',
+      createdAt: 0,
+      src: 'jira',
+      mode: 'chat',
+    }
+    expect(dtoToSession(dto).mode).toBe('chat')
+  })
+
+  it('TASK-CIOEQ: leaves mode undefined for the default ticket-backed DTO', () => {
+    const dto: SessionDTO = {
+      id: 's8',
+      tid: 'T-8',
+      title: 't',
+      prompt: 'p',
+      repoId: 'r',
+      branch: 'b',
+      status: 'idle',
+      createdAt: 0,
+      src: 'jira',
+    }
+    expect(dtoToSession(dto).mode).toBeUndefined()
+  })
+})
+
+/**
+ * TASK-CIOEQ: dtoToSession is a hand-maintained mapper — a SessionDTO field
+ * left unmapped silently vanishes, surfacing only after a reload/reconnect
+ * (exactly how `mode` was originally missed). SESSION_DTO_FIELD_KEYS
+ * (stores.ts) is the compile-time half of the guard: it's typed
+ * `Record<keyof SessionDTO, true>`, so TS refuses to compile the moment
+ * SessionDTO gains a field this object doesn't account for. These tests are
+ * the runtime half: they prove dtoToSession actually maps every field it
+ * claims to (or documents why it doesn't), and — separately — that the check
+ * itself has teeth by running it against a deliberately broken mapper.
+ */
+describe('dtoToSession exhaustiveness guard (TASK-CIOEQ)', () => {
+  // Kept in sync by hand with the comments next to the same names in
+  // SESSION_DTO_FIELD_KEYS (stores.ts) — those explain *why* each one is
+  // legitimately server-only rather than a gap.
+  const INTENTIONALLY_UNMAPPED = new Set<keyof SessionDTO>([
+    'systemPrompt',
+    'opencodeSid',
+    'createdAt',
+    'ownerId',
+  ])
+
+  // dtoToSession renames repoId -> repo; every other field keeps its name.
+  const RENAMED: Partial<Record<keyof SessionDTO, string>> = { repoId: 'repo' }
+
+  function fullDto(): SessionDTO {
+    return {
+      id: 's-full',
+      tid: 'T-FULL',
+      title: 'A full session',
+      prompt: 'do the thing',
+      repoId: 'repo-1',
+      branch: 'branch-1',
+      status: 'running',
+      port: 4242,
+      systemPrompt: 'you are an agent',
+      agentKind: 'pi',
+      opencodeSid: 'sid-1',
+      createdAt: 12345,
+      ownerId: 'owner-1',
+      prUrl: 'https://example.com/pr/1',
+      src: 'linear',
+      parentId: 'parent-1',
+      mode: 'chat',
+    }
+  }
+
+  /** Every SessionDTO field not in `unmapped`, present in `dto` with a
+   *  defined value, whose value doesn't survive unchanged onto `output`
+   *  under the same key name. This is the actual exhaustiveness check —
+   *  reused below both to assert the real mapper is clean and to prove the
+   *  check would catch a regression. */
+  function findSilentlyDroppedFields(
+    dto: SessionDTO,
+    output: Record<string, unknown>,
+    unmapped: Set<keyof SessionDTO>,
+  ): string[] {
+    return (Object.keys(dto) as (keyof SessionDTO)[])
+      .filter((key) => !unmapped.has(key))
+      .filter((key) => output[RENAMED[key] ?? key] !== dto[key])
+  }
+
+  it('SESSION_DTO_FIELD_KEYS accounts for every field in a fully-populated fixture', () => {
+    const dto = fullDto()
+    // Guards the fixture itself against drifting from the compile-time
+    // manifest — if this fails, fullDto() is missing a field.
+    expect(Object.keys(dto).sort()).toEqual(Object.keys(SESSION_DTO_FIELD_KEYS).sort())
+  })
+
+  it('dtoToSession maps every SessionDTO field, by name or via the documented drop list', () => {
+    const dto = fullDto()
+    const output = dtoToSession(dto) as unknown as Record<string, unknown>
+    expect(findSilentlyDroppedFields(dto, output, INTENTIONALLY_UNMAPPED)).toEqual([])
+  })
+
+  it('the guard actually fails when a field is silently dropped', () => {
+    const dto = fullDto()
+    // Simulate the historical bug directly: a mapper that forgets `mode`,
+    // the same way dtoToSession originally did.
+    const brokenOutput = dtoToSession(dto) as unknown as Record<string, unknown>
+    delete brokenOutput.mode
+    expect(findSilentlyDroppedFields(dto, brokenOutput, INTENTIONALLY_UNMAPPED)).toEqual(['mode'])
   })
 })
 

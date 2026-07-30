@@ -1,34 +1,57 @@
 /**
- * opencodeStore.ts — durable fallback reader for opencode chat history.
+ * opencodeStore.ts — durable fallback reader for opencode (and kilo) chat
+ * history.
  *
- * sessionChatReader's opencode branch reads messages from the TUI's embedded
- * HTTP server (fetchOpencodeMessages in opencodeSessions.ts), which is
- * in-memory, live-process state: a port + session id captured while the TUI
- * is running. Once that process exits — or the daemon restarts, which wipes
- * all in-memory session state — there is no port to ask, and the chat panel
- * (and the handoff prompt, which needs the prior agent's conversation) would
- * see an entire opencode session's history vanish. claude-code (JSONL
- * transcript) and pi (session file) don't have this gap; only opencode does,
- * because its message store historically wasn't consulted as a fallback.
+ * sessionChatReader's embedded-server branch (opencode, and kilo — an
+ * opencode fork, see usesEmbeddedServer in agentBackend.ts) reads messages
+ * from the TUI's embedded HTTP server (fetchOpencodeMessages in
+ * opencodeSessions.ts), which is in-memory, live-process state: a port +
+ * session id captured while the TUI is running. Once that process exits — or
+ * the daemon restarts, which wipes all in-memory session state — there is no
+ * port to ask, and the chat panel (and the handoff prompt, which needs the
+ * prior agent's conversation) would see an entire session's history vanish.
+ * claude-code (JSONL transcript) and pi (session file) don't have this gap;
+ * only opencode/kilo do, because their message store historically wasn't
+ * consulted as a fallback.
  *
  * opencode itself doesn't lose this data — it persists every message/part to
  * a durable SQLite database at `<XDG_DATA_HOME or ~/.local/share>/opencode/
  * opencode.db` (sibling to the per-message JSON files opencodeUsage.ts reads
  * under `opencode/storage/`; same base-dir convention, different subpath).
- * This module reads that database directly and reassembles rows into the
- * exact `OpencodeMessage[]` shape opencodeSessions.ts's `fetchOpencodeMessages`
- * returns, so sessionChatReader can feed both through the same pure mapper
+ * Kilo, being an opencode fork, persists to its OWN durable SQLite database
+ * at the equivalent `kilo/kilo.db` path (see `kiloDbPath` below) — NOT
+ * opencode's db. This module reads either database directly and reassembles
+ * rows into the exact `OpencodeMessage[]` shape opencodeSessions.ts's
+ * `fetchOpencodeMessages` returns, so sessionChatReader can feed both
+ * opencode's and kilo's rows through the same pure mapper
  * (`opencodeMessagesToChat`) — no second mapper, no shape drift.
+ *
+ * Kilo verification caveat: inspection of a real `~/.local/share/kilo/
+ * kilo.db` on this machine confirmed the `message`/`part` table schema is
+ * IDENTICAL to opencode's (same columns: `message(id, session_id,
+ * time_created, time_updated, data)`, `part(id, message_id, session_id,
+ * time_created, time_updated, data)`), which is why this module is reused
+ * unchanged rather than forked. However, that db's tables were EMPTY at
+ * inspection time (kilo was installed but had never recorded a session), so
+ * the JSON *shape* of the `data` column — the actual fields inside
+ * `message.data`/`part.data` that `parseDataObject` hands to
+ * `opencodeMessagesToChat` — is verified only against opencode's schema
+ * documentation/behavior, not against a real kilo-produced row. If kilo's
+ * `data` JSON shape ever diverges from opencode's, this module's per-row
+ * best-effort contract (below) means the worst case is silently skipped rows
+ * (an honest empty/partial read), never a crash — strictly better than the
+ * bug this fixes (kilo chat reads being routed into opencode's own db, where
+ * a kilo session id matches nothing at all).
  *
  * Best-effort, matching sessionChatReader's "never throws" contract: opening
  * the db, querying it, and parsing each row's JSON `data` column can each
- * fail independently (db file missing because opencode was never run, a
- * writer holding a lock, a schema opencode changes out from under us, a
- * truncated row from a crash mid-write) and none of that should surface as an
- * error — a missing history is a `{ available: false, messages: [] }` outcome
- * for the caller, not a crash. Malformed rows are skipped individually rather
- * than failing the whole read, since one bad row shouldn't hide the rest of
- * an otherwise-readable conversation.
+ * fail independently (db file missing because opencode/kilo was never run, a
+ * writer holding a lock, a schema change out from under us, a truncated row
+ * from a crash mid-write) and none of that should surface as an error — a
+ * missing history is a `{ available: false, messages: [] }` outcome for the
+ * caller, not a crash. Malformed rows are skipped individually rather than
+ * failing the whole read, since one bad row shouldn't hide the rest of an
+ * otherwise-readable conversation.
  */
 import os from 'node:os'
 import path from 'node:path'
@@ -46,6 +69,18 @@ import type {
 export function opencodeDbPath(): string {
   const base = process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local', 'share')
   return path.join(base, 'opencode', 'opencode.db')
+}
+
+/** Path to kilo's OWN durable SQLite store — a separate file from opencode's,
+ *  despite kilo being an opencode fork with a schema-identical message/part
+ *  store (see module doc comment's verification caveat). Same base-dir idiom
+ *  as opencodeDbPath() (XDG_DATA_HOME, else ~/.local/share), but under
+ *  `kilo/kilo.db` rather than `opencode/opencode.db`. Reading a kilo session
+ *  id out of opencode's db (or vice versa) matches nothing — this is the
+ *  fix for that mismatch, not a new reader/mapper. */
+export function kiloDbPath(): string {
+  const base = process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local', 'share')
+  return path.join(base, 'kilo', 'kilo.db')
 }
 
 interface RowWithData {
@@ -68,17 +103,20 @@ function parseDataObject(raw: string): Record<string, unknown> | null {
 }
 
 /**
- * Read one opencode session's messages (with their parts) from the durable
- * SQLite store, oldest first — the same order fetchOpencodeMessages' HTTP
- * response uses, so callers don't need to re-sort. Returns `[]` on any
+ * Read one opencode-OR-kilo session's messages (with their parts) from the
+ * durable SQLite store, oldest first — the same order fetchOpencodeMessages'
+ * HTTP response uses, so callers don't need to re-sort. Returns `[]` on any
  * failure: no db file, a locked/corrupt db, an unexpected schema, or a
- * session id with no rows. `dbPath` defaults to `opencodeDbPath()` and is
- * injectable so tests point it at a temp fixture instead of the real store.
+ * session id with no rows. `dbPath` defaults to `opencodeDbPath()`; pass
+ * `kiloDbPath()` (or an override) explicitly to read kilo's store instead —
+ * see sessionChatReader.ts's kind-based dbPath selection. Also injectable so
+ * tests point it at a temp fixture instead of either real store.
  *
- * Row shapes (verified against a live opencode.db): `message.data` and
- * `part.data` hold the JSON body opencode's HTTP API would return, EXCEPT
- * the row's own `id` is a separate column, not inside `data` — spliced back
- * in below so the result matches what fetchOpencodeMessages returns.
+ * Row shapes (verified against a live opencode.db; schema-only for kilo, per
+ * the module doc comment's caveat): `message.data` and `part.data` hold the
+ * JSON body opencode's HTTP API would return, EXCEPT the row's own `id` is a
+ * separate column, not inside `data` — spliced back in below so the result
+ * matches what fetchOpencodeMessages returns.
  */
 export function readOpencodeMessagesFromStore(
   sessionId: string,

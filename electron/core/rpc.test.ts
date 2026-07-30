@@ -3006,5 +3006,38 @@ describe('createRpc', () => {
       const result = await rpc.handle(IPC.getSchedulerPolicy, [])
       expect(result).toEqual({ maxConcurrent: 0 })
     })
+
+    it('setSpawnPolicy persists the normalized policy via config.set', async () => {
+      await rpc.handle(IPC.setSpawnPolicy, [
+        { maxDepth: 4, maxChildrenPerSession: 10, maxSpawnsPerHour: 50 },
+      ])
+      expect(deps.config.set).toHaveBeenCalledWith(
+        'spawn.policy',
+        JSON.stringify({ maxDepth: 4, maxChildrenPerSession: 10, maxSpawnsPerHour: 50 }),
+      )
+    })
+
+    it('getSpawnPolicy reads the policy back through config.get', async () => {
+      ;(deps.config.get as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+        JSON.stringify({ maxDepth: 4, maxChildrenPerSession: 10, maxSpawnsPerHour: 50 }),
+      )
+      const result = await rpc.handle(IPC.getSpawnPolicy, [])
+      expect(result).toEqual({ maxDepth: 4, maxChildrenPerSession: 10, maxSpawnsPerHour: 50 })
+    })
+
+    it('getSpawnPolicy returns the default when unset', async () => {
+      const result = await rpc.handle(IPC.getSpawnPolicy, [])
+      expect(result).toEqual({ maxDepth: 2, maxChildrenPerSession: 5, maxSpawnsPerHour: 20 })
+    })
+
+    it('setSpawnPolicy normalizes negative/non-finite fields to the default, clamped at 0', async () => {
+      await rpc.handle(IPC.setSpawnPolicy, [
+        { maxDepth: -1, maxChildrenPerSession: Number.NaN, maxSpawnsPerHour: 0 },
+      ])
+      expect(deps.config.set).toHaveBeenCalledWith(
+        'spawn.policy',
+        JSON.stringify({ maxDepth: 0, maxChildrenPerSession: 5, maxSpawnsPerHour: 0 }),
+      )
+    })
   })
 })

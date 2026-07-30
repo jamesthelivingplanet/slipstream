@@ -53,16 +53,125 @@ import type {
   ISessionStore,
   RepoDTO,
   SessionDTO,
+  SpawnPolicy,
 } from '../shared/contract.js'
-import { BACKEND_KINDS } from '../shared/contract.js'
+import { BACKEND_KINDS, DEFAULT_SPAWN_POLICY } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
+import type { IConfigStore } from './configStore.js'
 import {
   AGENT_RESPONSES_FILE,
   parseAgentResponses,
   type AgentResponse,
 } from './agentRequestSentinel.js'
 import { launchSession, type LaunchDeps, type LaunchRequest } from './sessionLauncher.js'
+
+/** Same config key rpcHandlers/config.ts's getSpawnPolicy/setSpawnPolicy
+ *  persist under (SPAWN_POLICY_KEY there) — duplicated here rather than
+ *  imported since that file has no exported read helper; must stay in sync
+ *  with that string if it ever changes. */
+const SPAWN_POLICY_KEY = 'spawn.policy'
+
+/** Mirrors rpcHandlers/config.ts's coerceSpawnPolicy: clamp to a
+ *  non-negative integer, falling back to the given default for anything
+ *  that isn't a finite number (matches SchedulerPolicy's convention). */
+function coerceSpawnPolicyField(raw: unknown, def: number): number {
+  const n = typeof raw === 'number' && Number.isFinite(raw) ? Math.floor(raw) : def
+  return Math.max(0, n)
+}
+
+/** Read the spawn-limit guardrail policy. Best-effort: a missing key,
+ *  malformed JSON, or a config store that throws all fall back to
+ *  DEFAULT_SPAWN_POLICY — never to unlimited (0 for every field), since that
+ *  would silently disable the guardrail this read exists to enforce. */
+function readSpawnPolicy(config: Pick<IConfigStore, 'get'>): SpawnPolicy {
+  try {
+    const raw = config.get(SPAWN_POLICY_KEY)
+    if (!raw) return { ...DEFAULT_SPAWN_POLICY }
+    const parsed = JSON.parse(raw) as Partial<SpawnPolicy>
+    return {
+      maxDepth: coerceSpawnPolicyField(parsed.maxDepth, DEFAULT_SPAWN_POLICY.maxDepth),
+      maxChildrenPerSession: coerceSpawnPolicyField(
+        parsed.maxChildrenPerSession,
+        DEFAULT_SPAWN_POLICY.maxChildrenPerSession,
+      ),
+      maxSpawnsPerHour: coerceSpawnPolicyField(
+        parsed.maxSpawnsPerHour,
+        DEFAULT_SPAWN_POLICY.maxSpawnsPerHour,
+      ),
+    }
+  } catch {
+    return { ...DEFAULT_SPAWN_POLICY }
+  }
+}
+
+/** Depth of `sessionId` in its parentId chain: 0 for a human-started root
+ *  (no parentId), 1 for its direct child, etc. Cycle-guarded defensively
+ *  (should never happen — parentId is only ever set at spawn time to an
+ *  already-existing session — but a broken chain must never infinite-loop). */
+function computeSessionDepth(sessionStore: Pick<ISessionStore, 'get'>, sessionId: string): number {
+  let depth = 0
+  const seen = new Set<string>([sessionId])
+  let current = sessionStore.get(sessionId)
+  while (current?.parentId && !seen.has(current.parentId)) {
+    seen.add(current.parentId)
+    depth++
+    current = sessionStore.get(current.parentId)
+  }
+  return depth
+}
+
+/** Enforce SpawnPolicy against the requesting session, returning a
+ *  human-readable refusal reason (for the agent to act on) or null if the
+ *  spawn is allowed. 0 means unlimited for each field.
+ *
+ *  maxSpawnsPerHour scope: per REQUESTING session (the session that would
+ *  become the new agent's parent) — counted from that session's own
+ *  existing children created within the last rolling hour, not a global or
+ *  per-owner count. This reuses sessionStore's persisted `createdAt`, so
+ *  (unlike an in-memory counter) it survives a daemon restart intact rather
+ *  than resetting the window. */
+function checkSpawnPolicy(
+  sessionStore: Pick<ISessionStore, 'list' | 'get'>,
+  policy: SpawnPolicy,
+  parentSessionId: string,
+  nowMs: number,
+): string | null {
+  if (policy.maxDepth !== 0) {
+    const newChildDepth = computeSessionDepth(sessionStore, parentSessionId) + 1
+    if (newChildDepth > policy.maxDepth) {
+      return (
+        `Spawn refused: depth limit is ${policy.maxDepth} (a new agent from this session ` +
+        `would be at depth ${newChildDepth}). Ask a human to raise the limit, or finish work ` +
+        `in this session instead of spawning further.`
+      )
+    }
+  }
+
+  const children = sessionStore.list().filter((s) => s.parentId === parentSessionId)
+
+  if (policy.maxChildrenPerSession !== 0 && children.length >= policy.maxChildrenPerSession) {
+    return (
+      `Spawn refused: this session already has ${children.length} child agent(s), the limit ` +
+      `is ${policy.maxChildrenPerSession}. Wait for one to finish, or ask a human to raise ` +
+      `the limit.`
+    )
+  }
+
+  if (policy.maxSpawnsPerHour !== 0) {
+    const hourAgo = nowMs - 60 * 60 * 1000
+    const recentSpawns = children.filter((s) => s.createdAt >= hourAgo).length
+    if (recentSpawns >= policy.maxSpawnsPerHour) {
+      return (
+        `Spawn refused: this session has spawned ${recentSpawns} agent(s) in the last hour, ` +
+        `the limit is ${policy.maxSpawnsPerHour}. Wait before spawning more, or ask a human ` +
+        `to raise the limit.`
+      )
+    }
+  }
+
+  return null
+}
 
 export interface AgentSpawnService {
   /** Remove the daemon-level agentRequest listener. */
@@ -82,6 +191,11 @@ export interface AgentSpawnDeps {
   sessionStore: ISessionStore
   repos: Pick<IRepoRegistry, 'list'>
   outcomeStore: Pick<IOutcomeStore, 'get'>
+  /** Config store read access for the spawn-limit guardrail (SpawnPolicy,
+   *  persisted under the 'spawn.policy' key by rpcHandlers/config.ts's
+   *  getSpawnPolicy/setSpawnPolicy). See readSpawnPolicy's doc for the
+   *  read-failure fallback. */
+  config: Pick<IConfigStore, 'get'>
   /** Full launch procedure deps (repos/worktrees/sessions/ports/store/
    *  tickets/agentCli) — the same bag core/services.ts assembles for
    *  launchSession/the scheduler. Used only when `scheduler` is absent. */
@@ -186,7 +300,7 @@ function mintTid(): string {
 }
 
 export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService {
-  const { sessions, sessionStore, repos, outcomeStore, launchDeps, scheduler } = deps
+  const { sessions, sessionStore, repos, outcomeStore, config, launchDeps, scheduler } = deps
   const now = deps.now ?? Date.now
   const rawWriteResponse = deps.writeResponse ?? defaultWriteResponse(deps.dataDir)
   const readResponses = deps.readResponses ?? defaultReadResponses(deps.dataDir)
@@ -253,6 +367,18 @@ export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService
     ownerId: string,
   ): Promise<void> {
     const { id } = req
+
+    // Spawn-limit guardrail (SpawnPolicy) — enforced before any other
+    // validation/work, and before scheduler.submit/launchSession below.
+    // A refusal is answered exactly like any other ok:false response (see
+    // respond()), so it's seeded into `answered` and never re-attempted on
+    // a daemon-restart replay of requests.ndjson — a refusal IS an answer.
+    const policy = readSpawnPolicy(config)
+    const refusal = checkSpawnPolicy(sessionStore, policy, parentSessionId, now())
+    if (refusal) {
+      respond(parentSessionId, err(id, refusal))
+      return
+    }
 
     const repoRef = req.repo?.trim()
     if (!repoRef) {

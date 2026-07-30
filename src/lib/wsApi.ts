@@ -697,6 +697,10 @@ export function createWsApi(opts: WsApiOpts): WsApi {
 
     setSchedulerPolicy: wire<'setSchedulerPolicy'>(IPC.setSchedulerPolicy),
 
+    getSpawnPolicy: wire<'getSpawnPolicy'>(IPC.getSpawnPolicy),
+
+    setSpawnPolicy: wire<'setSpawnPolicy'>(IPC.setSpawnPolicy),
+
     getCliStatus: wire<'getCliStatus'>(IPC.getCliStatus),
 
     getDiagnostics: wire<'getDiagnostics'>(IPC.getDiagnostics),

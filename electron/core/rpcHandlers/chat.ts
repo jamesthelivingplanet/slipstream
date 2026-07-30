@@ -1,6 +1,6 @@
 import type { IpcDeps } from '../../ipc.js'
 import { IPC } from '../../shared/contract.js'
-import type { SessionChatMessageDTO } from '../../shared/contract.js'
+import type { SessionChatMessageDTO, SlipstreamApi } from '../../shared/contract.js'
 import { readSessionChat } from '../../services/sessionChatReader.js'
 import { listAgentSkillsFor } from '../../services/agentSkills.js'
 import { extractScreenQuestion } from '../../services/chatQuestion.js'
@@ -268,13 +268,10 @@ export function createChatHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHandl
 
     [IPC.getChatMessages]: async (args) => {
       const id = args[0] as string
-      // `includeSidechains` is additive-only on this handler's own opts
-      // shape (not the typed `SlipstreamApi.getChatMessages` signature in
-      // contract.ts, out of scope this round) — defaults to included, see
-      // pageChatMessages's doc comment.
-      const opts =
-        (args[1] as
-          { beforeTs?: number; limit?: number; includeSidechains?: boolean } | undefined) ?? {}
+      // `opts` is typed from SlipstreamApi.getChatMessages itself (contract.ts)
+      // — `includeSidechains` defaults to included, see pageChatMessages's
+      // doc comment.
+      const opts = (args[1] as Parameters<SlipstreamApi['getChatMessages']>[1]) ?? {}
       // Owner-scoped like getSessionOutcome/listSessionAgentEvents: missing
       // and other-owner rows surface the same "not found".
       const session = ownedSession(id)

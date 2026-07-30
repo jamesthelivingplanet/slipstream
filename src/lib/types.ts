@@ -98,6 +98,10 @@ export interface Session {
   // the session that spawned this one via the `slipstream new-agent` CLI
   // command (TASK-CIOEQ); undefined for a session nobody spawned.
   parentId?: string
+  // 'chat' selects a "blank chat" session (TASK-CIOEQ) — no ticket framing,
+  // no ticket-provider transitions, a chat-flavored handoff prompt.
+  // Undefined is the existing ticket-backed flow.
+  mode?: 'chat'
   activity: { text: string; q?: boolean }
 }
 

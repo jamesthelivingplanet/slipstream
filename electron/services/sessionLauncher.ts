@@ -71,6 +71,12 @@ export interface LaunchRequest {
    *  unknown tid or, worse, collide with an unrelated real ticket that
    *  happens to share the id. Undefined/false preserves today's behavior. */
   skipTicket?: boolean
+  /** Persisted alongside skipTicket (TASK-CIOEQ) so a "blank chat" session
+   *  can still be told apart from a ticket session after this launch call
+   *  returns — e.g. by handoffSession (rpcHandlers/sessions.ts), which picks
+   *  a chat-flavored takeover prompt for it. Undefined is the existing
+   *  ticket-backed flow. */
+  mode?: 'chat'
 }
 
 export interface LaunchDeps {
@@ -101,6 +107,7 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     extraArgs,
     parentId,
     skipTicket,
+    mode,
   } = req
 
   const repo = await deps.repos.resolvePath(repoId)
@@ -148,6 +155,7 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     agentKind: agentKind ?? 'claude-code',
     ownerId,
     parentId,
+    mode,
   })
 
   if (usesEmbeddedServer(agentKind)) {
@@ -175,7 +183,7 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
     }
   }
 
-  return { ...session, port }
+  return { ...session, port, mode }
 }
 
 /** Run the shared "reconnect to an already-started session" procedure shared

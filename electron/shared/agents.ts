@@ -10,11 +10,28 @@ export interface AgentMeta {
   icon: string
   /**
    * Whether this kind has a chat transcript reader at all. Must exactly
-   * mirror the per-kind branching in `getChatMessages` (electron/core/rpc.ts):
-   * claude-code/pi/opencode/kilo/grok are chat-capable there, antigravity
-   * always returns `{available:false}` unconditionally.
+   * mirror the per-kind branching in `readSessionChat`
+   * (electron/services/sessionChatReader.ts): claude-code/pi/opencode/kilo/
+   * grok are chat-capable there, antigravity always returns
+   * `{available:false}` unconditionally.
    */
   supportsChat: boolean
+  /**
+   * Whether this kind has a usage reader at all. Must exactly mirror the
+   * per-kind switch in `readSessionUsage`'s dispatch (electron/services/
+   * usage.ts): claude-code/opencode/pi are usage-capable there; grok and
+   * kilo fall through the `default` case to `emptyUsage` (no documented
+   * on-disk format for grok; kilo's SQLite store isn't read yet); same for
+   * antigravity.
+   */
+  supportsUsage: boolean
+  /**
+   * Whether this kind has a known `SKILL.md`-convention skills directory at
+   * all. Must exactly mirror the per-kind dispatch in agentSkills.ts:
+   * claude-code/opencode/pi are skills-capable there; antigravity/grok/kilo
+   * have no known convention and always resolve to [].
+   */
+  supportsSkills: boolean
 }
 
 /**
@@ -31,6 +48,8 @@ const AGENT_META_BY_KIND: Record<BackendKind, Omit<AgentMeta, 'kind'>> = {
     description: 'Uses claude --dangerously-skip-permissions in a git worktree.',
     icon: '/icons/agents/claude-code.svg',
     supportsChat: true,
+    supportsUsage: true,
+    supportsSkills: true,
   },
   opencode: {
     label: 'OpenCode',
@@ -38,12 +57,16 @@ const AGENT_META_BY_KIND: Record<BackendKind, Omit<AgentMeta, 'kind'>> = {
       'Uses opencode in a git worktree with auto-discovered AGENTS.md and permissions set to allow.',
     icon: '/icons/agents/opencode.svg',
     supportsChat: true,
+    supportsUsage: true,
+    supportsSkills: true,
   },
   pi: {
     label: 'Pi',
     description: 'Uses pi --approve in a git worktree with an appended system prompt.',
     icon: '/icons/agents/pi.svg',
     supportsChat: true,
+    supportsUsage: true,
+    supportsSkills: true,
   },
   antigravity: {
     label: 'Antigravity',
@@ -51,12 +74,16 @@ const AGENT_META_BY_KIND: Record<BackendKind, Omit<AgentMeta, 'kind'>> = {
       'Uses agy --dangerously-skip-permissions in a git worktree with auto-discovered AGENTS.md.',
     icon: '/icons/agents/antigravity.svg',
     supportsChat: false,
+    supportsUsage: false,
+    supportsSkills: false,
   },
   grok: {
     label: 'Grok',
     description: 'Uses grok in a git worktree with auto-discovered AGENTS.md.',
     icon: '/icons/agents/grok.svg',
     supportsChat: true,
+    supportsUsage: false,
+    supportsSkills: false,
   },
   kilo: {
     label: 'Kilo Code',
@@ -64,6 +91,8 @@ const AGENT_META_BY_KIND: Record<BackendKind, Omit<AgentMeta, 'kind'>> = {
       'Uses kilo in a git worktree with auto-discovered AGENTS.md and permissions set to allow.',
     icon: '/icons/agents/kilo.svg',
     supportsChat: true,
+    supportsUsage: false,
+    supportsSkills: false,
   },
 }
 

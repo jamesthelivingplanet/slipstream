@@ -50,6 +50,7 @@ function makeDeps(
   overrides: {
     getOpencodeState?: ISessionManager['getOpencodeState']
     opencodeDbPath?: string
+    kiloDbPath?: string
     grokDbPath?: string
   } = {},
 ) {
@@ -68,6 +69,9 @@ function makeDeps(
     // that don't care about the durable-store fallback still get a clean
     // available:false without risking a hit on the actual machine's store.
     opencodeDbPath: overrides.opencodeDbPath ?? path.join(tmp, 'opencode-unused.db'),
+    // Same idea for kilo's OWN durable store (a separate file from
+    // opencode's) — default to a nonexistent path under tmp.
+    kiloDbPath: overrides.kiloDbPath ?? path.join(tmp, 'kilo-unused.db'),
     // Same idea for grok's durable store — default to a nonexistent path
     // under tmp so tests that don't care get a clean available:false without
     // risking a hit on the real machine's ~/.grok/grok.db.
@@ -451,6 +455,80 @@ describe('readSessionChat', () => {
     const { available, messages } = await readSessionChat(
       makeDeps({ getOpencodeState: () => undefined }),
       makeSession({ agentKind: 'opencode' }),
+    )
+    expect(available).toBe(false)
+    expect(messages).toEqual([])
+    expect(fetchOpencodeMessages).not.toHaveBeenCalled()
+  })
+
+  it("falls back to kilo's OWN durable SQLite store (kiloDbPath), not opencode's, for a kilo session", async () => {
+    const kiloDbFile = path.join(tmp, 'kilo.db')
+    makeOpencodeDbFixture(kiloDbFile, 'ses_kilo') // schema-identical fixture builder, per opencodeStore.ts
+    // An opencode.db also exists at the default opencode path, but has NO
+    // row for this session id — if the reader ever regresses to hardcoding
+    // opencodeDbPath() for kilo (the bug this fixes), this would surface as
+    // available:false instead of the durable-store hit below.
+    const opencodeDbFile = path.join(tmp, 'opencode.db')
+    makeOpencodeDbFixture(opencodeDbFile, 'some_other_opencode_session')
+    const deps = makeDeps({
+      getOpencodeState: () => undefined,
+      kiloDbPath: kiloDbFile,
+      opencodeDbPath: opencodeDbFile,
+    })
+
+    const { available, messages } = await readSessionChat(
+      deps,
+      makeSession({ agentKind: 'kilo', opencodeSid: 'ses_kilo' }),
+    )
+
+    expect(available).toBe(true)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ role: 'user' })
+  })
+
+  it("returns available:false for kilo when the sid is only present in opencode's db, not kilo's", async () => {
+    const kiloDbFile = path.join(tmp, 'kilo.db')
+    makeOpencodeDbFixture(kiloDbFile, 'ses_other') // no row for 'ses_kilo'
+    const opencodeDbFile = path.join(tmp, 'opencode.db')
+    makeOpencodeDbFixture(opencodeDbFile, 'ses_kilo') // present in the WRONG store
+    const deps = makeDeps({
+      getOpencodeState: () => undefined,
+      kiloDbPath: kiloDbFile,
+      opencodeDbPath: opencodeDbFile,
+    })
+
+    const { available, messages } = await readSessionChat(
+      deps,
+      makeSession({ agentKind: 'kilo', opencodeSid: 'ses_kilo' }),
+    )
+
+    expect(available).toBe(false)
+    expect(messages).toEqual([])
+  })
+
+  it('reads kilo messages from the live embedded server state, same as opencode', async () => {
+    vi.mocked(fetchOpencodeMessages).mockResolvedValue([
+      {
+        info: { id: 'msg1', role: 'user', time: { created: 0 } },
+        parts: [{ type: 'text', text: 'Begin implementing T-1 via kilo.' }],
+      },
+    ])
+    const deps = makeDeps({
+      getOpencodeState: () => ({ port: 5555, sid: 'ses_kilo_live' }),
+    })
+
+    const { available, messages } = await readSessionChat(deps, makeSession({ agentKind: 'kilo' }))
+
+    expect(available).toBe(true)
+    expect(fetchOpencodeMessages).toHaveBeenCalledWith(5555, 'ses_kilo_live')
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ role: 'user' })
+  })
+
+  it('returns available:false for kilo with no captured port/sid and no durable store row', async () => {
+    const { available, messages } = await readSessionChat(
+      makeDeps({ getOpencodeState: () => undefined }),
+      makeSession({ agentKind: 'kilo' }),
     )
     expect(available).toBe(false)
     expect(messages).toEqual([])

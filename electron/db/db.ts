@@ -77,8 +77,8 @@ export function upsertSession(db: Database.Database, session: SessionDTO): void 
   prepared(
     db,
     `
-    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt, ownerId, prUrl, src, parentId)
-    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt, @ownerId, @prUrl, @src, @parentId)
+    INSERT INTO sessions (id, tid, title, prompt, repoId, branch, status, port, systemPrompt, agentKind, opencodeSid, createdAt, ownerId, prUrl, src, parentId, mode)
+    VALUES (@id, @tid, @title, @prompt, @repoId, @branch, @status, @port, @systemPrompt, @agentKind, @opencodeSid, @createdAt, @ownerId, @prUrl, @src, @parentId, @mode)
     ON CONFLICT(id) DO UPDATE SET
       tid          = excluded.tid,
       title        = excluded.title,
@@ -94,7 +94,8 @@ export function upsertSession(db: Database.Database, session: SessionDTO): void 
       ownerId      = excluded.ownerId,
       prUrl        = excluded.prUrl,
       src          = excluded.src,
-      parentId     = excluded.parentId
+      parentId     = excluded.parentId,
+      mode         = excluded.mode
   `,
   ).run({
     ...session,
@@ -106,6 +107,7 @@ export function upsertSession(db: Database.Database, session: SessionDTO): void 
     prUrl: session.prUrl ?? null,
     src: session.src ?? null,
     parentId: session.parentId ?? null,
+    mode: session.mode ?? null,
   })
 }
 

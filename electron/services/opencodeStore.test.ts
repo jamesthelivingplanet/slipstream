@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 
-import { opencodeDbPath, readOpencodeMessagesFromStore } from './opencodeStore.js'
+import { opencodeDbPath, kiloDbPath, readOpencodeMessagesFromStore } from './opencodeStore.js'
 import { opencodeMessagesToChat } from './opencodeSessions.js'
 
 /** Build a temp opencode.db with the message/part schema this module reads,
@@ -88,6 +88,35 @@ describe('opencodeDbPath', () => {
     expect(opencodeDbPath()).toBe(
       path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db'),
     )
+  })
+})
+
+describe('kiloDbPath', () => {
+  let prevXdg: string | undefined
+
+  beforeEach(() => {
+    prevXdg = process.env.XDG_DATA_HOME
+  })
+  afterEach(() => {
+    if (prevXdg === undefined) delete process.env.XDG_DATA_HOME
+    else process.env.XDG_DATA_HOME = prevXdg
+  })
+
+  it('respects XDG_DATA_HOME', () => {
+    process.env.XDG_DATA_HOME = '/xdg-home'
+    expect(kiloDbPath()).toBe(path.join('/xdg-home', 'kilo', 'kilo.db'))
+  })
+
+  it('falls back to ~/.local/share', () => {
+    delete process.env.XDG_DATA_HOME
+    expect(kiloDbPath()).toBe(path.join(os.homedir(), '.local', 'share', 'kilo', 'kilo.db'))
+  })
+
+  it('is a distinct path from opencodeDbPath under the same base dir', () => {
+    process.env.XDG_DATA_HOME = '/xdg-home'
+    expect(kiloDbPath()).not.toBe(opencodeDbPath())
+    expect(kiloDbPath()).toBe(path.join('/xdg-home', 'kilo', 'kilo.db'))
+    expect(opencodeDbPath()).toBe(path.join('/xdg-home', 'opencode', 'opencode.db'))
   })
 })
 

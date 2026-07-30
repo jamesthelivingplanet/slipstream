@@ -19,11 +19,16 @@
  * show delegated work instead of a black box between "Delegated: ..." and
  * the result.
  *
- * opencode-family backends have two sources, tried in order: the embedded
- * TUI server's live in-memory state (freshest, but gone once the process
- * exits or the daemon restarts), then opencode's own durable SQLite store
- * (opencodeStore.ts) keyed by the persisted `session.opencodeSid`. Without
- * the fallback, an opencode session's ENTIRE chat history would vanish the
+ * opencode-family backends (opencode AND kilo — an opencode fork sharing the
+ * same embedded-server/session-store shape, see usesEmbeddedServer in
+ * agentBackend.ts) have two sources, tried in order: the embedded TUI
+ * server's live in-memory state (freshest, but gone once the process exits or
+ * the daemon restarts), then the backend's OWN durable SQLite store
+ * (opencodeStore.ts) keyed by the persisted `session.opencodeSid`. Kilo reads
+ * `kiloDbPath()`, NOT opencode's `opencodeDbPath()` — they are separate db
+ * files even though both are read via the same `readOpencodeMessagesFromStore`
+ * (schema-identical, see opencodeStore.ts's doc comment). Without the
+ * fallback, an opencode/kilo session's ENTIRE chat history would vanish the
  * moment its process wasn't live to ask — unlike claude-code (JSONL
  * transcript) and pi (session file), which were always durable.
  *
@@ -50,7 +55,7 @@ import { parseTranscriptMessages } from './transcriptMessages.js'
 import { parsePiChatMessages } from './piChatMessages.js'
 import { findNewestPiSessionFile, piSessionDirFor, readPiSessionFile } from './piSessions.js'
 import { fetchOpencodeMessages, opencodeMessagesToChat } from './opencodeSessions.js'
-import { opencodeDbPath, readOpencodeMessagesFromStore } from './opencodeStore.js'
+import { opencodeDbPath, kiloDbPath, readOpencodeMessagesFromStore } from './opencodeStore.js'
 import { grokDbPath, readGrokMessagesFromStore } from './grokStore.js'
 
 export interface ChatReaderDeps {
@@ -65,6 +70,11 @@ export interface ChatReaderDeps {
    *  per-machine store. Not part of any live-process dep, so it's a plain
    *  optional field rather than threaded through an interface. */
   opencodeDbPath?: string
+  /** Override for kilo's OWN durable SQLite store path (kiloDbPath() by
+   *  default) — a SEPARATE file from opencode's, despite kilo reusing
+   *  opencode's reader/mapper (see opencodeStore.ts's module doc comment).
+   *  Same test-fixture-override idiom as opencodeDbPath. */
+  kiloDbPath?: string
   /** Override for grok's durable SQLite store path (grokDbPath() by
    *  default) — tests point this at a temp fixture instead of the real
    *  per-machine store. Not part of any live-process dep, so it's a plain
@@ -131,16 +141,22 @@ export async function readSessionChat(
       const raw = await fetchOpencodeMessages(state.port, state.sid)
       return { available: true, messages: opencodeMessagesToChat(raw) }
     }
-    // No live port/sid — the opencode process exited, or the daemon
-    // restarted and wiped in-memory session state. Fall back to opencode's
-    // own durable SQLite store keyed by the sid Slipstream persisted
-    // alongside the session row (session.opencodeSid), so history recovered
-    // this way survives exactly the restarts the live path can't.
+    // No live port/sid — the opencode/kilo process exited, or the daemon
+    // restarted and wiped in-memory session state. Fall back to this
+    // backend's OWN durable SQLite store keyed by the sid Slipstream
+    // persisted alongside the session row (session.opencodeSid — kilo reuses
+    // this field too, see StartArgsCtx/ResumeArgsCtx in agentBackend.ts), so
+    // history recovered this way survives exactly the restarts the live path
+    // can't. Kilo and opencode are schema-identical but store to SEPARATE db
+    // files (opencodeStore.ts's doc comment) — reading a kilo sid out of
+    // opencode's db (or vice versa) matches nothing, so the path must be
+    // selected by kind, not hardcoded to opencode's.
     if (!session.opencodeSid) return { available: false, messages: [] }
-    const raw = readOpencodeMessagesFromStore(
-      session.opencodeSid,
-      deps.opencodeDbPath ?? opencodeDbPath(),
-    )
+    const dbPath =
+      kind === 'kilo'
+        ? (deps.kiloDbPath ?? kiloDbPath())
+        : (deps.opencodeDbPath ?? opencodeDbPath())
+    const raw = readOpencodeMessagesFromStore(session.opencodeSid, dbPath)
     const messages = opencodeMessagesToChat(raw)
     if (messages.length === 0) return { available: false, messages: [] }
     return { available: true, messages }

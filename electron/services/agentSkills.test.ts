@@ -8,6 +8,8 @@ import {
   mergeSkills,
   listAgentSkillsFor,
 } from './agentSkills.js'
+import { BACKEND_KINDS } from '../shared/contract.js'
+import { AGENT_META } from '../shared/agents.js'
 
 // ─── parseSkillFrontmatter ───────────────────────────────────────────────────
 
@@ -238,4 +240,36 @@ describe('listAgentSkillsFor', () => {
     fs.writeFileSync(path.join(skillsDir, 'not-a-skill', 'README.md'), 'nope')
     expect(await listAgentSkillsFor('claude-code', cwd)).toEqual([])
   })
+
+  // ─── supportsSkills capability reconciliation ─────────────────────────────
+  // Drives the "no known convention" expectation from AGENT_META's
+  // supportsSkills flag (electron/shared/agents.ts) directly rather than a
+  // hand-maintained kind list, so a future kind added to one without the
+  // other fails here instead of silently drifting (per this file's own
+  // top-of-file doc comment cross-reference).
+
+  it('every BackendKind has an AGENT_META entry', () => {
+    for (const kind of BACKEND_KINDS) {
+      expect(AGENT_META.find((m) => m.kind === kind)).toBeDefined()
+    }
+  })
+
+  it.each(BACKEND_KINDS.filter((k) => !AGENT_META.find((m) => m.kind === k)?.supportsSkills))(
+    '%s: supportsSkills:false in AGENT_META means always [] (no known convention), even with a populated .claude/skills dir',
+    async (kind) => {
+      writeSkill(path.join(cwd, '.claude', 'skills'), 'irrelevant')
+      expect(await listAgentSkillsFor(kind, cwd)).toEqual([])
+    },
+  )
+
+  it.each(BACKEND_KINDS.filter((k) => AGENT_META.find((m) => m.kind === k)?.supportsSkills))(
+    '%s: supportsSkills:true in AGENT_META means listAgentSkillsFor has a real per-kind branch (not the default-[] fallthrough)',
+    (kind) => {
+      // claude-code/pi/opencode are the only kinds with a documented
+      // convention today — this just guards that AGENT_META's true set
+      // doesn't grow ahead of an actual implemented branch in
+      // listAgentSkillsFor's switch.
+      expect(['claude-code', 'pi', 'opencode']).toContain(kind)
+    },
+  )
 })

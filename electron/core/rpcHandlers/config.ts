@@ -6,7 +6,9 @@ import type {
   GcPolicy,
   GitHost,
   SchedulerPolicy,
+  SpawnPolicy,
 } from '../../shared/contract.js'
+import { DEFAULT_SPAWN_POLICY } from '../../shared/contract.js'
 import { GIT_PROVIDERS } from '../../services/gitProviders/registry.js'
 import { parseAgentArgs } from '../../shared/agentCli.js'
 import { readGcPolicy, writeGcPolicy } from '../../services/sessionReaper.js'
@@ -18,6 +20,45 @@ const GIT_HOST_IDS = new Set(GIT_PROVIDERS.map((p) => p.meta.id))
 
 function isGitHost(host: unknown): host is GitHost {
   return typeof host === 'string' && GIT_HOST_IDS.has(host as GitHost)
+}
+
+// Agent-spawn guardrail policy (seam only — no enforcement here). Persisted
+// under a single JSON config key, same pattern as GcPolicy/SchedulerPolicy
+// (readGcPolicy/readSchedulerPolicy), but kept local here rather than in a
+// dedicated service module since nothing yet consumes/enforces it.
+const SPAWN_POLICY_KEY = 'spawn.policy'
+
+function coerceSpawnPolicy(partial: unknown): SpawnPolicy {
+  const p = (partial ?? {}) as Partial<SpawnPolicy>
+  const field = (raw: unknown, def: number): number => {
+    const n = typeof raw === 'number' && Number.isFinite(raw) ? Math.floor(raw) : def
+    return Math.max(0, n)
+  }
+  return {
+    maxDepth: field(p.maxDepth, DEFAULT_SPAWN_POLICY.maxDepth),
+    maxChildrenPerSession: field(
+      p.maxChildrenPerSession,
+      DEFAULT_SPAWN_POLICY.maxChildrenPerSession,
+    ),
+    maxSpawnsPerHour: field(p.maxSpawnsPerHour, DEFAULT_SPAWN_POLICY.maxSpawnsPerHour),
+  }
+}
+
+function readSpawnPolicy(config: { get(key: string): string | undefined }): SpawnPolicy {
+  const raw = config.get(SPAWN_POLICY_KEY)
+  if (!raw) return { ...DEFAULT_SPAWN_POLICY }
+  try {
+    return coerceSpawnPolicy(JSON.parse(raw))
+  } catch {
+    return { ...DEFAULT_SPAWN_POLICY }
+  }
+}
+
+function writeSpawnPolicy(
+  config: { set(key: string, value: string): void },
+  policy: SpawnPolicy,
+): void {
+  config.set(SPAWN_POLICY_KEY, JSON.stringify(coerceSpawnPolicy(policy)))
 }
 
 export function createConfigHandlers(deps: IpcDeps, _ctx: RpcContext): ChannelHandlerMap {
@@ -112,6 +153,15 @@ export function createConfigHandlers(deps: IpcDeps, _ctx: RpcContext): ChannelHa
     [IPC.setSchedulerPolicy]: async (args) => {
       writeSchedulerPolicy(deps.config, args[0] as SchedulerPolicy)
       void deps.scheduler?.drain() // raising the cap frees slots immediately
+      return undefined
+    },
+
+    [IPC.getSpawnPolicy]: async () => {
+      return readSpawnPolicy(deps.config)
+    },
+
+    [IPC.setSpawnPolicy]: async (args) => {
+      writeSpawnPolicy(deps.config, args[0] as SpawnPolicy)
       return undefined
     },
   }

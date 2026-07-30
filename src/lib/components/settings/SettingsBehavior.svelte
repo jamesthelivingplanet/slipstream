@@ -10,6 +10,8 @@
     setGcPolicy,
     getSchedulerPolicy,
     setSchedulerPolicy,
+    getSpawnPolicy,
+    setSpawnPolicy,
   } from '../../ipc'
   import { pushToast } from '../../toast'
   import { mobile, settingsOpen, settingsRepoId } from '../../stores'
@@ -26,11 +28,13 @@
   import type {
     GcPolicy,
     SchedulerPolicy,
+    SpawnPolicy,
     AgentArgsConfig,
   } from '../../../../electron/shared/contract.js'
   import {
     DEFAULT_GC_POLICY,
     DEFAULT_SCHEDULER_POLICY,
+    DEFAULT_SPAWN_POLICY,
   } from '../../../../electron/shared/contract.js'
 
   let editorCommand = ''
@@ -151,6 +155,36 @@
     }
   }
 
+  let spawnPolicy: SpawnPolicy = { ...DEFAULT_SPAWN_POLICY }
+  let spawnPending = false
+
+  async function loadSpawnPolicy() {
+    if (!hasBackend) return
+    try {
+      spawnPolicy = await getSpawnPolicy()
+    } catch {
+      /* ignore */
+    }
+  }
+  async function saveSpawnPolicy() {
+    if (!hasBackend) return
+    spawnPending = true
+    try {
+      const next: SpawnPolicy = {
+        maxDepth: Math.max(0, Math.round(spawnPolicy.maxDepth)),
+        maxChildrenPerSession: Math.max(0, Math.round(spawnPolicy.maxChildrenPerSession)),
+        maxSpawnsPerHour: Math.max(0, Math.round(spawnPolicy.maxSpawnsPerHour)),
+      }
+      await setSpawnPolicy(next)
+      spawnPolicy = next
+      pushToast('success', 'Spawn limits saved')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Failed to save settings')
+    } finally {
+      spawnPending = false
+    }
+  }
+
   // TASK-EQOP4: closes Settings so the replayed onboarding (pager or modal,
   // per onboardingMode()) isn't stacked underneath the still-open panel.
   function handleReplayOnboarding() {
@@ -172,6 +206,7 @@
     loadAgentArgs()
     loadGcPolicy()
     loadSchedulerPolicy()
+    loadSpawnPolicy()
     initFabPrefs()
   })
 </script>
@@ -344,6 +379,56 @@
     style="margin-top:8px"
     on:click={saveSchedulerPolicy}
     disabled={schedPending || !hasBackend}>Save</button
+  >
+  {#if !hasBackend}
+    <p class="integration-hint muted">Backend not available in browser-only mode.</p>
+  {/if}
+</SettingsSection>
+
+<SettingsSection title="Spawn limits">
+  <p class="integration-hint">
+    Agents can ask the daemon to launch other agents (<code>slipstream new-agent</code>). These caps
+    bound how far that can fan out — a runaway agent can't spawn an unbounded chain of sibling PTYs
+    and API cost.
+  </p>
+  <div class="repo-settings-field">
+    <label class="lbl-f" for="spawn-depth">Max spawn depth (0 = unlimited)</label>
+    <input
+      id="spawn-depth"
+      type="number"
+      min="0"
+      class="path-input"
+      bind:value={spawnPolicy.maxDepth}
+      disabled={spawnPending || !hasBackend}
+    />
+  </div>
+  <div class="repo-settings-field">
+    <label class="lbl-f" for="spawn-children">Max children per session (0 = unlimited)</label>
+    <input
+      id="spawn-children"
+      type="number"
+      min="0"
+      class="path-input"
+      bind:value={spawnPolicy.maxChildrenPerSession}
+      disabled={spawnPending || !hasBackend}
+    />
+  </div>
+  <div class="repo-settings-field">
+    <label class="lbl-f" for="spawn-rate">Max spawns per hour, per session (0 = unlimited)</label>
+    <input
+      id="spawn-rate"
+      type="number"
+      min="0"
+      class="path-input"
+      bind:value={spawnPolicy.maxSpawnsPerHour}
+      disabled={spawnPending || !hasBackend}
+    />
+  </div>
+  <button
+    class="btn btn-outline btn-sm"
+    style="margin-top:8px"
+    on:click={saveSpawnPolicy}
+    disabled={spawnPending || !hasBackend}>Save</button
   >
   {#if !hasBackend}
     <p class="integration-hint muted">Backend not available in browser-only mode.</p>

@@ -14,6 +14,12 @@
  *    (project — opencode's own docs are inconsistent on the dir name, so both
  *    are tried), `~/.config/opencode/skills` (user).
  *  - antigravity/grok/kilo: no known convention — always [].
+ *
+ * The switch below (claude-code/pi/opencode capable, everything else [])
+ * must exactly mirror AGENT_META's `supportsSkills` flag per kind
+ * (electron/shared/agents.ts) — verified in agentSkills.test.ts's
+ * cross-check against BACKEND_KINDS, so a future kind added to one without
+ * the other fails a test instead of silently drifting.
  */
 import { readdir, readFile } from 'node:fs/promises'
 import * as path from 'node:path'

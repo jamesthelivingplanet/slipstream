@@ -5,6 +5,7 @@ import { createAgentSpawnService } from './agentSpawnService.js'
 import type { AgentSpawnDeps, AgentSpawnScheduler } from './agentSpawnService.js'
 import type { LaunchDeps, LaunchRequest } from './sessionLauncher.js'
 import type { AgentResponse } from './agentRequestSentinel.js'
+import type { IConfigStore } from './configStore.js'
 import type {
   AgentRequest,
   ISessionManager,
@@ -14,6 +15,7 @@ import type {
   RepoDTO,
   SessionDTO,
   SessionOutcomeDTO,
+  SpawnPolicy,
 } from '../shared/contract.js'
 
 function makeRepo(overrides: Partial<RepoDTO> = {}): RepoDTO {
@@ -50,6 +52,10 @@ interface Fakes {
   outcomeMap: Map<string, SessionOutcomeDTO>
   responses: Record<string, AgentResponse[]>
   scheduler?: AgentSpawnScheduler
+  /** Set/clear the persisted spawn.policy value the fake config store
+   *  returns. Pass undefined to simulate an unset key (falls back to
+   *  DEFAULT_SPAWN_POLICY), or a raw string to simulate malformed JSON. */
+  setSpawnPolicy: (policy: Partial<SpawnPolicy> | string | undefined) => void
   deps: AgentSpawnDeps
 }
 
@@ -164,18 +170,31 @@ function makeFakes(opts: { withScheduler?: boolean } = {}): Fakes {
       }
     : undefined
 
+  // Fake config store: defaults to no persisted policy (readSpawnPolicy
+  // falls back to DEFAULT_SPAWN_POLICY), overridable per-test via
+  // setSpawnPolicy.
+  let spawnPolicyRaw: string | undefined
+  const config: Pick<IConfigStore, 'get'> = {
+    get: (key: string) => (key === 'spawn.policy' ? spawnPolicyRaw : undefined),
+  }
+  const setSpawnPolicy = (policy: Partial<SpawnPolicy> | string | undefined): void => {
+    spawnPolicyRaw =
+      typeof policy === 'string' || policy === undefined ? policy : JSON.stringify(policy)
+  }
+
   const deps: AgentSpawnDeps = {
     sessions,
     sessionStore,
     repos,
     outcomeStore,
+    config,
     launchDeps,
     scheduler,
     dataDir: '/data',
     writeResponse,
   }
 
-  return { emitter, sessionStore, repoList, outcomeMap, responses, scheduler, deps }
+  return { emitter, sessionStore, repoList, outcomeMap, responses, scheduler, setSpawnPolicy, deps }
 }
 
 /** Emit an agentRequest and wait for its response to land — the handler runs
@@ -474,6 +493,255 @@ describe('agentSpawnService — agents', () => {
       const child2 = data.find((a) => a.sessionId === 'child-2')!
       expect(child2.outcome).toBeUndefined()
     }
+    service.dispose()
+  })
+})
+
+function newAgentReq(overrides: Partial<AgentRequest> = {}): AgentRequest {
+  return {
+    id: 'req-limit',
+    kind: 'new-agent',
+    ts: Date.now(),
+    repo: 'acme/api',
+    title: 'Do the thing',
+    prompt: 'go',
+    ...overrides,
+  } as AgentRequest
+}
+
+describe('agentSpawnService — SpawnPolicy: maxDepth', () => {
+  it('allows a spawn at exactly the depth limit', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 2, maxChildrenPerSession: 0, maxSpawnsPerHour: 0 })
+    // root (depth 0) -> mid (depth 1); spawning from mid puts the new child
+    // at depth 2, which is exactly the limit.
+    fakes.sessionStore.upsert(makeSession({ id: 'root' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'mid', parentId: 'root' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(fakes, 'mid', newAgentReq({ id: 'req-depth-ok' }))
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('refuses a spawn that would exceed the depth limit', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 2, maxChildrenPerSession: 0, maxSpawnsPerHour: 0 })
+    // root (0) -> mid (1) -> deep (2); spawning from deep would put the new
+    // child at depth 3, over the limit of 2.
+    fakes.sessionStore.upsert(makeSession({ id: 'root' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'mid', parentId: 'root' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'deep', parentId: 'mid' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(fakes, 'deep', newAgentReq({ id: 'req-depth-bad' }))
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toMatch(/depth/i)
+    expect(fakes.scheduler!.submit).not.toHaveBeenCalled()
+    service.dispose()
+  })
+
+  it('maxDepth: 0 means unlimited', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 0, maxChildrenPerSession: 0, maxSpawnsPerHour: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'root' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'mid', parentId: 'root' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'deep', parentId: 'mid' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'deeper', parentId: 'deep' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'deeper',
+      newAgentReq({ id: 'req-depth-unlim' }),
+    )
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+})
+
+describe('agentSpawnService — SpawnPolicy: maxChildrenPerSession', () => {
+  it('allows a spawn under the children cap', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 0, maxChildrenPerSession: 2, maxSpawnsPerHour: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'child-1', parentId: 'parent-1' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', newAgentReq({ id: 'req-child-ok' }))
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('refuses a spawn at the children cap', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 0, maxChildrenPerSession: 2, maxSpawnsPerHour: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'child-1', parentId: 'parent-1' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'child-2', parentId: 'parent-1' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'parent-1',
+      newAgentReq({ id: 'req-child-bad' }),
+    )
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toMatch(/child/i)
+    expect(fakes.scheduler!.submit).not.toHaveBeenCalled()
+    service.dispose()
+  })
+
+  it('maxChildrenPerSession: 0 means unlimited', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 0, maxChildrenPerSession: 0, maxSpawnsPerHour: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    for (let i = 0; i < 10; i++) {
+      fakes.sessionStore.upsert(makeSession({ id: `child-${i}`, parentId: 'parent-1' }))
+    }
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'parent-1',
+      newAgentReq({ id: 'req-child-unlim' }),
+    )
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+})
+
+describe('agentSpawnService — SpawnPolicy: maxSpawnsPerHour', () => {
+  it('allows a spawn under the hourly rate cap', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 0, maxChildrenPerSession: 0, maxSpawnsPerHour: 2 })
+    const nowMs = Date.now()
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.sessionStore.upsert(
+      makeSession({ id: 'child-1', parentId: 'parent-1', createdAt: nowMs - 5 * 60_000 }),
+    )
+    fakes.repoList.push(makeRepo())
+    const deps: AgentSpawnDeps = { ...fakes.deps, now: () => nowMs }
+    const service = createAgentSpawnService(deps)
+
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', newAgentReq({ id: 'req-rate-ok' }))
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('refuses a spawn at the hourly rate cap, ignoring spawns older than an hour', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 0, maxChildrenPerSession: 0, maxSpawnsPerHour: 2 })
+    const nowMs = Date.now()
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.sessionStore.upsert(
+      makeSession({ id: 'child-1', parentId: 'parent-1', createdAt: nowMs - 5 * 60_000 }),
+    )
+    fakes.sessionStore.upsert(
+      makeSession({ id: 'child-2', parentId: 'parent-1', createdAt: nowMs - 10 * 60_000 }),
+    )
+    // Outside the rolling hour window — must not count toward the cap.
+    fakes.sessionStore.upsert(
+      makeSession({ id: 'child-old', parentId: 'parent-1', createdAt: nowMs - 90 * 60_000 }),
+    )
+    fakes.repoList.push(makeRepo())
+    const deps: AgentSpawnDeps = { ...fakes.deps, now: () => nowMs }
+    const service = createAgentSpawnService(deps)
+
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', newAgentReq({ id: 'req-rate-bad' }))
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toMatch(/hour/i)
+    expect(fakes.scheduler!.submit).not.toHaveBeenCalled()
+    service.dispose()
+  })
+
+  it('maxSpawnsPerHour: 0 means unlimited', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 0, maxChildrenPerSession: 0, maxSpawnsPerHour: 0 })
+    const nowMs = Date.now()
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    for (let i = 0; i < 10; i++) {
+      fakes.sessionStore.upsert(
+        makeSession({ id: `child-${i}`, parentId: 'parent-1', createdAt: nowMs - 60_000 }),
+      )
+    }
+    fakes.repoList.push(makeRepo())
+    const deps: AgentSpawnDeps = { ...fakes.deps, now: () => nowMs }
+    const service = createAgentSpawnService(deps)
+
+    const res = await emitAndWaitForResponse(
+      fakes,
+      'parent-1',
+      newAgentReq({ id: 'req-rate-unlim' }),
+    )
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+})
+
+describe('agentSpawnService — SpawnPolicy: read failure falls back to defaults', () => {
+  it('falls back to DEFAULT_SPAWN_POLICY (not unlimited) on malformed persisted policy', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    // Malformed JSON — readSpawnPolicy must fall back to DEFAULT_SPAWN_POLICY
+    // (maxDepth 2, maxChildrenPerSession 5, maxSpawnsPerHour 20), never to
+    // unlimited (0/0/0), or this spawn (11th child) would wrongly succeed.
+    fakes.setSpawnPolicy('{not valid json')
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    for (let i = 0; i < 5; i++) {
+      fakes.sessionStore.upsert(makeSession({ id: `child-${i}`, parentId: 'parent-1' }))
+    }
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', newAgentReq({ id: 'req-fallback' }))
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toMatch(/child/i)
+    service.dispose()
+  })
+})
+
+describe('agentSpawnService — SpawnPolicy refusal is durable across restart replay', () => {
+  it('never reprocesses (and never retries) a request that was already refused', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.setSpawnPolicy({ maxDepth: 0, maxChildrenPerSession: 1, maxSpawnsPerHour: 0 })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'child-1', parentId: 'parent-1' }))
+    // Simulate: this request was already refused in a previous daemon run —
+    // responses.ndjson already has an ok:false entry for it before the
+    // service starts (a refusal is an answer, seeded exactly like a success).
+    fakes.responses['parent-1'] = [
+      { id: 'req-refused', ok: false, ts: 1, error: 'Spawn refused: child limit' },
+    ]
+    const deps: AgentSpawnDeps = {
+      ...fakes.deps,
+      readResponses: (parentSessionId) => fakes.responses[parentSessionId] ?? [],
+    }
+    const service = createAgentSpawnService(deps)
+
+    fakes.emitter.emit('agentRequest', 'parent-1', newAgentReq({ id: 'req-refused' }))
+
+    // Give any (incorrect) async re-processing a chance to run before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(fakes.scheduler!.submit).not.toHaveBeenCalled()
+    // The seeded refusal is untouched — no second entry was appended.
+    expect(fakes.responses['parent-1']).toHaveLength(1)
+    expect(fakes.responses['parent-1'][0].ok).toBe(false)
     service.dispose()
   })
 })

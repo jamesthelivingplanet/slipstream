@@ -209,6 +209,25 @@ describe('launchSession — happy path', () => {
     expect(deps.tickets.startTicket).not.toHaveBeenCalled()
   })
 
+  it('TASK-CIOEQ: persists mode alongside skipTicket so it round-trips after this launch call', async () => {
+    const deps = makeDeps()
+    const session = await launchSession(
+      deps,
+      makeReq({ tid: 'CHAT-1', skipTicket: true, mode: 'chat' }),
+    )
+
+    expect(session.mode).toBe('chat')
+    expect(deps.sessionStore.get('s1')?.mode).toBe('chat')
+  })
+
+  it('TASK-CIOEQ: leaves mode undefined for the default ticket-backed flow', async () => {
+    const deps = makeDeps()
+    const session = await launchSession(deps, makeReq())
+
+    expect(session.mode).toBeUndefined()
+    expect(deps.sessionStore.get('s1')?.mode).toBeUndefined()
+  })
+
   it('builds the PTY env from agentSessionEnv (PORT only when no agentCli)', async () => {
     const deps = makeDeps()
     await launchSession(deps, makeReq())

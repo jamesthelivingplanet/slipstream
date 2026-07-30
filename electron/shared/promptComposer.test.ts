@@ -6,6 +6,7 @@ import {
   buildAgentsMdContent,
   deliverPrompt,
   buildHandoffPrompt,
+  buildChatHandoffPrompt,
   formatChatExcerpt,
   AGENT_LABELS,
 } from './promptComposer.js'
@@ -345,6 +346,90 @@ describe('buildHandoffPrompt', () => {
     const result = buildHandoffPrompt(baseCtx)
     expect(result).toContain('terminal scrollback from before is not available')
     expect(result).not.toContain('Conversation so far')
+  })
+})
+
+describe('buildChatHandoffPrompt (TASK-CIOEQ)', () => {
+  const baseCtx = { fromAgent: 'Claude Code' }
+
+  it('signals this is a takeover, not a fresh start', () => {
+    const result = buildChatHandoffPrompt(baseCtx)
+    expect(result).toContain('taking over')
+    expect(result).toContain('Do not start over')
+  })
+
+  it('includes the fromAgent label', () => {
+    const result = buildChatHandoffPrompt(baseCtx)
+    expect(result).toContain('Claude Code')
+  })
+
+  it('says there is no ticket and no merge request unless explicitly asked', () => {
+    const result = buildChatHandoffPrompt(baseCtx)
+    expect(result).toContain('no ticket')
+    expect(result.toLowerCase()).toContain('no merge request')
+  })
+
+  it('does not instruct opening a merge request', () => {
+    const result = buildChatHandoffPrompt(baseCtx)
+    expect(result).not.toContain('slipstream open-mr')
+  })
+
+  it('does not carry ticket-takeover framing (no tid/branch/base git-log instruction)', () => {
+    const result = buildChatHandoffPrompt(baseCtx)
+    expect(result).not.toContain('## Original request')
+    expect(result).not.toContain('git log')
+  })
+
+  it('frames waiting on the user as the normal resting state, same stance as buildChatSystemPrompt', () => {
+    const result = buildChatHandoffPrompt(baseCtx)
+    expect(result.toLowerCase()).toContain('normal resting state')
+    expect(result).toContain('slipstream request-input')
+    expect(result).toContain('slipstream task-started')
+  })
+
+  it('includes the original prompt when provided', () => {
+    const result = buildChatHandoffPrompt({ ...baseCtx, prompt: 'Help me refactor this module.' })
+    expect(result).toContain('Help me refactor this module.')
+  })
+
+  it('omits the prompt section entirely when no prompt was given (blank-chat start)', () => {
+    const withPrompt = buildChatHandoffPrompt({ ...baseCtx, prompt: 'something' })
+    const withoutPrompt = buildChatHandoffPrompt(baseCtx)
+    expect(withoutPrompt.length).toBeLessThan(withPrompt.length)
+  })
+
+  it('includes the outcome summary when provided', () => {
+    const result = buildChatHandoffPrompt({
+      ...baseCtx,
+      outcomeSummary: 'Answered the question, waiting on a follow-up.',
+    })
+    expect(result).toContain('Answered the question, waiting on a follow-up.')
+  })
+
+  it('omits "last reported summary" when outcomeSummary is not provided', () => {
+    const result = buildChatHandoffPrompt(baseCtx)
+    expect(result).not.toContain('last reported summary')
+  })
+
+  it('includes the prior conversation under a "Conversation so far" section when provided', () => {
+    const result = buildChatHandoffPrompt({
+      ...baseCtx,
+      priorConversation: 'User: hey\n\nAssistant: What can I help with?',
+    })
+    expect(result).toContain('Conversation so far (from Claude Code)')
+    expect(result).toContain('User: hey')
+    expect(result).toContain('Assistant: What can I help with?')
+  })
+
+  it('points at the conversation excerpt instead of the git-status fallback when a prior conversation exists', () => {
+    const result = buildChatHandoffPrompt({ ...baseCtx, priorConversation: 'User: hey' })
+    expect(result).toContain('conversation excerpt above')
+    expect(result).not.toContain('terminal scrollback from before is not available')
+  })
+
+  it('falls back to a git-status hint when no prior conversation is available', () => {
+    const result = buildChatHandoffPrompt(baseCtx)
+    expect(result).toContain('terminal scrollback from before is not available')
   })
 })
 

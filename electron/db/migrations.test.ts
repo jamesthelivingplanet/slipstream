@@ -132,6 +132,24 @@ describe('runMigrations', () => {
     })
   })
 
+  describe('migration 10 (TASK-CIOEQ sessions.mode)', () => {
+    it('adds the nullable mode column on a fresh DB', () => {
+      const f = makeFakeDb({ userVersion: 0 })
+      runMigrations(f.db)
+      expect(f.sessionCols.has('mode')).toBe(true)
+      const sql = f.execLog.find((s) => s.includes('ALTER TABLE sessions ADD COLUMN mode'))
+      expect(sql).toContain('ADD COLUMN mode TEXT')
+    })
+
+    it('runs only the new migration for a DB already at version 9', () => {
+      const f = makeFakeDb({ userVersion: 9 })
+      runMigrations(f.db)
+      expect(f.version).toBe(MIGRATIONS.length)
+      expect(f.execLog).toHaveLength(MIGRATIONS.length - 9)
+      expect(f.execLog[0]).toContain('ALTER TABLE sessions ADD COLUMN mode TEXT')
+    })
+  })
+
   describe('migration 8 (FLO-143 device_tokens)', () => {
     it('creates the device_tokens table with a unique index on tokenHash', () => {
       const f = makeFakeDb({ userVersion: 0 })

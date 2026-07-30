@@ -9,6 +9,7 @@ import {
   buildSystemPrompt,
   buildChatSystemPrompt,
   buildHandoffPrompt,
+  buildChatHandoffPrompt,
   formatChatExcerpt,
   AGENT_LABELS,
 } from '../../shared/promptComposer.js'
@@ -294,16 +295,28 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
       // reader (antigravity/grok) or nothing recoverable yields an empty
       // excerpt and the prompt falls back to the git-state path.
       const priorConversation = formatChatExcerpt((await readSessionChat(deps, persisted)).messages)
-      const handoffPrompt = buildHandoffPrompt({
-        tid: persisted.tid,
-        title: persisted.title,
-        prompt: persisted.prompt,
-        fromAgent: AGENT_LABELS[fromKind],
-        branch: persisted.branch,
-        base: repo.base,
-        outcomeSummary: outcome?.summary,
-        priorConversation,
-      })
+      // TASK-CIOEQ: a "blank chat" session (mode === 'chat', persisted at
+      // launch — see startSession above) gets the chat-flavored takeover
+      // prompt instead of the ticket one: no synthetic tid framing, no base-
+      // branch diff review, no "open the merge request" instruction.
+      const handoffPrompt =
+        persisted.mode === 'chat'
+          ? buildChatHandoffPrompt({
+              fromAgent: AGENT_LABELS[fromKind],
+              prompt: persisted.prompt,
+              outcomeSummary: outcome?.summary,
+              priorConversation,
+            })
+          : buildHandoffPrompt({
+              tid: persisted.tid,
+              title: persisted.title,
+              prompt: persisted.prompt,
+              fromAgent: AGENT_LABELS[fromKind],
+              branch: persisted.branch,
+              base: repo.base,
+              outcomeSummary: outcome?.summary,
+              priorConversation,
+            })
       return resumeProcedure(deps, {
         mode: 'handoff',
         session: persisted,
