@@ -275,7 +275,7 @@ public class SlipstreamMessagingService extends FirebaseMessagingService {
 
     /** Tap intent mirroring AgentWidgetProvider's launch intent. When an
      *  ask is present, the sessionId extra lets MainActivity deep-link into
-     *  that session (see MainActivity.forwardWidgetSessionId); otherwise
+     *  that session (see MainActivity.stashWidgetAction); otherwise
      *  the tap just opens the app. */
     private PendingIntent launchIntent(String askSessionId) {
         Intent launchIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());

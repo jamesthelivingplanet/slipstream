@@ -36,12 +36,14 @@ interface AppControlPluginListenerHandle {
 
 interface AppControlPlugin {
   syncWidget(options: { snapshotJson: string; updatedAt: number }): Promise<void>
-  // Fired by MainActivity.relayAgentIdToWebView() (native, not a syncWidget
-  // caller) when a widget row is tapped while the app is already running —
-  // see AppControlPlugin.notifyOpenAgent() on the native side. The
-  // cold-start case (app not yet running) instead arrives via the
-  // `?agent=` query param on the initial page load, same as the
-  // push-notification tap path — see App.svelte's onMount.
+  // No native code currently emits this event — there is no
+  // MainActivity/AppControlPlugin method that fires 'openAgent'. The live
+  // widget row-tap deep link (FLO-162) instead goes through the pending-
+  // action stash: MainActivity.stashWidgetAction() writes
+  // `{ sessionId, action }` to WidgetPrefs, and the SPA picks it up via
+  // consumePendingWidgetActionAndExecute() below. The `?agent=` query
+  // param remains real, but only for the push-notification tap path — see
+  // push.ts and App.svelte's onMount — not for the widget.
   // Capacitor 6 returned a Promise here; Capacitor 7 made addListener
   // synchronous and returns the bare handle instead (a breaking change that
   // isn't reflected if you only type against the older docs) — this app
@@ -346,15 +348,17 @@ export function subscribeWidgetSync(): () => void {
 let agentOpenListenerBoundFor: AppControlPlugin | null = null
 let agentOpenListenerHandle: AppControlPluginListenerHandle | null = null
 
-/** Warm-start half of the widget row-tap deep link (TASK-DM25C): when the
- *  app is already running, MainActivity can't use the CapConfig start-path
- *  trick (that only affects the WebView's *first* load), so it relays the
- *  tapped session's id natively via AppControlPlugin.notifyOpenAgent() —
- *  this listens for that event and opens the agent directly, the same
- *  openAgentById() the FCM push-tap path (push.ts) and the `?agent=` cold-
- *  start query param (App.svelte) both use, so every entry point converges
- *  on identical behavior. No-ops outside the Capacitor mobile shell. Returns
- *  an unsubscribe function, same shape as subscribeWidgetSync(). */
+/** Binds a Capacitor 'openAgent' listener that, as of FLO-162, nothing
+ *  native emits — currently unfired (see docs/SECURITY.md §12). The widget
+ *  row-tap deep link is handled elsewhere: MainActivity.stashWidgetAction()
+ *  stashes `{ sessionId, action }` into WidgetPrefs, and
+ *  consumePendingWidgetActionAndExecute() (below) picks it up and calls
+ *  openAgentById() for the `'open'` action. This function is kept rather
+ *  than deleted because its Capacitor 6-vs-7 dual-shape handling is
+ *  separately tested (see widgetSync.test.ts) and it would be the landing
+ *  point again if a native emitter of 'openAgent' is ever added. No-ops
+ *  outside the Capacitor mobile shell. Returns an unsubscribe function, same
+ *  shape as subscribeWidgetSync(). */
 export function subscribeWidgetAgentOpen(): () => void {
   if (!appControlAvailable()) return () => {}
   const plugin = widgetPlugin()
