@@ -65,6 +65,10 @@ Notes:
 - \`open-mr\` opens the MR from your current branch; commit and push with
   ordinary git first (open-mr's push is only a best-effort fallback).
   Report the printed MR URL in your final message.
+- Delegate work you don't need to do yourself: \`new-agent\` spawns an
+  independent agent in another repo (its own worktree, its own lifecycle);
+  \`repos\` lists what you can target; \`agents\` shows what you've spawned
+  and their status.
 - Exit codes: ${renderExitCodes(' · ')}. Each success prints the next expected transition.
 `
 }

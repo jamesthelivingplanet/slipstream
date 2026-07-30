@@ -34,6 +34,9 @@ describe('SLIPSTREAM_COMMANDS spec', () => {
       'checkpoint',
       'artifact publish',
       'open-mr',
+      'new-agent',
+      'repos',
+      'agents',
       'help',
     ])
   })

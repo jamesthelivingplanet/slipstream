@@ -154,6 +154,10 @@ CREATE TABLE device_tokens (
 );
 CREATE UNIQUE INDEX idx_device_tokens_hash ON device_tokens (tokenHash)
 `),
+  // 9 — TASK-CIOEQ: the session that spawned this one via the agent-spawn
+  // request channel (a token-free CLI agent asking the daemon for a new
+  // sibling agent). NULL for a session started directly by a human.
+  (db) => db.exec(`ALTER TABLE sessions ADD COLUMN parentId TEXT`),
 ]
 
 /**

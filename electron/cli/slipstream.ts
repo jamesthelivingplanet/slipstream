@@ -15,6 +15,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { execFile as _execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { randomUUID } from 'node:crypto'
 import type { GitHost, OutcomeResult, NeedsReason, AgentEventKind } from '../shared/contract.js'
 import {
   renderUsageCommandBlock,
@@ -27,6 +28,12 @@ import {
 import { STATUS_SENTINEL_FILE } from '../services/statusSentinel.js'
 import { OUTCOME_SENTINEL_FILE } from '../services/outcomeSentinel.js'
 import { AGENT_EVENTS_FILE } from '../services/agentEventsSentinel.js'
+import {
+  AGENT_REQUESTS_FILE,
+  AGENT_RESPONSES_FILE,
+  parseAgentResponses,
+  type AgentResponse,
+} from '../services/agentRequestSentinel.js'
 import { createGitDriver } from '../services/gitDriver.js'
 import { resolveRemote } from '../services/gitProviders/registry.js'
 import type { GitHostConfig } from '../services/gitProviders/types.js'
@@ -77,6 +84,26 @@ export interface CliDeps {
   }): Promise<{ url: string; isNew: boolean }>
   getRemoteUrl(cwd: string): Promise<string>
   writePrSentinel(url: string): Promise<void>
+  /** new-agent/repos/agents only (TASK-CIOEQ) — append a request line to this
+   *  session's `requests.ndjson` (the agent-spawn request channel; see
+   *  agentRequestSentinel.ts) and return the generated request id, so the
+   *  caller can poll `readResponses()` for the matching answer. */
+  sendRequest(
+    kind: 'new-agent' | 'repos' | 'agents',
+    payload: Record<string, unknown>,
+  ): Promise<string>
+  /** new-agent/repos/agents only — read and parse the CURRENT contents of
+   *  this session's `responses.ndjson`. Polled rather than tailed: the CLI
+   *  process is short-lived (one command, then exit), so there is no
+   *  fs.watch to hang a callback off — polling is simpler and sufficient. */
+  readResponses(): Promise<AgentResponse[]>
+  /** new-agent/repos/agents only — sleep between polls. Injected (rather than
+   *  a bare setTimeout) so tests can fake time instead of waiting out real
+   *  15s/60s timeouts. */
+  sleep(ms: number): Promise<void>
+  /** new-agent/repos/agents only — current time in ms. Injected alongside
+   *  `sleep` so timeout tests are deterministic. */
+  now(): number
 }
 
 /**
@@ -148,6 +175,58 @@ export function parseArgs(
 function usageError(deps: CliDeps, message: string): number {
   deps.stderr(`slipstream: ${message}\n\n${USAGE}`)
   return EXIT_USAGE
+}
+
+/** Render simple padded columns: each column is widened to its widest cell
+ *  (header included) plus a 2-space gap, mirroring renderUsageCommandBlock's
+ *  alignment style. Trailing whitespace on each row is trimmed. */
+function renderTable(headers: string[], rows: string[][]): string {
+  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)))
+  const renderRow = (cells: string[]): string =>
+    cells
+      .map((c, i) => c.padEnd(widths[i]))
+      .join('  ')
+      .trimEnd()
+  return [renderRow(headers), ...rows.map(renderRow)].join('\n')
+}
+
+/**
+ * Send a new-agent/repos/agents request and poll `responses.ndjson` for the
+ * matching id (TASK-CIOEQ). The CLI has no daemon auth token and is
+ * short-lived, so it can't wait on an RPC or an fs.watch callback — the
+ * agent-spawn channel is request/response-over-files instead: append a line
+ * to requests.ndjson, then poll responses.ndjson every ~150ms until the
+ * daemon (agentSpawnService.ts) answers by id or the deadline passes.
+ */
+async function sendAndAwait(
+  deps: CliDeps,
+  kind: 'new-agent' | 'repos' | 'agents',
+  payload: Record<string, unknown>,
+  timeoutMs: number,
+  onSuccess: (data: unknown) => void,
+): Promise<number> {
+  const id = await deps.sendRequest(kind, payload)
+  const deadline = deps.now() + timeoutMs
+  for (;;) {
+    const responses = await deps.readResponses()
+    const match = responses.find((r) => r.id === id)
+    if (match) {
+      if (match.ok) {
+        onSuccess(match.data)
+        return EXIT_OK
+      }
+      deps.stderr(match.error)
+      return EXIT_FAILED
+    }
+    if (deps.now() >= deadline) {
+      deps.stderr(
+        `slipstream: timed out waiting ${Math.round(timeoutMs / 1000)}s for a response to '${kind}'. ` +
+          'The app may be busy or unreachable — try again shortly.',
+      )
+      return EXIT_FAILED
+    }
+    await deps.sleep(150)
+  }
 }
 
 async function statusCommand(
@@ -265,6 +344,58 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         const action = result.isNew ? 'Opened' : 'Found existing'
         deps.stdout(`${action} merge/pull request: ${result.url}`)
         return EXIT_OK
+      }
+
+      case 'new-agent': {
+        const repo = flags['repo']
+        if (!repo) return usageError(deps, '--repo is required for new-agent')
+        const title = flags['title']
+        if (!title) return usageError(deps, '--title is required for new-agent')
+        const payload: Record<string, unknown> = {
+          repo,
+          title,
+          prompt: flags['prompt'] ?? '',
+          ...(flags['agent'] ? { agent: flags['agent'] } : {}),
+        }
+        return await sendAndAwait(deps, 'new-agent', payload, 60_000, (data) => {
+          const d = data as { tid: string; sessionId: string; branch: string; repo: string }
+          deps.stdout(
+            `Spawned agent ${d.tid} (session ${d.sessionId}) on branch \`${d.branch}\` in ${d.repo}.\n` +
+              'It runs independently in its own worktree — check on it anytime with `slipstream agents`.',
+          )
+        })
+      }
+
+      case 'repos': {
+        return await sendAndAwait(deps, 'repos', {}, 15_000, (data) => {
+          const rows = data as Array<{ org: string; name: string; base: string }>
+          if (rows.length === 0) {
+            deps.stdout('No repositories registered.')
+            return
+          }
+          deps.stdout(
+            renderTable(
+              ['REPO', 'BASE'],
+              rows.map((r) => [`${r.org}/${r.name}`, r.base]),
+            ),
+          )
+        })
+      }
+
+      case 'agents': {
+        return await sendAndAwait(deps, 'agents', {}, 15_000, (data) => {
+          const rows = data as Array<{ tid: string; title: string; status: string; repo: string }>
+          if (rows.length === 0) {
+            deps.stdout('No agents spawned from this session yet — try `slipstream new-agent`.')
+            return
+          }
+          deps.stdout(
+            renderTable(
+              ['TID', 'TITLE', 'STATUS', 'REPO'],
+              rows.map((r) => [r.tid, r.title, r.status, r.repo]),
+            ),
+          )
+        })
       }
 
       default:
@@ -411,6 +542,27 @@ export async function main(): Promise<void> {
     },
     async writePrSentinel(url) {
       await writeSentinelFile('pr.json', JSON.stringify({ url }))
+    },
+    async sendRequest(kind, payload) {
+      const id = randomUUID()
+      await fs.promises.mkdir(sentinelDir, { recursive: true })
+      const line = JSON.stringify({ id, kind, ts: Date.now(), ...payload })
+      await fs.promises.appendFile(path.join(sentinelDir, AGENT_REQUESTS_FILE), line + '\n')
+      return id
+    },
+    async readResponses() {
+      try {
+        const raw = await fs.promises.readFile(path.join(sentinelDir, AGENT_RESPONSES_FILE), 'utf8')
+        return parseAgentResponses(raw)
+      } catch {
+        return []
+      }
+    },
+    sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms))
+    },
+    now() {
+      return Date.now()
     },
   }
 

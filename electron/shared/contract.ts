@@ -237,6 +237,10 @@ export interface SessionDTO {
   ownerId?: string // owner identity; 'local' for the single-user tier
   prUrl?: string // MR/PR URL opened for this session's branch
   src?: TicketSource // ticket source this session came from; persisted so it round-trips on reload (FLO-83)
+  /** The session that spawned this one via the agent-spawn request channel
+   *  (TASK-CIOEQ), e.g. an agent asking the daemon for a new sibling agent.
+   *  Undefined for a session started directly by a human via the UI. */
+  parentId?: string
 }
 
 export interface WorkflowState {
@@ -394,6 +398,35 @@ export interface IAgentEventStore {
   insert(e: SessionAgentEventDTO): void
   list(sessionId: string): SessionAgentEventDTO[]
   delete(sessionId: string): void
+}
+
+/* ───────── Agent-spawn request channel (TASK-CIOEQ) ─────────
+ * A token-free agent session (the `slipstream` CLI has no daemon auth token)
+ * asks the daemon to do privileged things — resolve a repo, launch a new
+ * agent session, list sibling agents it spawned — by appending a line to
+ * requests.ndjson under its own `<dataDir>/sessions/<id>/` sentinel dir (the
+ * only path bind-mounted rw inside the bwrap sandbox, see agentSandbox.ts)
+ * and reading the answer back from responses.ndjson. This is the structural
+ * slice of that channel that crosses the SessionEvents boundary; contract.ts
+ * has zero imports by convention, so the detailed parse-level line types
+ * (the discriminated union per kind, lenient NDJSON parsing) live in
+ * agentRequestSentinel.ts instead — this type is a superset with the
+ * kind-specific fields optional, good enough for consumers that route on
+ * `kind` (agentSpawnService.ts). */
+export type AgentRequestKind = 'new-agent' | 'repos' | 'agents'
+
+/** Structural shape of one parsed requests.ndjson line. `repo`/`title`/
+ *  `prompt`/`agent` only apply to kind 'new-agent'; `agent` is a raw,
+ *  unvalidated BackendKind string — the consumer validates it against
+ *  BACKEND_KINDS. See agentRequestSentinel.ts for the precise per-kind types. */
+export interface AgentRequest {
+  id: string
+  kind: AgentRequestKind
+  ts: number
+  repo?: string
+  title?: string
+  prompt?: string
+  agent?: string
 }
 
 /* ───────── Chat view (TASK-FPH60) ─────────
@@ -655,6 +688,12 @@ export interface SessionEvents {
   outcome: (sessionId: string, outcome: SessionOutcomeDTO) => void
   /** Structured checkpoint/artifact/approval event from events.ndjson (FLO-104). */
   agentEvent: (sessionId: string, event: SessionAgentEventDTO) => void
+  /** A token-free CLI agent asked the daemon to do something privileged —
+   *  resolve a repo, launch a new agent, list sibling agents — via
+   *  requests.ndjson (TASK-CIOEQ). `sessionId` is the REQUESTING (parent)
+   *  session whose sentinel dir the line was read from, not any session the
+   *  request might create. agentSpawnService.ts is the sole consumer. */
+  agentRequest: (sessionId: string, request: AgentRequest) => void
   /** User keystrokes were written to the session's PTY (write() is only
    *  reachable via the writeSession RPC, i.e. a human typing in a terminal). */
   input: (sessionId: string) => void
@@ -677,6 +716,9 @@ export interface StartSessionInput {
   sessionId?: string
   /** User-supplied extra CLI args (raw string), prepended to the launch command (TASK-UQF55). */
   extraArgs?: string
+  /** The session that spawned this one via the agent-spawn request channel
+   *  (TASK-CIOEQ). Undefined for a session started directly by a human. */
+  parentId?: string
 }
 
 export interface ResumeSessionInput {
@@ -930,6 +972,11 @@ export interface SlipstreamApi {
      *  the server always minting a fresh one. Passed through to rpc.ts's
      *  LaunchRequest.sessionId, falling back to a random UUID when omitted. */
     sessionId?: string
+    /** Selects a "blank chat" session (TASK-CIOEQ phase 3, not yet wired):
+     *  a different system prompt and skipping ticket-provider side effects
+     *  (no ticket to transition). Undefined/omitted is the existing
+     *  ticket-backed flow. */
+    mode?: 'chat'
   }): Promise<SessionDTO>
   writeSession(id: string, data: string): void
   /** Upload a clipboard image (PNG bytes, base64-encoded) for this session before

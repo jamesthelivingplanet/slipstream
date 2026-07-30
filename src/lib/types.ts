@@ -95,6 +95,9 @@ export interface Session {
   reconcileWarning?: string
   // epoch ms timestamp when this session entered 'needs' status; cleared when it exits
   needsSince?: number
+  // the session that spawned this one via the `slipstream new-agent` CLI
+  // command (TASK-CIOEQ); undefined for a session nobody spawned.
+  parentId?: string
   activity: { text: string; q?: boolean }
 }
 

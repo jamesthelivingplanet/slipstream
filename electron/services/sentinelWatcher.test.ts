@@ -15,6 +15,7 @@ import { StatusDetector } from './statusDetector.js'
 import { STATUS_SENTINEL_FILE } from './statusSentinel.js'
 import { OUTCOME_SENTINEL_FILE, type OutcomeSentinel } from './outcomeSentinel.js'
 import { AGENT_EVENTS_FILE, type AgentEventLine } from './agentEventsSentinel.js'
+import { AGENT_REQUESTS_FILE, type AgentRequest } from './agentRequestSentinel.js'
 import type { SessionStatus, StatusMeta } from '../shared/contract.js'
 
 let dir: string
@@ -34,15 +35,17 @@ interface Recorder {
   pr: string[]
   outcome: OutcomeSentinel[]
   agentEvent: AgentEventLine[]
+  agentRequest: AgentRequest[]
   status: Array<{ status: SessionStatus; meta?: StatusMeta; activityMessage?: string }>
 }
 
 function watch(detector: StatusDetector, ptyDriven: boolean): Recorder {
-  const rec: Recorder = { pr: [], outcome: [], agentEvent: [], status: [] }
+  const rec: Recorder = { pr: [], outcome: [], agentEvent: [], agentRequest: [], status: [] }
   const w = createSentinelWatcher(dir, detector, ptyDriven, {
     onPr: (url) => rec.pr.push(url),
     onOutcome: (o) => rec.outcome.push(o),
     onAgentEvent: (e) => rec.agentEvent.push(e),
+    onAgentRequest: (r) => rec.agentRequest.push(r),
     onStatus: (status, meta, activityMessage) => rec.status.push({ status, meta, activityMessage }),
   })
   watchers.push(w)
@@ -176,6 +179,94 @@ describe('createSentinelWatcher — events.ndjson', () => {
       () => rec.agentEvent.length > 0,
     )
     expect(rec.agentEvent).toEqual([{ kind: 'checkpoint', message: 'ok', ts }])
+  })
+})
+
+describe('createSentinelWatcher — requests.ndjson', () => {
+  it('fires onAgentRequest once per new line, deduping by id across re-writes of the same file', async () => {
+    const rec = watch(new StatusDetector(), false)
+    const ts = Date.now()
+
+    await pump(
+      AGENT_REQUESTS_FILE,
+      () =>
+        JSON.stringify({ id: 'r1', kind: 'repos', ts }) +
+        '\n' +
+        JSON.stringify({ id: 'r2', kind: 'agents', ts: ts + 1 }) +
+        '\n',
+      () => rec.agentRequest.length >= 2,
+    )
+    expect(rec.agentRequest.map((r) => r.id)).toEqual(['r1', 'r2'])
+
+    // Re-writing the same two lines plus one new one only surfaces the new row.
+    await pump(
+      AGENT_REQUESTS_FILE,
+      () =>
+        JSON.stringify({ id: 'r1', kind: 'repos', ts }) +
+        '\n' +
+        JSON.stringify({ id: 'r2', kind: 'agents', ts: ts + 1 }) +
+        '\n' +
+        JSON.stringify({
+          id: 'r3',
+          kind: 'new-agent',
+          ts: ts + 2,
+          repo: 'acme/api',
+          title: 'Fix it',
+          prompt: 'do it',
+        }) +
+        '\n',
+      () => rec.agentRequest.length >= 3,
+    )
+    expect(rec.agentRequest).toHaveLength(3)
+    expect(rec.agentRequest[2]).toMatchObject({ id: 'r3', kind: 'new-agent', repo: 'acme/api' })
+  })
+
+  it('fires onAgentRequest for two lines sharing the same ts but different ids (TASK-CIOEQ)', async () => {
+    // Regression: a ts-cursor (`r.ts > lastAgentRequestTs`) drops the
+    // second-and-later same-ts line forever — reachable whenever an
+    // orchestrator backgrounds several `slipstream new-agent` calls at once.
+    // Dedupe must key on id, not ts.
+    const rec = watch(new StatusDetector(), false)
+    const ts = Date.now()
+
+    await pump(
+      AGENT_REQUESTS_FILE,
+      () =>
+        JSON.stringify({ id: 'r1', kind: 'repos', ts }) +
+        '\n' +
+        JSON.stringify({ id: 'r2', kind: 'agents', ts }) +
+        '\n',
+      () => rec.agentRequest.length >= 2,
+    )
+    expect(rec.agentRequest.map((r) => r.id).sort()).toEqual(['r1', 'r2'])
+  })
+
+  it('does not re-fire for lines already seen', async () => {
+    const rec = watch(new StatusDetector(), false)
+    const ts = Date.now()
+
+    await pump(
+      AGENT_REQUESTS_FILE,
+      () => JSON.stringify({ id: 'r1', kind: 'repos', ts }) + '\n',
+      () => rec.agentRequest.length > 0,
+    )
+    expect(rec.agentRequest).toHaveLength(1)
+
+    // Re-writing the exact same content (same ts) must not re-emit.
+    await nudge(AGENT_REQUESTS_FILE, () => JSON.stringify({ id: 'r1', kind: 'repos', ts }) + '\n')
+    expect(rec.agentRequest).toHaveLength(1)
+  })
+
+  it('skips malformed lines without losing well-formed ones', async () => {
+    const rec = watch(new StatusDetector(), false)
+    const ts = Date.now()
+
+    await pump(
+      AGENT_REQUESTS_FILE,
+      () => 'not json\n' + JSON.stringify({ id: 'r1', kind: 'repos', ts }) + '\n',
+      () => rec.agentRequest.length > 0,
+    )
+    expect(rec.agentRequest).toEqual([{ id: 'r1', kind: 'repos', ts }])
   })
 })
 

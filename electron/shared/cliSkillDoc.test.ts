@@ -48,4 +48,11 @@ describe('buildSlipstreamSkillMd', () => {
   it('documents the exit codes', () => {
     expect(md).toContain('not inside a Slipstream session')
   })
+
+  it('explains delegating work by spawning independent agents (TASK-CIOEQ)', () => {
+    expect(md).toContain('Delegate work')
+    expect(md).toContain('slipstream new-agent')
+    expect(md).toContain('slipstream repos')
+    expect(md).toContain('slipstream agents')
+  })
 })
