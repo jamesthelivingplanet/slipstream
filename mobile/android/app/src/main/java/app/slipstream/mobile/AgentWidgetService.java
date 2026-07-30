@@ -87,10 +87,29 @@ public class AgentWidgetService extends RemoteViewsService {
             // without a fill-in intent per item. The sessionId extra merges
             // into the PendingIntent template's launch intent so MainActivity
             // can deep-link into this specific session (see onNewIntent).
+            // FLO-162: "action" defaults this row-body tap to a plain "open" —
+            // these fill-in intents carry intent only (a session id and an
+            // action name), never a credential; the widget process has no
+            // auth token to hand over even if it wanted to. The SPA (which
+            // does hold the token, behind the FLO-159 biometric gate) is the
+            // only thing that ever turns "stop"/"restart" into a real
+            // network call, via MainActivity stashing these into WidgetPrefs
+            // for AppControlPlugin.consumePendingWidgetAction() to hand back.
             String sessionId = session.optString("id", "");
             Intent fillInIntent = new Intent();
             fillInIntent.putExtra("sessionId", sessionId);
+            fillInIntent.putExtra("action", "open");
             row.setOnClickFillInIntent(R.id.widget_item_root, fillInIntent);
+
+            Intent stopFillInIntent = new Intent();
+            stopFillInIntent.putExtra("sessionId", sessionId);
+            stopFillInIntent.putExtra("action", "stop");
+            row.setOnClickFillInIntent(R.id.item_action_stop, stopFillInIntent);
+
+            Intent restartFillInIntent = new Intent();
+            restartFillInIntent.putExtra("sessionId", sessionId);
+            restartFillInIntent.putExtra("action", "restart");
+            row.setOnClickFillInIntent(R.id.item_action_restart, restartFillInIntent);
 
             setChip(row, R.id.item_chip_pr, session.optJSONObject("prChip"));
             setChip(row, R.id.item_chip_ci, session.optJSONObject("ciChip"));

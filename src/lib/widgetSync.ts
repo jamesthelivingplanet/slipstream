@@ -1,6 +1,15 @@
-import { repoById, sessions, openAgentById } from './stores'
+import { get } from 'svelte/store'
+import {
+  repoById,
+  sessions,
+  openAgentById,
+  cleanupAgent,
+  confirmDialog,
+  cleanError,
+} from './stores'
 import { statusBucket, STATUS_LABEL, type Session } from './types'
-import { getPrStatus, getUsageSummary } from './ipc'
+import { getPrStatus, getUsageSummary, resumeSession } from './ipc'
+import { pushToast } from './toast'
 import type { PrStatusDTO, SessionUsage } from '../../electron/shared/contract.js'
 import { formatCost } from '../../electron/shared/usageFormat.js'
 
@@ -42,6 +51,21 @@ interface AppControlPlugin {
     eventName: 'openAgent',
     listenerFunc: (data: { agentId: string }) => void,
   ): AppControlPluginListenerHandle | Promise<AppControlPluginListenerHandle>
+  // FLO-162: home-screen widget Stop/Restart buttons. The widget itself holds
+  // no auth token and makes no network call — a button tap just stashes an
+  // intent in native SharedPreferences and launches the app; this reads it
+  // back and clears it. Native reads-and-clears atomically (so at most one
+  // consumer ever sees a given stash, even under concurrent calls) and
+  // enforces a 2-minute TTL, returning `{}` for "nothing pending" and for a
+  // stash older than that TTL — see consumePendingWidgetActionAndExecute()
+  // below, which tolerates `{}` and unknown/missing `action` values.
+  // Optional because an older native shell (built before this method
+  // existed) won't have it — callers must feature-detect with
+  // `typeof plugin.consumePendingWidgetAction === 'function'` before calling.
+  consumePendingWidgetAction?(): Promise<{
+    sessionId?: string
+    action?: 'open' | 'stop' | 'restart'
+  }>
 }
 
 // Cast through `unknown` rather than extending the global `Window.Capacitor`
@@ -370,5 +394,96 @@ export function subscribeWidgetAgentOpen(): () => void {
     agentOpenListenerHandle?.remove()
     agentOpenListenerHandle = null
     agentOpenListenerBoundFor = null
+  }
+}
+
+/**
+ * FLO-162: consumes and executes one pending home-screen widget action.
+ *
+ * Architecture decision this encodes: the widget is **app-mediated** — it
+ * holds no auth token and makes no network call of its own. A Stop/Restart
+ * tap on the widget just stashes an intent (`{ sessionId, action }`) in
+ * native SharedPreferences and launches the app; this function is the other
+ * half — it reads that stash back (via the native
+ * `consumePendingWidgetAction()`, which reads-and-clears atomically, so an
+ * action fires at most once even under concurrent callers) and performs the
+ * action using the app's own token, which stays in the WebView behind the
+ * FLO-159 biometric gate the whole time. That's also why `'stop'` shows an
+ * in-app confirm dialog rather than tearing the session down immediately: a
+ * destructive action arriving from a home-screen tap has to be confirmed
+ * in-app, because there is no other place left to confirm it — the widget
+ * itself can't (no token, no code running there to ask), and a native
+ * BroadcastReceiver acting on the tap directly would have to skip the
+ * confirm entirely. Backgrounding this into a BroadcastReceiver is
+ * therefore not on the table for 'stop': the confirm dialog is the point.
+ *
+ * Call sites (App.svelte): once after the initial backend load resolves
+ * (cold start), once on `visibilitychange` (warm resume — `singleTask`
+ * brings the existing app forward with no reload), and once right after a
+ * successful biometric unlock (so an action tapped while locked still runs,
+ * instead of being silently dropped). All three must be skipped while the
+ * FLO-159 lock overlay is up — there is no token to act with until then.
+ *
+ * No-ops (never throws) outside the Capacitor mobile shell, when the
+ * AppControl plugin isn't available, when the native shell predates this
+ * method, when nothing is pending, and when the action value is missing or
+ * unrecognized. Every native call is best-effort: a rejection is caught and
+ * surfaced as a toast (or silently swallowed, matching this module's
+ * existing best-effort error style) rather than propagated to the caller.
+ */
+export async function consumePendingWidgetActionAndExecute(): Promise<void> {
+  if (!appControlAvailable()) return
+  const plugin = widgetPlugin()
+  if (!plugin || typeof plugin.consumePendingWidgetAction !== 'function') return
+
+  try {
+    const result = await plugin.consumePendingWidgetAction()
+    const sessionId = result?.sessionId
+    const action = result?.action
+    if (!sessionId || !action) return
+
+    const session = get(sessions).find((s) => s.id === sessionId)
+
+    switch (action) {
+      case 'open':
+        openAgentById(sessionId)
+        return
+      case 'restart': {
+        const label = session?.tid ?? sessionId
+        try {
+          await resumeSession(sessionId)
+          pushToast('success', `Restarted ${label}.`)
+        } catch (e) {
+          pushToast('error', cleanError(e))
+        }
+        return
+      }
+      case 'stop': {
+        if (!session) {
+          pushToast('error', 'Could not find that session to stop.')
+          return
+        }
+        const ok = await confirmDialog({
+          title: 'Stop agent?',
+          message: `Stop ${session.tid} from the home screen widget? This ends the session.`,
+          confirmLabel: 'Stop',
+          danger: true,
+        })
+        if (!ok) return
+        await cleanupAgent(session, { auto: false })
+        return
+      }
+      default:
+        // Unknown action value (e.g. a newer native shell sending an action
+        // this build doesn't know about yet) — ignore rather than throw.
+        return
+    }
+  } catch (e) {
+    // Best-effort, matching flush()/subscribeWidgetAgentOpen() above: a
+    // failed consumePendingWidgetAction() call (or an unexpected throw from
+    // one of the branches, e.g. a lookup helper) must never propagate out of
+    // this function and abort whatever called it (App.svelte's onMount /
+    // visibilitychange listener / post-unlock handler).
+    pushToast('error', cleanError(e))
   }
 }

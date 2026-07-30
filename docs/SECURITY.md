@@ -589,3 +589,149 @@ Electron desktop pins its window to the app origin and never leaves
 `127.0.0.1` (§8), and a browser client's token is scoped to that browser's
 own storage/session, protected by the OS session lock and the CSP/origin
 hardening in §9–§10 rather than by an in-app prompt.
+
+## 12. Home-screen widget Stop/Restart — app-mediated actions, not a widget credential (FLO-162)
+
+**Threat.** TASK-DM25C's home-screen widget (`AgentWidgetService`,
+`AgentWidgetProvider`) renders session rows from a JSON snapshot
+(`WidgetPrefs.SESSIONS_JSON_KEY`) written by `syncWidget()` — a
+`RemoteViewsService` with no auth token and no network access on its render
+path, by original design. FLO-162 was filed flagged "needs deliberate
+re-architecture" specifically because adding Stop/Restart buttons the naive
+way — a `BroadcastReceiver` that calls the daemon directly off a widget tap —
+would have to route the bearer token onto that path: either baked into the
+widget process's own storage (a new, permanently-resident credential copy
+outside the FLO-159 gate above) or read out of `nativeStorage` from a
+headless receiver with no running WebView and no way to ask the user
+anything first.
+
+**Mitigation — app-mediated actions.** The widget records *intent*, never a
+credential. A Stop/Restart tap on a row fills in an `action` extra
+(`"open"` | `"stop"` | `"restart"`) alongside the existing `sessionId` on
+the row's `PendingIntent` template (`AgentWidgetService.getViewAt`),
+launches the app, and `MainActivity.stashWidgetAction()` writes
+`{ action, sessionId, pendingAt }` into app-private
+(`MODE_PRIVATE`) `SharedPreferences` (`WidgetPrefs.PENDING_ACTION_KEY` /
+`PENDING_SESSION_ID_KEY` / `PENDING_AT_KEY`) — never into anything the
+widget's own `RemoteViewsService` process reads back. The SPA — which holds
+the daemon token behind the §11 biometric gate the whole time — is the only
+thing that ever turns that intent into a real RPC, via
+`AppControlPlugin.consumePendingWidgetAction()` (native) and
+`consumePendingWidgetActionAndExecute()` (`src/lib/widgetSync.ts`), polled
+on cold start, on `visibilitychange` resume, and right after a successful
+biometric unlock so an action tapped while locked still runs instead of
+being silently dropped. The widget's render path — `syncWidget()`, the
+JSON snapshot, `SESSIONS_JSON_KEY`/`UPDATED_AT_KEY` — is unchanged by any
+of this: it stays exactly as token-free as it was before FLO-162.
+
+Two properties do the load-bearing work:
+
+- **Read-and-clear, TTL-bounded.** `consumePendingWidgetAction()` clears
+  `WidgetPrefs`'s pending-action trio *before* resolving, so a stash is
+  consumed at most once even if the SPA's boot-time and resume-time checks
+  race each other — a tap can't fire twice. `PENDING_AT_KEY` bounds how
+  long a stash stays live (`PENDING_TTL_MS`, 2 minutes); past that it
+  resolves as `{}` (nothing pending) rather than firing, so a tap that sat
+  unconsumed because the app was killed, or the user got distracted before
+  unlocking, can never act on a session's state long after the user meant
+  it — the 2-minute window is short enough that "the session I'm about to
+  stop is the session I tapped" stays true.
+- **`'stop'` requires an in-app confirm; `'restart'` doesn't need one.**
+  This is architectural, not cosmetic. `resumeSession(id)` (what
+  `'restart'` maps to) is a single recoverable RPC — safe to fire
+  unconfirmed. `'stop'` maps to `cleanupAgent()`, which kills the session
+  and then cleans up the worktree; on a dirty worktree that raises a
+  "force-removing discards any uncommitted changes and unmerged commits"
+  prompt (`confirmDialog`) that only the SPA, running with a live UI, can
+  show. A `BroadcastReceiver` acting on a widget tap directly has no UI to
+  ask that from — it would have to either silently force-destroy unpushed
+  agent work or leave a session half torn down. That's the concrete reason
+  Stop can't be backgrounded into the receiver, independent of the token
+  question: `consumePendingWidgetActionAndExecute()`'s `'stop'` branch
+  always raises `confirmDialog` before calling `cleanupAgent()`, and there
+  is no code path that skips it.
+
+**Governing precedent.** The house pattern for "an edge actor needs a
+privileged effect" is already established by the `slipstream` CLI
+(`electron/cli/slipstream.ts`): its header states identity is scoped to the
+session env and "no daemon token is ever exposed to the agent" — the agent
+causes privileged effects by writing sentinel files the daemon watches
+(`status.json`/`outcome.json`/`pr.json`), and even `open-mr` (the one
+command that needs a git token) resolves it inside the CLI process on the
+daemon host rather than handing it to the agent. The widget now follows the
+same inversion: the edge (agent PTY / widget tap) expresses intent, the
+privileged side (daemon / SPA holding the gated token) holds the credential
+and decides. The mechanism doesn't transfer literally — the CLI's
+sentinel-file channel assumes a filesystem shared with the daemon, and a
+phone has none — but the inversion (never hand the credential to the actor
+that only needs to *ask*) does.
+
+**Rejected alternatives.**
+
+- **Reusing the FLO-151 `ReplyPrefs` stash in a widget click receiver.**
+  Cheapest to build — `ReplyPrefs.java` already keeps a plaintext
+  daemon-URL-plus-token copy in `MODE_PRIVATE` `SharedPreferences` for the
+  background inline-reply receiver (see §11's residual-gaps list). Rejected
+  because it would extend a stash its own doc comment already calls
+  prototype-grade from covering one notification action to being the
+  permanent backing for home-screen buttons the user can tap any time —
+  outside the §11 biometric gate entirely — and it still can't render the
+  force-remove confirm a headless receiver has no UI for, so Stop would
+  still be compromised even with a token available.
+- **Short-lived, single-use, session+action-scoped grants** — generalizing
+  the FLO-144 one-time WS ticket pattern (§3) to widget actions, so a tap
+  could act with no app launch at all. This is the only rejected design
+  that would deliver true no-launch actions, but it needs: a new minting
+  endpoint, a grant lifecycle (issuance/expiry/rotation, not just the
+  10-second single-shot TTL §3's tickets use), a new credential class
+  scoped through the `ownerId` identity seam (docs/IDENTITY-SEAM.md) rather
+  than reusing an existing one, and a second at-rest credential stash on
+  the device to hold the minted grant between mints. It *still* leaves
+  Stop compromised — a grant is a credential, and a headless receiver
+  redeeming one still can't show the force-remove confirm. Revisit this
+  only once **both**: (1) a per-action confirm-or-not policy exists so
+  `'stop'` can be excluded from no-launch grants (or the confirm itself is
+  redesigned to not require a foreground app), and (2) the grant-lifecycle
+  and second-stash cost is justified by a concrete complaint about the
+  accepted cost below, not preemptively.
+
+**Accepted cost, stated plainly.** Every widget action costs a foreground
+app launch plus, if the §11 gate is armed, a biometric unlock. It is not a
+one-tap background action the way the FLO-151 inline-reply button is. That
+is the deliberate price of keeping the token inside the gated SPA process
+and off the widget's render and click paths.
+
+**Residual gaps — stated plainly, not closed:**
+
+- **The FLO-151 `ReplyPrefs` stash (§11's residual-gaps list) is unchanged
+  by this work.** It remains a plaintext, ungated token copy for a
+  different feature (background inline reply); FLO-162 did not extend it
+  and did not close it.
+- **A killed app still costs a real cold start**, not just an unlock —
+  `stashWidgetAction()` writes to `SharedPreferences` regardless of
+  whether the app is running, but nothing consumes the stash until the SPA
+  boots and reaches the post-backend-load `consumePendingWidgetActionAndExecute()`
+  call, so the 2-minute TTL is a real constraint on a slow cold start, not
+  just a theoretical one.
+- **No server-side record that an action originated from the widget.** The
+  RPC the SPA ends up issuing (`resumeSession`/`cleanupAgent`) is
+  indistinguishable, once made, from the same action triggered from the
+  sidebar — this is intentional (the widget is a trigger, never a
+  separately-audited actor) but means widget-originated actions aren't
+  separately logged or rate-limited.
+
+A latent, unrelated bug surfaced and was fixed as a side effect of this
+work: the widget row's plain-tap deep link (open the app to a specific
+session) was dead before FLO-162. `MainActivity` used to dispatch a
+`slipstream:widget-open` DOM `CustomEvent` via `evaluateJavascript()` that
+nothing in the SPA listened for, and on a cold start the event fired before
+the page had loaded regardless. `subscribeWidgetAgentOpen()`
+(`src/lib/widgetSync.ts`) binds a Capacitor `'openAgent'` listener that no
+native code ever emitted — two halves that never met. The new
+`stashWidgetAction()`/`consumePendingWidgetActionAndExecute()` pair (an
+`'open'` action is the default when a widget-built-before-FLO-162 omits the
+`action` extra) replaced the dead `evaluateJavascript` dispatch and made
+row-tap deep-linking work for the first time.
+`subscribeWidgetAgentOpen()` itself was deliberately left in place — its
+Capacitor 6-vs-7 dual-shape handling is separately tested — but it is still
+unfired by any native code path; don't mistake it for a live channel.

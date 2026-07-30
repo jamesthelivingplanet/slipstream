@@ -103,4 +103,41 @@
         android:singleLine="true"
         android:visibility="gone" />
 
+    <!-- FLO-162: app-mediated action buttons. A tap here never calls the
+         daemon from the widget process — it fills in an "action" extra on
+         AgentWidgetProvider's PendingIntent template (see
+         AgentWidgetService.getViewAt) that MainActivity stashes into
+         WidgetPrefs for the SPA (which holds the token) to act on. -->
+    <TextView
+        android:id="@+id/item_action_stop"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/widget_chip_bg_muted"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:text="@string/widget_action_stop"
+        android:textColor="#9AA5B1"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:singleLine="true" />
+
+    <TextView
+        android:id="@+id/item_action_restart"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/widget_chip_bg_muted"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:text="@string/widget_action_restart"
+        android:textColor="#9AA5B1"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:singleLine="true" />
+
 </LinearLayout>

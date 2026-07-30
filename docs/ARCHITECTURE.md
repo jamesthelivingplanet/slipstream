@@ -364,6 +364,29 @@ an agent finishes before the watcher reattaches) and backfills the store on a su
 (FLO-94) into a `SessionHistoryEntry[]`, most recent first — this is what powers the History
 view (browse by repo, compare prompts/outcomes).
 
+### Mobile home-screen widget (FLO-162)
+
+The Android app's home-screen widget (`AgentWidgetService`/`AgentWidgetProvider`) is a
+`RemoteViewsService`, not a WebView — it has two separate channels to the SPA, and only one
+of them ever touches a credential:
+
+- **Snapshot render path (token-free).** `syncWidget()` (`src/lib/widgetSync.ts`) writes a
+  JSON session snapshot into app-private `SharedPreferences`
+  (`WidgetPrefs.SESSIONS_JSON_KEY`/`UPDATED_AT_KEY`); the widget process reads it back to
+  draw rows. No network access, no auth token, on this path — by original design, unchanged
+  by FLO-162.
+- **Action path (intent stash → SPA).** A Stop/Restart/row tap stashes `{ action, sessionId,
+  pendingAt }` into the same prefs (a different key trio,
+  `WidgetPrefs.PENDING_ACTION_KEY`/`PENDING_SESSION_ID_KEY`/`PENDING_AT_KEY`) and launches
+  the app; `consumePendingWidgetActionAndExecute()` (`src/lib/widgetSync.ts`) reads it back
+  (read-and-clear, 2-minute TTL) and performs the action with the token the SPA already
+  holds behind the FLO-159 biometric gate.
+
+**Invariant: the widget is a trigger, never an authority.** It never holds, receives, or
+transmits the daemon token on either channel. Rationale, threat model, and the rejected
+designs (widget-held credential; short-lived action grants) are in
+[docs/SECURITY.md](SECURITY.md) §12.
+
 ## Key decisions
 
 - **Electron + Svelte** over Tauri — `node-pty` is the proven path for many concurrent

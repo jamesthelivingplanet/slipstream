@@ -13,6 +13,10 @@
     <string name="widget_updated_minutes_ago">Updated %dm ago</string>
     <string name="widget_updated_hours_ago">Updated %dh ago</string>
 
+    <!-- FLO-162: per-row app-mediated Stop/Restart action buttons -->
+    <string name="widget_action_stop">Stop</string>
+    <string name="widget_action_restart">Restart</string>
+
     <!-- FLO-160: persistent "ongoing" status notification -->
     <string name="notification_channel_ongoing_name">Slipstream status</string>
     <string name="notification_channel_ongoing_desc">Always-visible running-agent count and top pending ask.</string>
