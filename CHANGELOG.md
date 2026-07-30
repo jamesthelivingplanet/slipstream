@@ -84,6 +84,53 @@ specifically (schema versioning, build stamping, release flow).
   and disables the preference for anyone who abandons or fails the prompt,
   so a lost fingerprint match can never stall someone in front of a gate
   with no way out other than reinstalling.
+- Stop/Restart buttons on the home-screen widget's session rows (FLO-162),
+  built on a deliberate re-architecture rather than the naive add-on the
+  ticket was filed to head off. The widget's render path has no auth token
+  and no network access by design — a straight `BroadcastReceiver` calling
+  the daemon off a tap would have had to route the bearer token onto that
+  token-free surface, or read it out of storage with no UI to confirm
+  anything against. Instead, a tap now only stashes an intent (session id +
+  action) in app-private storage and launches the app; the SPA, which
+  already holds the token behind the FLO-159 biometric gate, reads that
+  intent back (read-and-clear, so a tap fires at most once, with a 2-minute
+  TTL so a stale tap can never act on later session state) and performs the
+  action itself. `Restart` maps straight to a recoverable resume RPC, but
+  `Stop` still raises the app's own "this discards uncommitted work"
+  confirm dialog before tearing the session down — the concrete reason Stop
+  couldn't be backgrounded regardless of the token question, since a
+  headless receiver has nowhere to show that prompt. The accepted trade-off
+  is that every widget action now costs a foreground launch and, if the
+  gate is armed, a biometric unlock — not a one-tap background action —
+  which is the deliberate price of keeping the token out of the widget
+  process entirely. Two alternatives were considered and rejected: reusing
+  the FLO-151 `ReplyPrefs` plaintext token stash (cheapest, but extends a
+  stash its own doc comment calls prototype-grade to permanent home-screen
+  buttons outside the biometric gate, and still can't show the confirm);
+  and short-lived single-use action grants generalizing the FLO-144 one-time
+  WS ticket pattern (the only design that would allow true no-launch
+  actions, but needs a new minting endpoint, a grant lifecycle, and a
+  second at-rest credential stash, and still leaves Stop compromised). See
+  docs/SECURITY.md §12 for the full threat model and revisit criteria, and
+  docs/ARCHITECTURE.md's new "Mobile home-screen widget" subsection for the
+  two-channel shape.
+
+### Fixed
+
+- The widget row's plain tap (open the app to a specific session) was a
+  dead deep link before FLO-162, discovered and fixed as a side effect of
+  the Stop/Restart work above. `MainActivity` dispatched a
+  `slipstream:widget-open` DOM event via `evaluateJavascript()` that
+  nothing in the SPA listened for, and on a cold start it fired before the
+  page had even loaded; separately, `subscribeWidgetAgentOpen()` bound a
+  Capacitor `'openAgent'` listener that no native code ever emitted. Two
+  halves that never met, so a row tap did nothing but open the app. The new
+  intent-stash mechanism (a plain tap defaults to an `"open"` action)
+  replaced the unreliable `evaluateJavascript` dispatch and made row-tap
+  deep-linking work for the first time.
+  `subscribeWidgetAgentOpen()` itself was deliberately left in place — its
+  Capacitor 6-vs-7 dual-shape handling is separately tested — but remains
+  unfired by any native code path; it is not a live channel.
 
 ## [0.9.0] - 2026-07-29
 

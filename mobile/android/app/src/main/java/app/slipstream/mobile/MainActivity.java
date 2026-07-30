@@ -6,10 +6,8 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.WebSettings;
-import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.CapConfig;
-import org.json.JSONObject;
 
 /**
  * TASK-I9S44: the daemon URL is a runtime preference, not just the build-time
@@ -52,7 +50,7 @@ public class MainActivity extends BridgeActivity {
         settings.setLoadWithOverviewMode(true);
 
         // Cold start from a widget row tap (see AgentWidgetService).
-        forwardWidgetSessionId(getIntent());
+        stashWidgetAction(getIntent());
     }
 
     /**
@@ -62,13 +60,28 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        forwardWidgetSessionId(intent);
+        stashWidgetAction(intent);
     }
 
-    /** Forwards a widget row's sessionId extra to the SPA as a DOM event
-     *  (see App.svelte's 'slipstream:widget-open' listener). No-op if the
-     *  intent didn't come from a widget tap. */
-    private void forwardWidgetSessionId(Intent intent) {
+    /**
+     * FLO-162: stashes a widget row tap's sessionId/action into WidgetPrefs
+     * for the SPA to pick up via AppControlPlugin.consumePendingWidgetAction().
+     *
+     * This replaces an earlier approach that dispatched a
+     * 'slipstream:widget-open' DOM CustomEvent straight into the WebView via
+     * evaluateJavascript(): nothing in the SPA ever listened for that event,
+     * and even if something had, a cold start runs this before the page has
+     * loaded, so the event would be dispatched into an empty document and
+     * lost. Writing to SharedPreferences instead works identically for cold
+     * start (the SPA reads the stash once it's up) and warm start (onNewIntent
+     * fires while the SPA is already running and can poll immediately) — see
+     * WidgetPrefs for the pending-action trio and its TTL.
+     *
+     * No-op if the intent didn't come from a widget tap (no sessionId extra).
+     * A missing "action" extra defaults to "open" so an older widget instance
+     * — built before Stop/Restart existed — still deep-links correctly.
+     */
+    private void stashWidgetAction(Intent intent) {
         if (intent == null) {
             return;
         }
@@ -76,15 +89,18 @@ public class MainActivity extends BridgeActivity {
         if (sessionId == null || sessionId.isEmpty()) {
             return;
         }
-        WebView webView = getBridge().getWebView();
-        if (webView == null) {
-            return;
+        String action = intent.getStringExtra("action");
+        if (action == null || action.isEmpty()) {
+            action = "open";
         }
-        String js =
-            "window.dispatchEvent(new CustomEvent('slipstream:widget-open', { detail: { sessionId: " +
-            JSONObject.quote(sessionId) +
-            " } }))";
-        webView.evaluateJavascript(js, null);
+
+        SharedPreferences prefs = getSharedPreferences(WidgetPrefs.PREFS_NAME, Context.MODE_PRIVATE);
+        prefs
+            .edit()
+            .putString(WidgetPrefs.PENDING_ACTION_KEY, action)
+            .putString(WidgetPrefs.PENDING_SESSION_ID_KEY, sessionId)
+            .putLong(WidgetPrefs.PENDING_AT_KEY, System.currentTimeMillis())
+            .apply();
     }
 
     private CapConfig resolveRuntimeServerUrl() {

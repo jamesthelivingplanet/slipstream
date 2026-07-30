@@ -44,7 +44,11 @@
   import BiometricGate from './lib/components/BiometricGate.svelte'
   import { nativeStorage, TOKEN_KEY } from './lib/nativeStorage'
   import { initOnboarding, onboardingMode } from './lib/onboarding'
-  import { subscribeWidgetSync, subscribeWidgetAgentOpen } from './lib/widgetSync'
+  import {
+    subscribeWidgetSync,
+    subscribeWidgetAgentOpen,
+    consumePendingWidgetActionAndExecute,
+  } from './lib/widgetSync'
   import {
     MOBILE_MEDIA_QUERY,
     DRAWER_MEDIA_QUERY,
@@ -83,6 +87,10 @@
     if (result.ok) {
       biometricLocked = false
       biometricError = ''
+      // FLO-162: an action tapped on the widget while the app was locked
+      // must still run once the user unlocks, rather than being silently
+      // dropped — the token wasn't available to act with until now.
+      void consumePendingWidgetActionAndExecute()
       return
     }
     biometricError = biometricErrorMessage(result.code, result.error)
@@ -160,6 +168,19 @@
     }
     window.addEventListener('slipstream:biometric-locked', onBiometricLocked)
 
+    // FLO-162: warm-resume half of the widget Stop/Restart action —
+    // `singleTask` brings the existing app forward on a widget tap rather
+    // than reloading it, so there's no fresh onMount/initFromBackend to hang
+    // this off; visibilitychange firing 'visible' is the resume signal
+    // instead. Skipped while the FLO-159 lock overlay is up, same as the
+    // cold-start call above — nothing to act with until the user unlocks.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !biometricLocked) {
+        void consumePendingWidgetActionAndExecute()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
     // First-boot onboarding: independent of the backend/ticket bootstrap
     // below (it only reads its own nativeStorage flag), started alongside it
     // rather than chained after — see initOnboarding() in ./lib/onboarding.ts.
@@ -180,6 +201,12 @@
             location.pathname + (clean ? `?${clean}` : '') + location.hash,
           )
         }
+        // FLO-162: cold-start half of the widget Stop/Restart action — run
+        // once the backend is seeded so openAgentById/resumeSession/
+        // cleanupAgent have real session data to act against. Skipped while
+        // the FLO-159 lock overlay is up (see handleBiometricUnlock, which
+        // runs this once the user unlocks instead).
+        if (!biometricLocked) void consumePendingWidgetActionAndExecute()
       })
     })
 
@@ -244,6 +271,7 @@
       offConnection()
       offWidgetSync()
       offWidgetAgentOpen()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('slipstream:biometric-locked', onBiometricLocked)
       window.removeEventListener('resize', checkViewport)
       window.removeEventListener('orientationchange', checkViewport)

@@ -44,6 +44,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * would require a live fingerprint check inside a headless BroadcastReceiver
  * with no UI to prompt against, which would just break background inline
  * reply outright.
+ *
+ * FLO-162: consumePendingWidgetAction() is the other half of the same
+ * token-free design as syncWidget() — it's how a Stop/Restart tap on a
+ * widget row turns into a real daemon call without the widget ever holding
+ * (or the app ever handing it) an auth token. See WidgetPrefs for the
+ * pending-action trio MainActivity writes and this method reads/clears.
  */
 @CapacitorPlugin(name = "AppControl")
 public class AppControlPlugin extends Plugin {
@@ -78,6 +84,58 @@ public class AppControlPlugin extends Plugin {
 
         AgentWidgetProvider.requestUpdate(context);
         call.resolve();
+    }
+
+    /**
+     * FLO-162: hands back (and atomically clears) whatever widget row action
+     * MainActivity.stashWidgetAction() last stashed into WidgetPrefs, so the
+     * SPA — polling this on boot and on resume — can perform a Stop/Restart
+     * with the biometric-gated daemon token it holds. The widget itself never
+     * gets anywhere near that token: it only ever wrote an intent (session id
+     * + action name) here, which is exactly why this hop exists.
+     *
+     * The clear happens before resolve() so a stash is consumed at most
+     * once, even if the SPA ends up calling this twice in quick succession
+     * (e.g. once from a boot-time check and once from a resume-time check
+     * racing it) — otherwise the same Stop tap could fire twice.
+     *
+     * Resolves {} (no sessionId/action keys) when nothing is stashed, or when
+     * the stash is older than WidgetPrefs.PENDING_TTL_MS: a tap that's sat
+     * unconsumed that long (app was killed, user got distracted before
+     * unlocking, etc.) is stale and must not fire against the user's current
+     * session state — see WidgetPrefs.PENDING_AT_KEY.
+     */
+    @PluginMethod
+    public void consumePendingWidgetAction(PluginCall call) {
+        Context context = getContext();
+        SharedPreferences prefs = context.getSharedPreferences(WidgetPrefs.PREFS_NAME, Context.MODE_PRIVATE);
+
+        String action = prefs.getString(WidgetPrefs.PENDING_ACTION_KEY, null);
+        String sessionId = prefs.getString(WidgetPrefs.PENDING_SESSION_ID_KEY, null);
+        long pendingAt = prefs.getLong(WidgetPrefs.PENDING_AT_KEY, 0L);
+
+        // Clear before resolving — see javadoc above on why this must happen
+        // first, not after, the resolve().
+        prefs
+            .edit()
+            .remove(WidgetPrefs.PENDING_ACTION_KEY)
+            .remove(WidgetPrefs.PENDING_SESSION_ID_KEY)
+            .remove(WidgetPrefs.PENDING_AT_KEY)
+            .apply();
+
+        JSObject ret = new JSObject();
+        if (action == null || sessionId == null || pendingAt <= 0L) {
+            call.resolve(ret);
+            return;
+        }
+        if (System.currentTimeMillis() - pendingAt > WidgetPrefs.PENDING_TTL_MS) {
+            call.resolve(ret);
+            return;
+        }
+
+        ret.put("sessionId", sessionId);
+        ret.put("action", action);
+        call.resolve(ret);
     }
 
     /** FLO-151: stash the daemon URL + bearer token the background

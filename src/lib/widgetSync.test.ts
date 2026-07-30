@@ -11,6 +11,10 @@ const repoByIdMock = vi.hoisted(() => vi.fn())
 const openAgentByIdMock = vi.hoisted(() => vi.fn())
 const getPrStatusMock = vi.hoisted(() => vi.fn())
 const getUsageSummaryMock = vi.hoisted(() => vi.fn())
+const resumeSessionMock = vi.hoisted(() => vi.fn())
+const cleanupAgentMock = vi.hoisted(() => vi.fn())
+const confirmDialogMock = vi.hoisted(() => vi.fn())
+const pushToastMock = vi.hoisted(() => vi.fn())
 
 vi.mock('./stores', async () => {
   const { writable } = await import('svelte/store')
@@ -18,15 +22,27 @@ vi.mock('./stores', async () => {
     sessions: writable<Session[]>([]),
     repoById: repoByIdMock,
     openAgentById: openAgentByIdMock,
+    cleanupAgent: cleanupAgentMock,
+    confirmDialog: confirmDialogMock,
+    cleanError: (e: unknown) => (e instanceof Error ? e.message : String(e)),
   }
 })
 
 vi.mock('./ipc', () => ({
   getPrStatus: getPrStatusMock,
   getUsageSummary: getUsageSummaryMock,
+  resumeSession: resumeSessionMock,
 }))
 
-import { subscribeWidgetSync, subscribeWidgetAgentOpen } from './widgetSync.js'
+vi.mock('./toast', () => ({
+  pushToast: pushToastMock,
+}))
+
+import {
+  subscribeWidgetSync,
+  subscribeWidgetAgentOpen,
+  consumePendingWidgetActionAndExecute,
+} from './widgetSync.js'
 import { sessions as sessionsStore } from './stores'
 
 const ZERO_USAGE_SUMMARY = {
@@ -64,6 +80,10 @@ function makeFakeCapacitor(
   opts: {
     pluginAvailable?: boolean
     addListenerMode?: 'promise' | 'sync' | 'throw'
+    // FLO-162: omit entirely to simulate an older native shell built before
+    // consumePendingWidgetAction() existed (the method feature-detection
+    // case); pass a vi.fn() to control what it resolves/rejects with.
+    consumePendingWidgetAction?: ReturnType<typeof vi.fn>
   } = {},
 ) {
   const mode = opts.addListenerMode ?? 'promise'
@@ -80,7 +100,15 @@ function makeFakeCapacitor(
     isPluginAvailable: vi.fn((name: string) =>
       opts.pluginAvailable === false ? false : name === 'AppControl',
     ),
-    Plugins: { AppControl: { syncWidget, addListener } },
+    Plugins: {
+      AppControl: {
+        syncWidget,
+        addListener,
+        ...(opts.consumePendingWidgetAction
+          ? { consumePendingWidgetAction: opts.consumePendingWidgetAction }
+          : {}),
+      },
+    },
     _syncWidget: syncWidget,
     _addListener: addListener,
     _removeListener: removeListener,
@@ -449,5 +477,201 @@ describe('subscribeWidgetAgentOpen', () => {
     }).not.toThrow()
     expect(() => unsub?.()).not.toThrow()
     expect(openAgentByIdMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('consumePendingWidgetActionAndExecute', () => {
+  beforeEach(() => {
+    sessionsStore.set([])
+    openAgentByIdMock.mockReset()
+    resumeSessionMock.mockReset()
+    resumeSessionMock.mockResolvedValue(undefined)
+    cleanupAgentMock.mockReset()
+    cleanupAgentMock.mockResolvedValue(true)
+    confirmDialogMock.mockReset()
+    confirmDialogMock.mockResolvedValue(true)
+    pushToastMock.mockReset()
+    // @ts-expect-error test-only global stub
+    delete globalThis.window
+  })
+
+  afterEach(() => {
+    // @ts-expect-error test-only global stub
+    delete globalThis.window
+  })
+
+  it('no-ops outside the Capacitor shell (window.Capacitor absent)', async () => {
+    // @ts-expect-error minimal window stub
+    globalThis.window = {}
+    await expect(consumePendingWidgetActionAndExecute()).resolves.toBeUndefined()
+    expect(openAgentByIdMock).not.toHaveBeenCalled()
+    expect(resumeSessionMock).not.toHaveBeenCalled()
+    expect(cleanupAgentMock).not.toHaveBeenCalled()
+  })
+
+  it('no-ops when the AppControl plugin is unavailable', async () => {
+    const capacitor = makeFakeCapacitor({
+      pluginAvailable: false,
+      consumePendingWidgetAction: vi.fn().mockResolvedValue({ sessionId: 'a', action: 'open' }),
+    })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await consumePendingWidgetActionAndExecute()
+    expect(openAgentByIdMock).not.toHaveBeenCalled()
+  })
+
+  it('no-ops when the native shell predates consumePendingWidgetAction (method absent)', async () => {
+    const capacitor = makeFakeCapacitor() // no consumePendingWidgetAction passed
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await expect(consumePendingWidgetActionAndExecute()).resolves.toBeUndefined()
+    expect(openAgentByIdMock).not.toHaveBeenCalled()
+  })
+
+  it('resolves cleanly on {} (nothing pending / stash past TTL)', async () => {
+    const consume = vi.fn().mockResolvedValue({})
+    const capacitor = makeFakeCapacitor({ consumePendingWidgetAction: consume })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await consumePendingWidgetActionAndExecute()
+    expect(openAgentByIdMock).not.toHaveBeenCalled()
+    expect(resumeSessionMock).not.toHaveBeenCalled()
+    expect(cleanupAgentMock).not.toHaveBeenCalled()
+    expect(pushToastMock).not.toHaveBeenCalled()
+  })
+
+  it("'open' dispatches openAgentById with the sessionId", async () => {
+    const consume = vi.fn().mockResolvedValue({ sessionId: 's1', action: 'open' })
+    const capacitor = makeFakeCapacitor({ consumePendingWidgetAction: consume })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await consumePendingWidgetActionAndExecute()
+    expect(openAgentByIdMock).toHaveBeenCalledWith('s1')
+  })
+
+  it("'restart' calls resumeSession and toasts success", async () => {
+    sessionsStore.set([makeSession({ id: 's1', tid: 'TASK-1' })])
+    const consume = vi.fn().mockResolvedValue({ sessionId: 's1', action: 'restart' })
+    const capacitor = makeFakeCapacitor({ consumePendingWidgetAction: consume })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await consumePendingWidgetActionAndExecute()
+    expect(resumeSessionMock).toHaveBeenCalledWith('s1')
+    expect(pushToastMock).toHaveBeenCalledWith('success', expect.stringContaining('TASK-1'))
+  })
+
+  it("'restart' toasts an error when resumeSession rejects", async () => {
+    sessionsStore.set([makeSession({ id: 's1', tid: 'TASK-1' })])
+    resumeSessionMock.mockRejectedValue(new Error('daemon unreachable'))
+    const consume = vi.fn().mockResolvedValue({ sessionId: 's1', action: 'restart' })
+    const capacitor = makeFakeCapacitor({ consumePendingWidgetAction: consume })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await consumePendingWidgetActionAndExecute()
+    expect(pushToastMock).toHaveBeenCalledWith('error', 'daemon unreachable')
+  })
+
+  it("'stop' toasts an error and never confirms/cleans up when the session isn't found", async () => {
+    const consume = vi.fn().mockResolvedValue({ sessionId: 'missing', action: 'stop' })
+    const capacitor = makeFakeCapacitor({ consumePendingWidgetAction: consume })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await consumePendingWidgetActionAndExecute()
+    expect(confirmDialogMock).not.toHaveBeenCalled()
+    expect(cleanupAgentMock).not.toHaveBeenCalled()
+    expect(pushToastMock).toHaveBeenCalledWith('error', expect.any(String))
+  })
+
+  it("'stop' shows a danger confirm naming the session's tid, then calls cleanupAgent when confirmed", async () => {
+    const session = makeSession({ id: 's1', tid: 'TASK-9' })
+    sessionsStore.set([session])
+    confirmDialogMock.mockResolvedValue(true)
+    const consume = vi.fn().mockResolvedValue({ sessionId: 's1', action: 'stop' })
+    const capacitor = makeFakeCapacitor({ consumePendingWidgetAction: consume })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await consumePendingWidgetActionAndExecute()
+
+    expect(confirmDialogMock).toHaveBeenCalledTimes(1)
+    const req = confirmDialogMock.mock.calls[0][0]
+    expect(req.danger).toBe(true)
+    expect(req.message).toContain('TASK-9')
+    expect(cleanupAgentMock).toHaveBeenCalledWith(session, { auto: false })
+  })
+
+  it("'stop' does not call cleanupAgent when the confirm is declined", async () => {
+    sessionsStore.set([makeSession({ id: 's1', tid: 'TASK-9' })])
+    confirmDialogMock.mockResolvedValue(false)
+    const consume = vi.fn().mockResolvedValue({ sessionId: 's1', action: 'stop' })
+    const capacitor = makeFakeCapacitor({ consumePendingWidgetAction: consume })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await consumePendingWidgetActionAndExecute()
+
+    expect(confirmDialogMock).toHaveBeenCalledTimes(1)
+    expect(cleanupAgentMock).not.toHaveBeenCalled()
+  })
+
+  it('ignores an unknown action value without throwing', async () => {
+    const consume = vi.fn().mockResolvedValue({ sessionId: 's1', action: 'launch-nukes' })
+    const capacitor = makeFakeCapacitor({ consumePendingWidgetAction: consume })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await expect(consumePendingWidgetActionAndExecute()).resolves.toBeUndefined()
+    expect(openAgentByIdMock).not.toHaveBeenCalled()
+    expect(resumeSessionMock).not.toHaveBeenCalled()
+    expect(cleanupAgentMock).not.toHaveBeenCalled()
+  })
+
+  it('does not let a rejecting consumePendingWidgetAction() call propagate', async () => {
+    const consume = vi.fn().mockRejectedValue(new Error('bridge exploded'))
+    const capacitor = makeFakeCapacitor({ consumePendingWidgetAction: consume })
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    await expect(consumePendingWidgetActionAndExecute()).resolves.toBeUndefined()
+  })
+})
+
+describe('widget snapshot credential boundary (FLO-162)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    sessionsStore.set([])
+    repoByIdMock.mockReset()
+    repoByIdMock.mockReturnValue({ id: 'r1', org: 'acme', name: 'widget', base: 'main' })
+    getPrStatusMock.mockReset()
+    getPrStatusMock.mockResolvedValue(null)
+    getUsageSummaryMock.mockReset()
+    getUsageSummaryMock.mockResolvedValue(ZERO_USAGE_SUMMARY)
+    // @ts-expect-error test-only global stub
+    delete globalThis.window
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    // @ts-expect-error test-only global stub
+    delete globalThis.window
+  })
+
+  // Pins the FLO-162 boundary: the widget carries session titles/statuses,
+  // never the auth token. This guards against a future incremental change
+  // (e.g. routing something onto the widget path to make Stop/Restart
+  // "faster") accidentally minting a credential the widget process could
+  // leak — see the module doc comment at the top of widgetSync.ts.
+  it('never puts a token/daemonUrl/authorization-shaped field in the serialized snapshot', () => {
+    const capacitor = makeFakeCapacitor()
+    // @ts-expect-error minimal window stub
+    globalThis.window = { Capacitor: capacitor }
+    const unsub = subscribeWidgetSync()
+
+    sessionsStore.set([
+      makeSession({ id: 'a', tid: 'TASK-1', repo: 'r1', status: 'needs' }),
+      makeSession({ id: 'b', tid: 'TASK-2', repo: 'r1', status: 'running' }),
+    ])
+    vi.advanceTimersByTime(4000)
+
+    const call = capacitor._syncWidget.mock.calls[0][0] as { snapshotJson: string }
+    expect(call.snapshotJson.toLowerCase()).not.toMatch(/token|daemonurl|authorization/)
+
+    unsub()
   })
 })
