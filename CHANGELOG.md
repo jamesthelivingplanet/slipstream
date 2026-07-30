@@ -11,6 +11,43 @@ specifically (schema versioning, build stamping, release flow).
 
 ### Added
 
+- Agents can now delegate work by spawning independent sibling agents, and the app gains a
+  blank "New chat" session kind alongside the existing ticket-driven flow (TASK-CIOEQ). A
+  token-free agent session's `slipstream` CLI can only write to its own
+  `<dataDir>/sessions/<id>/` sentinel dir (the one path bind-mounted rw inside the bwrap
+  sandbox), so it now has a file-based request/response channel to ask the daemon for
+  privileged things: `electron/services/agentRequestSentinel.ts` defines the
+  `requests.ndjson`/`responses.ndjson` line formats (`new-agent`/`repos`/`agents` request
+  kinds); `sentinelWatcher.ts` tails `requests.ndjson` alongside the existing sentinel
+  files and fires a new `onAgentRequest` callback per line; `sessionManager.ts` re-emits
+  it as an `agentRequest` session event; and `electron/services/agentSpawnService.ts` is
+  the sole consumer — it resolves the requesting session's owner, validates and
+  owner-scopes the repo lookup, mints a tid, and launches through the same
+  `scheduler.submit`/`launchSession` path the UI's own `startSession` RPC uses, answering
+  via `responses.ndjson`. Because launching an agent isn't idempotent, the service seeds
+  already-answered request ids from every session's `responses.ndjson` before it starts
+  processing, so a daemon restart (which replays the whole of `requests.ndjson`) can't
+  double-spawn. `sessions.parentId` (DB migration 9, `contract.ts`, `sessionLauncher.ts`)
+  tracks which session spawned which.
+
+  Three new `slipstream` CLI commands expose this to agents: `new-agent --repo <org/name>
+  --title <t> [--prompt <p>] [--agent <kind>]` spawns a sibling agent and prints its tid,
+  session id, and branch; `repos` lists the repos an agent can target; `agents` lists what
+  it has spawned and their status. Each sends a request and polls `responses.ndjson` for
+  the matching id (60s timeout for `new-agent`, 15s for `repos`/`agents`). The command
+  registry (`electron/shared/slipstreamCommands.ts`), the ticket-agent system prompt
+  (`promptComposer.ts`), and the `slipstream` worktree skill (`cliSkillDoc.ts`) all
+  mention the new delegation capability, in their own voice.
+
+  A session can also now be started in "blank chat" mode (`mode: 'chat'` on `startSession`,
+  `electron/core/rpcHandlers/sessions.ts`): a new `buildChatSystemPrompt()` frames the
+  agent as a conversational assistant with no ticket and no merge request to open unless
+  asked, and reframes `slipstream request-input` as the agent's normal per-turn resting
+  state rather than something reserved for being stuck; the ticket-provider `startTicket`
+  side effect is skipped (`LaunchRequest.skipTicket`, `sessionLauncher.ts`) since a chat
+  session's tid is synthetic. The renderer gains a "New chat" entry point (a home-screen
+  FAB and dialog, `src/lib/components/NewChatDialog.svelte` + `NewAgentFab.svelte`) that
+  mints a `CHAT-XXXXX` tid client-side and starts the session with `mode: 'chat'`.
 - `docs/UX-GO-NO-GO.md` (FLO-148) — the core-UX half of the production go/no-go, which
   FLO-142 named as its one unresolved sub-issue and deliberately left to a judgement call.
   Inventories every in-flight core-UX workstream (chat-by-default, per-backend chat, the

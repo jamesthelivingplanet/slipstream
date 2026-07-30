@@ -7,6 +7,7 @@ import type { BackendKind, RepoDTO, TicketSource } from '../../shared/contract.j
 import { branchFor } from '../../shared/branch.js'
 import {
   buildSystemPrompt,
+  buildChatSystemPrompt,
   buildHandoffPrompt,
   formatChatExcerpt,
   AGENT_LABELS,
@@ -43,8 +44,14 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
         sessionId?: string
         src?: TicketSource
         extraArgs?: string
+        /** Selects a "blank chat" session (TASK-CIOEQ): a different system
+         *  prompt (buildChatSystemPrompt) and no ticket-provider startTicket
+         *  side effect, since a chat session's tid is synthetic (minted
+         *  client-side, e.g. `CHAT-XXXXX` in stores.ts) rather than a real
+         *  ticket. Undefined/omitted is the existing ticket-backed flow. */
+        mode?: 'chat'
       }
-      const { tid, title, prompt, repoId, description } = input
+      const { tid, title, prompt, repoId, description, mode } = input
       const agentKind = input.agentKind
 
       // TASK-CMZUG: a blank per-run extraArgs falls back to the saved per-agent
@@ -62,7 +69,8 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
       if (!ownedByCaller(repo)) throw new Error(`Unknown repo: ${repoId}`)
 
       const branch = branchFor(tid, title)
-      const systemPrompt = buildSystemPrompt({ tid, title, description })
+      const systemPrompt =
+        mode === 'chat' ? buildChatSystemPrompt() : buildSystemPrompt({ tid, title, description })
 
       // FLO-95: the actual worktree/port/PTY launch procedure lives in
       // sessionLauncher.ts so it can run immediately (below the concurrency
@@ -81,6 +89,7 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
         src: input.src,
         ownerId: identity.id,
         extraArgs: effectiveExtraArgs,
+        skipTicket: mode === 'chat',
       }
 
       const session = deps.scheduler

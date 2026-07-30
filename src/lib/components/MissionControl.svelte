@@ -14,6 +14,7 @@
     createAgentFromTicket,
     startAgentsFromTickets,
     dialogOpen,
+    chatDialogOpen,
     registerRepo,
     repoById,
     initialLoadLoading,
@@ -329,6 +330,22 @@
     return { cost: formatCost(u.costUsd), tokens: formatTokens(tokens) }
   }
 
+  /** TASK-CIOEQ: title of the session that spawned `s` via `slipstream
+   *  new-agent`, or undefined when `s` has no parentId or the parent isn't
+   *  (or is no longer) a known session. Additive annotation only — never
+   *  restructures the existing needs/running/landed grouping. */
+  function parentTitle(s: Session): string | undefined {
+    if (!s.parentId) return undefined
+    return $sessions.find((x) => x.id === s.parentId)?.title
+  }
+
+  /** TASK-CIOEQ: how many currently-known sessions `s` spawned via
+   *  `slipstream new-agent`. */
+  function spawnedCount(s: Session): number {
+    if (!s.id) return 0
+    return $sessions.filter((x) => x.parentId === s.id).length
+  }
+
   /** Mirrors NewAgentDialog's ticket → prompt convention so launching from here
    *  is equivalent to picking the ticket in the New Agent dialog. The agent
    *  used is whatever's selected in the quick-launch picker (launchAgent). */
@@ -394,13 +411,25 @@
             >{/if}
         </div>
       </div>
-      {#if hasUsage}
-        <span class="head-spend" title="Estimated from transcript usage">
-          <span class="spend-today">today {formatCost(todayCost)}</span>
-          <span class="muted">·</span>
-          <span class="spend-total">{formatCost(usage?.costUsd ?? 0)} all time</span>
-        </span>
-      {/if}
+      <div class="deck-actions">
+        {#if hasUsage}
+          <span class="head-spend" title="Estimated from transcript usage">
+            <span class="spend-today">today {formatCost(todayCost)}</span>
+            <span class="muted">·</span>
+            <span class="spend-total">{formatCost(usage?.costUsd ?? 0)} all time</span>
+          </span>
+        {/if}
+        <!-- TASK-CIOEQ: reachable on mobile too (unlike App.svelte's header
+             "New chat", which is desktop-only), since Mission Control is the
+             home view on every viewport. -->
+        <button
+          type="button"
+          class="btn btn-outline btn-sm"
+          on:click={() => chatDialogOpen.set(true)}
+        >
+          {@html icons.chat} New chat
+        </button>
+      </div>
     </div>
 
     {#if initialLoading}
@@ -429,7 +458,12 @@
       <div class="first-run">
         <h2>No agents yet</h2>
         <p>Start one from a ticket or a blank task to see it here.</p>
-        <button class="btn btn-primary" on:click={() => dialogOpen.set(true)}>New agent</button>
+        <div class="first-run-actions">
+          <button class="btn btn-primary" on:click={() => dialogOpen.set(true)}>New agent</button>
+          <button class="btn btn-outline" on:click={() => chatDialogOpen.set(true)}>
+            {@html icons.chat} New chat
+          </button>
+        </div>
       </div>
     {:else}
       {#if needsSessions.length > 0}
@@ -503,6 +537,9 @@
                     <span class="c-id mono">{s.tid}{s.agentKind ? ` · ${s.agentKind}` : ''}</span>
                   </div>
                   <div class="c-title">{s.title}</div>
+                  {#if parentTitle(s)}
+                    <div class="spawned-by">↳ spawned by {parentTitle(s)}</div>
+                  {/if}
                   {#if s.status !== 'errored' && hasBackend && s.id && asks[s.id]}
                     <div class="ask">{asks[s.id]}</div>
                     {#if suggestedReplies(asks[s.id]).length > 0}
@@ -523,6 +560,9 @@
                     {#if s.branch}<span>{s.branch}</span>{/if}
                     <span class="add">+{s.add}</span>
                     <span class="del">−{s.del}</span>
+                    {#if spawnedCount(s) > 0}
+                      <span class="chip mono">{spawnedCount(s)} spawned</span>
+                    {/if}
                     <span class="go" class:err={s.status === 'errored'}>Answer →</span>
                   </div>
                 </button>
@@ -591,6 +631,14 @@
                   <span class="dot" class:queued={s.status === 'queued'}></span>
                   <span class="r-id mono">{s.tid}</span>
                   <span class="r-title">{s.title}</span>
+                  {#if parentTitle(s)}
+                    <span class="chip mono spawned-chip" title={`Spawned by ${parentTitle(s)}`}
+                      >↳ {parentTitle(s)}</span
+                    >
+                  {/if}
+                  {#if spawnedCount(s) > 0}
+                    <span class="chip mono">{spawnedCount(s)} spawned</span>
+                  {/if}
                   {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
                   {#if s.status === 'detached' || s.status === 'queued'}
                     <span class="r-activity muted">{s.activity.text}</span>
@@ -767,6 +815,14 @@
                   ></span>
                   <span class="r-id mono">{s.tid}</span>
                   <span class="r-title">{s.title}</span>
+                  {#if parentTitle(s)}
+                    <span class="chip mono spawned-chip" title={`Spawned by ${parentTitle(s)}`}
+                      >↳ {parentTitle(s)}</span
+                    >
+                  {/if}
+                  {#if spawnedCount(s) > 0}
+                    <span class="chip mono">{spawnedCount(s)} spawned</span>
+                  {/if}
                   {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
                   {#if costFor(s)}
                     <span
@@ -872,8 +928,15 @@
     color: hsl(var(--border));
   }
 
-  .head-spend {
+  /* TASK-CIOEQ: wraps the optional spend readout + the "New chat" button so
+   * both sit flush right, whether or not hasUsage is true. */
+  .deck-actions {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .head-spend {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -907,6 +970,13 @@
   }
   .first-run .btn {
     margin-top: 6px;
+  }
+  .first-run-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
   }
   .first-run.loading .spin {
     width: 32px;
@@ -1070,6 +1140,15 @@
     font-size: 14px;
     font-weight: 600;
   }
+  /* TASK-CIOEQ: additive "spawned by" annotation — a session started via
+   * `slipstream new-agent` from another agent's run. */
+  .spawned-by {
+    font-size: 11px;
+    color: hsl(var(--muted-foreground));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .ask {
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
@@ -1190,6 +1269,14 @@
     background: hsl(var(--muted) / 0.6);
     color: hsl(var(--muted-foreground));
     flex: 0 0 auto;
+  }
+  /* TASK-CIOEQ: the "↳ spawned by" chip on running/landed rows — truncate so
+   * a long parent title can't blow out the row layout. */
+  .spawned-chip {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .r-diff {
     font-size: 11px;
@@ -1412,6 +1499,8 @@
     .deck {
       padding: 13px 14px;
       gap: 12px;
+      flex-wrap: wrap;
+      row-gap: 10px;
     }
     .watch img {
       width: 36px;
@@ -1419,6 +1508,11 @@
     }
     .mc-inner {
       padding: 24px 16px 40px;
+    }
+    .deck-actions {
+      margin-left: 0;
+      width: 100%;
+      justify-content: flex-end;
     }
   }
 

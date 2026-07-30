@@ -1,7 +1,42 @@
 import { describe, it, expect, vi } from 'vitest'
 import { runCli, parseArgs, EXIT_OK, EXIT_USAGE, EXIT_FAILED } from './slipstream.js'
 import type { CliDeps } from './slipstream.js'
+import type { AgentResponse } from '../services/agentRequestSentinel.js'
 import { SLIPSTREAM_COMMANDS, renderExitCodes } from '../shared/slipstreamCommands.js'
+
+/**
+ * Fake `sendRequest`/`readResponses`/`sleep`/`now` for the new-agent/repos/agents
+ * polling loop (TASK-CIOEQ): `respond(id, response)` queues an answer that
+ * `readResponses()` returns from then on, and `now`/`sleep` are driven by a fake
+ * clock advanced manually — no real timers, so a timeout test doesn't have to
+ * actually wait out 60s/15s.
+ */
+function makeFakeChannel() {
+  let clock = 0
+  const responses: AgentResponse[] = []
+  const sentIds: string[] = []
+  return {
+    sentIds,
+    respond(response: AgentResponse) {
+      responses.push(response)
+    },
+    advance(ms: number) {
+      clock += ms
+    },
+    deps: {
+      sendRequest: vi.fn(async () => {
+        const id = `req-${sentIds.length + 1}`
+        sentIds.push(id)
+        return id
+      }),
+      readResponses: vi.fn(async () => responses.slice()),
+      sleep: vi.fn(async (ms: number) => {
+        clock += ms
+      }),
+      now: vi.fn(() => clock),
+    } satisfies Pick<CliDeps, 'sendRequest' | 'readResponses' | 'sleep' | 'now'>,
+  }
+}
 
 function makeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
   return {
@@ -22,6 +57,10 @@ function makeDeps(overrides: Partial<CliDeps> = {}): CliDeps {
     openMergeRequest: vi.fn().mockResolvedValue({ url: 'https://example.com/mr/1', isNew: true }),
     getRemoteUrl: vi.fn().mockResolvedValue('git@github.com:org/repo.git'),
     writePrSentinel: vi.fn().mockResolvedValue(undefined),
+    sendRequest: vi.fn().mockResolvedValue('req-1'),
+    readResponses: vi.fn().mockResolvedValue([]),
+    sleep: vi.fn().mockResolvedValue(undefined),
+    now: vi.fn().mockReturnValue(0),
     ...overrides,
   }
 }
@@ -296,6 +335,223 @@ describe('runCli', () => {
       const deps = makeDeps()
       expect(await runCli(['open-mr'], deps)).toBe(EXIT_USAGE)
       expect(deps.openMergeRequest).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('new-agent (TASK-CIOEQ)', () => {
+    it('sends a new-agent request and prints the spawned agent on success', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: { tid: 'TASK-ABCDE', sessionId: 's99', branch: 'task-abcde-x', repo: 'acme/api' },
+      })
+
+      const code = await runCli(
+        ['new-agent', '--repo', 'acme/api', '--title', 'Do the thing'],
+        deps,
+      )
+
+      expect(code).toBe(EXIT_OK)
+      expect(deps.sendRequest).toHaveBeenCalledWith('new-agent', {
+        repo: 'acme/api',
+        title: 'Do the thing',
+        prompt: '',
+      })
+      const out = stdoutText(deps)
+      expect(out).toContain('TASK-ABCDE')
+      expect(out).toContain('s99')
+      expect(out).toContain('task-abcde-x')
+      expect(out).toContain('acme/api')
+      expect(out).toContain('slipstream agents')
+    })
+
+    it('passes --prompt and --agent through when provided', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: { tid: 'T', sessionId: 's', branch: 'b', repo: 'r' },
+      })
+
+      await runCli(
+        [
+          'new-agent',
+          '--repo',
+          'acme/api',
+          '--title',
+          'Do it',
+          '--prompt',
+          'go fix it',
+          '--agent',
+          'pi',
+        ],
+        deps,
+      )
+
+      expect(deps.sendRequest).toHaveBeenCalledWith('new-agent', {
+        repo: 'acme/api',
+        title: 'Do it',
+        prompt: 'go fix it',
+        agent: 'pi',
+      })
+    })
+
+    it('requires --repo', async () => {
+      const deps = makeDeps()
+      expect(await runCli(['new-agent', '--title', 'T'], deps)).toBe(EXIT_USAGE)
+      expect(deps.sendRequest).not.toHaveBeenCalled()
+    })
+
+    it('requires --title', async () => {
+      const deps = makeDeps()
+      expect(await runCli(['new-agent', '--repo', 'acme/api'], deps)).toBe(EXIT_USAGE)
+      expect(deps.sendRequest).not.toHaveBeenCalled()
+    })
+
+    it('prints the error and exits 3 on an ok:false response', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({ id: 'req-1', ok: false, ts: 0, error: 'Unknown repo: acme/api' })
+
+      const code = await runCli(
+        ['new-agent', '--repo', 'acme/api', '--title', 'Do the thing'],
+        deps,
+      )
+
+      expect(code).toBe(EXIT_FAILED)
+      expect(stderrText(deps)).toContain('Unknown repo: acme/api')
+    })
+
+    it('times out after 60s of no matching response and exits 3', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      // Never respond — the fake clock still advances via deps.sleep.
+
+      const code = await runCli(
+        ['new-agent', '--repo', 'acme/api', '--title', 'Do the thing'],
+        deps,
+      )
+
+      expect(code).toBe(EXIT_FAILED)
+      expect(stderrText(deps)).toContain('timed out')
+      expect(stderrText(deps)).toContain('60s')
+      // Confirms the loop actually waited out the full 60s via the fake clock,
+      // not e.g. a single readResponses call that happened to time out early.
+      expect((deps.sleep as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1)
+    })
+  })
+
+  describe('repos (TASK-CIOEQ)', () => {
+    it('renders a table of repos on success', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: [
+          { id: 'r1', org: 'acme', name: 'api', base: 'main' },
+          { id: 'r2', org: 'acme', name: 'web', base: 'develop' },
+        ],
+      })
+
+      const code = await runCli(['repos'], deps)
+
+      expect(code).toBe(EXIT_OK)
+      expect(deps.sendRequest).toHaveBeenCalledWith('repos', {})
+      const out = stdoutText(deps)
+      expect(out).toContain('acme/api')
+      expect(out).toContain('main')
+      expect(out).toContain('acme/web')
+      expect(out).toContain('develop')
+    })
+
+    it('prints a friendly message when there are no repos', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({ id: 'req-1', ok: true, ts: 0, data: [] })
+
+      expect(await runCli(['repos'], deps)).toBe(EXIT_OK)
+      expect(stdoutText(deps)).toContain('No repositories')
+    })
+
+    it('exits 3 on an ok:false response', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({ id: 'req-1', ok: false, ts: 0, error: 'boom' })
+
+      expect(await runCli(['repos'], deps)).toBe(EXIT_FAILED)
+      expect(stderrText(deps)).toContain('boom')
+    })
+
+    it('times out after 15s and exits 3', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+
+      const code = await runCli(['repos'], deps)
+
+      expect(code).toBe(EXIT_FAILED)
+      expect(stderrText(deps)).toContain('timed out')
+      expect(stderrText(deps)).toContain('15s')
+    })
+  })
+
+  describe('agents (TASK-CIOEQ)', () => {
+    it('renders a table of spawned agents on success', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: [
+          { tid: 'TASK-A', title: 'Fix the thing', status: 'running', repo: 'acme/api' },
+          { tid: 'TASK-B', title: 'Ship it', status: 'done', repo: 'acme/web' },
+        ],
+      })
+
+      const code = await runCli(['agents'], deps)
+
+      expect(code).toBe(EXIT_OK)
+      expect(deps.sendRequest).toHaveBeenCalledWith('agents', {})
+      const out = stdoutText(deps)
+      expect(out).toContain('TASK-A')
+      expect(out).toContain('running')
+      expect(out).toContain('TASK-B')
+      expect(out).toContain('done')
+    })
+
+    it('prints a friendly message when nothing has been spawned', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({ id: 'req-1', ok: true, ts: 0, data: [] })
+
+      expect(await runCli(['agents'], deps)).toBe(EXIT_OK)
+      expect(stdoutText(deps)).toContain('No agents spawned')
+    })
+
+    it('exits 3 on an ok:false response', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({ id: 'req-1', ok: false, ts: 0, error: 'daemon unavailable' })
+
+      expect(await runCli(['agents'], deps)).toBe(EXIT_FAILED)
+      expect(stderrText(deps)).toContain('daemon unavailable')
+    })
+
+    it('times out after 15s and exits 3', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+
+      const code = await runCli(['agents'], deps)
+
+      expect(code).toBe(EXIT_FAILED)
+      expect(stderrText(deps)).toContain('timed out')
     })
   })
 

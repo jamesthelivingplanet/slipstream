@@ -202,6 +202,13 @@ describe('launchSession — happy path', () => {
     expect(deps.tickets.startTicket).toHaveBeenCalledWith('FLO-9', 'linear')
   })
 
+  it('skips startTicket for a blank chat session (TASK-CIOEQ, skipTicket:true)', async () => {
+    const deps = makeDeps()
+    await launchSession(deps, makeReq({ tid: 'CHAT-1', skipTicket: true }))
+
+    expect(deps.tickets.startTicket).not.toHaveBeenCalled()
+  })
+
   it('builds the PTY env from agentSessionEnv (PORT only when no agentCli)', async () => {
     const deps = makeDeps()
     await launchSession(deps, makeReq())

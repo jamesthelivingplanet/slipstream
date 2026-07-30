@@ -147,3 +147,12 @@ doc only when the symptom matches what you're seeing.
   (agent PTY + data dir present + no `server.env` found) and reports inconclusive (exit `2`)
   instead — run it on the host, or from an unsandboxed shell, for a real verdict. Detail:
   [docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md) §4.
+- **A `new-agent` request must never re-launch across a daemon restart.** `requests.ndjson`
+  (`agentRequestSentinel.ts`) is replayed in full after a restart — `sentinelWatcher.ts`'s
+  ts-cursor resets to 0 — but spawning a new agent isn't idempotent like the other one-way
+  sentinels are. `agentSpawnService.ts` guards this itself: it seeds already-answered
+  request ids from every known session's `responses.ndjson` before subscribing to
+  `agentRequest`, and skips any request already in that set. Symptom if this guard is ever
+  removed/bypassed: every daemon restart double-spawns every agent any session ever
+  requested. Detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §Agent-spawn
+  request/response channel.

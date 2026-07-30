@@ -30,6 +30,7 @@ import { createWriteCoordinator } from '../services/writeCoordinator.js'
 import { createSessionReaper } from '../services/sessionReaper.js'
 import { createSessionScheduler } from '../services/sessionScheduler.js'
 import { launchSession } from '../services/sessionLauncher.js'
+import { createAgentSpawnService } from '../services/agentSpawnService.js'
 import { createPrStatusService } from '../services/prStatus.js'
 import { createDeviceTokenStore } from '../services/deviceTokenStore.js'
 import { wirePrEventListeners } from './wirePrEventListeners.js'
@@ -174,6 +175,23 @@ export function createServices(root: string): IpcDeps {
   })
   deps.scheduler = scheduler
   scheduler.start()
+
+  // TASK-CIOEQ: daemon-side half of the agent-spawn request channel — a
+  // token-free CLI agent asks (via requests.ndjson under its own session's
+  // sentinel dir) to resolve a repo, launch a sibling agent, or list agents
+  // it already spawned; this subscribes to sessionManager's `agentRequest`
+  // event (fed by the sentinel watcher) and answers via responses.ndjson.
+  // Wired last, same rationale as the scheduler: it needs `deps` (incl. the
+  // scheduler just assigned above) fully assembled first.
+  createAgentSpawnService({
+    sessions,
+    sessionStore,
+    repos: deps.repos,
+    outcomeStore,
+    launchDeps: deps,
+    scheduler: deps.scheduler,
+    dataDir: root,
+  })
 
   return deps
 }

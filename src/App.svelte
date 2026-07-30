@@ -4,6 +4,7 @@
     selected,
     selectedId,
     dialogOpen,
+    chatDialogOpen,
     settingsOpen,
     initFromBackend,
     refreshAndReconcile,
@@ -29,6 +30,7 @@
   import HistoryView from './lib/components/HistoryView.svelte'
   import TerminalView from './lib/components/TerminalView.svelte'
   import NewAgentDialog from './lib/components/NewAgentDialog.svelte'
+  import NewChatDialog from './lib/components/NewChatDialog.svelte'
   import SettingsModal from './lib/components/SettingsModal.svelte'
   import Toasts from './lib/components/Toasts.svelte'
   import ConfirmDialog from './lib/components/ConfirmDialog.svelte'
@@ -344,6 +346,10 @@
       {@html icons.settings}
     </button>
     {#if !$mobile}
+      <button class="btn btn-outline btn-sm" on:click={() => chatDialogOpen.set(true)}>
+        {@html icons.chat}
+        New chat
+      </button>
       <button class="btn btn-primary btn-sm" on:click={() => dialogOpen.set(true)}>
         {@html icons.plus}
         New agent
@@ -394,6 +400,7 @@
   </div>
 
   <NewAgentDialog />
+  <NewChatDialog />
   <SettingsModal />
   <Toasts />
   <ConfirmDialog />

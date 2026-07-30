@@ -1,13 +1,13 @@
 /**
  * sentinelWatcher — fs.watch multiplexer over a session's sentinel directory
- * (pr.json / status.json / outcome.json / events.ndjson), extracted from the
- * 110-line anonymous closure that used to live inline in sessionManager's
- * launch() (FLO-119). Owns the per-file dedupe cursors and the pty-vs-poll
- * status merge (StatusDetector.applySignal vs the sentinel's state verbatim)
- * so both are directly unit-testable without a real PTY. File parsing itself
- * stays in statusSentinel.ts/outcomeSentinel.ts/agentEventsSentinel.ts —
- * this module only wires fs events to those parsers and dedupes/merges the
- * result.
+ * (pr.json / status.json / outcome.json / events.ndjson / requests.ndjson),
+ * extracted from the 110-line anonymous closure that used to live inline in
+ * sessionManager's launch() (FLO-119). Owns the per-file dedupe cursors and
+ * the pty-vs-poll status merge (StatusDetector.applySignal vs the sentinel's
+ * state verbatim) so both are directly unit-testable without a real PTY.
+ * File parsing itself stays in statusSentinel.ts/outcomeSentinel.ts/
+ * agentEventsSentinel.ts/agentRequestSentinel.ts — this module only wires fs
+ * events to those parsers and dedupes/merges the result.
  */
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -21,12 +21,22 @@ import {
   type OutcomeSentinel,
 } from './outcomeSentinel.js'
 import { parseAgentEvents, AGENT_EVENTS_FILE, type AgentEventLine } from './agentEventsSentinel.js'
+import {
+  parseAgentRequests,
+  AGENT_REQUESTS_FILE,
+  type AgentRequest,
+} from './agentRequestSentinel.js'
 
 export interface SentinelWatcherCallbacks {
   /** pr.json: url, deduped internally across repeated writes of the same url. */
   onPr(url: string): void
   onOutcome(outcome: OutcomeSentinel): void
   onAgentEvent(event: AgentEventLine): void
+  /** requests.ndjson: fires once per distinct request id (TASK-CIOEQ) — the
+   *  agent-spawn service (not this module) is responsible for idempotency
+   *  across daemon restarts by seeding answered ids from responses.ndjson
+   *  before it starts processing. */
+  onAgentRequest(request: AgentRequest): void
   /** Fires on every status.json write newer than the last one seen. `status`
    *  is already merged (see `ptyDriven` below); `activityMessage` is the
    *  episode-scoped "what is the agent asking" text (set only alongside a
@@ -62,6 +72,20 @@ export function createSentinelWatcher(
   callbacks: SentinelWatcherCallbacks,
 ): SentinelWatcher {
   const emittedPrUrl = new Set<string>()
+  // requests.ndjson dedupes by id rather than by ts cursor (unlike events/
+  // status/outcome below): two lines can legitimately share the same
+  // millisecond timestamp — e.g. an orchestrator backgrounding several
+  // `slipstream new-agent` invocations at once — and a ts-cursor
+  // (`ts > lastSeenTs`) would silently and permanently drop the second-and-
+  // later same-ts line, orphaning that CLI invocation to a 60s
+  // responses.ndjson poll with no agent ever spawned. A same-ts duplicate
+  // *event* is merely a re-shown notification if merged/dropped, hence the
+  // different treatment there. As with events.ndjson, a daemon restart still
+  // replays the whole requests.ndjson history through this (now id-keyed)
+  // dedupe starting from an empty set; idempotency *across* restarts is
+  // agentSpawnService.ts's job (seeding answered ids from responses.ndjson
+  // before it starts processing), not this watcher's.
+  const emittedRequestIds = new Set<string>()
   let lastStatusTs = 0
   let lastOutcomeTs = 0
   // Deliberately starts at 0: after a daemon restart the whole events.ndjson
@@ -81,7 +105,8 @@ export function createSentinelWatcher(
             filename !== 'pr.json' &&
             filename !== STATUS_SENTINEL_FILE &&
             filename !== OUTCOME_SENTINEL_FILE &&
-            filename !== AGENT_EVENTS_FILE
+            filename !== AGENT_EVENTS_FILE &&
+            filename !== AGENT_REQUESTS_FILE
           )
             return
 
@@ -120,6 +145,20 @@ export function createSentinelWatcher(
               for (const event of events) {
                 lastAgentEventTs = event.ts
                 callbacks.onAgentEvent(event)
+              }
+            } catch {
+              // Ignore read/parse errors (file may be partially written)
+            }
+            return
+          }
+
+          if (filename === AGENT_REQUESTS_FILE) {
+            try {
+              const content = fs.readFileSync(path.join(dir, AGENT_REQUESTS_FILE), 'utf8')
+              for (const req of parseAgentRequests(content)) {
+                if (emittedRequestIds.has(req.id)) continue
+                emittedRequestIds.add(req.id)
+                callbacks.onAgentRequest(req)
               }
             } catch {
               // Ignore read/parse errors (file may be partially written)

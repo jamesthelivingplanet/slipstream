@@ -60,6 +60,10 @@ The transition agents most often drop is #1's resume case: user was asked someth
 
 The \`slipstream\` skill in this worktree documents every command (checkpoints, artifact publishing); \`slipstream help\` prints the same reference.
 
+## Delegating work
+
+You are not limited to working alone: \`slipstream new-agent --repo <org/name> --title "..."\` spawns an independent agent in its own worktree to take on a subtask, and prints its session id. Use \`slipstream repos\` to discover which repos you can target, and \`slipstream agents\` to check on the agents you've spawned and their status. A spawned agent runs on its own — it does not block your own progress.
+
 Ticket:
 ${tid}: ${title}
 
@@ -73,6 +77,39 @@ When the ticket is complete, commit and push your changes yourself using ordinar
 2. Report the URL it prints in your final message.
 
 Do not skip this step — it is how the work gets reviewed.`
+}
+
+/**
+ * System prompt for a "blank chat" session (TASK-CIOEQ) — the app's one-click
+ * "New chat" entry point starts a scratch worktree with no linked ticket,
+ * rather than a ticket kickoff. Reuses the SAME lifecycle wording as
+ * {@link buildSystemPrompt} (SINGLE_CHANNEL_CLAIM, the five status commands)
+ * so the two prompts can't drift on the CLI facts — only the framing prose
+ * differs:
+ *
+ * - No ticket, no autonomous "run to completion and open a PR" loop: the
+ *   agent talks to the user turn by turn and does not open a merge request
+ *   unless the user explicitly asks for one.
+ * - Waiting on the user is this agent's NORMAL resting state (every reply
+ *   ends by handing the turn back), not something reserved for being stuck —
+ *   so \`request-input\` is the every-turn call here, not just the blocked case.
+ */
+export function buildChatSystemPrompt(): string {
+  return `You are a conversational assistant working inside a scratch git worktree.
+
+There is no ticket for this session, and no merge request to open unless the user explicitly asks you to open one. This is not an autonomous ticket-runner — the user talks to you directly, turn by turn, and you respond to what they actually ask for.
+
+You can still delegate real work by spawning independent agents: \`slipstream new-agent --repo <org/name> --title "..."\` starts a new agent in its own worktree and prints its session id. Discover which repos you can target with \`slipstream repos\`, and check on agents you've spawned (and their status) with \`slipstream agents\`. A spawned agent runs on its own — it does not block the conversation.
+
+## Signaling your state to the app
+
+The app learns your state ${SINGLE_CHANNEL_CLAIM} on your PATH — there is no other channel. Report every transition the instant it happens:
+
+1. **\`slipstream task-started\`** — run this FIRST, before anything else, whenever you begin working on a new request AND every time you resume after the user sends a message.
+2. **\`slipstream request-input --message "..."\`** — for a chat agent, waiting on the user is the NORMAL resting state, not a sign of being stuck: run this every time you hand the turn back, whether you just answered, asked a follow-up question, or are simply done for now. Use \`slipstream task-blocked --message "..."\` when you cannot proceed at all, and \`slipstream approval-request --message "..."\` when you need an explicit go-ahead for a risky action.
+3. **\`slipstream task-complete --summary "..."\`** — only if the user explicitly asks you to end the session; most chat sessions just keep handing the turn back and forth via \`request-input\`.
+
+The \`slipstream\` skill in this worktree documents every command; \`slipstream help\` prints the same reference.`
 }
 
 export interface HandoffContext {

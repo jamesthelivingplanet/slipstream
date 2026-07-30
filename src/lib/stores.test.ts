@@ -73,6 +73,7 @@ import {
   createBlankAgent,
   createAgentFromTicket,
   startAgent,
+  startChatAgent,
   startAgentsFromTickets,
   discardDraft,
   setSessionPrUrl,
@@ -941,6 +942,37 @@ describe('dtoToSession (FLO-83 src round-trip)', () => {
     }
     expect(dtoToSession(dto).agentKind).toBe('pi')
   })
+
+  it('TASK-CIOEQ: maps parentId so a spawned-by card annotation survives a reload/reconnect', () => {
+    const dto = {
+      id: 's5',
+      tid: 'T-5',
+      title: 't',
+      prompt: 'p',
+      repoId: 'r',
+      branch: 'b',
+      status: 'idle',
+      createdAt: 0,
+      src: 'jira',
+      parentId: 'parent-1',
+    } as SessionDTO
+    expect(dtoToSession(dto).parentId).toBe('parent-1')
+  })
+
+  it('TASK-CIOEQ: leaves parentId undefined when the DTO carries none', () => {
+    const dto: SessionDTO = {
+      id: 's6',
+      tid: 'T-6',
+      title: 't',
+      prompt: 'p',
+      repoId: 'r',
+      branch: 'b',
+      status: 'idle',
+      createdAt: 0,
+      src: 'jira',
+    }
+    expect(dtoToSession(dto).parentId).toBeUndefined()
+  })
 })
 
 describe('counts/visible bucket agreement with Mission Control (FLO-113)', () => {
@@ -1085,6 +1117,65 @@ describe('startAgentsFromTickets (FLO-95 batch launch)', () => {
 
     expect(get(selectedId)).toBe('preserved')
     expect(get(dialogOpen)).toBe(true)
+  })
+})
+
+describe('startChatAgent (TASK-CIOEQ new chat)', () => {
+  beforeEach(() => {
+    sessions.set([])
+    repos.set([{ id: 'repo1', org: 'acme', name: 'widgets', base: 'main' }])
+    selectedId.set(null)
+    bootingId.set(null)
+    vi.clearAllMocks()
+  })
+
+  it('mints a CHAT- tid, starts with an empty prompt and mode "chat", and selects the new session', async () => {
+    // The real backend honors the caller-supplied sessionId (contract.ts's
+    // startSession doc comment), so the dto it returns keeps the same id the
+    // client optimistically minted — mirrored here rather than a literal.
+    vi.mocked(startSession).mockImplementation(async (input) => ({
+      id: input.sessionId as string,
+      tid: input.tid,
+      title: input.title,
+      prompt: input.prompt,
+      repoId: input.repoId,
+      branch: 'chat-branch',
+      status: 'running',
+      createdAt: 0,
+    }))
+
+    await startChatAgent('repo1')
+
+    expect(startSession).toHaveBeenCalledTimes(1)
+    const input = vi.mocked(startSession).mock.calls[0][0]
+    expect(input).toMatchObject({ prompt: '', repoId: 'repo1', mode: 'chat' })
+    expect(input.tid).toMatch(/^CHAT-[0-9A-Z]{5}$/)
+    expect(input.title).toMatch(/^Chat /)
+
+    const created = get(sessions).find((s) => s.tid === input.tid)
+    expect(created).toBeDefined()
+    expect(get(selectedId)).toBe(created?.id)
+  })
+
+  it('never invents a placeholder kickoff prompt — the draft and the started session both carry an empty prompt', async () => {
+    let capturedPrompt: string | undefined
+    vi.mocked(startSession).mockImplementation(async (input) => {
+      capturedPrompt = input.prompt
+      return {
+        id: 'chat-2',
+        tid: input.tid,
+        title: input.title,
+        prompt: input.prompt,
+        repoId: input.repoId,
+        branch: 'chat-branch',
+        status: 'running',
+        createdAt: 0,
+      }
+    })
+
+    await startChatAgent('repo1')
+
+    expect(capturedPrompt).toBe('')
   })
 })
 

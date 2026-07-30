@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest'
 import {
   defaultUserPrompt,
   buildSystemPrompt,
+  buildChatSystemPrompt,
   buildAgentsMdContent,
   deliverPrompt,
   buildHandoffPrompt,
   formatChatExcerpt,
   AGENT_LABELS,
 } from './promptComposer.js'
-import { LIFECYCLE_INVOCATIONS } from './slipstreamCommands.js'
+import { LIFECYCLE_INVOCATIONS, SINGLE_CHANNEL_CLAIM } from './slipstreamCommands.js'
 import type { SessionChatMessageDTO } from './contract.js'
 
 describe('defaultUserPrompt', () => {
@@ -109,6 +110,47 @@ describe('buildSystemPrompt', () => {
   it('instructs "done" is the final action', () => {
     const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
     expect(result).toContain('as your final action')
+  })
+
+  it('explains delegating work by spawning independent agents (TASK-CIOEQ)', () => {
+    const result = buildSystemPrompt({ tid: 'T-1', title: 'Fix bug' })
+    expect(result).toContain('slipstream new-agent')
+    expect(result).toContain('slipstream repos')
+    expect(result).toContain('slipstream agents')
+  })
+})
+
+describe('buildChatSystemPrompt (TASK-CIOEQ)', () => {
+  it('mentions delegating work by spawning independent agents', () => {
+    const result = buildChatSystemPrompt()
+    expect(result).toContain('slipstream new-agent')
+    expect(result).toContain('slipstream repos')
+    expect(result).toContain('slipstream agents')
+  })
+
+  it('frames request-input as the normal resting state, not just for being stuck', () => {
+    const result = buildChatSystemPrompt()
+    expect(result.toLowerCase()).toContain('normal resting state')
+    expect(result).toContain('slipstream request-input')
+  })
+
+  it('does not instruct opening a merge request', () => {
+    const result = buildChatSystemPrompt()
+    expect(result).not.toContain('slipstream open-mr')
+  })
+
+  it('says there is no ticket and frames itself as talking to the user directly', () => {
+    const result = buildChatSystemPrompt()
+    expect(result).toContain('no ticket')
+    expect(result.toLowerCase()).toContain('not an autonomous ticket-runner')
+  })
+
+  it('includes the shared lifecycle section (SINGLE_CHANNEL_CLAIM + every lifecycle command)', () => {
+    const result = buildChatSystemPrompt()
+    expect(result).toContain(SINGLE_CHANNEL_CLAIM)
+    for (const cmd of LIFECYCLE_INVOCATIONS) {
+      expect(result).toContain(cmd)
+    }
   })
 })
 
