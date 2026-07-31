@@ -103,6 +103,31 @@ specifically (schema versioning, build stamping, release flow).
 
   Both components are listed in `docs/UX-GO-NO-GO.md` §3's freeze scope; the decision to
   touch them is recorded there rather than left implicit.
+- The claude-code, pi and grok chat mappers now share one tested core
+  (`electron/services/chatBlockShared.ts`) for the two helpers whose control flow is
+  genuinely identical — `toolResultContentToParts` and `blocksFromContent` — unified via an
+  injected per-backend callback rather than flags. The rest stays deliberately duplicated:
+  the three `imageBlockFrom*` variants take three different input envelopes, `blockFromRaw`
+  and `blockFromPart` differ in discriminant, field names and return shape, and grok's
+  tool-result helpers handle a discriminated union rather than an array of parts. Net line
+  count barely moves; the win is that a fix to the shared pair lands once instead of three
+  times. `antigravityChatMessages.ts` (protobuf walking) is untouched by design.
+
+### Fixed
+
+- Toasts now pause their auto-dismiss timer on keyboard focus, not only on mouse hover
+  (`role="group"` plus `focusin`/`focusout` on the same pause/resume path). A keyboard user
+  tabbing to the dismiss button could previously have the toast vanish mid-interaction —
+  the hover handlers already guarded against exactly that for mouse users.
+- `NewAgentFab`'s press-animation CSS is no longer reported as unused. The `.pressed` class
+  is applied imperatively (`classList.add`/`remove`, deliberately, to force a reflow so a
+  rapid re-tap retriggers the animation), which svelte-check cannot see; the selectors are
+  now `:global(.pressed)`-scoped for that part only. Nothing was deleted — the styling is
+  live, and removing it would have dropped a real press affordance. `pnpm check` is now 0
+  errors and 0 warnings repo-wide.
+- `docs/DEVELOPMENT.md` documents that a freshly created linked worktree needs `mise trust`
+  before `pnpm check`/`test`/`lint` will run — they otherwise fail with a mise config-trust
+  error rather than actually running.
 
 ### Security
 

@@ -6,6 +6,25 @@ always-on command summary and conventions live in [../CLAUDE.md](../CLAUDE.md);
 the design lives in [ARCHITECTURE.md](ARCHITECTURE.md); native-build pain lives
 in [NATIVE-MODULES.md](NATIVE-MODULES.md).
 
+## First run in a fresh worktree: `mise trust`
+
+A freshly created linked worktree (`git worktree add`, or a per-ticket
+worktree) has its own copy of `mise.toml`, and mise treats every worktree's
+copy as an unrecognized config file until it's explicitly trusted — even
+though you already trust this repo's `mise.toml` in the main checkout. If
+mise's shell integration is active, the first `pnpm check` / `pnpm test` /
+`pnpm lint` (or anything else that shells out) in the new worktree fails
+fast with `Config files in ... are not trusted` instead of running. Fix it
+once per worktree:
+
+```sh
+mise trust
+```
+
+then re-run whatever command failed. This is unrelated to the dev/prod
+target guard below — it's mise refusing to auto-load config it hasn't seen
+before, not anything Slipstream-specific.
+
 ## Dev vs prod deploy targets
 
 If you're working in a linked git worktree (e.g. a per-ticket worktree under

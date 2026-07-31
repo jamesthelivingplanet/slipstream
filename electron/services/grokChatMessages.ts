@@ -41,6 +41,7 @@
  * instance-verified against a captured row.
  */
 import type { ChatBlock, SessionChatMessageDTO } from '../shared/contract.js'
+import { blocksFromContent } from './chatBlockShared.js'
 
 /** One row of grok's `messages` table (`SELECT session_id, seq, role,
  *  message_json, created_at`). `role` is a redundant copy of the parsed
@@ -171,21 +172,6 @@ function toolResultContentPartsToString(value: unknown): string {
     .join('\n')
 }
 
-/** A ModelMessage's `content` is either a plain string (simple prompts) or
- *  an array of part objects. */
-function blocksFromContent(content: unknown): ChatBlock[] {
-  if (typeof content === 'string') {
-    return content.length > 0 ? [{ type: 'text', text: content }] : []
-  }
-  if (!Array.isArray(content)) return []
-  const blocks: ChatBlock[] = []
-  for (const raw of content) {
-    const block = blockFromPart(raw)
-    if (block) blocks.push(block)
-  }
-  return blocks
-}
-
 /** Map one `messages` table row to a chat DTO, or null when the row is
  *  unusable (malformed JSON, unrecognized role, unparseable timestamp) or
  *  has nothing renderable (e.g. a turn with only a tool-approval part).
@@ -211,7 +197,10 @@ export function mapGrokMessageRow(row: GrokMessageRow): SessionChatMessageDTO | 
   if (role === 'system') return null // system prompt — not part of the visible conversation
   if (role !== 'user' && role !== 'assistant' && role !== 'tool') return null
 
-  const blocks = blocksFromContent(msg['content'])
+  const blocks = blocksFromContent(msg['content'], (raw) => {
+    const block = blockFromPart(raw)
+    return block ? [block] : []
+  })
   if (blocks.length === 0) return null // e.g. a turn whose only part was a tool-approval part — nothing to show
 
   const ts = Date.parse(row.created_at)

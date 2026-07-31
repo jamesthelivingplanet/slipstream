@@ -24,6 +24,7 @@
  * with the tool's output).
  */
 import type { ChatBlock, SessionChatMessageDTO } from '../shared/contract.js'
+import { blocksFromContent, toolResultContentToParts } from './chatBlockShared.js'
 
 function blockFromRaw(raw: unknown): ChatBlock | null {
   if (typeof raw !== 'object' || raw === null) return null
@@ -69,47 +70,6 @@ function imageBlockFromPart(raw: unknown): ChatBlock | null {
   return block
 }
 
-/** A ToolResultMessage's `content` is an array of text/image parts. Text
- *  parts flatten into `.text` (same join behavior as before); `image` parts
- *  become sibling `ChatBlock`s in `.images` instead of being silently
- *  dropped. */
-function toolResultContentToParts(content: unknown): { text: string; images: ChatBlock[] } {
-  if (typeof content === 'string') return { text: content, images: [] }
-  if (!Array.isArray(content)) return { text: '', images: [] }
-
-  const textParts: string[] = []
-  const images: ChatBlock[] = []
-  for (const part of content) {
-    if (typeof part === 'string') {
-      textParts.push(part)
-      continue
-    }
-    if (typeof part !== 'object' || part === null) continue
-    const p = part as Record<string, unknown>
-    if (p['type'] === 'image') {
-      const img = imageBlockFromPart(p)
-      if (img) images.push(img)
-      continue
-    }
-    const text = p['text']
-    if (typeof text === 'string') textParts.push(text)
-  }
-  return { text: textParts.filter((s) => s.length > 0).join('\n'), images }
-}
-
-function blocksFromContent(content: unknown): ChatBlock[] {
-  if (typeof content === 'string') {
-    return content.length > 0 ? [{ type: 'text', text: content }] : []
-  }
-  if (!Array.isArray(content)) return []
-  const blocks: ChatBlock[] = []
-  for (const raw of content) {
-    const block = blockFromRaw(raw)
-    if (block) blocks.push(block)
-  }
-  return blocks
-}
-
 /** entry.timestamp is an ISO string; message.timestamp (when present, e.g.
  *  UserMessage/AssistantMessage) is epoch ms. Either is accepted, entry-level
  *  preferred (present on every entry per the format doc). */
@@ -144,7 +104,10 @@ function parseLine(line: string): SessionChatMessageDTO | null {
   const role = msg['role']
 
   if (role === 'user' || role === 'assistant') {
-    const blocks = blocksFromContent(msg['content'])
+    const blocks = blocksFromContent(msg['content'], (raw) => {
+      const block = blockFromRaw(raw)
+      return block ? [block] : []
+    })
     if (blocks.length === 0) return null // e.g. a turn whose only block was an unrecognized/future kind
     return { uuid, role, blocks, ts }
   }
@@ -152,7 +115,7 @@ function parseLine(line: string): SessionChatMessageDTO | null {
   if (role === 'toolResult') {
     const toolCallId = msg['toolCallId']
     if (typeof toolCallId !== 'string') return null
-    const { text, images } = toolResultContentToParts(msg['content'])
+    const { text, images } = toolResultContentToParts(msg['content'], imageBlockFromPart)
     const block: ChatBlock = { type: 'tool_result', toolUseId: toolCallId, content: text }
     if (msg['isError'] === true) block.isError = true
     return { uuid, role: 'user', blocks: [block, ...images], ts }

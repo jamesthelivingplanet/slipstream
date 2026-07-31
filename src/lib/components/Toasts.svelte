@@ -4,10 +4,20 @@
 
 <div class="toasts-wrap">
   {#each $toasts as t (t.id)}
+    <!-- role="group" (not decorative): pause-on-hover is a real functional
+         interaction — it stops the auto-dismiss timer while the pointer is
+         over the toast (see toast.ts). A keyboard user tabbing to the
+         dismiss button gets no hover, so the same pause/resume is wired to
+         focusin/focusout (which bubble from the button, unlike focus/blur)
+         to give keyboard users the same protection from the toast
+         disappearing mid-interaction. -->
     <div
       class="toast {t.type}"
+      role="group"
       on:mouseenter={() => pauseToast(t.id)}
       on:mouseleave={() => resumeToast(t.id)}
+      on:focusin={() => pauseToast(t.id)}
+      on:focusout={() => resumeToast(t.id)}
     >
       <!-- Each toast is its own live region (FLO-115): role="alert" is
            assertive (errors), role="status" is polite (success/warning). The

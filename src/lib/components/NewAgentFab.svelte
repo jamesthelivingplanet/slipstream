@@ -676,16 +676,22 @@
 
   /* Press: squash-and-stretch on the button + the hex ripple firing once.
      Angel mode only — .regular.pressed below has one more class so it wins
-     on specificity and overrides this with a plain scale instead. */
-  .new-agent-fab.pressed {
+     on specificity and overrides this with a plain scale instead.
+     `.pressed` is applied imperatively via classList (see handleClick) —
+     never through a Svelte class: binding — so it's invisible to
+     svelte-check's static template analysis. :global() on just that part of
+     the selector keeps `.new-agent-fab` itself scoped as normal while
+     telling the unused-CSS-selector check this class is managed outside the
+     template on purpose, rather than being dead. */
+  .new-agent-fab:global(.pressed) {
     animation: fab-squash 0.32s cubic-bezier(0.36, 1.9, 0.4, 1) 1;
   }
-  .new-agent-fab.pressed .ripple {
+  .new-agent-fab:global(.pressed) .ripple {
     animation: fab-ripple 0.5s ease-out 1;
   }
 
   /* Regular-mode press feedback: simple scale-down, no squash/ripple. */
-  .new-agent-fab.regular.pressed {
+  .new-agent-fab.regular:global(.pressed) {
     animation: fab-regular-press 0.18s ease-out 1;
   }
 
@@ -736,10 +742,10 @@
     .px-eye-echo {
       animation: none;
     }
-    .new-agent-fab.pressed {
+    .new-agent-fab:global(.pressed) {
       animation: fab-flash 0.12s ease-out 1;
     }
-    .new-agent-fab.pressed .ripple {
+    .new-agent-fab:global(.pressed) .ripple {
       animation: none;
     }
   }

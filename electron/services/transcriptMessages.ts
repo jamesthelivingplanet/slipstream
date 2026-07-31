@@ -28,6 +28,7 @@
  * two files.
  */
 import type { ChatBlock, SessionChatMessageDTO } from '../shared/contract.js'
+import { blocksFromContent, toolResultContentToParts } from './chatBlockShared.js'
 
 /** Convert one raw content-block object into zero or more ChatBlocks. Most
  *  kinds map to a single block; `tool_result` can additionally surface
@@ -61,7 +62,9 @@ function blockFromRaw(raw: unknown): ChatBlock[] {
     case 'tool_result': {
       const toolUseId = b['tool_use_id']
       if (typeof toolUseId !== 'string') return []
-      const { text, images } = toolResultContentToParts(b['content'])
+      const { text, images } = toolResultContentToParts(b['content'], (p) =>
+        imageBlockFromSource(p['source']),
+      )
       const block: ChatBlock = { type: 'tool_result', toolUseId, content: text }
       if (b['is_error'] === true) block.isError = true
       return [block, ...images]
@@ -86,47 +89,6 @@ function imageBlockFromSource(raw: unknown): ChatBlock | null {
   const mediaType = source['media_type']
   if (typeof mediaType === 'string') block.mediaType = mediaType
   return block
-}
-
-/** A tool_result's `content` is either a plain string or an array of
- *  content-part objects (text parts interleaved with e.g. images). Text
- *  parts flatten to `.text` (same join behavior as before); `image` parts
- *  become sibling `ChatBlock`s in `.images` instead of being silently
- *  dropped. */
-function toolResultContentToParts(content: unknown): { text: string; images: ChatBlock[] } {
-  if (typeof content === 'string') return { text: content, images: [] }
-  if (!Array.isArray(content)) return { text: '', images: [] }
-
-  const textParts: string[] = []
-  const images: ChatBlock[] = []
-  for (const part of content) {
-    if (typeof part === 'string') {
-      textParts.push(part)
-      continue
-    }
-    if (typeof part !== 'object' || part === null) continue
-    const p = part as Record<string, unknown>
-    if (p['type'] === 'image') {
-      const img = imageBlockFromSource(p['source'])
-      if (img) images.push(img)
-      continue
-    }
-    const text = p['text']
-    if (typeof text === 'string') textParts.push(text)
-  }
-  return { text: textParts.filter((s) => s.length > 0).join('\n'), images }
-}
-
-/** A message's `content` is either a plain string (simple prompts/commands)
- *  or an array of content-block objects. */
-function blocksFromContent(content: unknown): ChatBlock[] {
-  if (typeof content === 'string') {
-    return content.length > 0 ? [{ type: 'text', text: content }] : []
-  }
-  if (!Array.isArray(content)) return []
-  const blocks: ChatBlock[] = []
-  for (const raw of content) blocks.push(...blockFromRaw(raw))
-  return blocks
 }
 
 function parseLine(line: string): SessionChatMessageDTO | null {
@@ -156,7 +118,7 @@ function parseLine(line: string): SessionChatMessageDTO | null {
   const role = msg['role']
   if (role !== 'user' && role !== 'assistant') return null
 
-  const blocks = blocksFromContent(msg['content'])
+  const blocks = blocksFromContent(msg['content'], blockFromRaw)
   if (blocks.length === 0) return null // e.g. a line whose only block was an unrecognized/future kind
 
   const dto: SessionChatMessageDTO = { uuid, role, blocks, ts }
