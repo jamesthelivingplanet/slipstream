@@ -1,0 +1,100 @@
+# Codemagic CI/CD — iOS build + TestFlight upload only.
+#
+# .gitlab-ci.yml already gates every MR (lint/check/test/build), but it runs
+# on GitLab's shared Linux runners: no macOS, no Xcode, so it cannot build the
+# iOS app. Separately, this project's GitLab.com shared-runner quota is
+# already exhausted (see docs/plans/TASK-I9S44-mobile-apps.md, Phase 0) — so
+# even a macOS-capable GitLab CI job isn't an option right now. Codemagic is a
+# mobile-first CI/CD product with managed macOS/Xcode/CocoaPods instances, so
+# it lives here as a standalone top-level file rather than a stage bolted onto
+# .gitlab-ci.yml. See docs/MOBILE-IOS.md for the full build/ship runbook this
+# workflow automates.
+workflows:
+  ios-testflight:
+    name: iOS - build and upload to TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      # Repo's engines.node in package.json is "22.x" — match it so the SPA
+      # build behaves the same as local/dev and .gitlab-ci.yml.
+      node: 22
+      xcode: latest
+      cocoapods: default
+      groups:
+        # App Store Connect API key (Fastfile's setup_ci_signing lane) —
+        # from appstoreconnect.apple.com -> Users and Access -> Integrations
+        # -> Keys. Create this group in the Codemagic UI (Teams -> your team
+        # -> Environment variables) with:
+        #   APP_STORE_CONNECT_KEY_ID       the key's Key ID
+        #   APP_STORE_CONNECT_ISSUER_ID    the Issuer ID shown on the same
+        #                                  Keys page
+        #   APP_STORE_CONNECT_PRIVATE_KEY  the downloaded .p8 file's full
+        #                                  contents (PEM headers included) —
+        #                                  mark it "secure"/masked
+        #   APPLE_TEAM_ID                  developer portal team id
+        #                                  (developer.apple.com/account ->
+        #                                  Membership)
+        #   ITC_TEAM_ID                    App Store Connect team id (only
+        #                                  differs from APPLE_TEAM_ID for
+        #                                  multi-team accounts; Users and
+        #                                  Access -> the team switcher)
+        - app_store_connect
+        # Firebase project slipstream-45299's iOS config, base64-encoded so
+        # it survives as a single env var. Create this group with:
+        #   GOOGLE_SERVICE_INFO_PLIST_BASE64   `base64 -i GoogleService-Info.plist`
+        #                                      of the file downloaded from
+        #                                      the Firebase console for the
+        #                                      iOS app (same project the
+        #                                      Android app already uses) —
+        #                                      mark it "secure"/masked
+        - firebase_ios
+    triggering:
+      # Tag push matching pnpm release's tag scheme (vX.Y.Z — see
+      # docs/VERSIONING.md) starts a build automatically. Codemagic always
+      # additionally allows starting any workflow manually from its
+      # dashboard/API regardless of the triggers configured here, which
+      # covers ad hoc/manual runs without a separate trigger entry.
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
+      cancel_previous_builds: true
+    scripts:
+      - name: Install root dependencies
+        script: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Build the SPA
+        script: |
+          # mobile/capacitor.config.ts's `server.url` is the whole point of
+          # the kiosk shell: the WebView loads the daemon-served SPA at
+          # runtime, over the tailnet, not a bundled copy. `webDir: 'www'`
+          # only covers the hand-written ServerGate/offline fallback pages
+          # (`mobile/www/index.html`, `offline.html`) — `cap sync` copies
+          # that directory verbatim; it does NOT consume this build's
+          # output. Running `pnpm build` here isn't required for the app to
+          # function, but it IS the cheapest available correctness check
+          # that the SPA still compiles before cutting a release — skipping
+          # it would let a broken `src/` build go unnoticed until someone
+          # actually points a daemon at this tag.
+          pnpm build
+      - name: Install mobile/ dependencies
+        script: |
+          cd mobile
+          pnpm install --frozen-lockfile
+      - name: Write GoogleService-Info.plist
+        script: |
+          echo "$GOOGLE_SERVICE_INFO_PLIST_BASE64" | base64 --decode > mobile/ios/App/App/GoogleService-Info.plist
+      - name: cap sync ios
+        script: |
+          cd mobile
+          npx cap sync ios
+      - name: pod install
+        script: |
+          cd mobile/ios/App
+          pod install
+      - name: Fastlane beta (TestFlight)
+        script: |
+          cd mobile
+          fastlane beta

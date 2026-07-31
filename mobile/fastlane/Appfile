@@ -1,0 +1,23 @@
+# Fastlane Appfile — identifiers only, no personal/team secrets.
+#
+# Bundle id is fixed (matches mobile/ios/App/App.xcodeproj's
+# PRODUCT_BUNDLE_IDENTIFIER and mobile/capacitor.config.ts's appId). Apple ID
+# and team ids are per-account and read from env so this file stays the same
+# across whichever Apple Developer account James enrolls (individual or
+# organization — see docs/MOBILE-IOS.md's Open decisions table).
+app_identifier('app.slipstream.mobile')
+
+# Apple ID (email) used to authenticate with App Store Connect / the developer
+# portal. Only needed for interactive `fastlane` runs on a Mac; CI auth goes
+# through the App Store Connect API key in the Fastfile instead (see
+# setup_ci_signing), so this is unset (nil) unless FASTLANE_APPLE_ID is
+# exported.
+apple_id(ENV['FASTLANE_APPLE_ID']) if ENV['FASTLANE_APPLE_ID']
+
+# Developer portal team id (found at developer.apple.com/account → Membership).
+team_id(ENV['APPLE_TEAM_ID']) if ENV['APPLE_TEAM_ID']
+
+# App Store Connect team id — only differs from APPLE_TEAM_ID for accounts
+# that belong to multiple App Store Connect teams (found at
+# appstoreconnect.apple.com → Users and Access → the team switcher).
+itc_team_id(ENV['ITC_TEAM_ID']) if ENV['ITC_TEAM_ID']

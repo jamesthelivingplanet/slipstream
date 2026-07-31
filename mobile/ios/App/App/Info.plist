@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+        <string>Slipstream</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<!-- iPhone-only v1 — no iPad-specific orientation set (~ipad key removed).
+	     TARGETED_DEVICE_FAMILY is pinned to 1 (iPhone) in project.pbxproj to
+	     match. -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+	<!-- FLO-149: silent/data push (the FCM-bridged inline-reply prompt, and
+	     ordinary "needs you" notifications) must be able to wake/refresh the
+	     app in the background, same intent as Android's FCM service running
+	     without the app in the foreground. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<!-- FLO-159: biometric unlock of the saved daemon bearer token (see
+	     AppControlPlugin.biometricAuthenticate) — iOS requires a usage
+	     description before an app may call LAContext's Face ID policy at
+	     all, unlike Touch ID which needs no Info.plist entry. -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Slipstream uses Face ID to unlock your saved server token before letting you back into the app.</string>
+	<!-- FLO-155: @capacitor-community/speech-recognition (voice-to-text for
+	     composing agent replies) needs both of these — the microphone to
+	     capture audio, and speech recognition because iOS treats on-device/
+	     server transcription as a distinct privacy-sensitive capability from
+	     raw mic access. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Slipstream uses the microphone for voice-to-text when composing a reply.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Slipstream uses speech recognition to transcribe your voice into a reply.</string>
+	<!-- TASK-I9S44: the daemon URL (baked default or the runtime Settings >
+	     Server override — see MainViewController.instanceDescriptor()) is
+	     frequently a plain-http address on the same local network/tailnet as
+	     the phone. NSAllowsLocalNetworking permits that WITHOUT the blanket
+	     NSAllowsArbitraryLoads escape hatch, which Apple requires specific
+	     written justification for at App Store review. A daemon reached over
+	     a real remote/tailnet hop (rather than the same local network) MUST
+	     be served over https/wss — e.g. via `tailscale serve` — because ATS
+	     still blocks cleartext to any non-local host; that restriction is
+	     intentional, not a bug to route around with arbitrary loads. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Slipstream connects to your Slipstream daemon on your local network.</string>
+</dict>
+</plist>
