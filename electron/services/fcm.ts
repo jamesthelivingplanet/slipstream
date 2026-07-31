@@ -146,7 +146,24 @@ async function parseFcmSendResult(res: Response): Promise<FcmSendResult> {
  *  URL for the full-color Nulliel picture; FCM v1 puts it at
  *  `message.android.notification.image`, not on the top-level `notification`
  *  block. When absent, `android` stays exactly `{ priority: 'high' }` as
- *  before this change. */
+ *  before this change. `image` is deliberately Android-only: rendering an
+ *  image on iOS needs a Notification Service Extension to fetch+attach it
+ *  (v1 does not ship one), so there is no `apns` equivalent to set here —
+ *  FLO-149.
+ *
+ *  `apns` (FLO-149, iOS app ships) mirrors the `android` block's
+ *  user-facing-alert intent for the platform FCM routes to APNs:
+ *  `apns-priority: '10'` is APNs' "deliver now" priority, matching
+ *  `android.priority: 'high'`; `aps.sound: 'default'` makes the notification
+ *  play a sound instead of arriving silently. The top-level `notification`
+ *  and `data` blocks are untouched — FCM itself translates `notification`
+ *  into the APNs alert and forwards `data` as custom APNs payload keys, so
+ *  the existing tap-to-deep-link behavior (TASK-F0TYG) works unchanged on
+ *  iOS. This is one un-branched request for both platforms: FCM sends a
+ *  single message per device token, and a device silently ignores whichever
+ *  of `android`/`apns` doesn't apply to it — don't add an `if (platform ===
+ *  'ios')` branch here, it isn't needed and only forks a path that already
+ *  works for both. */
 export async function sendFcmMessage(
   account: FcmServiceAccount,
   accessToken: string,
@@ -170,6 +187,7 @@ export async function sendFcmMessage(
           notification: notificationFields,
           ...(data ? { data } : {}),
           android: { priority: 'high', ...(image ? { notification: { image } } : {}) },
+          apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
         },
       }),
     },
@@ -194,7 +212,17 @@ export async function sendFcmMessage(
  *
  *  Same error/unregistered contract as `sendFcmMessage` (shared via
  *  `parseFcmSendResult`), so pushService's prune-on-unregistered loop works
- *  identically on both transports. */
+ *  identically on both transports.
+ *
+ *  iOS (FLO-149): unlike `sendFcmMessage`, this is NOT cross-platform as-is.
+ *  Both current callers (`sendOngoingSummary`, `sendNeedsReplyForAndroid`)
+ *  already filter to Android-only tokens, so that's fine today — but a
+ *  data-only FCM message does nothing on iOS by default. Shipping an iOS
+ *  background-data feature on this transport needs an `apns` block adding
+ *  `payload.aps['content-available'] = 1` and
+ *  `headers['apns-push-type'] = 'background'`, without which APNs won't even
+ *  wake the app to hand `data` to it. Not added here since there is no iOS
+ *  caller yet — don't assume this already works for iOS. */
 export async function sendFcmDataMessage(
   account: FcmServiceAccount,
   accessToken: string,

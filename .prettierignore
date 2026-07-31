@@ -10,3 +10,5 @@ public
 .pnpm-store
 # Capacitor-generated native Android project — not hand-written, not ours to format.
 mobile/android
+# Capacitor-generated native iOS project — not hand-written, not ours to format.
+mobile/ios

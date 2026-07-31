@@ -152,6 +152,7 @@ describe('sendFcmMessage', () => {
         token: 'device-tok-1',
         notification: { title: 'Hi', body: 'there' },
         android: { priority: 'high' },
+        apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
       },
     })
   })
@@ -181,6 +182,7 @@ describe('sendFcmMessage', () => {
         notification: { title: 'Hi', body: 'there' },
         data: { sessionId: 's1', tid: 'FLO-42', status: 'needs' },
         android: { priority: 'high' },
+        apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
       },
     })
   })
@@ -205,6 +207,7 @@ describe('sendFcmMessage', () => {
         token: 'device-tok-1',
         notification: { title: 'Hi', body: 'there' },
         android: { priority: 'high' },
+        apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
       },
     })
   })
@@ -234,8 +237,14 @@ describe('sendFcmMessage', () => {
           priority: 'high',
           notification: { image: 'https://example.com/icons/nulliel-512.png' },
         },
+        // image is Android-only (FLO-149): no apns equivalent — rendering an
+        // image on iOS needs a Notification Service Extension, which v1
+        // doesn't ship, so apns stays exactly the plain sound/priority block.
+        apns: { headers: { 'apns-priority': '10' }, payload: { aps: { sound: 'default' } } },
       },
     })
+    const body = capturedBody as { message: { apns: unknown } }
+    expect(JSON.stringify(body.message.apns)).not.toContain('nulliel')
   })
 
   it('omits android.notification entirely when image is absent — priority-only android block unchanged', async () => {
@@ -255,6 +264,30 @@ describe('sendFcmMessage', () => {
 
     const body = capturedBody as { message: { android: unknown } }
     expect(body.message.android).toEqual({ priority: 'high' })
+  })
+
+  it('sets apns-priority 10 and aps.sound default so iOS pushes render with sound at high priority (FLO-149)', async () => {
+    let capturedBody: unknown
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedBody = JSON.parse(init!.body as string)
+      return jsonResponse({ name: 'projects/test-project/messages/123' })
+    })
+
+    await sendFcmMessage(
+      account,
+      'access-tok',
+      'device-tok-1',
+      { title: 'Hi', body: 'there' },
+      { fetchFn: fetchFn as unknown as typeof fetch },
+    )
+
+    const body = capturedBody as {
+      message: { apns: { headers: Record<string, string>; payload: { aps: { sound: string } } } }
+    }
+    expect(body.message.apns).toEqual({
+      headers: { 'apns-priority': '10' },
+      payload: { aps: { sound: 'default' } },
+    })
   })
 
   it('flags unregistered on a 404 response', async () => {

@@ -1,0 +1,24 @@
+App/build
+App/Pods
+App/output
+App/App/public
+DerivedData
+xcuserdata
+
+# Cordova plugins for Capacitor
+capacitor-cordova-ios-plugins
+
+# Generated Config files
+App/App/capacitor.config.json
+App/App/config.xml
+
+# Google Services (Firebase/FCM)
+# Contains real Firebase project credentials for app.slipstream.mobile; download from
+# the Firebase console (console.firebase.google.com) if you need to build FCM locally.
+# Mirrors mobile/android/.gitignore's google-services.json handling — this file is
+# referenced by project.pbxproj and must be supplied before building.
+App/App/GoogleService-Info.plist
+
+# Podfile.lock is intentionally NOT ignored here — it should be committed once
+# `pod install` has been run on a macOS machine (cannot be generated in this
+# environment). Do not add a blanket Pods/ or *.lock rule above this line.

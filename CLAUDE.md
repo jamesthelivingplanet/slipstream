@@ -11,7 +11,8 @@ tag/changelog flow) → [docs/VERSIONING.md](docs/VERSIONING.md); deployment
 postures, what each wider one is gated on, and production-cut go/no-go criteria →
 [docs/PRODUCTION-READINESS.md](docs/PRODUCTION-READINESS.md); the core-UX half of that
 go/no-go — workstream classifications, the stability bar, and the freeze scope →
-[docs/UX-GO-NO-GO.md](docs/UX-GO-NO-GO.md).
+[docs/UX-GO-NO-GO.md](docs/UX-GO-NO-GO.md); the iOS app's build/ship runbook (Fastlane/
+Codemagic, push, ATS, App Store review notes) → [docs/MOBILE-IOS.md](docs/MOBILE-IOS.md).
 
 Use **pnpm**. Run `pnpm check` (svelte-check), `pnpm test`, and `pnpm lint` (eslint +
 `prettier --check`) before committing — `pnpm lint` gates the MR, so don't skip it; use
@@ -156,3 +157,10 @@ doc only when the symptom matches what you're seeing.
   removed/bypassed: every daemon restart double-spawns every agent any session ever
   requested. Detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §Agent-spawn
   request/response channel.
+- **iOS push is silently dead without `GoogleService-Info.plist`.** It's gitignored (project
+  API keys) and not baked into the repo, so a fresh checkout or CI run that skips fetching it
+  builds and runs fine — `AppDelegate.swift` guards `FirebaseApp.configure()` on the file's
+  presence — but never registers for push, with no crash and no log to point at it. Get it
+  from the Firebase console (project `slipstream-45299`) or, in Codemagic, from the
+  `GOOGLE_SERVICE_INFO_PLIST_BASE64` secret. Full push chain + more silent-failure modes:
+  [docs/MOBILE-IOS.md](docs/MOBILE-IOS.md) §Push.

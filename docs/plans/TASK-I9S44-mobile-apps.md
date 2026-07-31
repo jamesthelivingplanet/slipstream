@@ -2,6 +2,12 @@
 
 _Date: 2026-07-14 · Status: proposed_
 
+> **Status update (FLO-149):** the iOS half of this plan (Capacitor iOS platform, native
+> push, biometric parity, Fastlane/Codemagic pipeline, store-compliance writeup) is
+> implemented — code-complete but unverified on a real Mac build. See
+> [docs/MOBILE-IOS.md](../MOBILE-IOS.md) for the runbook, open decisions, and exactly what
+> a first Mac build must confirm.
+
 ## TL;DR
 
 Wrap the **existing Svelte web client in a Capacitor shell** — one codebase, two
