@@ -4,6 +4,14 @@
    * everything that needs attention (needs-you cards with the agent's live
    * ask), what's running, what's ready to launch from tickets, and what
    * recently landed — instead of a bare "no agent selected" empty state.
+   *
+   * The four card/row sections are child components (NeedsYouSection,
+   * RunningSection, LaunchpadSection, LandedSection); this file owns the
+   * cross-section state they share (session list, the ask-fetch cache, PR/
+   * usage polling, and the single "which swipe row is open" value) plus the
+   * deck header and first-run empty states. Pure glue (PR chips, usage
+   * rollup, the ask-fetch cache guard, session lookups) lives in
+   * ../missionControl.ts.
    */
   import { onMount, onDestroy } from 'svelte'
   import {
@@ -11,23 +19,12 @@
     tickets,
     repos,
     select,
-    createAgentFromTicket,
-    startAgentsFromTickets,
     dialogOpen,
     chatDialogOpen,
     registerRepo,
-    repoById,
     initialLoadLoading,
     initialLoadError,
     retryInitialLoad,
-    ticketsLoading,
-    ticketsTotalCount,
-    ticketsPage,
-    ticketsHasMore,
-    ticketsQuery,
-    loadMoreTickets,
-    setTicketsQuery,
-    refreshTickets,
     mobile,
     cleanupAgent,
     setSessionAgent,
@@ -44,24 +41,26 @@
     handoffSession,
     checkAgentCli,
   } from '../ipc'
-  import { extractAsk, formatWait, suggestedReplies } from '../missionControl'
-  import { formatCost, formatTokens, dayKeyFromMs } from '../../../electron/shared/usageFormat.js'
+  import {
+    extractAsk,
+    computeUsageRollup,
+    sessionsNeedingAskFetch,
+    staleAskFetchIds,
+    sessionSwipeKey,
+    nextHandoffFor,
+  } from '../missionControl'
+  import { formatCost } from '../../../electron/shared/usageFormat.js'
   import { pushToast } from '../toast'
   import { statusBucket } from '../types'
-  import type { Session, Ticket, BackendKind } from '../types'
-  import type {
-    UsageSummary,
-    SessionUsage,
-    PrStatusDTO,
-  } from '../../../electron/shared/contract.js'
+  import type { Session, BackendKind } from '../types'
+  import type { UsageSummary, PrStatusDTO } from '../../../electron/shared/contract.js'
   import Streamlines from './Streamlines.svelte'
-  import AgentSelector from './AgentSelector.svelte'
   import { icons } from '../icons'
-  import NullielLoader from './NullielLoader.svelte'
-  import SearchInput from './SearchInput.svelte'
-  import SwipeActions from './SwipeActions.svelte'
-  import { floatingAnchor } from '../floating'
-  import { AGENTS, agentOption } from '../agents'
+  import { agentOption } from '../agents'
+  import NeedsYouSection from './NeedsYouSection.svelte'
+  import RunningSection from './RunningSection.svelte'
+  import LaunchpadSection from './LaunchpadSection.svelte'
+  import LandedSection from './LandedSection.svelte'
 
   // Ticks every 30s so "waiting Xm" labels stay fresh without a full re-render trigger.
   let now = Date.now()
@@ -72,9 +71,10 @@
   // real cost signal instead of the idle reaper as a proxy.
   let usage: UsageSummary | null = null
   let usageTimer: ReturnType<typeof setInterval> | undefined
-  $: usageById = new Map<string, SessionUsage>((usage?.sessions ?? []).map((s) => [s.sessionId, s]))
-  $: todayCost = usage?.byDay.find((b) => b.key === dayKeyFromMs(Date.now()))?.costUsd ?? 0
-  $: hasUsage = (usage?.costUsd ?? 0) > 0
+  $: usageRollup = computeUsageRollup(usage, Date.now())
+  $: usageById = usageRollup.usageById
+  $: todayCost = usageRollup.todayCost
+  $: hasUsage = usageRollup.hasUsage
 
   async function refreshUsage(): Promise<void> {
     if (!hasBackend) return
@@ -86,29 +86,26 @@
   }
 
   // Cache of the last-extracted "ask" per backend session id. Re-fetched only
-  // when a session newly enters 'needs' (not on every store tick).
+  // when a session newly enters 'needs' (not on every store tick) — see
+  // sessionsNeedingAskFetch/staleAskFetchIds in ../missionControl.ts.
   let asks: Record<string, string | null> = {}
   const fetchedFor = new Set<string>()
 
   function refreshAsks(list: Session[]) {
     if (!hasBackend) return
-    for (const s of list) {
-      if (s.status === 'needs' && s.id && !fetchedFor.has(s.id)) {
-        fetchedFor.add(s.id)
-        const id = s.id
-        getSessionBuffer(id)
-          .then((res) => {
-            asks = { ...asks, [id]: extractAsk(res.data) }
-          })
-          .catch(() => {
-            asks = { ...asks, [id]: null }
-          })
-      }
+    for (const id of sessionsNeedingAskFetch(list, fetchedFor)) {
+      fetchedFor.add(id)
+      getSessionBuffer(id)
+        .then((res) => {
+          asks = { ...asks, [id]: extractAsk(res.data) }
+        })
+        .catch(() => {
+          asks = { ...asks, [id]: null }
+        })
     }
     // Let sessions that left 'needs' refetch cleanly if they re-enter later.
-    for (const id of Array.from(fetchedFor)) {
-      const s = list.find((x) => x.id === id)
-      if (!s || s.status !== 'needs') fetchedFor.delete(id)
+    for (const id of staleAskFetchIds(list, fetchedFor)) {
+      fetchedFor.delete(id)
     }
   }
 
@@ -170,38 +167,6 @@
 
   $: refreshNewPrs($sessions)
 
-  /** A done session whose PR is known but hasn't merged yet needs to read
-   *  differently from one that actually landed. */
-  function prNotMerged(s: Session): boolean {
-    if (!s.id) return false
-    const dto = prStatuses[s.id]
-    return !!dto && dto.state !== 'unknown' && dto.state !== 'merged'
-  }
-
-  interface PrChip {
-    text: string
-    cls: 'done' | 'error' | 'needs' | 'muted'
-  }
-
-  /** Compact chip list for a session's PR: merge state, CI, review — in that
-   *  order, omitting states that aren't worth a chip (none/unknown CI,
-   *  none/unknown review). An error collapses to a single "PR ?" chip. */
-  function prChips(dto: PrStatusDTO | undefined): PrChip[] {
-    if (!dto) return []
-    if (dto.error) return [{ text: 'PR ?', cls: 'muted' }]
-    const chips: PrChip[] = []
-    if (dto.state === 'merged') chips.push({ text: 'merged', cls: 'done' })
-    else if (dto.state === 'open') chips.push({ text: 'open', cls: 'muted' })
-    else if (dto.state === 'closed') chips.push({ text: 'closed', cls: 'error' })
-    if (dto.ci === 'passed') chips.push({ text: 'CI ✓', cls: 'done' })
-    else if (dto.ci === 'failed') chips.push({ text: 'CI ✗', cls: 'error' })
-    else if (dto.ci === 'pending' || dto.ci === 'running')
-      chips.push({ text: 'CI …', cls: 'needs' })
-    if (dto.review === 'approved') chips.push({ text: 'approved', cls: 'done' })
-    else if (dto.review === 'changes_requested') chips.push({ text: 'changes', cls: 'error' })
-    return chips
-  }
-
   $: needsSessions = $sessions.filter((s) => statusBucket(s.status) === 'needs')
   $: runningSessions = $sessions.filter((s) => statusBucket(s.status) === 'running')
   $: doneSessions = $sessions.filter((s) => statusBucket(s.status) === 'done')
@@ -243,20 +208,20 @@
 
   // FLO-152: swipe-to-reveal single-session actions on mobile rows/cards.
   // Only one row may be open at a time — opening another (or firing any
-  // action) clears `openSwipeId`, which each SwipeActions reacts to by
+  // action) clears `openSwipeId`, which each SessionSwipeRow reacts to by
   // snapping shut. `handoffFor` is the session whose agent-picker menu is
-  // open inside a revealed panel.
+  // open inside a revealed panel. Shared across all three sections that use
+  // SessionSwipeRow via plain props (each section forwards its swipe events
+  // back up to the handlers below, which are the single owners of this state).
   let openSwipeId: string | null = null
   let handoffFor: string | null = null
   $: swipeEnabled = $mobile && hasBackend
 
-  function swipeKey(s: Session): string {
-    return s.id ?? s.tid
+  function handleSwipeOpen(id: string) {
+    openSwipeId = id
   }
-
-  /** Agents this run could be handed off to (every kind except the current). */
-  function swipeHandoffTargets(s: Session) {
-    return AGENTS.filter((a) => a.kind !== (s.agentKind ?? 'claude-code'))
+  function handleSwipeClose(id: string) {
+    if (openSwipeId === id) openSwipeId = null
   }
 
   /** Tear the session down (manual path: confirms first). */
@@ -280,8 +245,7 @@
   }
 
   function toggleHandoff(s: Session) {
-    const key = swipeKey(s)
-    handoffFor = handoffFor === key ? null : key
+    handoffFor = nextHandoffFor(handoffFor, sessionSwipeKey(s))
   }
 
   /** Continue the run with a different agent, keeping the worktree. */
@@ -318,75 +282,6 @@
     }
     if (openSwipeId && !t.closest('.swipe')) {
       openSwipeId = null
-    }
-  }
-
-  /** Cost chip text for a session row, or null when there's no usage yet. */
-  function costFor(s: Session): { cost: string; tokens: string } | null {
-    if (!s.id) return null
-    const u = usageById.get(s.id)
-    if (!u || !u.exists || u.turns === 0) return null
-    const tokens = u.tokens.input + u.tokens.output + u.tokens.cacheCreation + u.tokens.cacheRead
-    return { cost: formatCost(u.costUsd), tokens: formatTokens(tokens) }
-  }
-
-  /** TASK-CIOEQ: title of the session that spawned `s` via `slipstream
-   *  new-agent`, or undefined when `s` has no parentId or the parent isn't
-   *  (or is no longer) a known session. Additive annotation only — never
-   *  restructures the existing needs/running/landed grouping. */
-  function parentTitle(s: Session): string | undefined {
-    if (!s.parentId) return undefined
-    return $sessions.find((x) => x.id === s.parentId)?.title
-  }
-
-  /** TASK-CIOEQ: how many currently-known sessions `s` spawned via
-   *  `slipstream new-agent`. */
-  function spawnedCount(s: Session): number {
-    if (!s.id) return 0
-    return $sessions.filter((x) => x.parentId === s.id).length
-  }
-
-  /** Mirrors NewAgentDialog's ticket → prompt convention so launching from here
-   *  is equivalent to picking the ticket in the New Agent dialog. The agent
-   *  used is whatever's selected in the quick-launch picker (launchAgent). */
-  let launchAgent: BackendKind = 'claude-code'
-  function launch(t: Ticket) {
-    const prompt = `Begin implementing ${t.tid}.`
-    createAgentFromTicket(t, prompt, launchAgent)
-  }
-
-  // FLO-95: batch-launch every ticket whose repo hint resolves to a registered
-  // repo. Starts beyond the scheduler's concurrency cap queue and drain on
-  // their own, so this is safe to fire for an arbitrary number of tickets.
-  $: launchableTickets = $tickets.filter((t) => repoById(t.repo))
-  // Tickets pagination reactive state. ticketsTotalCount/ticketsPageSize have
-  // no UI here (no total-count or page-size display yet), so they're left
-  // unmirrored — an unused `$:` reactive var crashes @typescript-eslint's
-  // no-unused-vars (it doesn't recognize Svelte's "ComputedVariable"
-  // definition kind), so dead ones can't just be left in place.
-  $: ticketsLoadingState = $ticketsLoading
-  $: ticketsPageState = $ticketsPage
-  $: ticketsHasMoreState = $ticketsHasMore
-  $: ticketsQueryState = $ticketsQuery
-
-  function handleTicketsSearch(query: string): void {
-    setTicketsQuery(query)
-  }
-
-  async function handleLoadMoreTickets(): Promise<void> {
-    await loadMoreTickets()
-  }
-  let launchingAll = false
-  async function launchAll() {
-    if (launchingAll) return
-    launchingAll = true
-    try {
-      const n = await startAgentsFromTickets(launchableTickets, launchAgent)
-      if (n > 0) {
-        pushToast('success', `Launched ${n} agents — excess starts queue`)
-      }
-    } finally {
-      launchingAll = false
     }
   }
 </script>
@@ -467,384 +362,64 @@
       </div>
     {:else}
       {#if needsSessions.length > 0}
-        <section>
-          <div class="eyebrow hot">Needs you <span class="cnt">{needsSessions.length}</span></div>
-          <div class="cards">
-            {#each needsSessions as s (s.id ?? s.tid)}
-              <SwipeActions
-                id={swipeKey(s)}
-                enabled={swipeEnabled}
-                openId={openSwipeId}
-                on:open={(e) => (openSwipeId = e.detail.id)}
-                on:close={() => {
-                  if (openSwipeId === swipeKey(s)) openSwipeId = null
-                }}
-              >
-                <svelte:fragment slot="left">
-                  <button
-                    type="button"
-                    class="swipe-act restart"
-                    title="Restart agent"
-                    on:click|stopPropagation={() => swipeRestart(s)}
-                    >{@html icons.refresh}<span class="lbl">Restart</span></button
-                  >
-                  <div class="swipe-handoff">
-                    <button
-                      type="button"
-                      class="swipe-act handoff"
-                      data-handoff-trigger
-                      title="Hand off to another agent"
-                      on:click|stopPropagation={() => toggleHandoff(s)}
-                      >{@html icons.arrowRightLeft}<span class="lbl">Hand off</span></button
-                    >
-                    {#if handoffFor === swipeKey(s)}
-                      <div class="handoff-menu" use:floatingAnchor>
-                        {#each swipeHandoffTargets(s) as agent (agent.kind)}
-                          <button
-                            type="button"
-                            class="opt"
-                            on:click|stopPropagation={() => swipeHandoff(s, agent.kind)}
-                          >
-                            <span>Hand off to {agent.label}</span>
-                          </button>
-                        {/each}
-                      </div>
-                    {/if}
-                  </div>
-                </svelte:fragment>
-                <svelte:fragment slot="right">
-                  <button
-                    type="button"
-                    class="swipe-act danger"
-                    title="Clean up agent"
-                    on:click|stopPropagation={() => swipeCleanup(s)}
-                    >{@html icons.trash}<span class="lbl">Cleanup</span></button
-                  >
-                </svelte:fragment>
-                <button
-                  type="button"
-                  class="card"
-                  class:error={s.status === 'errored'}
-                  on:click={() => choose(s.id)}
-                >
-                  <div class="c-top">
-                    <span class="dot" class:err={s.status === 'errored'}></span>
-                    {#if s.status === 'errored'}
-                      <span class="wait err">errored</span>
-                    {:else if s.needsSince !== undefined}
-                      <span class="wait">waiting {formatWait(s.needsSince, now)}</span>
-                    {/if}
-                    <span class="c-id mono">{s.tid}{s.agentKind ? ` · ${s.agentKind}` : ''}</span>
-                  </div>
-                  <div class="c-title">{s.title}</div>
-                  {#if parentTitle(s)}
-                    <div class="spawned-by">↳ spawned by {parentTitle(s)}</div>
-                  {/if}
-                  {#if s.status !== 'errored' && hasBackend && s.id && asks[s.id]}
-                    <div class="ask">{asks[s.id]}</div>
-                    {#if suggestedReplies(asks[s.id]).length > 0}
-                      <div class="reply-chips">
-                        {#each suggestedReplies(asks[s.id]) as reply (reply)}
-                          <button
-                            type="button"
-                            class="chip reply-chip"
-                            on:click|stopPropagation={() => sendReply(s.id, reply)}
-                          >
-                            {reply}
-                          </button>
-                        {/each}
-                      </div>
-                    {/if}
-                  {/if}
-                  <div class="c-foot">
-                    {#if s.branch}<span>{s.branch}</span>{/if}
-                    <span class="add">+{s.add}</span>
-                    <span class="del">−{s.del}</span>
-                    {#if spawnedCount(s) > 0}
-                      <span class="chip mono">{spawnedCount(s)} spawned</span>
-                    {/if}
-                    <span class="go" class:err={s.status === 'errored'}>Answer →</span>
-                  </div>
-                </button>
-              </SwipeActions>
-            {/each}
-          </div>
-        </section>
+        <NeedsYouSection
+          sessions={$sessions}
+          {needsSessions}
+          {now}
+          {asks}
+          {hasBackend}
+          {swipeEnabled}
+          {openSwipeId}
+          {handoffFor}
+          onSelect={choose}
+          onReply={sendReply}
+          onSwipeOpen={handleSwipeOpen}
+          onSwipeClose={handleSwipeClose}
+          onRestart={swipeRestart}
+          onCleanup={swipeCleanup}
+          onToggleHandoff={toggleHandoff}
+          onHandoff={swipeHandoff}
+        />
       {/if}
 
       {#if runningSessions.length > 0}
-        <section>
-          <div class="eyebrow">Running <span class="cnt">{runningSessions.length}</span></div>
-          <div class="rows">
-            {#each runningSessions as s (s.id ?? s.tid)}
-              <SwipeActions
-                id={swipeKey(s)}
-                enabled={swipeEnabled}
-                openId={openSwipeId}
-                on:open={(e) => (openSwipeId = e.detail.id)}
-                on:close={() => {
-                  if (openSwipeId === swipeKey(s)) openSwipeId = null
-                }}
-              >
-                <svelte:fragment slot="left">
-                  <button
-                    type="button"
-                    class="swipe-act restart"
-                    title="Restart agent"
-                    on:click|stopPropagation={() => swipeRestart(s)}
-                    >{@html icons.refresh}<span class="lbl">Restart</span></button
-                  >
-                  <div class="swipe-handoff">
-                    <button
-                      type="button"
-                      class="swipe-act handoff"
-                      data-handoff-trigger
-                      title="Hand off to another agent"
-                      on:click|stopPropagation={() => toggleHandoff(s)}
-                      >{@html icons.arrowRightLeft}<span class="lbl">Hand off</span></button
-                    >
-                    {#if handoffFor === swipeKey(s)}
-                      <div class="handoff-menu" use:floatingAnchor>
-                        {#each swipeHandoffTargets(s) as agent (agent.kind)}
-                          <button
-                            type="button"
-                            class="opt"
-                            on:click|stopPropagation={() => swipeHandoff(s, agent.kind)}
-                          >
-                            <span>Hand off to {agent.label}</span>
-                          </button>
-                        {/each}
-                      </div>
-                    {/if}
-                  </div>
-                </svelte:fragment>
-                <svelte:fragment slot="right">
-                  <button
-                    type="button"
-                    class="swipe-act danger"
-                    title="Clean up agent"
-                    on:click|stopPropagation={() => swipeCleanup(s)}
-                    >{@html icons.trash}<span class="lbl">Cleanup</span></button
-                  >
-                </svelte:fragment>
-                <button type="button" class="row" on:click={() => choose(s.id)}>
-                  <span class="dot" class:queued={s.status === 'queued'}></span>
-                  <span class="r-id mono">{s.tid}</span>
-                  <span class="r-title">{s.title}</span>
-                  {#if parentTitle(s)}
-                    <span class="chip mono spawned-chip" title={`Spawned by ${parentTitle(s)}`}
-                      >↳ {parentTitle(s)}</span
-                    >
-                  {/if}
-                  {#if spawnedCount(s) > 0}
-                    <span class="chip mono">{spawnedCount(s)} spawned</span>
-                  {/if}
-                  {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
-                  {#if s.status === 'detached' || s.status === 'queued'}
-                    <span class="r-activity muted">{s.activity.text}</span>
-                  {:else}
-                    <span class="r-diff mono">
-                      <span class="add">+{s.add}</span>
-                      <span class="del">−{s.del}</span>
-                      {#if s.behind > 0}
-                        <span
-                          class="behind"
-                          title={`${s.behind} commit${s.behind === 1 ? '' : 's'} behind base`}
-                          >↓{s.behind}</span
-                        >
-                      {/if}
-                    </span>
-                  {/if}
-                  {#if costFor(s)}
-                    <span
-                      class="r-cost mono"
-                      title={`${costFor(s)?.tokens} tokens · estimated from transcript usage`}
-                      >{costFor(s)?.cost}</span
-                    >
-                  {/if}
-                  {#if s.id && s.prUrl && prStatuses[s.id]}
-                    <span class="pr-chips">
-                      {#each prChips(prStatuses[s.id]) as c (c.text)}
-                        <span class="pr-chip pr-{c.cls}" title={prStatuses[s.id]?.error}
-                          >{c.text}</span
-                        >
-                      {/each}
-                    </span>
-                  {/if}
-                </button>
-              </SwipeActions>
-            {/each}
-          </div>
-        </section>
+        <RunningSection
+          sessions={$sessions}
+          {runningSessions}
+          {usageById}
+          {prStatuses}
+          {swipeEnabled}
+          {openSwipeId}
+          {handoffFor}
+          onSelect={choose}
+          onSwipeOpen={handleSwipeOpen}
+          onSwipeClose={handleSwipeClose}
+          onRestart={swipeRestart}
+          onCleanup={swipeCleanup}
+          onToggleHandoff={toggleHandoff}
+          onHandoff={swipeHandoff}
+        />
       {/if}
 
-      {#if $tickets.length > 0 || ticketsLoadingState}
-        <section>
-          <div class="eyebrow">
-            Ready to launch <span class="cnt">{$ticketsTotalCount || $tickets.length}</span>
-            <div class="tickets-search">
-              <SearchInput
-                value={ticketsQueryState}
-                onInput={handleTicketsSearch}
-                placeholder="Search tickets…"
-                ariaLabel="Search tickets"
-              />
-            </div>
-            <div class="quick-agent">
-              <AgentSelector
-                value={launchAgent}
-                label="Quick-launch agent"
-                on:select={(e) => (launchAgent = e.detail)}
-              />
-            </div>
-            {#if launchableTickets.length >= 2}
-              <button
-                type="button"
-                class="btn btn-outline btn-sm launch-all"
-                disabled={launchingAll}
-                on:click={launchAll}
-              >
-                {launchingAll ? 'Launching…' : 'Launch all →'}
-              </button>
-            {/if}
-          </div>
-          {#if ticketsLoadingState}
-            <div class="tickets-loading">
-              <NullielLoader size={32} caption="Loading tickets" />
-            </div>
-          {:else}
-            <div class="tiks">
-              {#each $tickets as t (t.tid)}
-                <button type="button" class="tik" on:click={() => launch(t)}>
-                  <span class="t-src mono">{t.tid}</span>
-                  <span class="t-title">{t.title}</span>
-                  <span class="launch">Launch agent →</span>
-                </button>
-              {/each}
-            </div>
-            {#if ticketsHasMoreState || ticketsPageState > 1}
-              <div class="tickets-pagination">
-                <button
-                  class="btn btn-outline btn-sm"
-                  on:click={() => {
-                    if (ticketsPageState > 1) {
-                      ticketsPage.set(ticketsPageState - 1)
-                      refreshTickets()
-                    }
-                  }}
-                  disabled={ticketsLoadingState || ticketsPageState <= 1}
-                  aria-label="Previous page"
-                >
-                  {@html icons.chevronLeft}
-                </button>
-                <span class="page-info">Page {ticketsPageState}</span>
-                <button
-                  class="btn btn-outline btn-sm"
-                  on:click={handleLoadMoreTickets}
-                  disabled={ticketsLoadingState || !ticketsHasMoreState}
-                  aria-label="Next page"
-                >
-                  {@html icons.chevronRight}
-                </button>
-              </div>
-            {/if}
-          {/if}
-        </section>
-      {/if}
+      <LaunchpadSection />
 
       {#if doneSessions.length > 0}
-        <section class="landed">
-          <div class="eyebrow">Recently landed</div>
-          <div class="rows">
-            {#each doneSessions as s (s.id ?? s.tid)}
-              <SwipeActions
-                id={swipeKey(s)}
-                enabled={swipeEnabled}
-                openId={openSwipeId}
-                on:open={(e) => (openSwipeId = e.detail.id)}
-                on:close={() => {
-                  if (openSwipeId === swipeKey(s)) openSwipeId = null
-                }}
-              >
-                <svelte:fragment slot="left">
-                  <button
-                    type="button"
-                    class="swipe-act restart"
-                    title="Restart agent"
-                    on:click|stopPropagation={() => swipeRestart(s)}
-                    >{@html icons.refresh}<span class="lbl">Restart</span></button
-                  >
-                  <div class="swipe-handoff">
-                    <button
-                      type="button"
-                      class="swipe-act handoff"
-                      data-handoff-trigger
-                      title="Hand off to another agent"
-                      on:click|stopPropagation={() => toggleHandoff(s)}
-                      >{@html icons.arrowRightLeft}<span class="lbl">Hand off</span></button
-                    >
-                    {#if handoffFor === swipeKey(s)}
-                      <div class="handoff-menu" use:floatingAnchor>
-                        {#each swipeHandoffTargets(s) as agent (agent.kind)}
-                          <button
-                            type="button"
-                            class="opt"
-                            on:click|stopPropagation={() => swipeHandoff(s, agent.kind)}
-                          >
-                            <span>Hand off to {agent.label}</span>
-                          </button>
-                        {/each}
-                      </div>
-                    {/if}
-                  </div>
-                </svelte:fragment>
-                <svelte:fragment slot="right">
-                  <button
-                    type="button"
-                    class="swipe-act danger"
-                    title="Clean up agent"
-                    on:click|stopPropagation={() => swipeCleanup(s)}
-                    >{@html icons.trash}<span class="lbl">Cleanup</span></button
-                  >
-                </svelte:fragment>
-                <button type="button" class="row" on:click={() => choose(s.id)}>
-                  <span
-                    class="dot"
-                    class:not-merged={prNotMerged(s)}
-                    title={prNotMerged(s) ? 'agent finished — PR not merged yet' : undefined}
-                  ></span>
-                  <span class="r-id mono">{s.tid}</span>
-                  <span class="r-title">{s.title}</span>
-                  {#if parentTitle(s)}
-                    <span class="chip mono spawned-chip" title={`Spawned by ${parentTitle(s)}`}
-                      >↳ {parentTitle(s)}</span
-                    >
-                  {/if}
-                  {#if spawnedCount(s) > 0}
-                    <span class="chip mono">{spawnedCount(s)} spawned</span>
-                  {/if}
-                  {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
-                  {#if costFor(s)}
-                    <span
-                      class="r-cost mono"
-                      title={`${costFor(s)?.tokens} tokens · estimated from transcript usage`}
-                      >{costFor(s)?.cost}</span
-                    >
-                  {/if}
-                  {#if s.id && s.prUrl && prStatuses[s.id]}
-                    <span class="pr-chips">
-                      {#each prChips(prStatuses[s.id]) as c (c.text)}
-                        <span class="pr-chip pr-{c.cls}" title={prStatuses[s.id]?.error}
-                          >{c.text}</span
-                        >
-                      {/each}
-                    </span>
-                  {/if}
-                </button>
-              </SwipeActions>
-            {/each}
-          </div>
-        </section>
+        <LandedSection
+          sessions={$sessions}
+          {doneSessions}
+          {usageById}
+          {prStatuses}
+          {swipeEnabled}
+          {openSwipeId}
+          {handoffFor}
+          onSelect={choose}
+          onSwipeOpen={handleSwipeOpen}
+          onSwipeClose={handleSwipeClose}
+          onRestart={swipeRestart}
+          onCleanup={swipeCleanup}
+          onToggleHandoff={toggleHandoff}
+          onHandoff={swipeHandoff}
+        />
       {/if}
     {/if}
   </div>
@@ -1003,493 +578,7 @@
     }
   }
 
-  .tickets-search {
-    flex: 1;
-    min-width: 180px;
-    max-width: 300px;
-  }
-
-  .eyebrow {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 550;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: hsl(var(--muted-foreground));
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-  .eyebrow .cnt {
-    color: hsl(var(--foreground));
-  }
-  .eyebrow.hot {
-    color: hsl(var(--st-needs));
-  }
-  .eyebrow.hot .cnt {
-    color: hsl(var(--st-needs));
-  }
-  .eyebrow::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: hsl(var(--border));
-  }
-  .eyebrow .launch-all {
-    text-transform: none;
-    letter-spacing: normal;
-    font-weight: 550;
-  }
-
-  /* Quick-launch agent picker — reuses AgentSelector but compressed to fit
-   * inline in the eyebrow header row instead of its usual card-grid size. */
-  .quick-agent {
-    text-transform: none;
-    letter-spacing: normal;
-  }
-  .quick-agent :global(.agent-grid) {
-    /* Flex + wrap (rather than a fixed column count) so a growing agent list
-     * (now 5) stays on one row when there's room and wraps cleanly when there
-     * isn't, instead of overflowing or leaving ragged empty grid cells. */
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .quick-agent :global(.agent-card) {
-    flex-direction: row;
-    padding: 3px 8px;
-    gap: 5px;
-    font-size: 11px;
-  }
-  .quick-agent :global(.agent-card-icon) {
-    width: 15px;
-    height: 15px;
-  }
-  .quick-agent :global(.agent-card-check) {
-    display: none;
-  }
-  .quick-agent :global(.agent-select select) {
-    height: 28px;
-    font-size: 12px;
-    padding: 0 26px 0 8px;
-  }
-
-  /* needs-you cards */
-  .cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
-    gap: 12px;
-  }
-  .card {
-    text-align: left;
-    border-radius: var(--radius);
-    padding: 14px 15px;
-    background: hsl(var(--card));
-    border: 1px solid hsl(var(--st-needs) / 0.35);
-    box-shadow: 0 0 0 3px hsl(var(--st-needs) / 0.06);
-    display: flex;
-    flex-direction: column;
-    gap: 9px;
-    width: 100%;
-  }
-  .card:hover {
-    background: hsl(var(--card-hover));
-    border-color: hsl(var(--st-needs) / 0.6);
-  }
-  .card.error {
-    border-color: hsl(var(--st-error) / 0.35);
-    box-shadow: 0 0 0 3px hsl(var(--st-error) / 0.06);
-  }
-  .card.error:hover {
-    border-color: hsl(var(--st-error) / 0.6);
-  }
-  .c-top {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-  }
-  .c-top .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 99px;
-    flex: 0 0 auto;
-    background: hsl(var(--st-needs));
-    box-shadow: 0 0 0 0 hsl(var(--st-needs));
-    animation: pulse 1.9s infinite;
-  }
-  .c-top .dot.err {
-    background: hsl(var(--st-error));
-    box-shadow: none;
-    animation: none;
-  }
-  .wait {
-    color: hsl(var(--st-needs));
-    font-weight: 550;
-  }
-  .wait.err {
-    color: hsl(var(--st-error));
-  }
-  .c-id {
-    margin-left: auto;
-    font-size: 11px;
-    color: hsl(var(--muted-foreground));
-  }
-  .c-title {
-    font-size: 14px;
-    font-weight: 600;
-  }
-  /* TASK-CIOEQ: additive "spawned by" annotation — a session started via
-   * `slipstream new-agent` from another agent's run. */
-  .spawned-by {
-    font-size: 11px;
-    color: hsl(var(--muted-foreground));
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .ask {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    line-height: 1.5;
-    color: hsl(var(--foreground) / 0.85);
-    background: hsl(var(--muted) / 0.5);
-    border-left: 2px solid hsl(var(--st-needs));
-    padding: 8px 10px;
-    border-radius: 0 7px 7px 0;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-  }
-  .ask::before {
-    content: '❯ ';
-    color: hsl(var(--st-needs));
-  }
-  /* one-tap suggested replies (see suggestedReplies) */
-  .reply-chips {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .reply-chip {
-    border: 1px solid hsl(var(--st-needs) / 0.4);
-    cursor: pointer;
-    font-family: inherit;
-    font-weight: 600;
-    transition:
-      background 0.12s ease,
-      border-color 0.12s ease;
-  }
-  .reply-chip:hover {
-    background: hsl(var(--st-needs) / 0.15);
-    border-color: hsl(var(--st-needs) / 0.7);
-  }
-  .reply-chip:active {
-    background: hsl(var(--st-needs) / 0.25);
-  }
-  .c-foot {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: hsl(var(--muted-foreground));
-  }
-  .c-foot .add {
-    color: hsl(var(--st-done));
-  }
-  .c-foot .del {
-    color: hsl(var(--st-error));
-  }
-  .c-foot .go {
-    margin-left: auto;
-    color: hsl(var(--st-needs));
-    font-family: 'Hanken Grotesk', sans-serif;
-    font-size: 12px;
-    font-weight: 550;
-  }
-  .c-foot .go.err {
-    color: hsl(var(--st-error));
-  }
-
-  /* running / landed rows */
-  .rows {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    text-align: left;
-    padding: 10px 13px;
-    border-radius: var(--radius);
-    border: 1px solid hsl(var(--border));
-    background: hsl(var(--card) / 0.75);
-    width: 100%;
-  }
-  .row:hover {
-    background: hsl(var(--card-hover));
-  }
-  .row .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 99px;
-    flex: 0 0 auto;
-    background: hsl(var(--st-run));
-    animation: breathe 2.2s ease-in-out infinite;
-  }
-  .row .dot.queued {
-    background: hsl(var(--muted-foreground));
-    animation: none;
-  }
-  .r-id {
-    font-size: 11px;
-    color: hsl(var(--muted-foreground));
-    width: 58px;
-    flex: 0 0 auto;
-  }
-  .r-title {
-    font-weight: 550;
-    font-size: 13px;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .chip {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 99px;
-    background: hsl(var(--muted) / 0.6);
-    color: hsl(var(--muted-foreground));
-    flex: 0 0 auto;
-  }
-  /* TASK-CIOEQ: the "↳ spawned by" chip on running/landed rows — truncate so
-   * a long parent title can't blow out the row layout. */
-  .spawned-chip {
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .r-diff {
-    font-size: 11px;
-    flex: 0 0 auto;
-    font-variant-numeric: tabular-nums;
-    display: flex;
-    gap: 6px;
-  }
-  .r-diff .add {
-    color: hsl(var(--st-done));
-  }
-  .r-diff .del {
-    color: hsl(var(--st-error));
-  }
-  .r-diff .behind {
-    color: hsl(var(--st-needs));
-  }
-  .r-cost {
-    font-size: 11px;
-    flex: 0 0 auto;
-    font-variant-numeric: tabular-nums;
-    color: hsl(var(--muted-foreground));
-    padding: 1px 7px;
-    border-radius: 99px;
-    background: hsl(var(--muted) / 0.6);
-  }
-  .r-activity {
-    font-size: 12px;
-    flex: 0 0 auto;
-    max-width: 40%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  /* PR/CI status chips (FLO-96) */
-  .pr-chips {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    flex: 0 0 auto;
-  }
-  .pr-chip {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 550;
-    padding: 1px 7px;
-    border-radius: 99px;
-    background: hsl(var(--muted) / 0.6);
-    color: hsl(var(--muted-foreground));
-  }
-  .pr-chip.pr-done {
-    color: hsl(var(--st-done));
-    background: hsl(var(--st-done) / 0.12);
-  }
-  .pr-chip.pr-error {
-    color: hsl(var(--st-error));
-    background: hsl(var(--st-error) / 0.12);
-  }
-  .pr-chip.pr-needs {
-    color: hsl(var(--st-needs));
-    background: hsl(var(--st-needs) / 0.12);
-  }
-
-  /* launchpad */
-  .tiks {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .tik {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    text-align: left;
-    padding: 9px 13px;
-    border-radius: var(--radius);
-    border: 1px dashed hsl(var(--border));
-    color: hsl(var(--foreground) / 0.9);
-    width: 100%;
-  }
-  .tik:hover {
-    border-style: solid;
-    background: hsl(var(--card-hover));
-  }
-  .tik:hover .launch {
-    opacity: 1;
-  }
-  .t-src {
-    font-size: 11px;
-    color: hsl(var(--primary));
-    width: 58px;
-    flex: 0 0 auto;
-  }
-  .t-title {
-    font-size: 13px;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .launch {
-    opacity: 0;
-    font-size: 12px;
-    font-weight: 550;
-    color: hsl(var(--primary));
-    transition: opacity 0.12s;
-  }
-
-  /* landed */
-  .landed .row {
-    border-style: solid;
-    opacity: 0.78;
-  }
-  .landed .dot {
-    background: hsl(var(--st-done));
-    animation: none;
-  }
-  /* A done session whose PR hasn't merged yet must read differently from one
-     that actually landed (FLO-96). */
-  .landed .dot.not-merged {
-    background: hsl(var(--st-needs));
-  }
-
-  /* FLO-152: swipe-to-reveal action buttons behind a row/card. */
-  .swipe-act {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 3px;
-    min-width: 64px;
-    padding: 0 10px;
-    border: none;
-    background: transparent;
-    color: hsl(var(--muted-foreground));
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    line-height: 1;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .swipe-act :global(svg) {
-    width: 18px;
-    height: 18px;
-  }
-  .swipe-act.restart {
-    background: hsl(var(--primary) / 0.16);
-    color: hsl(var(--primary));
-  }
-  .swipe-act.handoff {
-    background: hsl(var(--muted) / 0.55);
-    color: hsl(var(--foreground));
-  }
-  .swipe-act.danger {
-    background: hsl(var(--st-error) / 0.16);
-    color: hsl(var(--st-error));
-  }
-  .swipe-act:active {
-    filter: brightness(0.92);
-  }
-
-  /* Hand-off target picker — portaled to <body> by floatingAnchor so it
-     escapes the short, overflow-clipped row. Mirrors the app's sel-menu. */
-  .swipe-handoff {
-    position: relative;
-    display: flex;
-  }
-  :global(.handoff-menu) {
-    z-index: 80;
-    padding: 5px;
-    background: hsl(var(--popover));
-    border: 1px solid hsl(var(--border));
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    min-width: 180px;
-    animation: pop 0.14s ease;
-  }
-  :global(.handoff-menu .opt) {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: calc(var(--radius) - 3px);
-    cursor: pointer;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    width: 100%;
-    background: transparent;
-    border: none;
-    color: hsl(var(--foreground));
-    text-align: left;
-  }
-  :global(.handoff-menu .opt:hover) {
-    background: hsl(var(--accent-bg));
-  }
-  @keyframes pop {
-    from {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
-    .c-top .dot,
-    .row .dot,
     .watch.alert img {
       animation: none;
     }
@@ -1514,11 +603,5 @@
       width: 100%;
       justify-content: flex-end;
     }
-  }
-
-  .tickets-search {
-    flex: 1;
-    min-width: 180px;
-    max-width: 300px;
   }
 </style>

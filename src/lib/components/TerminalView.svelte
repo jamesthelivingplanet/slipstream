@@ -49,22 +49,25 @@
   } from '../ipc'
   import { pushToast } from '../toast'
   import { mode } from '../theme'
-  import { icons } from '../icons'
   import { uploadClipboardImage, type ImageUploadDeps } from '../imageUpload'
   import type { Session, WorkflowState, BackendKind } from '../types'
   import type { PrStatusDTO, WorktreeUpdateMode } from '../../../electron/shared/contract.js'
   import { getTicketStatus, setTicketStatus } from '../ipc'
   import { contentLoading, contentResolvedAt, contentRefreshNonce } from '../stores'
-  import { floatingAnchor } from '../floating'
   import { AGENTS, agentOption } from '../agents'
   import { ReplayGate } from '../replayGate.js'
-  import { TouchScrollTracker, momentumStep, touchScrollRoute } from '../touchScroll.js'
   import { decodeOsc52, writeClipboardText } from '../osc52'
   import { termKeyAction } from '../termKeys'
+  import { TerminalTouchScroll, type TouchScrollHost } from '../terminalTouchScroll'
+  import { findClipboardImageItem } from '../clipboardImage'
+  import { closeMenusOutsideClick } from '../terminalMenus'
   import DiffView from './DiffView.svelte'
   import ChatView from './ChatView.svelte'
   import MobileTermInput from './MobileTermInput.svelte'
   import NullielLoader from './NullielLoader.svelte'
+  import TerminalHeader from './TerminalHeader.svelte'
+  import TerminalAlerts from './TerminalAlerts.svelte'
+  import TerminalMobileActions from './TerminalMobileActions.svelte'
   import { initChatViewPref, preferChatView, setPreferChatView } from '../chatViewPrefs'
 
   export let session: Session
@@ -186,111 +189,33 @@
   // instead we convert pans into whole lines and dispatch one synthetic
   // per-line wheel event each, on term.element, which xterm routes exactly
   // like desktop wheel (mouse reports / arrow keys / local scroll). The
-  // 'native' route (touchScrollRoute) is left alone — xterm's own touch
-  // scrolling is live there, and dispatching wheel events too would
-  // double-scroll.
-  let touchTracker: TouchScrollTracker | null = null
-  let momentumRaf: number | null = null
-  let lastTouchX = 0
-  let lastTouchY = 0
+  // 'native' route is left alone — xterm's own touch scrolling is live
+  // there, and dispatching wheel events too would double-scroll.
+  //
+  // The gesture math + routing decision live in touchScroll.ts (pure); the
+  // DOM wiring/sequencing (rAF momentum loop, wheel dispatch, teardown) is
+  // in terminalTouchScroll.ts's TerminalTouchScroll, driven here through a
+  // TouchScrollHost bound to this component's term/mountEl/destroyed state.
+  let touch: TerminalTouchScroll | null = null
 
   function stopMomentum() {
-    if (momentumRaf !== null) {
-      cancelAnimationFrame(momentumRaf)
-      momentumRaf = null
-    }
-  }
-
-  function terminalCellHeight(): number {
-    const screen = mountEl?.querySelector<HTMLElement>('.xterm-screen')
-    const rows = term?.rows ?? 0
-    return screen && rows > 0 && screen.clientHeight > 0 ? screen.clientHeight / rows : 16
-  }
-
-  function dispatchWheelLines(lines: number) {
-    const el = term.element
-    if (!el || lines === 0) return
-    // Clamp to the terminal's box — a captured touch can wander outside it,
-    // and xterm drops reports whose coordinates fall off the screen.
-    const r = el.getBoundingClientRect()
-    const x = Math.min(Math.max(lastTouchX, r.left + 1), r.right - 1)
-    const y = Math.min(Math.max(lastTouchY, r.top + 1), r.bottom - 1)
-    const deltaY = lines > 0 ? 1 : -1
-    const count = Math.min(Math.abs(lines), term.rows)
-    for (let i = 0; i < count; i++) {
-      el.dispatchEvent(
-        new WheelEvent('wheel', {
-          deltaY,
-          deltaMode: WheelEvent.DOM_DELTA_LINE,
-          clientX: x,
-          clientY: y,
-          bubbles: true,
-          cancelable: true,
-        }),
-      )
-    }
-  }
-
-  function touchRoutesToWheel(): boolean {
-    return touchScrollRoute(term.modes.mouseTrackingMode, term.buffer.active.type) === 'wheel'
-  }
-
-  function runMomentum(velocity: number) {
-    stopMomentum()
-    let v = velocity
-    let remainder = 0
-    let last = performance.now()
-    const frame = (now: number) => {
-      // Guard against the terminal being disposed mid-glide (onDestroy sets
-      // `destroyed` before term?.dispose()).
-      if (destroyed) {
-        momentumRaf = null
-        return
-      }
-      const dt = now - last
-      last = now
-      const step = momentumStep(v, dt, remainder)
-      v = step.velocity
-      remainder = step.remainder
-      dispatchWheelLines(step.lines)
-      if (v === 0) {
-        momentumRaf = null
-        return
-      }
-      momentumRaf = requestAnimationFrame(frame)
-    }
-    momentumRaf = requestAnimationFrame(frame)
+    touch?.stopMomentum()
   }
 
   function onTouchStart(e: TouchEvent) {
-    stopMomentum()
-    if (e.touches.length > 1 || !touchTracker) return
-    lastTouchX = e.touches[0].clientX
-    lastTouchY = e.touches[0].clientY
-    touchTracker.start(e.touches[0].clientY, e.timeStamp)
+    touch?.onTouchStart(e)
   }
 
   function onTouchMove(e: TouchEvent) {
-    if (e.touches.length > 1) {
-      onTouchEnd(e)
-      return
-    }
-    if (!touchTracker || !touchRoutesToWheel()) return
-    lastTouchX = e.touches[0].clientX
-    lastTouchY = e.touches[0].clientY
-    const lines = touchTracker.move(e.touches[0].clientY, e.timeStamp)
-    dispatchWheelLines(lines)
-    e.preventDefault()
+    touch?.onTouchMove(e)
   }
 
   function onTouchEnd(e: TouchEvent) {
-    if (!touchTracker || !touchRoutesToWheel()) return
-    const velocity = touchTracker.end(e.timeStamp)
-    if (velocity !== 0) runMomentum(velocity)
+    touch?.onTouchEnd(e)
   }
 
   function onTouchCancel() {
-    stopMomentum()
+    touch?.onTouchCancel()
   }
 
   // Shared upload+^V sequencing (src/lib/imageUpload.ts) — built once from
@@ -307,29 +232,12 @@
   let pendingImageUpload: Promise<void> | null = null
   let queuedWrites: string[] = []
 
-  let fileInput: HTMLInputElement
-
-  function onPaste(e: ClipboardEvent) {
-    if (!session.id || !canWrite) return
-    const items = e.clipboardData?.items
-    if (!items) return
-    let imageItem: DataTransferItem | null = null
-    for (const item of items) {
-      // DataTransferItem.kind is only ever 'string' or 'file' per spec — an
-      // image on the clipboard surfaces as kind 'file' with an image/* type,
-      // never kind 'image' (there is no such kind).
-      if (item.kind === 'file' && item.type.startsWith('image/')) {
-        imageItem = item
-        break
-      }
-    }
-    if (!imageItem) return // let text flow to xterm's own paste handling — do not interfere
-    e.preventDefault()
-    e.stopPropagation()
-    const blob = imageItem.getAsFile()
-    if (!blob) return
-    if (pendingImageUpload) return // ignore a 2nd paste while one is in flight
-    pendingImageUpload = uploadClipboardImage(imageUploadDeps, session.id, blob)
+  // Shared by onPaste and handleFileChange below: kick off the upload+^V
+  // round-trip and, once it settles (success or failure), flush whatever
+  // writes queued up behind it. Callers must check `pendingImageUpload` is
+  // already null before calling this (ignore a 2nd paste/pick in flight).
+  function beginImageUpload(sessionId: string, blob: Blob) {
+    pendingImageUpload = uploadClipboardImage(imageUploadDeps, sessionId, blob)
       .catch((err) => {
         pushToast('error', err instanceof Error ? err.message : String(err))
       })
@@ -346,6 +254,18 @@
       })
   }
 
+  function onPaste(e: ClipboardEvent) {
+    if (!session.id || !canWrite) return
+    const imageItem = findClipboardImageItem(e.clipboardData?.items)
+    if (!imageItem) return // let text flow to xterm's own paste handling — do not interfere
+    e.preventDefault()
+    e.stopPropagation()
+    const blob = imageItem.getAsFile()
+    if (!blob) return
+    if (pendingImageUpload) return // ignore a 2nd paste while one is in flight
+    beginImageUpload(session.id, blob)
+  }
+
   // Desktop attach button (header): same upload-then-^V sequencing as
   // clipboard paste, gated behind the same pendingImageUpload queue so a
   // fast-typed follow-up doesn't overtake the ^V.
@@ -355,21 +275,7 @@
     input.value = ''
     if (!file || !session.id || !canWrite) return
     if (pendingImageUpload) return // ignore a 2nd pick while one is in flight
-    pendingImageUpload = uploadClipboardImage(imageUploadDeps, session.id, file)
-      .catch((err) => {
-        pushToast('error', err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        const pending = queuedWrites
-        queuedWrites = []
-        pendingImageUpload = null
-        for (const d of pending) {
-          if (session.id) {
-            markSessionInput(session.id)
-            writeSession(session.id, d)
-          }
-        }
-      })
+    beginImageUpload(session.id, file)
   }
 
   onMount(() => {
@@ -400,7 +306,34 @@
       return true
     })
 
-    touchTracker = new TouchScrollTracker(terminalCellHeight)
+    const touchHost: TouchScrollHost = {
+      rows: () => term?.rows ?? 0,
+      cellHeight: () => {
+        const screen = mountEl?.querySelector<HTMLElement>('.xterm-screen')
+        const rows = term?.rows ?? 0
+        return screen && rows > 0 && screen.clientHeight > 0 ? screen.clientHeight / rows : 16
+      },
+      mouseTrackingMode: () => term.modes.mouseTrackingMode,
+      bufferType: () => term.buffer.active.type,
+      isDestroyed: () => destroyed,
+      now: () => performance.now(),
+      requestFrame: (cb) => requestAnimationFrame(cb),
+      cancelFrame: (handle) => cancelAnimationFrame(handle),
+      elementRect: () => term.element?.getBoundingClientRect() ?? null,
+      dispatchWheelLine: (deltaY, clientX, clientY) => {
+        term.element?.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY,
+            deltaMode: WheelEvent.DOM_DELTA_LINE,
+            clientX,
+            clientY,
+            bubbles: true,
+            cancelable: true,
+          }),
+        )
+      },
+    }
+    touch = new TerminalTouchScroll(touchHost)
     mountEl.addEventListener('touchstart', onTouchStart, { passive: true })
     mountEl.addEventListener('touchmove', onTouchMove, { passive: false })
     mountEl.addEventListener('touchend', onTouchEnd, { passive: true })
@@ -527,27 +460,6 @@
       })
   }
   $: refreshChatAvailability(session.id, session.status)
-
-  interface PrBadge {
-    text: string
-    cls: 'done' | 'error' | 'needs' | 'muted'
-  }
-
-  function prBadges(dto: PrStatusDTO | null): PrBadge[] {
-    if (!dto) return []
-    if (dto.error) return [{ text: 'PR ?', cls: 'muted' }]
-    const badges: PrBadge[] = []
-    if (dto.state === 'merged') badges.push({ text: 'merged', cls: 'done' })
-    else if (dto.state === 'open') badges.push({ text: 'open', cls: 'muted' })
-    else if (dto.state === 'closed') badges.push({ text: 'closed', cls: 'error' })
-    if (dto.ci === 'passed') badges.push({ text: 'CI ✓', cls: 'done' })
-    else if (dto.ci === 'failed') badges.push({ text: 'CI ✗', cls: 'error' })
-    else if (dto.ci === 'pending' || dto.ci === 'running')
-      badges.push({ text: 'CI …', cls: 'needs' })
-    if (dto.review === 'approved') badges.push({ text: 'approved', cls: 'done' })
-    else if (dto.review === 'changes_requested') badges.push({ text: 'changes', cls: 'error' })
-    return badges
-  }
 
   // FLO-110: reset the startup overlay when switching sessions; resync()
   // re-raises it for the queued / fresh-start-404 window. A queued session
@@ -1006,6 +918,66 @@
     if (next === 'terminal') refocusTerm()
   }
 
+  // ── Toolbar/menu toggles handed to TerminalHeader/TerminalMobileActions ──
+  // Both the desktop header and the mobile action bar had their own copies of
+  // these same inline toggles inline in the markup; named once here so both
+  // extracted components can share the same callback.
+  function toggleHandoffMenu() {
+    handoffOpen = !handoffOpen
+  }
+
+  function toggleUpdateBase() {
+    updateBaseOpen = !updateBaseOpen
+  }
+
+  function toggleMore() {
+    moreOpen = !moreOpen
+  }
+
+  // Mobile "more" overflow menu actions: each closes the menu, then performs
+  // the same action as its desktop-header counterpart (handleRemoteControl,
+  // handleOpenEditor, handleUpdateFromBase) or the same plain store call
+  // (run/stop/restartAppForSession) that the header's own buttons use.
+  function moreOpenApp() {
+    moreOpen = false
+    if (appUrl) window.open(appUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  function moreStopApp() {
+    moreOpen = false
+    stopAppForSession(session)
+  }
+
+  function moreRestartApp() {
+    moreOpen = false
+    restartAppForSession(session)
+  }
+
+  function moreRunApp() {
+    moreOpen = false
+    runAppForSession(session)
+  }
+
+  function moreRemoteControl() {
+    moreOpen = false
+    handleRemoteControl()
+  }
+
+  function moreOpenEditor() {
+    moreOpen = false
+    handleOpenEditor()
+  }
+
+  function moreUpdateFromBaseRebase() {
+    moreOpen = false
+    handleUpdateFromBase('rebase')
+  }
+
+  function moreUpdateFromBaseMerge() {
+    moreOpen = false
+    handleUpdateFromBase('merge')
+  }
+
   function handleDiffSubmitted() {
     showDiff = false
     refocusTerm()
@@ -1059,12 +1031,19 @@
 
   function onWindowClick(e: MouseEvent) {
     const t = e.target as HTMLElement
-    if (menuOpen && !t.closest('#ticketStatusSel') && !t.closest('#ticketStatusSelMob'))
-      menuOpen = false
-    if (handoffOpen && !t.closest('#handoffSel') && !t.closest('#handoffSelMob'))
-      handoffOpen = false
-    if (updateBaseOpen && !t.closest('#updateBaseSel')) updateBaseOpen = false
-    if (moreOpen && !t.closest('#moreSelMob')) moreOpen = false
+    const next = closeMenusOutsideClick(
+      { menuOpen, handoffOpen, updateBaseOpen, moreOpen },
+      {
+        ticketStatus: !!(t.closest('#ticketStatusSel') || t.closest('#ticketStatusSelMob')),
+        handoff: !!(t.closest('#handoffSel') || t.closest('#handoffSelMob')),
+        updateBase: !!t.closest('#updateBaseSel'),
+        more: !!t.closest('#moreSelMob'),
+      },
+    )
+    menuOpen = next.menuOpen
+    handoffOpen = next.handoffOpen
+    updateBaseOpen = next.updateBaseOpen
+    moreOpen = next.moreOpen
   }
 
   function onTriggerClick() {
@@ -1074,239 +1053,52 @@
 
 <svelte:window on:click={onWindowClick} />
 
-<div class="term-head">
-  <button class="btn btn-ghost btn-icon btn-sm" title="Deselect" on:click={() => select(null)}>
-    {@html icons.chevronLeft}
-  </button>
-  <div class="th-title">
-    <div class="t">
-      <span class="stat-dot" style="background:{dot}"></span>
-      <span class="tt">{session.tid} · {session.title}</span>
-    </div>
-    <div class="m">
-      <span class="badge mono"
-        >{@html icons.folder} {r ? `${r.org}/${r.name}` : session.repo || 'unknown repo'}</span
-      >
-      <span class="badge mono">{@html icons.gitBranch} {session.branch}</span>
-      {#if session.behind > 0}
-        <span
-          class="badge mono badge-behind"
-          title={`This worktree is ${session.behind} commit${session.behind === 1 ? '' : 's'} behind ${base}`}
-        >
-          ↓ {session.behind} behind {base}
-        </span>
-      {/if}
-      {#if liveMode && viewers > 1}
-        <span class="badge mono">{viewers} viewers</span>
-      {/if}
-      {#if session.prUrl}
-        <a class="badge mono" href={session.prUrl} target="_blank" rel="noopener noreferrer">
-          {@html icons.externalLink} View PR
-        </a>
-        {#each prBadges(prStatus) as b (b.text)}
-          <span class="badge mono pr-badge-{b.cls}" title={prStatus?.error}>{b.text}</span>
-        {/each}
-      {/if}
-    </div>
-  </div>
-  <div class="spacer"></div>
-  {#if !$mobile}
-    {#if shouldShow}
-      <div class="sel-head" id="ticketStatusSel">
-        {#if statusLoading && !current && available.length === 0}
-          <button class="btn btn-outline btn-sm status-trigger" type="button" disabled>
-            <span class="muted">Loading…</span>
-            <span class="chev">{@html icons.chevronDown}</span>
-          </button>
-        {:else if statusError}
-          <button
-            class="btn btn-outline btn-sm status-trigger"
-            type="button"
-            disabled
-            title={statusError}
-          >
-            <span class="muted">Status unavailable</span>
-            <span class="chev">{@html icons.chevronDown}</span>
-          </button>
-        {:else if available.length === 0}
-          <button class="btn btn-outline btn-sm status-trigger" type="button" disabled>
-            <span class="muted">{current?.name ?? 'No statuses'}</span>
-            <span class="chev">{@html icons.chevronDown}</span>
-          </button>
-        {:else}
-          <button
-            class="btn btn-outline btn-sm status-trigger"
-            type="button"
-            on:click|stopPropagation={onTriggerClick}
-          >
-            <span>{current?.name ?? 'Set status'}</span>
-            <span class="chev">{@html icons.chevronDown}</span>
-          </button>
-          {#if menuOpen}
-            <div class="sel-menu" use:floatingAnchor>
-              {#each available as state (state.id)}
-                <button
-                  type="button"
-                  class="opt"
-                  class:sel={current?.id === state.id}
-                  on:click={() => selectState(state)}
-                >
-                  <span>{state.name}</span>
-                  <span class="check">{@html icons.check}</span>
-                </button>
-              {/each}
-            </div>
-          {/if}
-        {/if}
-      </div>
-    {/if}
-    <button
-      class="btn btn-outline btn-sm"
-      class:btn-active={showDiff}
-      title="Review the worktree diff and comment on lines"
-      disabled={!session.repo || !session.branch}
-      on:click={toggleDiff}
-    >
-      {@html icons.fileDiff} <span class="btn-label">Diff</span>
-      {#if pendingCommentCount > 0}
-        <span class="diff-count">{pendingCommentCount}</span>
-      {/if}
-    </button>
-    {#if chatAvailable}
-      <button
-        class="btn btn-outline btn-sm"
-        class:btn-active={viewMode === 'chat'}
-        title={viewMode === 'chat' ? 'Switch to the terminal' : 'Switch to chat'}
-        on:click={toggleViewMode}
-      >
-        {@html viewMode === 'chat' ? icons.terminal : icons.chat}
-        <span class="btn-label">{viewMode === 'chat' ? 'Terminal' : 'Chat'}</span>
-      </button>
-    {/if}
-    {#if appRunning}
-      {#if appUrl}
-        <a
-          class="btn btn-outline btn-sm"
-          title="Open the running app over Tailscale"
-          href={appUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          >{@html icons.externalLink} <span class="btn-label">Open app</span></a
-        >
-      {/if}
-      <button
-        class="btn btn-outline btn-sm"
-        title="Stop the running app"
-        disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-        on:click={() => stopAppForSession(session)}
-        >{@html icons.stop} <span class="btn-label">Stop</span></button
-      >
-      <button
-        class="btn btn-outline btn-sm"
-        title="Restart the running app"
-        disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-        on:click={() => restartAppForSession(session)}
-        >{@html icons.refresh} <span class="btn-label">Restart</span></button
-      >
-    {:else}
-      <button
-        class="btn btn-outline btn-sm"
-        title="Run the app using this repository's start command"
-        disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-        on:click={() => runAppForSession(session)}
-        >{@html icons.play} <span class="btn-label">Run</span></button
-      >
-    {/if}
-    {#if currentKind === 'claude-code'}
-      <button
-        class="btn btn-outline btn-sm"
-        title="Relaunch this agent with Claude Code Remote Control"
-        disabled={!hasBackend || !session.id}
-        on:click={handleRemoteControl}
-        >{@html icons.remote} <span class="btn-label">Remote control</span></button
-      >
-    {/if}
-    <div class="sel-head" id="handoffSel">
-      <button
-        class="btn btn-outline btn-sm"
-        title="Continue this run with a different agent (e.g. when this one hit its limits)"
-        disabled={!hasBackend || !session.id || session.status === 'queued' || handingOff}
-        on:click|stopPropagation={() => (handoffOpen = !handoffOpen)}
-        >{@html icons.refresh}
-        <span class="btn-label">{handingOff ? 'Handing off…' : 'Hand off'}</span></button
-      >
-      {#if handoffOpen}
-        <div class="sel-menu" use:floatingAnchor>
-          {#each handoffTargets as agent (agent.kind)}
-            <button type="button" class="opt" on:click={() => handleHandoff(agent.kind)}>
-              <span>Continue with {agent.label}</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </div>
-    {#if session.behind > 0}
-      <div class="sel-head" id="updateBaseSel">
-        <button
-          class="btn btn-outline btn-sm"
-          title={`Rebase ${session.branch} onto the latest ${base} (uncommitted changes are autostashed)`}
-          disabled={!hasBackend || !session.repo || !session.branch || updatingBase}
-          on:click={() => handleUpdateFromBase('rebase')}
-        >
-          {@html icons.refresh}
-          <span class="btn-label">{updatingBase ? 'Updating…' : `Update from ${base}`}</span>
-        </button>
-        <button
-          class="btn btn-outline btn-sm btn-icon"
-          title="Choose rebase or merge"
-          disabled={!hasBackend || updatingBase}
-          on:click|stopPropagation={() => (updateBaseOpen = !updateBaseOpen)}
-        >
-          {@html icons.chevronDown}
-        </button>
-        {#if updateBaseOpen}
-          <div class="sel-menu" use:floatingAnchor>
-            <button type="button" class="opt" on:click={() => handleUpdateFromBase('rebase')}>
-              <span>Rebase onto {base} (recommended)</span>
-            </button>
-            <button type="button" class="opt" on:click={() => handleUpdateFromBase('merge')}>
-              <span>Merge {base} into {session.branch}</span>
-            </button>
-          </div>
-        {/if}
-      </div>
-    {/if}
-    <button
-      class="btn btn-outline btn-sm"
-      title="Open the worktree in your configured editor"
-      disabled={!hasBackend || !session.repo || !session.branch}
-      on:click={handleOpenEditor}
-    >
-      {@html icons.externalLink} <span class="btn-label">Editor</span>
-    </button>
-    <button class="btn btn-outline btn-sm btn-danger" on:click={handleCleanup}>
-      {@html icons.trash} <span class="btn-label">Clean up</span>
-    </button>
-    <!-- Attach image button (TASK-6R28O) -->
-    <input
-      bind:this={fileInput}
-      type="file"
-      accept="image/*"
-      style="display:none"
-      on:change={handleFileChange}
-    />
-    <button
-      type="button"
-      class="btn btn-outline btn-sm btn-icon"
-      title="Attach image"
-      aria-label="Attach image"
-      disabled={!canWrite || !session.id}
-      on:click={() => fileInput.click()}
-    >
-      {@html icons.image}
-    </button>
-  {/if}
-</div>
+<TerminalHeader
+  {session}
+  {dot}
+  {r}
+  {base}
+  {viewers}
+  {liveMode}
+  mobile={$mobile}
+  {prStatus}
+  {shouldShow}
+  {statusLoading}
+  {statusError}
+  {current}
+  {available}
+  {menuOpen}
+  {onTriggerClick}
+  onSelectState={selectState}
+  {showDiff}
+  {pendingCommentCount}
+  onToggleDiff={toggleDiff}
+  {chatAvailable}
+  {viewMode}
+  onToggleViewMode={toggleViewMode}
+  {appRunning}
+  {appUrl}
+  {hasBackend}
+  onRunApp={() => runAppForSession(session)}
+  onStopApp={() => stopAppForSession(session)}
+  onRestartApp={() => restartAppForSession(session)}
+  {currentKind}
+  onRemoteControl={handleRemoteControl}
+  {handoffOpen}
+  {handoffTargets}
+  {handingOff}
+  onToggleHandoffMenu={toggleHandoffMenu}
+  onHandoff={handleHandoff}
+  {updateBaseOpen}
+  {updatingBase}
+  onToggleUpdateBase={toggleUpdateBase}
+  onUpdateFromBase={handleUpdateFromBase}
+  onOpenEditor={handleOpenEditor}
+  onCleanup={handleCleanup}
+  {canWrite}
+  onFileChange={handleFileChange}
+  onDeselect={() => select(null)}
+/>
 
 <div class="term-wrap" class:hidden={showDiff || effectiveViewMode === 'chat'}>
   <div class="term-mount" bind:this={mountEl}></div>
@@ -1333,58 +1125,22 @@
   />
 {/if}
 
-{#if liveMode && !canWrite}
-  <div class="alert">
-    <span class="ic">{@html icons.remote}</span>
-    <div class="tx"><b>View-only</b><span>Another client is controlling this session.</span></div>
-    <button class="btn btn-sm" on:click={handleTakeOver}>Take over</button>
-  </div>
-{/if}
-
-{#if needsInput}
-  <div class="alert">
-    <span class="ic">{@html icons.alert}</span>
-    <div class="tx"><b>Agent needs your input</b><span>{alertMsg}</span></div>
-    <div class="keys">
-      <span class="kbd">1</span><span class="kbd">2</span><span class="kbd">↵</span>
-    </div>
-  </div>
-{/if}
-
-{#if liveMode && exited}
-  <div class="alert">
-    <span class="ic">{@html icons.refresh}</span>
-    <div class="tx">
-      <b>Agent closed out</b>
-      <span>
-        {exitCode === 0
-          ? 'The agent process exited.'
-          : `The agent process exited with code ${exitCode}.`}
-        Restart it to keep working in the same worktree, or hand the run off to a different agent.
-      </span>
-    </div>
-    <button class="btn btn-sm" disabled={restarting} on:click={handleRestart}>
-      {restarting ? 'Restarting…' : 'Restart'}
-    </button>
-    {#each handoffTargets as agent (agent.kind)}
-      <button class="btn btn-sm" disabled={handingOff} on:click={() => handleHandoff(agent.kind)}>
-        Continue with {agent.label}
-      </button>
-    {/each}
-  </div>
-{/if}
-
-{#if liveMode && !$connected && pendingInputBytes > 0}
-  <!-- FLO-154: typed input is buffered client-side while the transport is down
-       and flushed on reconnect — show that it's held, not silently lost. -->
-  <div class="alert" role="status">
-    <span class="ic">{@html icons.uploadCloud}</span>
-    <div class="tx">
-      <b>Will send once reconnected</b>
-      <span>{pendingInputBytes} character{pendingInputBytes === 1 ? '' : 's'} queued.</span>
-    </div>
-  </div>
-{/if}
+<TerminalAlerts
+  {liveMode}
+  {canWrite}
+  onTakeOver={handleTakeOver}
+  {needsInput}
+  {alertMsg}
+  {exited}
+  {exitCode}
+  {restarting}
+  {handingOff}
+  {handoffTargets}
+  onRestart={handleRestart}
+  onHandoff={handleHandoff}
+  connected={$connected}
+  {pendingInputBytes}
+/>
 
 {#if $mobile && liveMode && !exited && !showDiff && effectiveViewMode === 'terminal'}
   <!-- TerminalView is reused across sessions, so key the composer to reset its diff base on switch. -->
@@ -1405,187 +1161,45 @@
 {/if}
 
 {#if $mobile}
-  <div class="term-actions">
-    {#if shouldShow}
-      <div class="sel-head" id="ticketStatusSelMob">
-        <button
-          class="btn btn-outline btn-sm status-trigger"
-          type="button"
-          disabled={!!statusError || available.length === 0}
-          title={statusError ?? current?.name ?? 'Set status'}
-          on:click|stopPropagation={onTriggerClick}
-        >
-          <span class="stat-dot" style="background:{dot}"></span>
-          <span class="chev">{@html icons.chevronDown}</span>
-        </button>
-        {#if menuOpen}
-          <div class="sel-menu" use:floatingAnchor>
-            {#each available as state (state.id)}
-              <button
-                type="button"
-                class="opt"
-                class:sel={current?.id === state.id}
-                on:click={() => selectState(state)}
-              >
-                <span>{state.name}</span>
-                <span class="check">{@html icons.check}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-    <button
-      class="btn btn-outline btn-sm"
-      class:btn-active={showDiff}
-      title="Review the worktree diff and comment on lines"
-      disabled={!session.repo || !session.branch}
-      on:click={toggleDiff}
-    >
-      {@html icons.fileDiff}
-      {#if pendingCommentCount > 0}
-        <span class="diff-count">{pendingCommentCount}</span>
-      {/if}
-    </button>
-    {#if chatAvailable}
-      <button
-        class="btn btn-outline btn-sm"
-        class:btn-active={viewMode === 'chat'}
-        title={viewMode === 'chat' ? 'Switch to the terminal' : 'Switch to chat'}
-        on:click={toggleViewMode}
-      >
-        {@html viewMode === 'chat' ? icons.terminal : icons.chat}
-      </button>
-    {/if}
-    <div class="sel-head" id="handoffSelMob">
-      <button
-        class="btn btn-outline btn-sm"
-        title="Continue this run with a different agent"
-        disabled={!hasBackend || !session.id || session.status === 'queued' || handingOff}
-        on:click|stopPropagation={() => (handoffOpen = !handoffOpen)}>{@html icons.refresh}</button
-      >
-      {#if handoffOpen}
-        <div class="sel-menu" use:floatingAnchor>
-          {#each handoffTargets as agent (agent.kind)}
-            <button type="button" class="opt" on:click={() => handleHandoff(agent.kind)}>
-              <span>Continue with {agent.label}</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
-    </div>
-    <button class="btn btn-outline btn-sm btn-danger" title="Clean up" on:click={handleCleanup}>
-      {@html icons.trash}
-    </button>
-    <div class="sel-head" id="moreSelMob">
-      <button
-        class="btn btn-outline btn-sm"
-        type="button"
-        title="More actions"
-        on:click|stopPropagation={() => (moreOpen = !moreOpen)}>{@html icons.more}</button
-      >
-      {#if moreOpen}
-        <div class="sel-menu" use:floatingAnchor>
-          {#if appRunning}
-            {#if appUrl}
-              <button
-                type="button"
-                class="opt"
-                on:click={() => {
-                  moreOpen = false
-                  window.open(appUrl, '_blank', 'noopener,noreferrer')
-                }}
-              >
-                <span>{@html icons.externalLink} Open app</span>
-              </button>
-            {/if}
-            <button
-              type="button"
-              class="opt"
-              disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-              on:click={() => {
-                moreOpen = false
-                stopAppForSession(session)
-              }}
-            >
-              <span>{@html icons.stop} Stop</span>
-            </button>
-            <button
-              type="button"
-              class="opt"
-              disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-              on:click={() => {
-                moreOpen = false
-                restartAppForSession(session)
-              }}
-            >
-              <span>{@html icons.refresh} Restart</span>
-            </button>
-          {:else}
-            <button
-              type="button"
-              class="opt"
-              disabled={!hasBackend || !session.id || !session.branch || !session.repo}
-              on:click={() => {
-                moreOpen = false
-                runAppForSession(session)
-              }}
-            >
-              <span>{@html icons.play} Run</span>
-            </button>
-          {/if}
-          {#if currentKind === 'claude-code'}
-            <button
-              type="button"
-              class="opt"
-              disabled={!hasBackend || !session.id}
-              on:click={() => {
-                moreOpen = false
-                handleRemoteControl()
-              }}
-            >
-              <span>{@html icons.remote} Remote control</span>
-            </button>
-          {/if}
-          <button
-            type="button"
-            class="opt"
-            disabled={!hasBackend || !session.repo || !session.branch}
-            on:click={() => {
-              moreOpen = false
-              handleOpenEditor()
-            }}
-          >
-            <span>{@html icons.externalLink} Editor</span>
-          </button>
-          {#if session.behind > 0}
-            <button
-              type="button"
-              class="opt"
-              disabled={!hasBackend || !session.repo || !session.branch || updatingBase}
-              on:click={() => {
-                moreOpen = false
-                handleUpdateFromBase('rebase')
-              }}
-            >
-              <span>{@html icons.refresh} Update from {base} (rebase)</span>
-            </button>
-            <button
-              type="button"
-              class="opt"
-              disabled={!hasBackend || !session.repo || !session.branch || updatingBase}
-              on:click={() => {
-                moreOpen = false
-                handleUpdateFromBase('merge')
-              }}
-            >
-              <span>{@html icons.refresh} Merge {base} into branch</span>
-            </button>
-          {/if}
-        </div>
-      {/if}
-    </div>
-  </div>
+  <TerminalMobileActions
+    {shouldShow}
+    {statusError}
+    {available}
+    {current}
+    {menuOpen}
+    {dot}
+    {onTriggerClick}
+    onSelectState={selectState}
+    {showDiff}
+    {pendingCommentCount}
+    onToggleDiff={toggleDiff}
+    {chatAvailable}
+    {viewMode}
+    onToggleViewMode={toggleViewMode}
+    {hasBackend}
+    {session}
+    {handoffOpen}
+    {handoffTargets}
+    {handingOff}
+    onToggleHandoffMenu={toggleHandoffMenu}
+    onHandoff={handleHandoff}
+    onCleanup={handleCleanup}
+    {moreOpen}
+    onToggleMore={toggleMore}
+    {appRunning}
+    {appUrl}
+    onOpenApp={moreOpenApp}
+    onStopApp={moreStopApp}
+    onRestartApp={moreRestartApp}
+    onRunApp={moreRunApp}
+    {currentKind}
+    onRemoteControl={moreRemoteControl}
+    onOpenEditor={moreOpenEditor}
+    {base}
+    {updatingBase}
+    onUpdateFromBaseRebase={moreUpdateFromBaseRebase}
+    onUpdateFromBaseMerge={moreUpdateFromBaseMerge}
+  />
 {/if}
 
 <style>
@@ -1609,102 +1223,5 @@
     justify-content: center;
     background: hsl(var(--background));
     animation: fade 0.2s ease-out;
-  }
-
-  .btn-active {
-    background: hsl(var(--primary) / 0.12);
-    border-color: hsl(var(--primary) / 0.5);
-    color: hsl(var(--primary));
-  }
-
-  /* PR/CI status badges (FLO-96) */
-  .pr-badge-done {
-    color: hsl(var(--st-done));
-    border-color: hsl(var(--st-done) / 0.4);
-  }
-  .pr-badge-error {
-    color: hsl(var(--st-error));
-    border-color: hsl(var(--st-error) / 0.4);
-  }
-  .pr-badge-needs {
-    color: hsl(var(--st-needs));
-    border-color: hsl(var(--st-needs) / 0.4);
-  }
-  .badge-behind {
-    color: hsl(var(--st-needs));
-    border-color: hsl(var(--st-needs) / 0.4);
-  }
-
-  .diff-count {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 999px;
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 1;
-    background: hsl(var(--primary));
-    color: hsl(var(--primary-foreground));
-  }
-
-  .status-trigger {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    min-width: 100px;
-    gap: 4px;
-  }
-  .status-trigger .chev {
-    color: hsl(var(--muted-foreground));
-    display: flex;
-  }
-  @media (max-width: 700px) {
-    /* Let app.css's .term-actions square-chip sizing win — the scoped
-       min-width above would otherwise outrank it in the cascade. */
-    .term-actions .status-trigger {
-      min-width: 0;
-    }
-  }
-  .sel-head {
-    position: relative;
-  }
-  .sel-menu {
-    position: absolute;
-    top: 38px;
-    left: 0;
-    z-index: 60;
-    padding: 5px;
-    background: hsl(var(--popover));
-    border: 1px solid hsl(var(--border));
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    max-height: 260px;
-    overflow-y: auto;
-    animation: pop 0.14s ease;
-    min-width: 160px;
-  }
-  .opt {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: calc(var(--radius) - 3px);
-    cursor: pointer;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    width: 100%;
-  }
-  .opt:hover {
-    background: hsl(var(--accent-bg));
-  }
-  .opt .check {
-    margin-left: auto;
-    color: hsl(var(--primary));
-    opacity: 0;
-  }
-  .opt.sel .check {
-    opacity: 1;
   }
 </style>

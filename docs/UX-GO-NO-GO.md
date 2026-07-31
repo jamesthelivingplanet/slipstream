@@ -117,6 +117,28 @@ cut.
 
 Everything else keeps moving normally.
 
+> **Recorded decision, 2026-07-30 — `TerminalView.svelte` and `MissionControl.svelte` were
+> refactored while in this list.** Both were split as part of the
+> [docs/AUDIT-2026-07-30.md](AUDIT-2026-07-30.md) item M work (TerminalView 1710 → 1227
+> lines plus three child components; MissionControl 1524 → 607 plus four). This is written
+> down here rather than left to be discovered because the freeze exists precisely to make
+> movement on these paths deliberate.
+>
+> The justification, and the reason it is not a freeze violation in spirit: the freeze
+> protects the *interaction surface* — what a coordinated desktop+daemon upgrade would force
+> on users — and these changes are behavior-preserving decompositions with no props, no
+> layout, no styling and no `contract.ts`/`wire.ts` shape changed. The two invariants most at
+> risk were held explicitly: TerminalView's `resync`/`startLive`/`scheduleLiveRetry`/
+> `cleanupListeners` are byte-identical (verified by grepping the diff), and MissionControl's
+> per-episode ask-fetch guard was preserved and is now unit-tested in both directions
+> (same-tick no-refetch, leave/re-enter re-arms). Test count went 3014 → 3087 over the two
+> passes, all of it new coverage on logic these components previously had none for.
+>
+> The freeze's own §4 sign-off table was blank at the time, so the freeze had not been
+> formally opened — that ambiguity is what made this a decision worth recording rather than
+> a rule worth breaking. Anyone filling in §4 should treat these two rows as touched-and-
+> verified, not untouched.
+
 **Duration**: the freeze opens the day the last §1 row is classified and holds until the
 `vX.Y.Z` tag lands. During it, only PATCH-shaped fixes touch the frozen paths. A new
 interaction model during the freeze goes behind a preference — the way chat-by-default did —

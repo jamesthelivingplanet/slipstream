@@ -4,8 +4,13 @@
  * These mirror the heuristics in `electron/services/statusDetector.ts` (the
  * backend's 'needs' classifier) so the UI surfaces the same trailing question
  * the detector keyed on, plus small presentation helpers (elapsed-time
- * formatting).
+ * formatting) and the other pure glue extracted from MissionControl.svelte
+ * (PR status chips, usage/cost rollup, ask-fetch cache targeting).
  */
+
+import type { PrStatusDTO, SessionUsage, UsageSummary } from '../../electron/shared/contract.js'
+import { formatCost, formatTokens, dayKeyFromMs } from '../../electron/shared/usageFormat.js'
+import type { Session } from './types'
 
 // ─── ANSI stripping ─────────────────────────────────────────────────────────
 
@@ -161,4 +166,127 @@ export function formatWait(sinceEpochMs: number, nowEpochMs: number = Date.now()
 
   const d = Math.floor(elapsed / DAY_MS)
   return `${d}d`
+}
+
+// ─── PR/CI status chips (FLO-96) ───────────────────────────────────────────
+
+export interface PrChip {
+  text: string
+  cls: 'done' | 'error' | 'needs' | 'muted'
+}
+
+/** Compact chip list for a session's PR: merge state, CI, review — in that
+ *  order, omitting states that aren't worth a chip (none/unknown CI,
+ *  none/unknown review). An error collapses to a single "PR ?" chip. */
+export function prChips(dto: PrStatusDTO | undefined): PrChip[] {
+  if (!dto) return []
+  if (dto.error) return [{ text: 'PR ?', cls: 'muted' }]
+  const chips: PrChip[] = []
+  if (dto.state === 'merged') chips.push({ text: 'merged', cls: 'done' })
+  else if (dto.state === 'open') chips.push({ text: 'open', cls: 'muted' })
+  else if (dto.state === 'closed') chips.push({ text: 'closed', cls: 'error' })
+  if (dto.ci === 'passed') chips.push({ text: 'CI ✓', cls: 'done' })
+  else if (dto.ci === 'failed') chips.push({ text: 'CI ✗', cls: 'error' })
+  else if (dto.ci === 'pending' || dto.ci === 'running') chips.push({ text: 'CI …', cls: 'needs' })
+  if (dto.review === 'approved') chips.push({ text: 'approved', cls: 'done' })
+  else if (dto.review === 'changes_requested') chips.push({ text: 'changes', cls: 'error' })
+  return chips
+}
+
+/** A done session whose PR is known but hasn't merged yet needs to read
+ *  differently from one that actually landed. */
+export function prNotMerged(dto: PrStatusDTO | undefined): boolean {
+  return !!dto && dto.state !== 'unknown' && dto.state !== 'merged'
+}
+
+// ─── Usage/cost rollup (FLO-94) ─────────────────────────────────────────────
+
+/** Rolls the raw UsageSummary into the three derived values Mission Control's
+ *  header/rows read: a by-session lookup map, today's spend, and whether
+ *  there's any spend at all worth surfacing. */
+export function computeUsageRollup(
+  usage: UsageSummary | null,
+  nowMs: number = Date.now(),
+): { usageById: Map<string, SessionUsage>; todayCost: number; hasUsage: boolean } {
+  const usageById = new Map<string, SessionUsage>(
+    (usage?.sessions ?? []).map((s) => [s.sessionId, s]),
+  )
+  const todayCost = usage?.byDay.find((b) => b.key === dayKeyFromMs(nowMs))?.costUsd ?? 0
+  const hasUsage = (usage?.costUsd ?? 0) > 0
+  return { usageById, todayCost, hasUsage }
+}
+
+/** Cost chip text for a session row, or null when there's no usage yet. */
+export function costFor(u: SessionUsage | undefined): { cost: string; tokens: string } | null {
+  if (!u || !u.exists || u.turns === 0) return null
+  const tokens = u.tokens.input + u.tokens.output + u.tokens.cacheCreation + u.tokens.cacheRead
+  return { cost: formatCost(u.costUsd), tokens: formatTokens(tokens) }
+}
+
+// ─── Session relationships (TASK-CIOEQ) ─────────────────────────────────────
+
+/** Title of the session that spawned `parentId` via `slipstream new-agent`,
+ *  or undefined when there's no parentId or the parent isn't (or is no
+ *  longer) a known session. */
+export function findParentTitle(
+  sessions: Session[],
+  parentId: string | undefined,
+): string | undefined {
+  if (!parentId) return undefined
+  return sessions.find((x) => x.id === parentId)?.title
+}
+
+/** How many currently-known sessions were spawned by `sessionId` via
+ *  `slipstream new-agent`. */
+export function countSpawned(sessions: Session[], sessionId: string | undefined): number {
+  if (!sessionId) return 0
+  return sessions.filter((x) => x.parentId === sessionId).length
+}
+
+// ─── Ask-extraction fetch cache (load-bearing — see docs/ARCHITECTURE.md
+// §Session status pipeline) ─────────────────────────────────────────────────
+//
+// The `status` event fires on EVERY PTY chunk, and the heuristic status
+// flaps 'needs'↔'running' every few seconds by design on an idle TUI. These
+// two functions decide, given the current session list and the set of ids
+// already fetched, which ids are a NEW entry into 'needs' (fetch once) and
+// which previously-fetched ids have left 'needs' (clear so a future
+// re-entry fetches again) — the guard that keeps refreshAsks from turning
+// into a per-tick fetch.
+
+/** Session ids that just entered 'needs' and haven't been fetched yet. */
+export function sessionsNeedingAskFetch(
+  list: Session[],
+  fetchedFor: ReadonlySet<string>,
+): string[] {
+  const ids: string[] = []
+  for (const s of list) {
+    if (s.status === 'needs' && s.id && !fetchedFor.has(s.id)) ids.push(s.id)
+  }
+  return ids
+}
+
+/** Previously-fetched ids whose session has left 'needs' (or disappeared),
+ *  so the cache entry can be cleared and re-fetched on a future re-entry. */
+export function staleAskFetchIds(list: Session[], fetchedFor: ReadonlySet<string>): string[] {
+  const stale: string[] = []
+  for (const id of fetchedFor) {
+    const s = list.find((x) => x.id === id)
+    if (!s || s.status !== 'needs') stale.push(id)
+  }
+  return stale
+}
+
+// ─── FLO-152 swipe-row identity/toggle helpers ──────────────────────────────
+
+/** Stable key for a session's swipe row: backend id when present, else the
+ *  ticket id (mock/pre-registration sessions have no backend id yet). */
+export function sessionSwipeKey(s: Session): string {
+  return s.id ?? s.tid
+}
+
+/** Toggle semantics for the single shared "which row's handoff menu is
+ *  open" value: selecting the already-open row's key closes it. */
+export function nextHandoffFor(current: string | null, key: string): string | null {
+  return current === key ? null : key
 }

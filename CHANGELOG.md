@@ -80,6 +80,30 @@ specifically (schema versioning, build stamping, release flow).
   recorded as such: git-push credential reads in `prStatus.ts`/`gitDriver.ts`/`slipstream.ts`,
   and per-owner data directories (item 5).
 
+### Changed
+
+- The three largest renderer modules are decomposed, with no behavior change
+  (`docs/AUDIT-2026-07-30.md` item M). `src/lib/stores.ts` went from 1161 lines to a
+  111-line barrel over six focused modules under `src/lib/stores/`, keeping its full public
+  surface so none of its 24 importers changed and `stores.test.ts` needed no edit at all.
+  `MissionControl.svelte` went 1524 → 607 by extracting four section components plus a
+  shared swipe row, and `TerminalView.svelte` went 1710 → 1227 across two passes — four pure
+  helper modules (`terminalTouchScroll`, `prBadges`, `clipboardImage`, `terminalMenus`) and
+  three child components (`TerminalHeader`, `TerminalAlerts`, `TerminalMobileActions`).
+  The durable win is coverage: these components had no direct tests, and the extracted logic
+  now does, taking the suite from 3014 to 3087 tests.
+
+  Two invariants were held deliberately, since a "pure refactor" is exactly where they get
+  lost. TerminalView's `resync`/`startLive`/`scheduleLiveRetry`/`cleanupListeners` are
+  byte-identical (verified by grepping the diff) — that path re-attaches with a new
+  `clientId` and depends on `ReplayGate.applySnapshot` slicing a batch straddling the
+  snapshot's `seq` boundary. MissionControl's ask-fetch guard still fires once per episode
+  rather than per store tick — status flaps `needs`↔`running` by design — and that is now
+  unit-tested in both directions instead of resting on a comment.
+
+  Both components are listed in `docs/UX-GO-NO-GO.md` §3's freeze scope; the decision to
+  touch them is recorded there rather than left implicit.
+
 ### Security
 
 - The Android daemon bearer token is no longer kept in plaintext. `ReplyPrefs` now uses
