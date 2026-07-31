@@ -7,6 +7,7 @@ import type {
   TicketSourceSettings,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
+import { DEFAULT_OWNER_ID } from '../services/configStore.js'
 
 const DEFAULT_BASE_URL = 'https://gitlab.com'
 
@@ -87,13 +88,19 @@ const EMPTY_RESULT: PaginatedTickets = {
   hasMore: false,
 }
 
-export function createGitlabIssuesProvider(config: IConfigStore): ITicketProvider {
+export function createGitlabIssuesProvider(
+  config: IConfigStore,
+  ownerId: string = DEFAULT_OWNER_ID,
+): ITicketProvider {
   function getToken(): string | undefined {
-    return config.get('gitlab.token') || undefined
+    return config.getForOwner!(ownerId, 'gitlab.token') || undefined
   }
 
   function getApiRoot(): string {
-    const baseUrl = (config.get('gitlab.baseUrl') || DEFAULT_BASE_URL).replace(/\/+$/, '')
+    const baseUrl = (config.getForOwner!(ownerId, 'gitlab.baseUrl') || DEFAULT_BASE_URL).replace(
+      /\/+$/,
+      '',
+    )
     return `${baseUrl}/api/v4`
   }
 
@@ -153,8 +160,8 @@ export function createGitlabIssuesProvider(config: IConfigStore): ITicketProvide
     }): Promise<PaginatedTickets> {
       if (!getToken()) return EMPTY_RESULT
 
-      const projects = parseProjects(config.get('gitlab.issueProjects'))
-      const onlyMine = config.get('gitlab.onlyMine') !== '0'
+      const projects = parseProjects(config.getForOwner!(ownerId, 'gitlab.issueProjects'))
+      const onlyMine = config.getForOwner!(ownerId, 'gitlab.onlyMine') !== '0'
       const scope = onlyMine ? 'assigned_to_me' : 'all'
       const searchParam = opts?.query ? `&search=${encodeURIComponent(opts.query)}` : ''
 
@@ -245,8 +252,8 @@ export function createGitlabIssuesProvider(config: IConfigStore): ITicketProvide
     getSettings(): TicketSourceSettings {
       return {
         configured: !!getToken(),
-        scopeKeys: parseProjects(config.get('gitlab.issueProjects')),
-        onlyMine: config.get('gitlab.onlyMine') !== '0',
+        scopeKeys: parseProjects(config.getForOwner!(ownerId, 'gitlab.issueProjects')),
+        onlyMine: config.getForOwner!(ownerId, 'gitlab.onlyMine') !== '0',
         // apiKey/baseUrl/email/apiToken are Linear/Jira-specific per
         // TicketSourceSettings' doc comment — GitLab's credential (and base
         // URL, for self-hosted instances) is the shared git-host config
@@ -262,8 +269,8 @@ export function createGitlabIssuesProvider(config: IConfigStore): ITicketProvide
     setSettings(cfg: TicketSourceSettings): void {
       // Credential fields intentionally ignored — see getSettings' comment
       // above: nothing here ever writes gitlab.token/gitlab.baseUrl.
-      config.set('gitlab.issueProjects', (cfg.scopeKeys ?? []).join(','))
-      config.set('gitlab.onlyMine', cfg.onlyMine === false ? '0' : '1')
+      config.setForOwner!(ownerId, 'gitlab.issueProjects', (cfg.scopeKeys ?? []).join(','))
+      config.setForOwner!(ownerId, 'gitlab.onlyMine', cfg.onlyMine === false ? '0' : '1')
     },
   }
 }

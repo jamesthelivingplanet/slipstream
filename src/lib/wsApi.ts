@@ -760,6 +760,8 @@ export function createWsApi(opts: WsApiOpts): WsApi {
       pendingInputListeners.add(cb)
       return () => pendingInputListeners.delete(cb)
     },
+
+    createPairingCode: wire<'createPairingCode'>(IPC.createPairingCode),
   }
 
   return { ...api, destroy, connect: publicConnect }

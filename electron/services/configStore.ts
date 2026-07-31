@@ -13,6 +13,62 @@ import {
 export interface IConfigStore {
   get(key: string): string | undefined
   set(key: string, value: string): void
+  /** Owner-scoped accessors (see isOwnerScopedKey / OWNER_SCOPED_PREFIXES
+   *  above). Optional on the interface so every existing fake/mock
+   *  IConfigStore elsewhere in the test suite keeps compiling unchanged —
+   *  this must be a strictly additive extension, since dozens of files
+   *  outside this change's scope construct hand-rolled IConfigStore fakes.
+   *  The real store returned by createConfigStore always implements both;
+   *  callers that need them assert non-null rather than silently no-op'ing. */
+  getForOwner?(ownerId: string, key: string): string | undefined
+  setForOwner?(ownerId: string, key: string, value: string): void
+}
+
+/** The identity the static SLIPSTREAM_TOKEN always resolves to (see
+ *  docs/IDENTITY-SEAM.md) — the single-user/local tier default, and the
+ *  owner whose per-owner config rows are mirrored into the legacy
+ *  deployment-global `config` table (see setForOwner below). */
+export const DEFAULT_OWNER_ID = 'local'
+
+/**
+ * FLO-48 item 6: the `config` table is deployment-global — every owner on a
+ * deployment shares one set of values. That's fine for settings that
+ * describe the daemon's own behavior (GC policy, scheduler policy, spawn
+ * policy, budget policy, editor command, agentArgs) but wrong for
+ * integration credentials: two owners on the same deployment would
+ * reasonably want their own Linear/Jira/git-host tokens, not one shared
+ * set. OWNER_SCOPED_PREFIXES draws that line — namespaces whose keys
+ * (credentials, plus the non-secret settings that ride along with them,
+ * e.g. ticket-source scoping like `linear.teamKeys`/`github.issueRepos`,
+ * git host `username`/`baseUrl`) go in the per-owner `config_owner` table
+ * instead of the shared `config` table.
+ *
+ * Classification is by namespace *prefix*, not an enumerated key list,
+ * specifically so a new key under an existing integration namespace (e.g. a
+ * future `linear.somethingNew`) is automatically classified correctly
+ * without anyone having to remember to update a list — a new integration
+ * should add its prefix here.
+ *
+ * Note `push.fcmServiceAccount` is secret (see SECRET_KEYS above) but
+ * deliberately deployment-global: it's the daemon's own push credential,
+ * not any owner's. Note also that `editor.command`/`editor.mobileCommand`/
+ * `agentArgs.<kind>` remain deployment-global for now — out of scope for
+ * this pass, even though they're arguably per-owner by the same rationale,
+ * because no call site for them was migrated.
+ */
+export const OWNER_SCOPED_PREFIXES = [
+  'linear.',
+  'jira.',
+  'github.',
+  'gitlab.',
+  'bitbucket.',
+  'gitea.',
+]
+
+/** True if `key` falls under one of OWNER_SCOPED_PREFIXES — see the doc
+ *  comment on OWNER_SCOPED_PREFIXES above for the rationale. */
+export function isOwnerScopedKey(key: string): boolean {
+  return OWNER_SCOPED_PREFIXES.some((p) => key.startsWith(p))
 }
 
 /** Config keys whose values are secrets and get encrypted at rest when an
@@ -64,6 +120,14 @@ export function createConfigStore(
   const setStmt = db.prepare(
     'INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
   )
+  const getOwnerStmt = db.prepare<[string, string], { value: string }>(
+    'SELECT value FROM config_owner WHERE ownerId = ? AND key = ?',
+  )
+  const setOwnerStmt = db.prepare(
+    `INSERT INTO config_owner (ownerId, key, value) VALUES (?, ?, ?)
+   ON CONFLICT(ownerId, key) DO UPDATE SET value = excluded.value`,
+  )
+  const allOwnerRowsStmt = db.prepare('SELECT ownerId, key, value FROM config_owner')
 
   // FLO-145: opportunistically re-encrypt any legacy plaintext secrets so they
   // stop sitting in the DB as cleartext. Safe and non-locking: we hold the key,
@@ -85,29 +149,90 @@ export function createConfigStore(
     } catch {
       // best-effort migration only
     }
+
+    // Same opportunistic re-encrypt sweep, but over config_owner. ownerIds
+    // aren't known ahead of time so we can't loop ownerId×secretKeys like the
+    // sweep above — instead do one full-table scan (config_owner is small,
+    // not a hot path) and filter in JS.
+    try {
+      for (const row of allOwnerRowsStmt.all() as {
+        ownerId: string
+        key: string
+        value: string
+      }[]) {
+        if (!secretKeys.has(row.key)) continue
+        if (ENC_PREFIXES.some((p) => row.value.startsWith(p))) continue
+        try {
+          setOwnerStmt.run(row.ownerId, row.key, encryptor.encrypt(row.value))
+        } catch {
+          // leave this value plaintext; never block boot on a single key
+        }
+      }
+    } catch {
+      // best-effort migration only
+    }
+  }
+
+  /** Shared marker/decrypt logic for both get() and getForOwner(). */
+  function decryptRaw(raw: string): string | undefined {
+    const marker = ENC_PREFIXES.find((p) => raw.startsWith(p))
+    if (marker) {
+      // Encrypted at rest. Only the encryptor whose prefix matches can read
+      // it; anything else (no encryptor, or a different scheme) treats the
+      // value as absent rather than leaking ciphertext to callers.
+      if (!encryptor || encryptor.prefix !== marker) return undefined
+      try {
+        return encryptor.decrypt(raw)
+      } catch {
+        return undefined
+      }
+    }
+    return raw // legacy plaintext or non-secret value
   }
 
   return {
     get(key: string): string | undefined {
       const raw = getStmt.get(key)?.value
       if (raw === undefined) return undefined
-      const marker = ENC_PREFIXES.find((p) => raw.startsWith(p))
-      if (marker) {
-        // Encrypted at rest. Only the encryptor whose prefix matches can read
-        // it; anything else (no encryptor, or a different scheme) treats the
-        // value as absent rather than leaking ciphertext to callers.
-        if (!encryptor || encryptor.prefix !== marker) return undefined
-        try {
-          return encryptor.decrypt(raw)
-        } catch {
-          return undefined
-        }
-      }
-      return raw // legacy plaintext or non-secret value
+      return decryptRaw(raw)
     },
     set(key: string, value: string): void {
       const stored = encryptor && secretKeys.has(key) ? encryptor.encrypt(value) : value
       setStmt.run(key, stored)
+    },
+
+    getForOwner(ownerId: string, key: string): string | undefined {
+      if (!isOwnerScopedKey(key)) {
+        throw new Error(
+          `getForOwner: "${key}" is a deployment-global config key, not owner-scoped — use get() instead.`,
+        )
+      }
+      const raw = getOwnerStmt.get(ownerId, key)?.value
+      if (raw !== undefined) return decryptRaw(raw)
+      // Fallback for the default owner only: covers the window between an
+      // upgrade and the backfill migration having run (belt-and-suspenders —
+      // migration 11 in migrations.ts should already cover this).
+      if (ownerId !== DEFAULT_OWNER_ID) return undefined
+      const legacyRaw = getStmt.get(key)?.value
+      return legacyRaw === undefined ? undefined : decryptRaw(legacyRaw)
+    },
+
+    setForOwner(ownerId: string, key: string, value: string): void {
+      if (!isOwnerScopedKey(key)) {
+        throw new Error(
+          `setForOwner: "${key}" is a deployment-global config key, not owner-scoped — use set() instead.`,
+        )
+      }
+      const stored = encryptor && secretKeys.has(key) ? encryptor.encrypt(value) : value
+      setOwnerStmt.run(ownerId, key, stored)
+      // Mirror the default owner's writes into the legacy deployment-global
+      // `config` table too. This is what keeps every *unmigrated* reader (any
+      // call site still on the plain get() path, e.g. prStatus.ts/gitDriver.ts)
+      // seeing byte-identical values across this change — the acceptance
+      // criterion for this migration. Any owner other than the default is never
+      // mirrored: their data is genuinely isolated, never touching or being
+      // visible via the shared global row.
+      if (ownerId === DEFAULT_OWNER_ID) setStmt.run(key, stored)
     },
   }
 }

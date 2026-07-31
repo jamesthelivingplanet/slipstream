@@ -1,4 +1,5 @@
 import type { ISessionManager, ISessionStore, ITicketProvider } from '../shared/contract.js'
+import { DEFAULT_OWNER_ID } from './configStore.js'
 import type { RunLogger } from './runLogger.js'
 
 export interface TicketWriteback {
@@ -25,7 +26,9 @@ export interface TicketWriteback {
 export function createTicketWriteback(deps: {
   sessions: Pick<ISessionManager, 'on' | 'off'>
   store: ISessionStore
-  tickets: ITicketProvider
+  /** Per-owner ticket-provider factory (TASK-7LGAO) — see IpcDeps.tickets in
+   *  electron/ipc.ts for the full rationale. */
+  tickets: (ownerId: string) => ITicketProvider
   logger?: RunLogger
 }): TicketWriteback {
   const { sessions, store, tickets, logger } = deps
@@ -51,7 +54,11 @@ export function createTicketWriteback(deps: {
     const body = `🔀 Slipstream opened a merge request for ${persisted.tid} (branch \`${persisted.branch}\`): ${url}`
     void (async () => {
       try {
-        await tickets.postComment(persisted.tid, body, persisted.src)
+        await tickets(persisted.ownerId ?? DEFAULT_OWNER_ID).postComment(
+          persisted.tid,
+          body,
+          persisted.src,
+        )
       } catch (err) {
         // Best-effort: a ticket-API failure must never affect the session.
         logger?.server('warn', `ticket write-back failed for ${persisted.tid}`, err)

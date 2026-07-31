@@ -13,7 +13,9 @@
 
   // TASK-I9S44: the "Server" tab (runtime daemon URL) only makes sense
   // inside the Capacitor mobile shell — nativeStorage.isAvailable() is false
-  // on web/Electron, where it stays hidden entirely.
+  // on web/Electron, where it stays hidden entirely. "Security" (pairing +
+  // biometric lock) is NOT native-specific — see SettingsSecurity.svelte —
+  // and renders unconditionally below instead of behind this flag.
   const isNative = nativeStorage.isAvailable()
 
   let activeTab = 'repositories'
@@ -78,15 +80,15 @@
           >
             Server
           </button>
-          <button
-            type="button"
-            class="tab-item"
-            class:active={activeTab === 'security'}
-            on:click={() => (activeTab = 'security')}
-          >
-            Security
-          </button>
         {/if}
+        <button
+          type="button"
+          class="tab-item"
+          class:active={activeTab === 'security'}
+          on:click={() => (activeTab = 'security')}
+        >
+          Security
+        </button>
         <button
           type="button"
           class="tab-item"
@@ -126,7 +128,7 @@
           <SettingsServer />
         {/if}
 
-        {#if activeTab === 'security' && isNative}
+        {#if activeTab === 'security'}
           <SettingsSecurity />
         {/if}
 

@@ -1,14 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createLinearProvider } from './linearProvider.js'
-import type { IConfigStore } from '../services/configStore.js'
+import { DEFAULT_OWNER_ID, type IConfigStore } from '../services/configStore.js'
 
 function makeConfigStore(
   key?: string,
   extra: Record<string, string | undefined> = {},
 ): IConfigStore {
+  const values: Record<string, string | undefined> = { 'linear.apiKey': key, ...extra }
+  const ownerValues: Record<string, Record<string, string | undefined>> = {
+    [DEFAULT_OWNER_ID]: { ...values },
+  }
   return {
-    get: vi.fn((k: string) => (k === 'linear.apiKey' ? key : extra[k])),
-    set: vi.fn(),
+    get: vi.fn((k: string) => values[k]),
+    set: vi.fn((k: string, v: string) => {
+      values[k] = v
+    }),
+    getForOwner: vi.fn((ownerId: string, k: string) => ownerValues[ownerId]?.[k]),
+    setForOwner: vi.fn((ownerId: string, k: string, v: string) => {
+      ownerValues[ownerId] ??= {}
+      ownerValues[ownerId][k] = v
+    }),
   }
 }
 
@@ -719,6 +730,22 @@ describe('createLinearProvider', () => {
     it('throws when no API key is set', async () => {
       const provider = createLinearProvider(makeConfigStore(undefined))
       await expect(provider.listScopes!()).rejects.toThrow('Linear API key not set')
+    })
+  })
+
+  describe('per-owner credential isolation (TASK-7LGAO)', () => {
+    it("does not see another owner's API key", async () => {
+      const store = makeConfigStore('lin_api_local')
+      // seed a second owner with a different key directly
+      store.setForOwner!('other-owner', 'linear.apiKey', 'lin_api_other')
+
+      const otherProvider = createLinearProvider(store, 'other-owner')
+      expect(otherProvider.getSettings().apiKey).toBe('lin_api_other')
+
+      // the default-owner provider must not see it
+      const defaultProvider = createLinearProvider(store)
+      expect(defaultProvider.getSettings().apiKey).not.toBe('lin_api_other')
+      expect(defaultProvider.getSettings().apiKey).toBe('lin_api_local')
     })
   })
 })

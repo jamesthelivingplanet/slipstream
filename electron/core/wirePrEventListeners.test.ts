@@ -69,7 +69,9 @@ function makeFakes() {
   }
 
   const postComment = vi.fn().mockResolvedValue(true)
-  const tickets = { postComment } as unknown as ITicketProvider
+  const ticketsObj = { postComment } as unknown as ITicketProvider
+  // TASK-7LGAO: tickets is now a per-owner factory, not a static instance.
+  const tickets = (_ownerId: string) => ticketsObj
 
   return { emitter, sessions, store, map, outcomes, tickets, postComment }
 }

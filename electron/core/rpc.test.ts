@@ -28,6 +28,7 @@ import type {
   SessionAgentEventDTO,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
+import { DEFAULT_OWNER_ID } from '../services/configStore.js'
 import type { IEditorLauncher } from '../services/editorLauncher.js'
 import type { IPushService } from '../services/pushService.js'
 import { createWriteCoordinator } from '../services/writeCoordinator.js'
@@ -148,7 +149,7 @@ function makeFakeDeps(
     claim: vi.fn().mockResolvedValue(3001),
   }
 
-  const tickets: ITicketProvider = {
+  const ticketsObj: ITicketProvider = {
     id: 'test',
     listTickets: vi.fn().mockResolvedValue([]),
     getTicketStatus: vi.fn().mockResolvedValue({ current: null, available: [] }),
@@ -168,9 +169,34 @@ function makeFakeDeps(
     setSettings: vi.fn(),
   }
 
+  // Backing store for the per-owner Map used by getForOwner/setForOwner below —
+  // owners other than DEFAULT_OWNER_ID ('local') never touch configGet/configSet.
+  const ownerConfigMap = new Map<string, Map<string, string>>()
+  const configGet = vi.fn().mockReturnValue(undefined)
+  const configSet = vi.fn()
   const config: IConfigStore = {
-    get: vi.fn().mockReturnValue(undefined),
-    set: vi.fn(),
+    get: configGet,
+    set: configSet,
+    // Mirrors the real store's semantics (electron/services/configStore.ts):
+    // the default owner's reads/writes delegate straight into get()/set() so
+    // every existing assertion against deps.config.get/deps.config.set keeps
+    // passing unchanged; any other owner is isolated in its own in-memory map.
+    getForOwner: vi.fn((ownerId: string, key: string) => {
+      if (ownerId === DEFAULT_OWNER_ID) return configGet(key)
+      return ownerConfigMap.get(ownerId)?.get(key)
+    }),
+    setForOwner: vi.fn((ownerId: string, key: string, value: string) => {
+      if (ownerId === DEFAULT_OWNER_ID) {
+        configSet(key, value)
+        return
+      }
+      let m = ownerConfigMap.get(ownerId)
+      if (!m) {
+        m = new Map()
+        ownerConfigMap.set(ownerId, m)
+      }
+      m.set(key, value)
+    }),
   }
 
   const sessionStoreMap = new Map<string, SessionDTO>()
@@ -274,7 +300,10 @@ function makeFakeDeps(
     worktrees,
     sessions,
     ports,
-    tickets,
+    // Per-owner ticket-provider factory (TASK-7LGAO): every owner sees the
+    // same fake object here since none of these tests exercise cross-owner
+    // ticket-provider isolation — see ticketsObj above for the assertable mocks.
+    tickets: (_ownerId: string) => ticketsObj,
     config,
     sessionStore,
     promptTemplates,
@@ -336,7 +365,7 @@ describe('createRpc', () => {
 
   it('routes listTickets', async () => {
     const result = await rpc.handle(IPC.listTickets, [])
-    expect(deps.tickets.listTickets).toHaveBeenCalledOnce()
+    expect(deps.tickets('local').listTickets).toHaveBeenCalledOnce()
     expect(result).toEqual([])
   })
 
@@ -1996,11 +2025,11 @@ describe('createRpc', () => {
     await rpc.handle(IPC.startSession, [
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ])
-    expect(deps.tickets.startTicket).toHaveBeenCalledWith('T-1', undefined)
+    expect(deps.tickets('local').startTicket).toHaveBeenCalledWith('T-1', undefined)
   })
 
   it('startSession still succeeds when startTicket rejects', async () => {
-    ;(deps.tickets.startTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+    ;(deps.tickets('local').startTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('linear down'),
     )
     const result = (await rpc.handle(IPC.startSession, [
@@ -2025,14 +2054,14 @@ describe('createRpc', () => {
       await rpc.handle(IPC.startSession, [
         { tid: 'CHAT-1', title: 'Chat', prompt: '', repoId: 'r1', mode: 'chat' },
       ])
-      expect(deps.tickets.startTicket).not.toHaveBeenCalled()
+      expect(deps.tickets('local').startTicket).not.toHaveBeenCalled()
     })
 
     it('omitting mode preserves the existing ticket-agent behavior unchanged', async () => {
       await rpc.handle(IPC.startSession, [
         { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
       ])
-      expect(deps.tickets.startTicket).toHaveBeenCalledWith('T-1', undefined)
+      expect(deps.tickets('local').startTicket).toHaveBeenCalledWith('T-1', undefined)
       expect(deps.sessions.start).toHaveBeenCalledWith(
         expect.objectContaining({ systemPrompt: expect.stringContaining('autonomous agent') }),
       )
@@ -2099,7 +2128,7 @@ describe('createRpc', () => {
       { tid: 'T-1', title: 'Fix bug', prompt: 'fix it', repoId: 'r1' },
     ])
     await rpc.handle(IPC.cleanupSession, ['s1'])
-    expect(deps.tickets.resetTicket).toHaveBeenCalledWith('T-1', undefined)
+    expect(deps.tickets('local').resetTicket).toHaveBeenCalledWith('T-1', undefined)
   })
 
   it('cleanupSession does not reset the ticket when the session is done (TASK-5PVBM)', async () => {
@@ -2111,11 +2140,11 @@ describe('createRpc', () => {
     deps.sessionStore.upsert({ ...persisted, status: 'done' })
     const result = await rpc.handle(IPC.cleanupSession, ['s1'])
     expect(result).toEqual({ removed: true })
-    expect(deps.tickets.resetTicket).not.toHaveBeenCalled()
+    expect(deps.tickets('local').resetTicket).not.toHaveBeenCalled()
   })
 
   it('cleanupSession still succeeds when resetTicket rejects', async () => {
-    ;(deps.tickets.resetTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+    ;(deps.tickets('local').resetTicket as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('linear down'),
     )
     await rpc.handle(IPC.startSession, [

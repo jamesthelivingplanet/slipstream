@@ -67,7 +67,7 @@ function writeSpawnPolicy(
   config.set(SPAWN_POLICY_KEY, JSON.stringify(coerceSpawnPolicy(policy)))
 }
 
-export function createConfigHandlers(deps: IpcDeps, _ctx: RpcContext): ChannelHandlerMap {
+export function createConfigHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHandlerMap {
   return {
     [IPC.getEditorConfig]: async () => {
       return {
@@ -109,13 +109,13 @@ export function createConfigHandlers(deps: IpcDeps, _ctx: RpcContext): ChannelHa
     [IPC.getGitToken]: async (args) => {
       const host = args[0]
       if (!isGitHost(host)) throw new Error(`Invalid host: ${String(host)}`)
-      return deps.config.get(`${host}.token`) ?? null
+      return deps.config.getForOwner!(ctx.identity.id, `${host}.token`) ?? null
     },
 
     [IPC.setGitToken]: async (args) => {
       const host = args[0]
       if (!isGitHost(host)) throw new Error(`Invalid host: ${String(host)}`)
-      deps.config.set(`${host}.token`, args[1] as string)
+      deps.config.setForOwner!(ctx.identity.id, `${host}.token`, args[1] as string)
       return undefined
     },
 
@@ -127,9 +127,9 @@ export function createConfigHandlers(deps: IpcDeps, _ctx: RpcContext): ChannelHa
       const host = args[0]
       if (!isGitHost(host)) throw new Error(`Invalid host: ${String(host)}`)
       return {
-        token: deps.config.get(`${host}.token`) ?? null,
-        username: deps.config.get(`${host}.username`) ?? null,
-        baseUrl: deps.config.get(`${host}.baseUrl`) ?? null,
+        token: deps.config.getForOwner!(ctx.identity.id, `${host}.token`) ?? null,
+        username: deps.config.getForOwner!(ctx.identity.id, `${host}.username`) ?? null,
+        baseUrl: deps.config.getForOwner!(ctx.identity.id, `${host}.baseUrl`) ?? null,
       }
     },
 
@@ -137,9 +137,12 @@ export function createConfigHandlers(deps: IpcDeps, _ctx: RpcContext): ChannelHa
       const host = args[0]
       if (!isGitHost(host)) throw new Error(`Invalid host: ${String(host)}`)
       const cfg = (args[1] ?? {}) as { token?: string; username?: string; baseUrl?: string }
-      if (cfg.token !== undefined) deps.config.set(`${host}.token`, cfg.token)
-      if (cfg.username !== undefined) deps.config.set(`${host}.username`, cfg.username)
-      if (cfg.baseUrl !== undefined) deps.config.set(`${host}.baseUrl`, cfg.baseUrl)
+      if (cfg.token !== undefined)
+        deps.config.setForOwner!(ctx.identity.id, `${host}.token`, cfg.token)
+      if (cfg.username !== undefined)
+        deps.config.setForOwner!(ctx.identity.id, `${host}.username`, cfg.username)
+      if (cfg.baseUrl !== undefined)
+        deps.config.setForOwner!(ctx.identity.id, `${host}.baseUrl`, cfg.baseUrl)
       return undefined
     },
 

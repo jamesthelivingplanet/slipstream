@@ -1,20 +1,55 @@
 import { describe, it, expect } from 'vitest'
 import type Database from 'better-sqlite3'
-import { createConfigStore, createAesGcmEncryptor, type SecretEncryptor } from './configStore.js'
+import {
+  createConfigStore,
+  createAesGcmEncryptor,
+  DEFAULT_OWNER_ID,
+  type SecretEncryptor,
+} from './configStore.js'
 import { randomBytes } from 'node:crypto'
 
 const ENC_PREFIX = 'ss1:'
 
-/** Minimal fake for the config table — the real better-sqlite3 is built for
- *  Electron's ABI and can't load under Node vitest (see docs/NATIVE-MODULES.md),
- *  so, like migrations.test.ts, we fake the two statements configStore prepares. */
+/** Minimal fake for the config/config_owner tables — the real better-sqlite3
+ *  is built for Electron's ABI and can't load under Node vitest (see
+ *  docs/NATIVE-MODULES.md), so, like migrations.test.ts, we fake the
+ *  statements configStore prepares.
+ *
+ *  Note the ordering below: config_owner patterns must be checked BEFORE the
+ *  generic config patterns, since /^SELECT value FROM config/ would also
+ *  match "SELECT value FROM config_owner ..." — this is deliberate. */
 function makeDb() {
   const data = new Map<string, string>()
+  const ownerData = new Map<string, string>() // key: `${ownerId} ${key}`
   const db = {
     prepare(sql: string) {
+      if (/^SELECT value FROM config_owner/.test(sql)) {
+        return {
+          get: (ownerId: string, key: string) =>
+            ownerData.has(`${ownerId} ${key}`)
+              ? { value: ownerData.get(`${ownerId} ${key}`)! }
+              : undefined,
+        }
+      }
+      if (/^SELECT ownerId, key, value FROM config_owner/.test(sql)) {
+        return {
+          all: () =>
+            Array.from(ownerData.entries()).map(([k, value]) => {
+              const [ownerId, key] = k.split(' ')
+              return { ownerId, key, value }
+            }),
+        }
+      }
       if (/^SELECT value FROM config/.test(sql)) {
         return {
           get: (key: string) => (data.has(key) ? { value: data.get(key)! } : undefined),
+        }
+      }
+      if (/^INSERT INTO config_owner/.test(sql)) {
+        return {
+          run: (ownerId: string, key: string, value: string) => {
+            ownerData.set(`${ownerId} ${key}`, value)
+          },
         }
       }
       if (/^INSERT INTO config/.test(sql)) {
@@ -27,7 +62,7 @@ function makeDb() {
       throw new Error(`unexpected SQL in fake db: ${sql}`)
     },
   }
-  return { db: db as unknown as Database.Database, data }
+  return { db: db as unknown as Database.Database, data, ownerData }
 }
 
 /** Reversible fake: base64 with the ss1: marker, mirroring safeStorage's shape. */
@@ -143,5 +178,63 @@ describe('createConfigStore', () => {
     createConfigStore(db).set('theme', 'dark')
     createConfigStore(db, { encryptor: createAesGcmEncryptor(randomBytes(32)) })
     expect(data.get('theme')).toBe('dark')
+  })
+
+  describe('getForOwner / setForOwner', () => {
+    it('round-trips a value for an owner-scoped key', () => {
+      const { db } = makeDb()
+      const store = createConfigStore(db, { encryptor: makeEncryptor() })
+      store.setForOwner!(DEFAULT_OWNER_ID, 'github.token', 'ghp_owner_token')
+      expect(store.getForOwner!(DEFAULT_OWNER_ID, 'github.token')).toBe('ghp_owner_token')
+    })
+
+    it('encrypts per-owner secrets at rest and decrypts on read', () => {
+      const { db, ownerData } = makeDb()
+      const store = createConfigStore(db, { encryptor: makeEncryptor() })
+      store.setForOwner!(DEFAULT_OWNER_ID, 'linear.apiKey', 'secret')
+      const raw = ownerData.get(`${DEFAULT_OWNER_ID} linear.apiKey`)!
+      expect(raw.startsWith(ENC_PREFIX)).toBe(true)
+      expect(raw).not.toContain('secret')
+      expect(store.getForOwner!(DEFAULT_OWNER_ID, 'linear.apiKey')).toBe('secret')
+    })
+
+    it('isolates two different owners from each other and from the global get()', () => {
+      const { db } = makeDb()
+      const store = createConfigStore(db, { encryptor: makeEncryptor() })
+      store.setForOwner!('alice', 'github.token', 'alice-token')
+      store.setForOwner!('bob', 'github.token', 'bob-token')
+      expect(store.getForOwner!('alice', 'github.token')).toBe('alice-token')
+      expect(store.getForOwner!('bob', 'github.token')).toBe('bob-token')
+      expect(store.get('github.token')).toBeUndefined()
+    })
+
+    it('mirrors the default owner writes into the legacy global table (zero behavior change)', () => {
+      const { db, data } = makeDb()
+      const store = createConfigStore(db, { encryptor: makeEncryptor() })
+      store.setForOwner!(DEFAULT_OWNER_ID, 'github.token', 'tok')
+      expect(store.get('github.token')).toBe('tok')
+      expect(data.get('github.token')).toBeDefined()
+    })
+
+    it('falls back to the legacy global value when config_owner has no row yet (pre-backfill)', () => {
+      const { db } = makeDb()
+      const store = createConfigStore(db, { encryptor: makeEncryptor() })
+      store.set('github.token', 'legacy')
+      expect(store.getForOwner!(DEFAULT_OWNER_ID, 'github.token')).toBe('legacy')
+    })
+
+    it('throws for a deployment-global key', () => {
+      const { db } = makeDb()
+      const store = createConfigStore(db, { encryptor: makeEncryptor() })
+      expect(() => store.getForOwner!(DEFAULT_OWNER_ID, 'gc.policy')).toThrow()
+      expect(() => store.setForOwner!(DEFAULT_OWNER_ID, 'gc.policy', 'x')).toThrow()
+    })
+
+    it('does not mirror a non-default owner write into the global table', () => {
+      const { db, data } = makeDb()
+      const store = createConfigStore(db, { encryptor: makeEncryptor() })
+      store.setForOwner!('alice', 'github.token', 'alice-token')
+      expect(data.size).toBe(0)
+    })
   })
 })

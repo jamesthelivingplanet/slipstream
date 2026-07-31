@@ -216,7 +216,7 @@ export function createSessionHandlers(deps: IpcDeps, ctx: RpcContext): ChannelHa
         const tid = persisted.tid
         if (tid && persisted.status !== 'done') {
           try {
-            await deps.tickets.resetTicket(tid, persisted.src)
+            await deps.tickets(ctx.identity.id).resetTicket(tid, persisted.src)
           } catch {
             // ignore: ticket provider unavailable or transition not applicable
           }

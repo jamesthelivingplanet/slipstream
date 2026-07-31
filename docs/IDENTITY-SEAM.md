@@ -127,15 +127,133 @@ throwing — preserving the no-existence-leak invariant. This requires the sessi
 to be persisted (owned) in `sessionStore`, which is always true after
 `startSession`, so there's no practical behavior change for legitimate callers.
 
+## Per-owner integration config (FLO-48 item 6)
+
+The `config` table is deployment-global — every owner on a deployment shares
+one row per key. That's the right default for settings that describe the
+daemon's own behavior (GC policy, scheduler policy, spawn policy, budget
+policy, editor command, `agentArgs.<kind>`), but wrong for integration
+credentials: two owners on the same deployment would reasonably want their
+own Linear/Jira/git-host tokens, not one shared set. This splits config keys
+into two classes rather than making the whole table per-owner:
+
+- **Owner-scoped**: integration credentials (`linear.apiKey`,
+  `jira.apiToken`, `github.token`, `gitlab.token`, `bitbucket.token`,
+  `gitea.token`) plus the non-secret settings that ride along with them
+  (ticket-source scoping like `linear.teamKeys`/`github.issueRepos`, git
+  host `username`/`baseUrl`).
+- **Deployment-global**: everything else, unchanged.
+
+**Storage.** An additive `config_owner` table (`electron/db/migrations.ts`
+migration 11), keyed by `(ownerId, key)`, sits alongside the untouched
+deployment-global `config` table. `IConfigStore.getForOwner`/`setForOwner`
+(`electron/services/configStore.ts`) are optional on the interface — every
+hand-rolled `IConfigStore` fake elsewhere in the test suite keeps compiling
+unchanged — but the real store returned by `createConfigStore` always
+implements both. Classification is enforced by `isOwnerScopedKey`/
+`OWNER_SCOPED_PREFIXES` (a namespace-prefix match, not an enumerated key
+list, so a new key under an existing integration namespace is automatically
+classified correctly): `getForOwner`/`setForOwner` throw if called with a
+deployment-global key.
+
+**Zero behavior change for single-owner deployments.** `setForOwner`
+mirrors every write for `DEFAULT_OWNER_ID` (`'local'`) back into the legacy
+global `config` table, and `getForOwner(DEFAULT_OWNER_ID, key)` falls back
+to the legacy global value when `config_owner` has no row yet (belt-and-
+suspenders alongside migration 11's backfill). This is what keeps every
+*unmigrated* reader — anything still on the plain `get()` path, e.g.
+`electron/services/prStatus.ts`/`electron/services/gitDriver.ts` — seeing
+correct, up-to-date values: the migration's acceptance criterion. A
+non-default owner's data is never mirrored; it's genuinely isolated.
+
+**What's wired end-to-end today.** `electron/core/rpcHandlers/config.ts`'s
+git host token/config RPCs (`getGitToken`/`setGitToken`/`getGitHostConfig`/
+`setGitHostConfig`) are fully owner-scoped via the caller's resolved
+identity (`ctx.identity.id`) — a non-default owner's git host credentials
+are genuinely isolated at the storage/API layer.
+
+Ticket-provider credentials (linear/jira/github/gitlab) are now genuinely
+isolated per owner too, closing what was previously the gap in this
+section:
+
+- `electron/tickets/linearProvider.ts` takes an `ownerId` constructor
+  parameter (`ownerId: string = DEFAULT_OWNER_ID`) and uses
+  `config.getForOwner!(ownerId, 'linear.apiKey')`/
+  `config.setForOwner!(ownerId, ...)` throughout, including its
+  `setSettings`. The old blocker — a legacy duplicate write path
+  (`getLinearKey`/`setLinearKey` in `electron/core/rpcHandlers/tickets.ts`)
+  writing the same `linear.apiKey` key directly to the deployment-global
+  table, which would have desynced from a migrated linearProvider.ts — is
+  closed: those two handlers now also go through
+  `deps.config.getForOwner!(ctx.identity.id, 'linear.apiKey')`/
+  `setForOwner!(ctx.identity.id, 'linear.apiKey', ...)`, so both writers
+  share one accessor.
+- jira/github/gitlab (`jiraProvider.ts`, `githubIssuesProvider.ts`,
+  `gitlabIssuesProvider.ts`) already had the same `ownerId` constructor
+  parameter; what closes their gap is that a real per-request identity now
+  actually reaches them.
+- That's because `electron/core/services.ts` no longer builds one singleton
+  `ITicketProvider` per source at startup. It now exposes
+  `ticketProvidersForOwner(ownerId)`/`ticketsForOwner(ownerId)` factory
+  functions — a fresh instance per call (provider construction has no I/O,
+  so this is cheap and always reads live config) — threaded through as the
+  `tickets`/`ticketProviders` deps (now functions, not static objects)
+  passed to IPC handlers.
+- The ticket RPC handlers (`listTickets`/`getTicketStatus`/
+  `setTicketStatus`/`getTicketSettings`/`setTicketSettings`/
+  `listTicketScopes`) resolve `deps.ticketProviders?.(ctx.identity.id)` —
+  the caller's real identity, not a fixed default. Other call sites resolve
+  real identity the same way: session cleanup's ticket-reset
+  (`electron/core/rpcHandlers/sessions.ts`) uses `ctx.identity.id`; session
+  launch's ticket-start (`electron/services/sessionLauncher.ts`) uses the
+  launch request's `ownerId`; the daemon-level PR ticket-writeback
+  (`electron/services/ticketWriteback.ts`, wired via
+  `electron/core/wirePrEventListeners.ts`) resolves the provider from the
+  session's own persisted `ownerId` (falling back to `'local'` for legacy
+  rows, same pattern as every other owner-scoped read).
+
+**What's still not wired end-to-end, disclosed honestly:**
+
+- Downstream git-operation consumers of `${host}.token`/`username`/
+  `baseUrl` still read only the deployment-global table:
+  `electron/services/prStatus.ts` (`deps.config.get(\`${host}.token\`)`,
+  `deps.config.get(\`${host}.username\`)`, `deps.config.get(\`${host}.baseUrl\`)`)
+  and `electron/cli/slipstream.ts` (`cachedConfigStore?.get(\`${host}.token\`)`
+  etc.) call the plain `.get()` path directly; `electron/services/gitDriver.ts`
+  doesn't call `config.get` itself but receives host config via an injected
+  `getHostConfig` callback, and its only real caller (`slipstream.ts`)
+  sources that callback from the same plain deployment-global `.get()`
+  calls. This is safe today (thanks to the default-owner mirroring above)
+  but means a non-default owner's own saved git credentials aren't yet used
+  for their own git pushes/PR status — only the Settings-facing API layer
+  and (as of above) the ticket-provider layer are isolated per-owner so
+  far.
+
+Item 5 below (per-owner data directories) is orthogonal and still open,
+unaffected by this change.
+
 What's still open for a full multi-user milestone:
 
 1. ~~A real token → owner store.~~ Done (FLO-143, above).
-2. **End-user-facing onboarding UX.** The operator/admin CLI (above) covers
-   *minting* a credential, but getting it onto the new device is still manual
-   (copy the printed token into that device's config) — there's no QR-code
-   -style onboarding flow the way the single static `SLIPSTREAM_TOKEN` has
-   (see `scripts/deploy.sh`), and no self-service RPC/UI for a logged-in user
-   to add a second device of their own without an operator running the CLI.
+2. ~~End-user-facing onboarding UX.~~ Done — the self-service RPC/UI already
+   existed before this pass: `createPairingCode()`
+   (`electron/core/rpcHandlers/pairing.ts`), the in-memory store
+   (`electron/services/devicePairing.ts`), and the unauthenticated
+   `POST /pair` redemption endpoint, all documented in
+   [docs/SECURITY.md](SECURITY.md) §13. Its UI
+   (`src/lib/components/settings/SettingsSecurity.svelte`'s "Pair a device"
+   section) shows the short-lived code and a QR code (deep-linking
+   `#pair=<code>`, via the same `qrcode` dependency already used by
+   `SettingsIntegrations.svelte`'s token-pairing-link QR) — so a QR-style
+   flow was never actually missing. What *was* newly fixed in this pass:
+   `src/lib/components/SettingsModal.svelte`'s "Security" tab button used to
+   render conditionally on `nativeStorage.isAvailable()` (Capacitor
+   mobile-only), so this pairing UI was unreachable from an already-
+   authenticated desktop/web session — only mobile could get to it. That
+   gate is now removed for the tab button and its content (the "Server" tab,
+   Capacitor-only daemon-URL config, stays native-gated, unrelated), so a
+   logged-in desktop/web user can now self-service-add a second device
+   without an operator running `manageTokens.ts`.
 3. ~~Revocation granularity.~~ Done (FLO-143, above) — `revoke(id)` disables
    exactly one credential without touching any other.
 4. ~~Integration with the one-time WS ticket endpoint.~~ Done (FLO-144,
@@ -148,10 +266,12 @@ What's still open for a full multi-user milestone:
 5. **The per-owner-data-dir vs. row-level-isolation decision.** Orthogonal to
    token rotation, but both land in the same multi-user milestone and should be
    designed together rather than sequentially discovering conflicts.
-6. **Per-owner integration config.** The `config` table (Linear/Jira
-   credentials, git tokens, editor command, GC policy) is deployment-global
-   today — every owner would currently share one set of ticket-provider
-   credentials, and the FLO-98 ticket write-back posts comments with those
-   shared credentials. A multi-user tier needs config keys namespaced per owner
-   (or a per-owner config table) before distinct users can connect their own
-   trackers.
+6. ~~Per-owner integration config.~~ Done (FLO-48, above) — see "Per-owner
+   integration config" above. The config-storage/API layer is fully
+   owner-scoped, and the ticket-provider credential gap (linear/jira/
+   github/gitlab) disclosed there is now also closed end-to-end. This does
+   not mean identity/config is fully finished, though: item 5 (per-owner
+   data directories) remains open, and the git-push/PR-status credential
+   gap (`prStatus.ts`/`gitDriver.ts`/`slipstream.ts` still reading the
+   plain deployment-global `config.get()` path) described in that same
+   section also remains open.

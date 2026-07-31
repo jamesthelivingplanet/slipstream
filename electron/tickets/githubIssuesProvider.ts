@@ -7,6 +7,7 @@ import type {
   TicketSourceSettings,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
+import { DEFAULT_OWNER_ID } from '../services/configStore.js'
 
 const API_ROOT = 'https://api.github.com'
 
@@ -103,9 +104,12 @@ const EMPTY_RESULT: PaginatedTickets = {
   hasMore: false,
 }
 
-export function createGithubIssuesProvider(config: IConfigStore): ITicketProvider {
+export function createGithubIssuesProvider(
+  config: IConfigStore,
+  ownerId: string = DEFAULT_OWNER_ID,
+): ITicketProvider {
   function getToken(): string | undefined {
-    return config.get('github.token') || undefined
+    return config.getForOwner!(ownerId, 'github.token') || undefined
   }
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -149,8 +153,8 @@ export function createGithubIssuesProvider(config: IConfigStore): ITicketProvide
     }): Promise<PaginatedTickets> {
       if (!getToken()) return EMPTY_RESULT
 
-      const repos = parseRepos(config.get('github.issueRepos'))
-      const onlyMine = config.get('github.onlyMine') !== '0'
+      const repos = parseRepos(config.getForOwner!(ownerId, 'github.issueRepos'))
+      const onlyMine = config.getForOwner!(ownerId, 'github.onlyMine') !== '0'
 
       // Safety: the GitHub Search Issues API has no per-token default scope —
       // with no repo scope AND no onlyMine filter there is no safe query to
@@ -224,8 +228,8 @@ export function createGithubIssuesProvider(config: IConfigStore): ITicketProvide
     getSettings(): TicketSourceSettings {
       return {
         configured: !!getToken(),
-        scopeKeys: parseRepos(config.get('github.issueRepos')),
-        onlyMine: config.get('github.onlyMine') !== '0',
+        scopeKeys: parseRepos(config.getForOwner!(ownerId, 'github.issueRepos')),
+        onlyMine: config.getForOwner!(ownerId, 'github.onlyMine') !== '0',
         // apiKey/baseUrl/email/apiToken are Linear/Jira-specific per
         // TicketSourceSettings' doc comment — GitHub's credential is the
         // shared git-host token (github.token), edited only via the
@@ -240,8 +244,8 @@ export function createGithubIssuesProvider(config: IConfigStore): ITicketProvide
     setSettings(cfg: TicketSourceSettings): void {
       // Credential fields intentionally ignored — see getSettings' comment
       // above: nothing here ever writes github.token.
-      config.set('github.issueRepos', (cfg.scopeKeys ?? []).join(','))
-      config.set('github.onlyMine', cfg.onlyMine === false ? '0' : '1')
+      config.setForOwner!(ownerId, 'github.issueRepos', (cfg.scopeKeys ?? []).join(','))
+      config.setForOwner!(ownerId, 'github.onlyMine', cfg.onlyMine === false ? '0' : '1')
     },
   }
 }

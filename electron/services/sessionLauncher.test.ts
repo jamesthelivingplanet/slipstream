@@ -94,6 +94,13 @@ function makeStore(): ISessionStore {
  *  real in-memory ISessionStore so we can assert on what got persisted. */
 function makeDeps(overrides: Partial<LaunchDeps> = {}): LaunchDeps {
   const sessionStore = makeStore()
+  // Hoisted so the factory below always returns the SAME object/vi.fn() —
+  // tests assert on `deps.tickets(<any owner>).startTicket`, which must be
+  // stable across calls within one test (TASK-7LGAO: tickets is now a
+  // per-owner factory, not a static instance).
+  const ticketsObj: Pick<ITicketProvider, 'startTicket'> = {
+    startTicket: vi.fn(async () => null),
+  }
   return {
     repos: {
       resolvePath: vi.fn(async () => REPO),
@@ -108,10 +115,7 @@ function makeDeps(overrides: Partial<LaunchDeps> = {}): LaunchDeps {
     } satisfies Pick<ISessionManager, 'start' | 'setOpencodeSid'>,
     ports: { claim: vi.fn(async () => 3742) } satisfies IPortBroker,
     sessionStore,
-    tickets: { startTicket: vi.fn(async () => null) } satisfies Pick<
-      ITicketProvider,
-      'startTicket'
-    >,
+    tickets: (_ownerId: string) => ticketsObj,
     ...overrides,
   }
 }
@@ -199,14 +203,14 @@ describe('launchSession — happy path', () => {
     const deps = makeDeps()
     await launchSession(deps, makeReq({ tid: 'FLO-9', src: 'linear' }))
 
-    expect(deps.tickets.startTicket).toHaveBeenCalledWith('FLO-9', 'linear')
+    expect(deps.tickets('local').startTicket).toHaveBeenCalledWith('FLO-9', 'linear')
   })
 
   it('skips startTicket for a blank chat session (TASK-CIOEQ, skipTicket:true)', async () => {
     const deps = makeDeps()
     await launchSession(deps, makeReq({ tid: 'CHAT-1', skipTicket: true }))
 
-    expect(deps.tickets.startTicket).not.toHaveBeenCalled()
+    expect(deps.tickets('local').startTicket).not.toHaveBeenCalled()
   })
 
   it('TASK-CIOEQ: persists mode alongside skipTicket so it round-trips after this launch call', async () => {
@@ -386,7 +390,7 @@ describe('launchSession — failure ordering / rollback', () => {
     expect(deps.worktrees.create).not.toHaveBeenCalled()
     expect(deps.ports.claim).not.toHaveBeenCalled()
     expect(deps.sessions.start).not.toHaveBeenCalled()
-    expect(deps.tickets.startTicket).not.toHaveBeenCalled()
+    expect(deps.tickets('local').startTicket).not.toHaveBeenCalled()
     expect(deps.sessionStore.get('s1')).toBeUndefined()
   })
 
@@ -401,7 +405,7 @@ describe('launchSession — failure ordering / rollback', () => {
     expect(deps.ports.claim).not.toHaveBeenCalled()
     expect(deps.sessions.start).not.toHaveBeenCalled()
     expect(deps.sessionStore.get('s1')).toBeUndefined()
-    expect(deps.tickets.startTicket).not.toHaveBeenCalled()
+    expect(deps.tickets('local').startTicket).not.toHaveBeenCalled()
   })
 
   // The core "what's rolled back?" question from FLO-139: when the worktree is
@@ -422,13 +426,13 @@ describe('launchSession — failure ordering / rollback', () => {
     expect(deps.ports.claim).toHaveBeenCalledOnce()
     // …but nothing downstream committed:
     expect(deps.sessionStore.get('s1')).toBeUndefined()
-    expect(deps.tickets.startTicket).not.toHaveBeenCalled()
+    expect(deps.tickets('local').startTicket).not.toHaveBeenCalled()
     expect(captureSid).not.toHaveBeenCalled()
   })
 
   it('swallows a ticket-transition failure (best-effort) — launch still succeeds', async () => {
     const deps = makeDeps()
-    ;(deps.tickets.startTicket as ReturnType<typeof vi.fn>).mockRejectedValue(
+    ;(deps.tickets('local').startTicket as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error('linear 503'),
     )
 

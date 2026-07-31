@@ -154,9 +154,9 @@ function makeFakes(
       claim: async () => 1234,
     },
     sessionStore,
-    tickets: {
+    tickets: (_ownerId: string) => ({
       startTicket: async () => null,
-    },
+    }),
   }
 
   const scheduler: AgentSpawnScheduler | undefined = opts.withScheduler

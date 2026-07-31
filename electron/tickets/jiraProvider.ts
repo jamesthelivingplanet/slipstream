@@ -7,6 +7,7 @@ import type {
   TicketSourceSettings,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
+import { DEFAULT_OWNER_ID } from '../services/configStore.js'
 
 interface AdfNode {
   type?: string
@@ -110,11 +111,14 @@ function toTicketDTO(issue: JiraIssue): TicketDTO {
   }
 }
 
-export function createJiraProvider(config: IConfigStore): ITicketProvider {
+export function createJiraProvider(
+  config: IConfigStore,
+  ownerId: string = DEFAULT_OWNER_ID,
+): ITicketProvider {
   function creds(): { baseUrl: string; email: string; apiToken: string } | undefined {
-    const baseUrl = config.get('jira.baseUrl')
-    const email = config.get('jira.email')
-    const apiToken = config.get('jira.apiToken')
+    const baseUrl = config.getForOwner!(ownerId, 'jira.baseUrl')
+    const email = config.getForOwner!(ownerId, 'jira.email')
+    const apiToken = config.getForOwner!(ownerId, 'jira.apiToken')
     if (!baseUrl || !email || !apiToken) return undefined
     return { baseUrl: baseUrl.replace(/\/+$/, ''), email, apiToken }
   }
@@ -224,8 +228,8 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
       const c = creds()
       if (!c) return { tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false }
 
-      const projectKeys = parseKeys(config.get('jira.projectKeys'))
-      const onlyMine = config.get('jira.onlyMine') !== '0'
+      const projectKeys = parseKeys(config.getForOwner!(ownerId, 'jira.projectKeys'))
+      const onlyMine = config.getForOwner!(ownerId, 'jira.onlyMine') !== '0'
 
       const page = opts?.page ?? 1
       const pageSize = opts?.pageSize ?? 20
@@ -390,13 +394,13 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
     },
 
     getSettings(): TicketSourceSettings {
-      const baseUrl = config.get('jira.baseUrl') ?? ''
-      const email = config.get('jira.email') ?? ''
-      const apiToken = config.get('jira.apiToken') ?? ''
+      const baseUrl = config.getForOwner!(ownerId, 'jira.baseUrl') ?? ''
+      const email = config.getForOwner!(ownerId, 'jira.email') ?? ''
+      const apiToken = config.getForOwner!(ownerId, 'jira.apiToken') ?? ''
       return {
         configured: !!baseUrl && !!email && !!apiToken,
-        scopeKeys: parseKeys(config.get('jira.projectKeys')),
-        onlyMine: config.get('jira.onlyMine') !== '0',
+        scopeKeys: parseKeys(config.getForOwner!(ownerId, 'jira.projectKeys')),
+        onlyMine: config.getForOwner!(ownerId, 'jira.onlyMine') !== '0',
         apiKey: '',
         baseUrl,
         email,
@@ -405,11 +409,11 @@ export function createJiraProvider(config: IConfigStore): ITicketProvider {
     },
 
     setSettings(cfg: TicketSourceSettings): void {
-      config.set('jira.baseUrl', cfg.baseUrl ?? '')
-      config.set('jira.email', cfg.email ?? '')
-      config.set('jira.apiToken', cfg.apiToken ?? '')
-      config.set('jira.projectKeys', (cfg.scopeKeys ?? []).join(','))
-      config.set('jira.onlyMine', cfg.onlyMine === false ? '0' : '1')
+      config.setForOwner!(ownerId, 'jira.baseUrl', cfg.baseUrl ?? '')
+      config.setForOwner!(ownerId, 'jira.email', cfg.email ?? '')
+      config.setForOwner!(ownerId, 'jira.apiToken', cfg.apiToken ?? '')
+      config.setForOwner!(ownerId, 'jira.projectKeys', (cfg.scopeKeys ?? []).join(','))
+      config.setForOwner!(ownerId, 'jira.onlyMine', cfg.onlyMine === false ? '0' : '1')
     },
   }
 }

@@ -150,6 +150,31 @@ describe('runMigrations', () => {
     })
   })
 
+  describe('migration 11 (FLO-48 config_owner)', () => {
+    it('creates the config_owner table on a fresh DB', () => {
+      const f = makeFakeDb({ userVersion: 0 })
+      runMigrations(f.db)
+      const sql = f.execLog.find((s) => s.includes('CREATE TABLE IF NOT EXISTS config_owner'))
+      expect(sql).toBeDefined()
+    })
+
+    it('backfills owner-scoped keys into config_owner for the default owner', () => {
+      const f = makeFakeDb({ userVersion: 0 })
+      runMigrations(f.db)
+      const sql = f.execLog.find((s) => s.includes('INSERT OR IGNORE INTO config_owner'))
+      expect(sql).toBeDefined()
+      expect(sql).toContain(`key LIKE 'linear.%'`)
+      expect(sql).toContain(`key LIKE 'github.%'`)
+    })
+
+    it('runs only the new migration for a DB already at version 10', () => {
+      const f = makeFakeDb({ userVersion: 10 })
+      runMigrations(f.db)
+      expect(f.version).toBe(MIGRATIONS.length)
+      expect(f.execLog).toHaveLength(MIGRATIONS.length - 10)
+    })
+  })
+
   describe('migration 8 (FLO-143 device_tokens)', () => {
     it('creates the device_tokens table with a unique index on tokenHash', () => {
       const f = makeFakeDb({ userVersion: 0 })

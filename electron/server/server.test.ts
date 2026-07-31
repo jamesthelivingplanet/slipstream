@@ -25,6 +25,7 @@ import type { WireReq, WireRes } from '../shared/wire.js'
 import type { IConfigStore } from '../services/configStore.js'
 import type { IPushService } from '../services/pushService.js'
 import type { IDeviceTokenStore, DeviceTokenDTO } from '../services/deviceTokenStore.js'
+import type { DevicePairingStore } from '../services/devicePairing.js'
 import { OutputBuffer } from '../services/outputBuffer.js'
 
 // ── Fake deps (no native modules) ────────────────────────────────────────────
@@ -78,6 +79,30 @@ function makeFakeDeviceTokenStore(): IDeviceTokenStore {
       }
       return undefined
     },
+  }
+}
+
+/** In-memory fake for DevicePairingStore, mirroring createDevicePairingStore's
+ *  behavior (issue/redeem, single-use, TTL) without pulling in real timers/
+ *  crypto hashing — good enough to drive POST /pair end-to-end in tests. */
+function makeFakeDevicePairingStore(): DevicePairingStore {
+  const codes = new Map<string, { ownerId: string; expiresAt: number; used: boolean }>()
+  let counter = 0
+  return {
+    issue(identity) {
+      const code = `pair-code-${++counter}`
+      const expiresAt = Date.now() + 5 * 60_000
+      codes.set(code, { ownerId: identity.id, expiresAt, used: false })
+      return { code, expiresAt }
+    },
+    redeem(code) {
+      const entry = codes.get(code)
+      if (!entry) return undefined
+      if (entry.used || entry.expiresAt <= Date.now()) return undefined
+      entry.used = true
+      return entry.ownerId
+    },
+    dispose() {},
   }
 }
 
@@ -169,7 +194,7 @@ function makeFakeDeps(): IpcDeps {
 
   const ports: IPortBroker = { claim: vi.fn().mockResolvedValue(3000) }
 
-  const tickets: ITicketProvider = {
+  const ticketsObj: ITicketProvider = {
     id: 'test',
     listTickets: vi.fn().mockResolvedValue([]),
     getTicketStatus: vi.fn().mockResolvedValue({ current: null, available: [] }),
@@ -227,7 +252,7 @@ function makeFakeDeps(): IpcDeps {
     worktrees,
     sessions,
     ports,
-    tickets,
+    tickets: (_ownerId: string) => ticketsObj,
     config,
     sessionStore,
     promptTemplates: makeFakePromptTemplates(),
@@ -330,7 +355,7 @@ function makeSurvivalDeps(): {
 
   const ports: IPortBroker = { claim: vi.fn().mockResolvedValue(3000) }
 
-  const tickets: ITicketProvider = {
+  const ticketsObj: ITicketProvider = {
     id: 'test',
     listTickets: vi.fn().mockResolvedValue([]),
     getTicketStatus: vi.fn().mockResolvedValue({ current: null, available: [] }),
@@ -388,7 +413,7 @@ function makeSurvivalDeps(): {
     worktrees,
     sessions,
     ports,
-    tickets,
+    tickets: (_ownerId: string) => ticketsObj,
     config,
     sessionStore,
     promptTemplates: makeFakePromptTemplates(),
@@ -484,6 +509,39 @@ function postInlineReply(
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(payload),
           ...(bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {}),
+        },
+      },
+      (res) => {
+        let data = ''
+        res.on('data', (c) => (data += c))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }))
+      },
+    )
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
+  })
+}
+
+/** POST /pair (device-pairing-codes) — the unauthenticated redemption
+ *  endpoint. `rawBody`, when given, bypasses JSON.stringify to exercise
+ *  malformed-body cases. */
+function postPair(
+  port: number,
+  body: { code?: string } | undefined,
+  rawBody?: string,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const payload = rawBody ?? JSON.stringify(body ?? {})
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        path: '/pair',
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
         },
       },
       (res) => {
@@ -1482,6 +1540,182 @@ describe('createServer', () => {
       )
       expect(status).toBe(204)
       expect(deps.sessions.write).toHaveBeenCalledWith('s1', 'still works\n')
+    })
+  })
+
+  describe('POST /pair — self-service device onboarding (device-pairing-codes)', () => {
+    it('redeems a valid code for a real device token, without any bearer/Authorization credential', async () => {
+      const pairing = makeFakeDevicePairingStore()
+      const deviceTokens = makeFakeDeviceTokenStore()
+      const deps = makeFakeDeps()
+      deps.pairing = pairing
+      deps.deviceTokens = deviceTokens
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { code } = pairing.issue({ id: 'alice' })
+      const { status, body } = await postPair(port, { code })
+      expect(status).toBe(200)
+      const { token } = JSON.parse(body) as { token: string }
+      expect(typeof token).toBe('string')
+      expect(token.length).toBeGreaterThan(0)
+
+      // The minted token really does authenticate as the code's bound owner.
+      expect(deviceTokens.resolveToken(token)).toEqual({ id: 'alice' })
+    })
+
+    it('is single-use — redeeming the same code twice fails the second time with the SAME uniform error', async () => {
+      const pairing = makeFakeDevicePairingStore()
+      const deps = makeFakeDeps()
+      deps.pairing = pairing
+      deps.deviceTokens = makeFakeDeviceTokenStore()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { code } = pairing.issue({ id: 'alice' })
+      const first = await postPair(port, { code })
+      expect(first.status).toBe(200)
+
+      const second = await postPair(port, { code })
+      expect(second.status).toBe(401)
+      expect(JSON.parse(second.body)).toEqual({ error: 'Invalid or expired code' })
+    })
+
+    it('a concurrent double-redeem of the same code only mints ONE token', async () => {
+      const pairing = makeFakeDevicePairingStore()
+      const deps = makeFakeDeps()
+      deps.pairing = pairing
+      deps.deviceTokens = makeFakeDeviceTokenStore()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { code } = pairing.issue({ id: 'alice' })
+      const [a, b] = await Promise.all([postPair(port, { code }), postPair(port, { code })])
+      const statuses = [a.status, b.status].sort()
+      expect(statuses).toEqual([200, 401])
+    })
+
+    it('an unknown code returns the same 401 body as an expired/already-used code (uniform error)', async () => {
+      const deps = makeFakeDeps()
+      deps.pairing = makeFakeDevicePairingStore()
+      deps.deviceTokens = makeFakeDeviceTokenStore()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { status, body } = await postPair(port, { code: 'not-a-real-code' })
+      expect(status).toBe(401)
+      expect(JSON.parse(body)).toEqual({ error: 'Invalid or expired code' })
+    })
+
+    it('never mints a token when no code is provided', async () => {
+      const deps = makeFakeDeps()
+      deps.pairing = makeFakeDevicePairingStore()
+      const deviceTokens = makeFakeDeviceTokenStore()
+      deps.deviceTokens = deviceTokens
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { status } = await postPair(port, {})
+      expect(status).toBe(400)
+      expect(deviceTokens.list()).toEqual([])
+    })
+
+    it('never mints a token for a bad code, even when a device token store is wired up', async () => {
+      const deps = makeFakeDeps()
+      deps.pairing = makeFakeDevicePairingStore()
+      const deviceTokens = makeFakeDeviceTokenStore()
+      deps.deviceTokens = deviceTokens
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { status } = await postPair(port, { code: 'garbage' })
+      expect(status).toBe(401)
+      expect(deviceTokens.list()).toEqual([])
+    })
+
+    it('returns the uniform 401 (not a 500) when no pairing store is wired up at all', async () => {
+      const deps = makeFakeDeps() // deps.pairing left undefined
+      deps.deviceTokens = makeFakeDeviceTokenStore()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { status, body } = await postPair(port, { code: 'whatever' })
+      expect(status).toBe(401)
+      expect(JSON.parse(body)).toEqual({ error: 'Invalid or expired code' })
+    })
+
+    it('returns 400 for invalid JSON', async () => {
+      const deps = makeFakeDeps()
+      deps.pairing = makeFakeDevicePairingStore()
+      deps.deviceTokens = makeFakeDeviceTokenStore()
+      server = createServer(deps, { token: 'secret', port: 0 })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      const { status } = await postPair(port, undefined, '{not json')
+      expect(status).toBe(400)
+    })
+
+    it('rate-limits repeated attempts from the same source and returns 429 once exceeded', async () => {
+      const deps = makeFakeDeps()
+      deps.pairing = makeFakeDevicePairingStore()
+      deps.deviceTokens = makeFakeDeviceTokenStore()
+      server = createServer(deps, {
+        token: 'secret',
+        port: 0,
+        pairRateLimit: { windowMs: 60_000, max: 3 },
+      })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      // All wrong codes — every attempt below the limit should still get the
+      // normal uniform 401, not a 429, until the cap is hit.
+      const statuses: number[] = []
+      for (let i = 0; i < 4; i++) {
+        const { status } = await postPair(port, { code: 'bad-code' })
+        statuses.push(status)
+      }
+      expect(statuses).toEqual([401, 401, 401, 429])
+    })
+
+    it('a rate-limited caller cannot mint a token even with a valid code', async () => {
+      const pairing = makeFakeDevicePairingStore()
+      const deviceTokens = makeFakeDeviceTokenStore()
+      const deps = makeFakeDeps()
+      deps.pairing = pairing
+      deps.deviceTokens = deviceTokens
+      server = createServer(deps, {
+        token: 'secret',
+        port: 0,
+        pairRateLimit: { windowMs: 60_000, max: 1 },
+      })
+      const port = await new Promise<number>((res) =>
+        server!.once('listening', () => res(getPort(server!))),
+      )
+
+      // Burn the single allowed attempt with a bad guess.
+      await postPair(port, { code: 'wrong' })
+
+      const { code } = pairing.issue({ id: 'alice' })
+      const { status } = await postPair(port, { code })
+      expect(status).toBe(429)
+      expect(deviceTokens.list()).toEqual([])
     })
   })
 })

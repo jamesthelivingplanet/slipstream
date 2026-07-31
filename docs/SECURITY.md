@@ -735,3 +735,117 @@ row-tap deep-linking work for the first time.
 `subscribeWidgetAgentOpen()` itself was deliberately left in place — its
 Capacitor 6-vs-7 dual-shape handling is separately tested — but it is still
 unfired by any native code path; don't mistake it for a live channel.
+
+## 13. Self-service device pairing codes
+
+**What this is.** docs/IDENTITY-SEAM.md's open item 2: before this, minting a
+second device's credential required an operator to run `pnpm tokens -- issue
+<ownerId> <label>` and hand the printed token to the new device out of band
+(docs/PRODUCTION-READINESS.md §1 rung 4's gate). This adds a self-service
+path: a user who is already authenticated on one device can onboard a second
+device of their own without an operator in the loop.
+
+**The governing precedent, and why this is the deliberate exception to it.**
+The house pattern for "an edge actor needs a privileged effect" — established
+by the `slipstream` CLI (§12 above) and the FLO-162 widget — is to never hand
+the credential to the actor that only needs to *ask*: the edge expresses
+intent over a channel the privileged side watches, and the privileged side
+decides. Device pairing does not follow that pattern, and it can't: its
+entire purpose is to deliver a real, usable credential to a device that
+currently has none. There is no "intent, not credential" version of "give
+this phone a bearer token." That's exactly why the constraints below are as
+tight as they are — this is the one flow in the codebase that is allowed to
+hand out a credential over the network, so it has to earn that trust deliberately
+rather than by default.
+
+**The flow.**
+
+1. **`createPairingCode()`** — an authenticated, owner-scoped RPC
+   (`electron/core/rpcHandlers/pairing.ts`). Mints a short-lived, single-use
+   code bound to the CALLER's identity, as resolved by the existing
+   `RpcContext` seam (docs/IDENTITY-SEAM.md) — never to a client-supplied
+   `ownerId`. Returns `{ code, expiresAt }`. Surfaced in Settings → Security
+   as "Pair a device", which shows the code, a countdown to expiry, and (since
+   the `qrcode` package is already a dependency, used by the existing
+   token-pairing-link QR in `SettingsIntegrations.svelte`) a QR code.
+2. **`POST /pair`** (`electron/server/server.ts`) — the ONLY genuinely
+   unauthenticated endpoint in the server, because a brand-new device has no
+   credential yet and therefore cannot use the `Authorization`/`?token=`
+   paths every other endpoint (including `/rpc-ticket` and `/inline-reply`,
+   §3/§11-adjacent) relies on. Body: `{ code }`. On success, redeems the code
+   against `electron/services/devicePairing.ts`'s in-memory store and mints a
+   real device token via the existing `deviceTokenStore.issue(ownerId,
+   label)` path (§4) — returned exactly once, then the code is burned.
+
+**Defenses on the new unauthenticated surface** (`electron/services/devicePairing.ts`):
+
+- **Hashed at rest.** Only the SHA-256 hash of a code is ever held in memory
+  (`hashCode`, mirroring `deviceTokenStore.ts`'s `hashToken`) — a heap dump
+  doesn't hand out a usable code, and if this store were ever backed by
+  persistence later, neither would a stolen DB.
+- **Single-use, redeemed atomically.** Redemption marks a code `used` as the
+  very next synchronous statement after the lookup, with no `await` in
+  between — Node never preempts mid-handler, so two devices racing the same
+  code (e.g. two tabs both submitting a pasted code) cannot both win; exactly
+  one gets a token. Covered by a concurrent-double-redeem test in
+  `devicePairing.test.ts` and an end-to-end version (`Promise.all` of two
+  `POST /pair` calls) in `server.test.ts`.
+- **Short TTL — 5 minutes.** A code only needs to survive the walk from
+  looking at one screen to keying/scanning it into another, not a session
+  lifetime.
+- **Entropy vs. the rate limit, stated plainly.** Each code is 16 random
+  bytes (128 bits), base64url-encoded — the same generation shape as
+  `deviceTokenStore`'s token and the §3 WS ticket. `POST /pair` is
+  rate-limited to 10 attempts per 60s **per source IP**
+  (`createPairRateLimiter`), so across a code's whole 5-minute TTL any one IP
+  gets at most ~50 guesses. Against a keyspace of 2^128 (~3.4e38), the odds of
+  a correct guess in 50 attempts are on the order of 50 / 3.4e38 — brute force
+  is not a realistic threat here, and an attacker would need to spread guesses
+  across many independently-capped IPs just to reach that many attempts.
+- **Constant-time comparison.** Redemption hashes the presented code first
+  (converting "does a raw secret comparison leak length/prefix via timing"
+  into "does a fixed-length digest comparison leak anything," which SHA-256's
+  preimage resistance forecloses) and then compares against every live
+  entry's hash with `crypto.timingSafeEqual`, rather than a plain `Map` key
+  lookup that would rely on V8's internal string equality.
+- **One uniform error.** A wrong code, an expired code, an already-used code,
+  an unknown code, and even a deployment with no pairing store wired up at
+  all — every one of these returns the identical `401 {"error": "Invalid or
+  expired code"}`. This mirrors the WS upgrade's `4001`-for-any-reason
+  convention (§1) and `/inline-reply`'s identical-404-for-missing-or-other-owner
+  convention (§4/IDENTITY-SEAM.md's no-existence-leak rule): a network
+  observer, or the calling device itself, can never learn which case
+  occurred. (A structurally malformed request — no `code` field at all,
+  invalid JSON — gets its own distinct 400; that's a client bug, not a guess
+  among the code's keyspace, so it doesn't need to be folded into the uniform
+  case.)
+- **No enumeration.** There is no GET/list variant of `/pair` and no
+  unauthenticated way to ask "are any codes currently live" — a code can only
+  ever be redeemed, never listed or probed for existence short of guessing it
+  outright (covered by the entropy/rate-limit math above).
+
+**Interaction with §2's reverse-proxy-logs-the-URL threat.** The code
+travels in the `POST /pair` request **body**, never a query string — exactly
+the lesson §2/§3 already established for the WS token. The Settings → Security
+QR encodes the code as a URL **fragment** (`#pair=<code>`), not a query
+string either: a fragment is never sent in the HTTP request, not even for the
+very first page load, so — unlike the existing token-pairing-link QR in
+`SettingsIntegrations.svelte` (which embeds `?token=` and has a documented
+residual gap in §3 for exactly this reason) — this QR's deep link cannot land
+in a reverse-proxy access log at any point in the flow. `TokenGate.svelte`
+reads `location.hash` once on mount, prefills the code field, and immediately
+strips the fragment via `history.replaceState` so it doesn't linger even in
+local browser history beyond that instant.
+
+**What this does NOT close.** This is self-service onboarding for docs/IDENTITY-SEAM.md's
+item 2 and softens docs/PRODUCTION-READINESS.md §1 rung 4's operator-CLI gate —
+it is not a step toward rung 5 ("Public / untrusted multi-tenant"). Rung 5 is
+explicitly gated on per-owner integration config, the per-owner-data-dir
+decision, a real privilege boundary for agent execution, and rate/abuse/quota
+controls between owners — none of which this flow touches. A pairing code is
+scoped to the identity that minted it (same single/multi-user posture as
+every other device token, §4) and does nothing to isolate owners from each
+other once both are provisioned. `pnpm tokens -- issue` (§4) is unchanged and
+still the only path for an *operator* to mint a credential for someone who
+isn't already an authenticated user of the deployment — pairing codes only
+help an existing, authenticated owner add another device of their own.

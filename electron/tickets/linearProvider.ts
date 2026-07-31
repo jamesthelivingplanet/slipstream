@@ -7,6 +7,7 @@ import type {
   TicketSourceSettings,
 } from '../shared/contract.js'
 import type { IConfigStore } from '../services/configStore.js'
+import { DEFAULT_OWNER_ID } from '../services/configStore.js'
 
 interface LinearNode {
   id: string
@@ -48,7 +49,10 @@ const LIST_QUERY = `
   }
 `
 
-export function createLinearProvider(config: IConfigStore): ITicketProvider {
+export function createLinearProvider(
+  config: IConfigStore,
+  ownerId: string = DEFAULT_OWNER_ID,
+): ITicketProvider {
   async function gql(
     key: string,
     query: string,
@@ -87,7 +91,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
       throw new Error(`Invalid ticket id: ${tid}`)
     }
 
-    const apiKey = config.get('linear.apiKey')
+    const apiKey = config.getForOwner!(ownerId, 'linear.apiKey')
     if (!apiKey) throw new Error('Linear API key not set')
 
     const data = await gql(
@@ -112,7 +116,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
     id: 'linear',
 
     async listScopes(): Promise<ScopeOption[]> {
-      const apiKey = config.get('linear.apiKey')
+      const apiKey = config.getForOwner!(ownerId, 'linear.apiKey')
       if (!apiKey) throw new Error('Linear API key not set')
 
       const data = await gql(
@@ -136,11 +140,11 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
       pageSize?: number
       query?: string
     }): Promise<PaginatedTickets> {
-      const apiKey = config.get('linear.apiKey')
+      const apiKey = config.getForOwner!(ownerId, 'linear.apiKey')
       if (!apiKey) return { tickets: [], totalCount: 0, page: 1, pageSize: 20, hasMore: false }
 
-      const teamKeys = parseTeamKeys(config.get('linear.teamKeys'))
-      const onlyMine = config.get('linear.onlyMine') !== '0'
+      const teamKeys = parseTeamKeys(config.getForOwner!(ownerId, 'linear.teamKeys'))
+      const onlyMine = config.getForOwner!(ownerId, 'linear.onlyMine') !== '0'
 
       const page = opts?.page ?? 1
       const pageSize = opts?.pageSize ?? 20
@@ -208,7 +212,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
     async getTicketStatus(
       tid: string,
     ): Promise<{ current: WorkflowState | null; available: WorkflowState[] }> {
-      const apiKey = config.get('linear.apiKey')
+      const apiKey = config.getForOwner!(ownerId, 'linear.apiKey')
       if (!apiKey) throw new Error('Linear API key not set')
 
       const node = await resolveIssue(tid)
@@ -241,7 +245,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
     },
 
     async setTicketStatus(tid: string, stateId: string): Promise<WorkflowState> {
-      const apiKey = config.get('linear.apiKey')
+      const apiKey = config.getForOwner!(ownerId, 'linear.apiKey')
       if (!apiKey) throw new Error('Linear API key not set')
 
       const node = await resolveIssue(tid)
@@ -265,7 +269,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
     },
 
     async startTicket(tid: string): Promise<WorkflowState | null> {
-      const apiKey = config.get('linear.apiKey')
+      const apiKey = config.getForOwner!(ownerId, 'linear.apiKey')
       if (!apiKey) throw new Error('Linear API key not set')
 
       const node = await resolveIssue(tid)
@@ -314,7 +318,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
     },
 
     async resetTicket(tid: string): Promise<WorkflowState | null> {
-      const apiKey = config.get('linear.apiKey')
+      const apiKey = config.getForOwner!(ownerId, 'linear.apiKey')
       if (!apiKey) throw new Error('Linear API key not set')
 
       const node = await resolveIssue(tid)
@@ -370,7 +374,7 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
     },
 
     async postComment(tid: string, body: string): Promise<boolean> {
-      const apiKey = config.get('linear.apiKey')
+      const apiKey = config.getForOwner!(ownerId, 'linear.apiKey')
       if (!apiKey) return false
 
       const node = await resolveIssue(tid)
@@ -392,11 +396,11 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
     },
 
     getSettings(): TicketSourceSettings {
-      const apiKey = config.get('linear.apiKey') ?? ''
+      const apiKey = config.getForOwner!(ownerId, 'linear.apiKey') ?? ''
       return {
         configured: !!apiKey,
-        scopeKeys: parseTeamKeys(config.get('linear.teamKeys')),
-        onlyMine: config.get('linear.onlyMine') !== '0',
+        scopeKeys: parseTeamKeys(config.getForOwner!(ownerId, 'linear.teamKeys')),
+        onlyMine: config.getForOwner!(ownerId, 'linear.onlyMine') !== '0',
         apiKey,
         baseUrl: '',
         email: '',
@@ -405,9 +409,9 @@ export function createLinearProvider(config: IConfigStore): ITicketProvider {
     },
 
     setSettings(cfg: TicketSourceSettings): void {
-      config.set('linear.apiKey', cfg.apiKey ?? '')
-      config.set('linear.teamKeys', (cfg.scopeKeys ?? []).join(','))
-      config.set('linear.onlyMine', cfg.onlyMine === false ? '0' : '1')
+      config.setForOwner!(ownerId, 'linear.apiKey', cfg.apiKey ?? '')
+      config.setForOwner!(ownerId, 'linear.teamKeys', (cfg.scopeKeys ?? []).join(','))
+      config.setForOwner!(ownerId, 'linear.onlyMine', cfg.onlyMine === false ? '0' : '1')
     },
   }
 }

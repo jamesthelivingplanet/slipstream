@@ -1,12 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createGitlabIssuesProvider, parseGitlabTid } from './gitlabIssuesProvider.js'
-import type { IConfigStore } from '../services/configStore.js'
+import { DEFAULT_OWNER_ID, type IConfigStore } from '../services/configStore.js'
 
 function makeConfigStore(overrides: Record<string, string | undefined> = {}): IConfigStore {
   const values: Record<string, string | undefined> = { 'gitlab.token': 'glpat_123', ...overrides }
+  const ownerValues: Record<string, Record<string, string | undefined>> = {
+    [DEFAULT_OWNER_ID]: { ...values },
+  }
   return {
     get: vi.fn((k: string) => values[k]),
-    set: vi.fn(),
+    set: vi.fn((k: string, v: string) => {
+      values[k] = v
+    }),
+    getForOwner: vi.fn((ownerId: string, k: string) => ownerValues[ownerId]?.[k]),
+    setForOwner: vi.fn((ownerId: string, k: string, v: string) => {
+      ownerValues[ownerId] ??= {}
+      ownerValues[ownerId][k] = v
+    }),
   }
 }
 
@@ -367,10 +377,51 @@ describe('createGitlabIssuesProvider', () => {
         apiToken: 'should-be-ignored',
       })
 
-      expect(store.set).toHaveBeenCalledWith('gitlab.issueProjects', 'group/api')
-      expect(store.set).toHaveBeenCalledWith('gitlab.onlyMine', '0')
-      expect(store.set).not.toHaveBeenCalledWith('gitlab.token', expect.anything())
-      expect(store.set).not.toHaveBeenCalledWith('gitlab.baseUrl', expect.anything())
+      expect(store.setForOwner).toHaveBeenCalledWith(
+        DEFAULT_OWNER_ID,
+        'gitlab.issueProjects',
+        'group/api',
+      )
+      expect(store.setForOwner).toHaveBeenCalledWith(DEFAULT_OWNER_ID, 'gitlab.onlyMine', '0')
+      expect(store.setForOwner).not.toHaveBeenCalledWith(
+        DEFAULT_OWNER_ID,
+        'gitlab.token',
+        expect.anything(),
+      )
+      expect(store.setForOwner).not.toHaveBeenCalledWith(
+        DEFAULT_OWNER_ID,
+        'gitlab.baseUrl',
+        expect.anything(),
+      )
+    })
+  })
+
+  describe('per-owner credential isolation', () => {
+    it("does not see another owner's token", async () => {
+      const store = makeConfigStore()
+      store.setForOwner!('other-owner', 'gitlab.token', 'other-token')
+      const provider = createGitlabIssuesProvider(store, 'other-owner')
+      expect(provider.getSettings().configured).toBe(true)
+
+      vi.mocked(fetch).mockResolvedValue(jsonResponse([]))
+      await provider.listTickets()
+      expect(fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'PRIVATE-TOKEN': 'other-token' }),
+        }),
+      )
+
+      const defaultProvider = createGitlabIssuesProvider(store)
+      vi.mocked(fetch).mockClear()
+      vi.mocked(fetch).mockResolvedValue(jsonResponse([]))
+      await defaultProvider.listTickets()
+      expect(fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'PRIVATE-TOKEN': 'glpat_123' }),
+        }),
+      )
     })
   })
 })

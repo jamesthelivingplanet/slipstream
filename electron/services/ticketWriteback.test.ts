@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { createTicketWriteback } from './ticketWriteback.js'
+import { DEFAULT_OWNER_ID } from './configStore.js'
 import type {
   ISessionManager,
   ISessionStore,
@@ -48,7 +49,12 @@ function makeFakes() {
   }
 
   const postComment = vi.fn().mockResolvedValue(true)
-  const tickets = { postComment } as unknown as ITicketProvider
+  const ticketsObj = { postComment } as unknown as ITicketProvider
+  // TASK-7LGAO: tickets is now a per-owner factory, not a static instance —
+  // this fake always returns the SAME object regardless of ownerId (existing
+  // assertions on `postComment` stay valid), while still being a `vi.fn()` so
+  // tests can assert on which ownerId onPr resolved the provider for.
+  const tickets = vi.fn((_ownerId: string) => ticketsObj)
 
   return { emitter, sessions, store, map, tickets, postComment }
 }
@@ -159,5 +165,32 @@ describe('createTicketWriteback', () => {
     await flush()
 
     expect(postComment).not.toHaveBeenCalled()
+  })
+
+  describe('per-owner provider resolution (TASK-7LGAO)', () => {
+    it('resolves the provider for the local owner when the session has no ownerId', async () => {
+      const { emitter, sessions, store, map, tickets, postComment } = makeFakes()
+      map.set('s1', makeSession())
+      createTicketWriteback({ sessions, store, tickets })
+
+      emitter.emit('pr', 's1', 'https://example.com/pr/1')
+      await flush()
+
+      expect(tickets).toHaveBeenCalledWith(DEFAULT_OWNER_ID)
+      expect(postComment).toHaveBeenCalledTimes(1)
+    })
+
+    it("resolves the provider for the session's real ownerId, not hardcoded local", async () => {
+      const { emitter, sessions, store, map, tickets, postComment } = makeFakes()
+      map.set('s1', makeSession({ ownerId: 'alice' }))
+      createTicketWriteback({ sessions, store, tickets })
+
+      emitter.emit('pr', 's1', 'https://example.com/pr/1')
+      await flush()
+
+      expect(tickets).toHaveBeenCalledWith('alice')
+      expect(tickets).not.toHaveBeenCalledWith(DEFAULT_OWNER_ID)
+      expect(postComment).toHaveBeenCalledTimes(1)
+    })
   })
 })

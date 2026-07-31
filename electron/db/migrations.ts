@@ -10,6 +10,8 @@
 // column — always append a new migration. Each migration runs exactly once,
 // tracked by user_version.
 
+import { OWNER_SCOPED_PREFIXES, DEFAULT_OWNER_ID } from '../services/configStore.js'
+
 // Minimal DB surface the migration runner needs. better-sqlite3's Database
 // satisfies this structurally, and tests can supply a lightweight fake without
 // loading the native module.
@@ -164,6 +166,34 @@ CREATE UNIQUE INDEX idx_device_tokens_hash ON device_tokens (tokenHash)
   // handoff) can tell a chat session apart from a ticket session. NULL/'chat'
   // — NULL is the existing ticket-backed flow.
   (db) => db.exec(`ALTER TABLE sessions ADD COLUMN mode TEXT`),
+  // 11 — FLO-48 item 6: additive per-owner config table (config_owner),
+  // alongside the existing deployment-global `config` table (left untouched —
+  // every pre-existing get()/set() caller keeps reading/writing it exactly as
+  // before; see configStore.ts's IConfigStore doc). Backfills every
+  // currently-stored key classified as owner-scoped (ticket-tracker
+  // credentials + their scoping settings, git host token/username/baseUrl —
+  // see OWNER_SCOPED_PREFIXES in configStore.ts) into config_owner under the
+  // deployment's default owner (DEFAULT_OWNER_ID — 'local', the identity the
+  // static SLIPSTREAM_TOKEN resolves to, per docs/IDENTITY-SEAM.md), so a
+  // single-owner deployment's new getForOwner(DEFAULT_OWNER_ID, key) reads are
+  // byte-identical to the pre-migration get(key) reads — the migration's
+  // acceptance criterion. Values are copied as-is, including whatever at-rest
+  // encryption marker (ss1:/sk1:) they already carried; configStore.ts's
+  // opportunistic re-encrypt sweep (re-run on every open) covers any
+  // still-plaintext row from there.
+  (db) => {
+    const where = OWNER_SCOPED_PREFIXES.map((p) => `key LIKE '${p}%'`).join(' OR ')
+    db.exec(`
+CREATE TABLE IF NOT EXISTS config_owner (
+  ownerId TEXT NOT NULL,
+  key     TEXT NOT NULL,
+  value   TEXT NOT NULL,
+  PRIMARY KEY (ownerId, key)
+);
+INSERT OR IGNORE INTO config_owner (ownerId, key, value)
+SELECT '${DEFAULT_OWNER_ID}', key, value FROM config WHERE ${where}
+`)
+  },
 ]
 
 /**

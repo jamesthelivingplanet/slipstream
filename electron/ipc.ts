@@ -29,10 +29,19 @@ export interface IpcDeps {
   worktrees: IWorktreeManager
   sessions: ISessionManager
   ports: IPortBroker
-  tickets: ITicketProvider
-  /** Per-source providers, used only for scope listing (Settings picker);
-   *  per-ticket routing goes through `tickets` (the composite). */
-  ticketProviders?: Partial<Record<TicketSource, ITicketProvider>>
+  /** Per-owner ticket-provider factory (TASK-7LGAO, docs/IDENTITY-SEAM.md
+   *  "Per-owner integration config"): ticket-source credentials (linear/jira/
+   *  github/gitlab) are isolated per owner, so the composite provider must be
+   *  built fresh per call from the caller's resolved identity rather than
+   *  shared as one process-wide singleton. Provider construction does no I/O,
+   *  so calling this per-request is cheap. */
+  tickets: (ownerId: string) => ITicketProvider
+  /** Per-owner, per-source provider factory: used for ticket-source settings
+   *  get/set (IPC.getTicketSettings/setTicketSettings) and scope listing
+   *  (IPC.listTicketScopes, the Settings picker) — routing for ticket
+   *  operations themselves goes through `tickets` (the composite). Optional
+   *  so tests can omit it. */
+  ticketProviders?: (ownerId: string) => Partial<Record<TicketSource, ITicketProvider>>
   config: IConfigStore
   sessionStore: ISessionStore
   /** Per-repo reusable prompt templates (FLO-98). */
@@ -74,6 +83,13 @@ export interface IpcDeps {
    *  resolveIdentity's multi-user seam. Optional so tests without one fall
    *  back to the static-token-only (single-user) auth path. */
   deviceTokens?: import('./services/deviceTokenStore.js').IDeviceTokenStore
+  /** Self-service device-pairing-code store (docs/SECURITY.md): shared
+   *  between the authenticated createPairingCode RPC (issue) and the
+   *  unauthenticated POST /pair HTTP endpoint (redeem) — see
+   *  electron/services/devicePairing.ts. Optional so tests without one can
+   *  omit it; createPairingCode then throws, and POST /pair returns the
+   *  same uniform 401 it would for any invalid/expired/unknown code. */
+  pairing?: import('./services/devicePairing.js').DevicePairingStore
   /** The Slipstream data root (e.g. ~/.config/slipstream) — the same value
    *  passed to createSessionManager/createRunLogger/createClipboardStore. */
   dataDir: string

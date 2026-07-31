@@ -85,7 +85,9 @@ export interface LaunchDeps {
   sessions: Pick<ISessionManager, 'start' | 'setOpencodeSid'>
   ports: IPortBroker
   sessionStore: ISessionStore
-  tickets: Pick<ITicketProvider, 'startTicket'>
+  /** Per-owner ticket-provider factory (TASK-7LGAO) — see IpcDeps.tickets in
+   *  electron/ipc.ts for the full rationale. */
+  tickets: (ownerId: string) => Pick<ITicketProvider, 'startTicket'>
   agentCli?: AgentCliDep
 }
 
@@ -177,7 +179,7 @@ export async function launchSession(deps: LaunchDeps, req: LaunchRequest): Promi
   // real ticket to transition.
   if (!skipTicket) {
     try {
-      await deps.tickets.startTicket(tid, src)
+      await deps.tickets(ownerId).startTicket(tid, src)
     } catch {
       // ignore: ticket provider unavailable or transition not applicable
     }

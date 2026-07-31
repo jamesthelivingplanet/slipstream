@@ -10,6 +10,7 @@ import type { WireReq, WireRes, WirePush, WirePing } from '../shared/wire.js'
 import { resolveIdentity, LOCAL_IDENTITY } from '../core/auth.js'
 import type { Identity } from '../shared/contract.js'
 import { createTicketStore } from './wsTickets.js'
+import { createPairRateLimiter } from '../services/devicePairing.js'
 import { APP_VERSION, GIT_SHA } from '../shared/version.js'
 import { SCHEMA_VERSION } from '../db/migrations.js'
 
@@ -88,6 +89,9 @@ export interface ServerOptions {
   wsTickets?: boolean
   /** Test-only override for the ticket TTL (default: wsTickets.ts's TICKET_TTL_MS, ~10s). */
   wsTicketTtlMs?: number
+  /** Test-only override for POST /pair's rate limiter (default:
+   *  devicePairing.ts's PAIR_RATE_LIMIT_WINDOW_MS/PAIR_RATE_LIMIT_MAX). */
+  pairRateLimit?: { windowMs: number; max: number }
   /**
    * Content-Security-Policy applied to HTML/static responses (docs/SECURITY.md
    * §10). Defaults to DEFAULT_CSP. Pass `false` to omit the header entirely —
@@ -111,6 +115,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
     allowedOrigins,
     wsTickets = false,
     wsTicketTtlMs,
+    pairRateLimit,
     csp = DEFAULT_CSP,
   } = opts
 
@@ -124,6 +129,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
   }
 
   const ticketStore = createTicketStore(wsTicketTtlMs)
+  const pairRateLimiter = createPairRateLimiter(pairRateLimit?.windowMs, pairRateLimit?.max)
 
   const httpServer = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
@@ -249,6 +255,92 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
         deps.sessions.write(sessionId, `${data}\n`)
         res.writeHead(204)
         res.end()
+      })
+      req.on('error', () => {
+        if (!res.headersSent) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Bad request' }))
+        }
+      })
+      return
+    }
+
+    // POST /pair — self-service device onboarding (docs/SECURITY.md's
+    // device-pairing-codes section, docs/IDENTITY-SEAM.md's open item 2).
+    // The ONLY genuinely unauthenticated endpoint in this file: a brand-new
+    // device has no credential yet, so it cannot use the Authorization/
+    // ?token= paths every other endpoint here relies on. Body: { code } —
+    // deliberately in the POST body, never a query string, so a reverse
+    // proxy's access log (docs/SECURITY.md §2) never records it. On success,
+    // mints a real device token via deviceTokens.issue() and returns it
+    // exactly once; the code is burned atomically on redemption (single-use,
+    // see devicePairing.ts).
+    //
+    // Rate-limited per source IP regardless of the code's entropy (see
+    // devicePairing.ts's PAIR_RATE_LIMIT_* comment for the concrete numbers
+    // and why brute force is infeasible within the code's TTL). Every
+    // failure — bad code, expired code, already-used code, unknown code, or
+    // no pairing store wired up at all — returns the SAME 401 body, so a
+    // network observer (or the caller) can never tell which case occurred;
+    // this mirrors the "no signal" convention the WS upgrade's 4001 close
+    // and /inline-reply's 404 already use elsewhere in this file. There is
+    // no GET/list variant of this endpoint — a live code can only ever be
+    // consumed, never enumerated.
+    if (url.pathname === '/pair' && req.method === 'POST') {
+      const ip = req.socket.remoteAddress ?? 'unknown'
+      if (!pairRateLimiter.allow(ip)) {
+        res.writeHead(429, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Too many attempts' }))
+        return
+      }
+
+      // Small, bounded body read (a code is ~20-30 chars) — same shape as
+      // /inline-reply's guard above, capped much lower since there's nothing
+      // here that legitimately needs more than a few dozen bytes.
+      const chunks: Buffer[] = []
+      let total = 0
+      let tooLarge = false
+      req.on('data', (c: Buffer) => {
+        if (tooLarge) return
+        total += c.length
+        if (total > 4 * 1024) {
+          tooLarge = true
+          if (!res.headersSent) {
+            res.writeHead(413, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Payload too large' }))
+          }
+          return
+        }
+        chunks.push(c)
+      })
+      req.on('end', () => {
+        if (tooLarge) return
+        let parsed: { code?: unknown }
+        try {
+          parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as { code?: unknown }
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid JSON' }))
+          return
+        }
+        const code = parsed.code
+        // A structurally missing/malformed code is a client bug, not a guess
+        // among the code's keyspace — it's fine (and more useful) for this
+        // one case to be distinguishable from the uniform 401 below.
+        if (typeof code !== 'string' || code.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'code is required' }))
+          return
+        }
+        const ownerId = deps.pairing?.redeem(code)
+        if (!ownerId || !deps.deviceTokens) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Invalid or expired code' }))
+          return
+        }
+        const { token } = deps.deviceTokens.issue(ownerId, 'Paired device')
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ token }))
       })
       req.on('error', () => {
         if (!res.headersSent) {
@@ -387,6 +479,7 @@ export function createServer(deps: IpcDeps, opts: ServerOptions): http.Server {
   wss.on('close', () => clearInterval(heartbeat))
   httpServer.on('close', () => clearInterval(heartbeat))
   httpServer.on('close', () => ticketStore.dispose())
+  httpServer.on('close', () => pairRateLimiter.dispose())
 
   httpServer.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`)

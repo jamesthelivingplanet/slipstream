@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createJiraProvider } from './jiraProvider.js'
-import type { IConfigStore } from '../services/configStore.js'
+import { DEFAULT_OWNER_ID, type IConfigStore } from '../services/configStore.js'
 
 const CREDS = {
   'jira.baseUrl': 'https://acme.atlassian.net',
@@ -10,9 +10,19 @@ const CREDS = {
 
 function makeConfigStore(overrides: Record<string, string | undefined> = {}): IConfigStore {
   const values: Record<string, string | undefined> = { ...CREDS, ...overrides }
+  const ownerValues: Record<string, Record<string, string | undefined>> = {
+    [DEFAULT_OWNER_ID]: { ...values },
+  }
   return {
     get: vi.fn((k: string) => values[k]),
-    set: vi.fn(),
+    set: vi.fn((k: string, v: string) => {
+      values[k] = v
+    }),
+    getForOwner: vi.fn((ownerId: string, k: string) => ownerValues[ownerId]?.[k]),
+    setForOwner: vi.fn((ownerId: string, k: string, v: string) => {
+      ownerValues[ownerId] ??= {}
+      ownerValues[ownerId][k] = v
+    }),
   }
 }
 
@@ -443,6 +453,23 @@ describe('createJiraProvider', () => {
       await expect(provider.postComment('PROJ-1', 'hello')).rejects.toThrow(
         'Jira API error: 403 Forbidden',
       )
+    })
+  })
+
+  describe('per-owner credential isolation', () => {
+    it("does not see another owner's credentials", async () => {
+      const store = makeConfigStore()
+      // seed a second owner with different creds directly
+      store.setForOwner!('other-owner', 'jira.apiToken', 'other-secret')
+      store.setForOwner!('other-owner', 'jira.baseUrl', 'https://other.atlassian.net')
+      store.setForOwner!('other-owner', 'jira.email', 'other@example.com')
+      const provider = createJiraProvider(store, 'other-owner')
+      const settings = provider.getSettings()
+      expect(settings.apiToken).toBe('other-secret')
+      expect(settings.baseUrl).toBe('https://other.atlassian.net')
+      // the default-owner provider must not see it
+      const defaultProvider = createJiraProvider(store)
+      expect(defaultProvider.getSettings().apiToken).not.toBe('other-secret')
     })
   })
 })

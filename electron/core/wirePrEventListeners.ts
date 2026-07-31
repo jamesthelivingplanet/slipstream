@@ -30,7 +30,9 @@ import type { RunLogger } from '../services/runLogger.js'
 export function wirePrEventListeners(deps: {
   sessions: Pick<ISessionManager, 'on' | 'off'>
   store: ISessionStore
-  tickets: ITicketProvider
+  /** Per-owner ticket-provider factory (TASK-7LGAO) — see IpcDeps.tickets in
+   *  electron/ipc.ts for the full rationale. */
+  tickets: (ownerId: string) => ITicketProvider
   outcomes: IOutcomeStore
   agentEvents?: IAgentEventStore
   logger?: RunLogger

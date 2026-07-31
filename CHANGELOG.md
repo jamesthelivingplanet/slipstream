@@ -34,9 +34,74 @@ specifically (schema versioning, build stamping, release flow).
   `maxSpawnsPerHour` is scoped per requesting session (counted from that session's own
   children's `createdAt`, reusing the persisted DB row rather than an in-memory counter, so
   the window survives a daemon restart).
+- Spend is now a ceiling, not just a readout. A configurable `BudgetPolicy`
+  (`perSessionUsdCap` / `dailyUsdCap`, 0 = unlimited, disabled by default) is enforced in
+  two places: `electron/services/sessionReaper.ts` reaps a session over the per-session cap
+  with a reason that names the budget, and `agentSpawnService.ts` refuses a new
+  agent-requested spawn over the daily cap through the same readable-refusal path the spawn
+  limits use. Editable under Settings → Behavior. Backends with no usage reader (grok, kilo,
+  antigravity, and pi for a cwd-resolution reason — see `supportsUsage` in
+  `electron/shared/agents.ts`) are **skipped** rather than read as zero: an unknowable cost
+  is not "under budget", and quietly counting it as zero would exempt exactly the sessions
+  the cap cannot see while the user believed the cap was global. The Settings copy says so,
+  and says that costs are estimates parsed from transcripts, not invoices.
+- Self-service device onboarding (`docs/SECURITY.md` §13). An already-authenticated session
+  mints a single-use pairing code bound to its own owner (`createPairingCode`,
+  `electron/services/devicePairing.ts`), and a new device redeems it at `POST /pair` to
+  receive a real device token — replacing "the operator runs `pnpm tokens -- issue` and
+  hands the string over" as the only path onto a deployment. `/pair` is the one
+  unauthenticated endpoint on an otherwise fully-authenticated daemon, so: codes are hashed
+  at rest like device tokens already are, single-use with an atomic burn, ~5 minute TTL,
+  128-bit entropy, constant-time comparison, a uniform error across every failure case so
+  the endpoint cannot be probed, and rate limiting at 10 attempts/minute per source IP. The
+  code travels in the POST body, and the QR deep link carries it in the URL *fragment* — so
+  neither reaches a reverse proxy's access log, which is the rung-3 concern in
+  `docs/PRODUCTION-READINESS.md` §1. This flow is a deliberate exception to the repo's
+  usual "express intent, never hand over a credential" idiom, because delivering a
+  credential is precisely its purpose; that is why the constraints above are tight.
+- GitHub Issues and GitLab Issues as ticket sources, behind the existing `ITicketProvider`
+  seam (`TicketSource` is now `'jira' | 'linear' | 'github' | 'gitlab'`). Both reuse the
+  per-host git credentials already stored for the PR/MR path rather than introducing a
+  second place to keep the same token, and GitLab honors a configured `baseUrl` so
+  self-hosted instances work. Neither has an "in progress" state for a bare issue, so
+  `startTicket`/`resetTicket` return `null` per the interface's documented no-op contract
+  instead of inventing workflow states.
+- Integration credentials are now per-owner rather than deployment-global — the caveat
+  `docs/PRODUCTION-READINESS.md` §1 attaches to rung 4 and the blocker it names for rung 5
+  (`docs/IDENTITY-SEAM.md` item 6). Config keys are split into two classes: integration
+  credentials and their scoping are owner-scoped, while operator policy (`gc.policy`,
+  `scheduler.policy`, `spawn.policy`, `budget.policy`, VAPID) stays deployment-global,
+  because those describe how the daemon behaves rather than who a person is. Ticket
+  providers are no longer startup singletons — `electron/core/services.ts` exposes an
+  ownerId-keyed factory and every call site resolves the real caller identity first, so the
+  scoping is actual and not merely structural. Existing rows migrate to the `local`
+  identity, so a single-owner deployment sees no behavior change. At-rest encryption
+  (`ss1:`/`sk1:`) is unchanged and still applies to exactly these keys. Still open, and
+  recorded as such: git-push credential reads in `prStatus.ts`/`gitDriver.ts`/`slipstream.ts`,
+  and per-owner data directories (item 5).
+
+### Security
+
+- The Android daemon bearer token is no longer kept in plaintext. `ReplyPrefs` now uses
+  `EncryptedSharedPreferences` backed by an `AndroidKeyStore` `MasterKey`, still readable
+  unattended by `ReplyReceiver` when the app process is dead (which is why the copy exists
+  at all). An existing plaintext value migrates on first access and is deleted; a Keystore
+  initialization failure degrades to "inline reply unavailable" and never falls back to
+  plaintext. This is the mitigation `docs/UX-GO-NO-GO.md` B6 requires if the cut claims the
+  Android shell. It is compile-verified only — four runtime behaviors (Keystore init, the
+  migration against a real prior install, background decrypt-and-POST with the process
+  dead, and the degrade path) need a device, so treat B6 as "mitigation implemented, not
+  field-verified" until then. Per `docs/SECURITY.md` §6's threat model this still does not
+  defend against a same-uid reader.
 
 ### Fixed
 
+- Settings → Security (device pairing codes, fingerprint unlock) is now visible outside the
+  Capacitor mobile shell. It was previously gated behind the same `nativeStorage.isAvailable()`
+  check as the mobile-only "Server" tab, which made the pairing flow's primary use case —
+  generating a code on an already-authenticated desktop/web session to onboard a new
+  phone — unreachable in the UI. The "Server" tab (runtime daemon URL) stays native-only;
+  only "Security" widened (`src/lib/components/SettingsModal.svelte`).
 - A "blank chat" session's `mode` is now persisted directly on the `sessions` row by
   `db.ts`'s `upsertSession` (the column was added by migration 10 in
   `electron/db/migrations.ts`), so it survives a daemon restart; handing a chat session off

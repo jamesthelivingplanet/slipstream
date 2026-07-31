@@ -15,6 +15,7 @@ import { createUsageHandlers } from './rpcHandlers/usage.js'
 import { createPromptTemplateHandlers } from './rpcHandlers/promptTemplates.js'
 import { createChatHandlers } from './rpcHandlers/chat.js'
 import { createPushHandlers } from './rpcHandlers/push.js'
+import { createPairingHandlers } from './rpcHandlers/pairing.js'
 
 export interface Rpc {
   /** Route one request by IPC channel name. Returns the result or throws. */
@@ -119,6 +120,7 @@ export function createRpc(
     ...createPromptTemplateHandlers(deps, ctx),
     ...createChatHandlers(deps, ctx),
     ...createPushHandlers(deps, ctx),
+    ...createPairingHandlers(deps, ctx),
   }
 
   async function handle(channel: string, args: unknown[]): Promise<unknown> {

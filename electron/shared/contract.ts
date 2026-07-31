@@ -623,6 +623,17 @@ export interface PrStatusDTO {
   error?: string
 }
 
+/** Result of createPairingCode (self-service device onboarding, FLO-143's
+ *  open item 2 — see docs/SECURITY.md's device-pairing-codes section and
+ *  docs/IDENTITY-SEAM.md). Minted by an already-authenticated session,
+ *  bound server-side to the CALLER's resolved identity (never a
+ *  client-supplied ownerId); redeemed by a brand-new device at the
+ *  unauthenticated POST /pair HTTP endpoint for a real device token. */
+export interface PairingCodeDTO {
+  code: string
+  expiresAt: number // epoch ms
+}
+
 /** One entry per supported git host (TASK-7LGAO), driving the Settings →
  *  Integrations git-host cards: which extra fields to show alongside the
  *  token input. */
@@ -1215,6 +1226,13 @@ export interface SlipstreamApi {
    *  reconnected" state instead of typed input silently vanishing on a flaky
    *  mobile connection. */
   onPendingInputChange(cb: (sessions: Record<string, number>) => void): () => void
+
+  /** Self-service device onboarding (docs/SECURITY.md's device-pairing-codes
+   *  section): mint a short-lived, single-use pairing code bound to THIS
+   *  caller's identity. Hand the code (or its QR) to a new, not-yet-
+   *  authenticated device, which redeems it at POST /pair for a real device
+   *  token — see TokenGate.svelte's pairing-code path. */
+  createPairingCode(): Promise<PairingCodeDTO>
 }
 
 export const IPC = {
@@ -1302,6 +1320,7 @@ export const IPC = {
   unsubscribeChat: 'session:chatUnsubscribe',
   listAgentSkills: 'session:skills',
   getChatQuestion: 'session:chatQuestion',
+  createPairingCode: 'pairing:createCode',
 } as const
 
 declare global {

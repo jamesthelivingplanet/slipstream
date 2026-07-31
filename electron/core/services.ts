@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import type { ITicketProvider, TicketSource } from '../shared/contract.js'
 import { openDb } from '../db/db.js'
 import { createRepoRegistry } from '../services/repoRegistry.js'
 import { createWorktreeManager } from '../services/worktreeManager.js'
@@ -35,6 +36,7 @@ import { launchSession } from '../services/sessionLauncher.js'
 import { createAgentSpawnService } from '../services/agentSpawnService.js'
 import { createPrStatusService } from '../services/prStatus.js'
 import { createDeviceTokenStore } from '../services/deviceTokenStore.js'
+import { createDevicePairingStore } from '../services/devicePairing.js'
 import { wirePrEventListeners } from './wirePrEventListeners.js'
 import type { IpcDeps } from '../ipc.js'
 
@@ -82,18 +84,30 @@ export function createServices(root: string): IpcDeps {
   restoreInterruptedSessions(sessionStore)
   const runLogger = createRunLogger(root)
   const sessions = createSessionManager(runLogger, root)
-  const linear = createLinearProvider(configStore)
-  const jira = createJiraProvider(configStore)
-  const github = createGithubIssuesProvider(configStore)
-  const gitlab = createGitlabIssuesProvider(configStore)
-  const tickets = createCompositeProvider([linear, jira, github, gitlab])
+  // TASK-7LGAO: ticket-provider credentials are per-owner (see
+  // docs/IDENTITY-SEAM.md "Per-owner integration config"). Provider
+  // construction does no I/O, so building a fresh instance per call is cheap
+  // and always reads live config at call time — these factories replace what
+  // used to be one singleton set of providers shared by every connected
+  // client regardless of their real identity.
+  function ticketProvidersForOwner(ownerId: string): Record<TicketSource, ITicketProvider> {
+    return {
+      linear: createLinearProvider(configStore, ownerId),
+      jira: createJiraProvider(configStore, ownerId),
+      github: createGithubIssuesProvider(configStore, ownerId),
+      gitlab: createGitlabIssuesProvider(configStore, ownerId),
+    }
+  }
+  function ticketsForOwner(ownerId: string): ITicketProvider {
+    return createCompositeProvider(Object.values(ticketProvidersForOwner(ownerId)))
+  }
   // FLO-98/FLO-69/FLO-97/FLO-104: wires the ticket write-back and session
   // persistence `pr`-event listeners in the one order that keeps the
   // write-back's restart-dedupe correct — see wirePrEventListeners.ts.
   wirePrEventListeners({
     sessions,
     store: sessionStore,
-    tickets,
+    tickets: ticketsForOwner,
     outcomes: outcomeStore,
     agentEvents: agentEventStore,
     logger: runLogger,
@@ -112,8 +126,8 @@ export function createServices(root: string): IpcDeps {
     worktrees: createWorktreeManager(os.homedir()),
     sessions,
     ports: createPortBroker(),
-    tickets,
-    ticketProviders: { linear, jira, github, gitlab },
+    tickets: ticketsForOwner,
+    ticketProviders: ticketProvidersForOwner,
     config: configStore,
     sessionStore,
     promptTemplates: createPromptTemplateStore(db),
@@ -128,6 +142,7 @@ export function createServices(root: string): IpcDeps {
     writeCoordinator: createWriteCoordinator(),
     prStatus: createPrStatusService({ config: configStore }),
     deviceTokens: createDeviceTokenStore(db),
+    pairing: createDevicePairingStore(),
     agentCli: {
       binDir: path.join(root, 'bin'),
       cliJsPath: fileURLToPath(new URL('./slipstream-cli.js', import.meta.url)),

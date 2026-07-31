@@ -369,3 +369,10 @@ export const onConnectionChange = call('onConnectionChange', NOOP_UNSUBSCRIBE)
 /** Subscribe to the per-session byte count of writeSession input buffered while
  *  the transport was down (FLO-154). Returns an unsubscribe fn. */
 export const onPendingInputChange = call('onPendingInputChange', NOOP_UNSUBSCRIBE)
+
+// ── Device pairing (self-service onboarding) ────────────────────────────────
+
+/** Mint a short-lived, single-use pairing code bound to this session's
+ *  identity, for onboarding a new device (see TokenGate.svelte / POST
+ *  /pair). No backend → rejects, same as every other authenticated write. */
+export const createPairingCode = call('createPairingCode', NO_BACKEND)
