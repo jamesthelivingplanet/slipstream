@@ -9,6 +9,8 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-31
+
 ### Added
 
 - Slipstream now has an iOS app (FLO-149), a Capacitor kiosk shell alongside the existing
