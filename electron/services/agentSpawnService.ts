@@ -38,6 +38,19 @@
  * request whose id is already in it — a per-request-id check, not a
  * ts-cursor, because a restart replaying a whole file needs an exact "was
  * this one already answered", not "is this newer than the last one I saw".
+ *
+ * Phase 1 spawn safety: `new-agent` had no limit on recursion depth or
+ * fan-out — an agent could spawn agents that spawn agents, unbounded, each
+ * one a real live PTY + worktree + port. `readSpawnPolicy`/`writeSpawnPolicy`
+ * below mirror sessionScheduler.ts's policy read/coerce/write shape exactly
+ * (same config-store-backed, `0 = unlimited` pattern as SchedulerPolicy). The
+ * two caps are enforced in `handleNewAgent`, after the repo resolves but
+ * before a launch is attempted: `maxDepth` walks the `parentId` chain up from
+ * the requesting session (cycle-safe, bounded by `MAX_DEPTH_WALK`, so corrupt
+ * data can't hang the daemon); `maxChildrenPerSession` counts existing
+ * sessions whose `parentId` is the requesting session. Both reject via the
+ * normal `respond(err(...))` path — never throw — same as every other
+ * failure mode this service handles.
  */
 
 import * as fs from 'node:fs'
@@ -53,8 +66,9 @@ import type {
   ISessionStore,
   RepoDTO,
   SessionDTO,
+  SpawnPolicy,
 } from '../shared/contract.js'
-import { BACKEND_KINDS } from '../shared/contract.js'
+import { BACKEND_KINDS, DEFAULT_SPAWN_POLICY } from '../shared/contract.js'
 import { branchFor } from '../shared/branch.js'
 import { buildSystemPrompt } from '../shared/promptComposer.js'
 import {
@@ -62,7 +76,54 @@ import {
   parseAgentResponses,
   type AgentResponse,
 } from './agentRequestSentinel.js'
+// Type-only import: configStore.ts is a leaf dependency (no state, no
+// service-to-service wiring), same as sessionScheduler.ts's own `config:
+// IConfigStore` dep — this does not violate the "services never import each
+// other" convention, since IConfigStore isn't a peer service.
+import type { IConfigStore } from './configStore.js'
 import { launchSession, type LaunchDeps, type LaunchRequest } from './sessionLauncher.js'
+
+const SPAWN_POLICY_KEY = 'spawn.policy'
+
+/** Bounds the parentId-chain walk in `depthOf` below. A real spawn tree will
+ *  never get remotely this deep (the default maxDepth is 3) — this exists
+ *  purely so a corrupted/cyclic parentId chain in the session store can't
+ *  hang the daemon in an infinite loop. */
+const MAX_DEPTH_WALK = 64
+
+function coerce(partial: unknown): SpawnPolicy {
+  const p = (partial ?? {}) as Partial<SpawnPolicy>
+  const depthRaw = p.maxDepth
+  const childrenRaw = p.maxChildrenPerSession
+  const maxDepth =
+    typeof depthRaw === 'number' && Number.isFinite(depthRaw)
+      ? Math.floor(depthRaw)
+      : DEFAULT_SPAWN_POLICY.maxDepth
+  const maxChildrenPerSession =
+    typeof childrenRaw === 'number' && Number.isFinite(childrenRaw)
+      ? Math.floor(childrenRaw)
+      : DEFAULT_SPAWN_POLICY.maxChildrenPerSession
+  return {
+    maxDepth: Math.max(0, maxDepth),
+    maxChildrenPerSession: Math.max(0, maxChildrenPerSession),
+  }
+}
+
+/** Read the spawn policy from the config store, falling back to defaults. */
+export function readSpawnPolicy(config: IConfigStore): SpawnPolicy {
+  const raw = config.get(SPAWN_POLICY_KEY)
+  if (!raw) return { ...DEFAULT_SPAWN_POLICY }
+  try {
+    return coerce(JSON.parse(raw))
+  } catch {
+    return { ...DEFAULT_SPAWN_POLICY }
+  }
+}
+
+/** Normalize and persist a spawn policy. */
+export function writeSpawnPolicy(config: IConfigStore, policy: SpawnPolicy): void {
+  config.set(SPAWN_POLICY_KEY, JSON.stringify(coerce(policy)))
+}
 
 export interface AgentSpawnService {
   /** Remove the daemon-level agentRequest listener. */
@@ -82,6 +143,9 @@ export interface AgentSpawnDeps {
   sessionStore: ISessionStore
   repos: Pick<IRepoRegistry, 'list'>
   outcomeStore: Pick<IOutcomeStore, 'get'>
+  /** Backs the spawn depth/fan-out caps (see class doc + readSpawnPolicy).
+   *  A leaf dependency, not a peer service — see the type-only import above. */
+  config: IConfigStore
   /** Full launch procedure deps (repos/worktrees/sessions/ports/store/
    *  tickets/agentCli) — the same bag core/services.ts assembles for
    *  launchSession/the scheduler. Used only when `scheduler` is absent. */
@@ -185,8 +249,23 @@ function mintTid(): string {
   return `TASK-${Math.random().toString(36).slice(2, 7).toUpperCase()}`
 }
 
+/** Depth of `sessionId` within its spawn tree: a session with no `parentId`
+ *  is depth 0, and each spawn adds 1. Cycle-safe — bounded by
+ *  `MAX_DEPTH_WALK` so a corrupted/cyclic parentId chain can't hang the
+ *  daemon; a walk that hits the bound without reaching a root is treated as
+ *  "at least MAX_DEPTH_WALK deep", which is always over any sane policy cap. */
+function depthOf(sessionStore: ISessionStore, sessionId: string): number {
+  let depth = 0
+  let current = sessionStore.get(sessionId)
+  while (current?.parentId && depth < MAX_DEPTH_WALK) {
+    current = sessionStore.get(current.parentId)
+    depth += 1
+  }
+  return depth
+}
+
 export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService {
-  const { sessions, sessionStore, repos, outcomeStore, launchDeps, scheduler } = deps
+  const { sessions, sessionStore, repos, outcomeStore, launchDeps, scheduler, config } = deps
   const now = deps.now ?? Date.now
   const rawWriteResponse = deps.writeResponse ?? defaultWriteResponse(deps.dataDir)
   const readResponses = deps.readResponses ?? defaultReadResponses(deps.dataDir)
@@ -277,6 +356,37 @@ export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService
       const repo = resolveOwnedRepo(all, repoRef, ownerId)
       if (!repo) {
         respond(parentSessionId, err(id, `Unknown repo: ${repoRef}`))
+        return
+      }
+
+      // Spawn safety caps (see class doc): enforced here, after the repo
+      // resolves but before a launch is attempted, so a rejected request
+      // never claims a worktree/port/PTY.
+      const policy = readSpawnPolicy(config)
+      const newDepth = depthOf(sessionStore, parentSessionId) + 1
+      if (policy.maxDepth > 0 && newDepth > policy.maxDepth) {
+        // Report the parent's REAL depth (newDepth - 1), not policy.maxDepth
+        // — they only coincide when the parent sits exactly at the cap. If
+        // the policy is later lowered below an existing tree's depth, using
+        // the cap here would state a false fact about the agent.
+        respond(
+          parentSessionId,
+          err(
+            id,
+            `Spawn depth limit reached (${policy.maxDepth}): this agent is already ${newDepth - 1} levels deep.`,
+          ),
+        )
+        return
+      }
+      const childCount = sessionStore.list().filter((s) => s.parentId === parentSessionId).length
+      if (policy.maxChildrenPerSession > 0 && childCount >= policy.maxChildrenPerSession) {
+        respond(
+          parentSessionId,
+          err(
+            id,
+            `Spawn limit reached: this session already spawned ${childCount} agents (max ${policy.maxChildrenPerSession}).`,
+          ),
+        )
         return
       }
 

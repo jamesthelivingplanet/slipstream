@@ -9,6 +9,13 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Added
+
+- `slipstream new-agent` now enforces a configurable spawn depth cap and per-session fan-out
+  cap (`spawn.policy`, defaults 3 and 10) so an agent tree cannot grow unbounded.
+- `slipstream repos`, `slipstream agents` and `slipstream new-agent` accept `--json` for
+  machine-readable output.
+
 ### Fixed
 
 - The daemon now pins the per-user tool directories (`~/.local/bin`,

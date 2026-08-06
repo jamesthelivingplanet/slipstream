@@ -85,6 +85,29 @@ describe('parseArgs', () => {
     expect(parseArgs(['--message'])).toBeNull()
     expect(parseArgs(['--message', '--other', 'x'])).toBeNull()
   })
+
+  it('accepts a bare --json (the one boolean flag) without consuming the next arg', () => {
+    expect(parseArgs(['repos', '--json'])).toEqual({
+      flags: { json: 'true' },
+      positionals: ['repos'],
+    })
+    // A bare --json followed by another flag must not swallow it as its value.
+    expect(parseArgs(['--json', '--other', 'x'])).toEqual({
+      flags: { json: 'true', other: 'x' },
+      positionals: [],
+    })
+  })
+
+  it('parses --json=false as an explicit flag value (consumer treats it as OFF)', () => {
+    expect(parseArgs(['agents', '--json=false'])).toEqual({
+      flags: { json: 'false' },
+      positionals: ['agents'],
+    })
+  })
+
+  it('still rejects a non-boolean flag missing its value (--json is a narrow exception)', () => {
+    expect(parseArgs(['--message', '--json'])).toBeNull()
+  })
 })
 
 describe('runCli', () => {
@@ -444,6 +467,31 @@ describe('runCli', () => {
       // not e.g. a single readResponses call that happened to time out early.
       expect((deps.sleep as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(1)
     })
+
+    it('--json prints the raw response object instead of the prose sentence', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      const data = {
+        tid: 'TASK-ABCDE',
+        sessionId: 's99',
+        title: 'Do the thing',
+        branch: 'task-abcde-x',
+        repo: 'acme/api',
+        status: 'running',
+      }
+      channel.respond({ id: 'req-1', ok: true, ts: 0, data })
+
+      const code = await runCli(
+        ['new-agent', '--repo', 'acme/api', '--title', 'Do the thing', '--json'],
+        deps,
+      )
+
+      expect(code).toBe(EXIT_OK)
+      const out = stdoutText(deps)
+      expect(JSON.parse(out)).toEqual(data)
+      expect(out).not.toContain('Spawned agent')
+      expect(out).not.toContain('runs independently')
+    })
   })
 
   describe('repos (TASK-CIOEQ)', () => {
@@ -499,6 +547,43 @@ describe('runCli', () => {
       expect(stderrText(deps)).toContain('timed out')
       expect(stderrText(deps)).toContain('15s')
     })
+
+    it('--json prints the raw array, including the id the table drops', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      const data = [{ id: 'r1', org: 'acme', name: 'api', base: 'main' }]
+      channel.respond({ id: 'req-1', ok: true, ts: 0, data })
+
+      expect(await runCli(['repos', '--json'], deps)).toBe(EXIT_OK)
+      const out = stdoutText(deps)
+      expect(JSON.parse(out)).toEqual(data)
+      expect(out).toContain('"id"')
+    })
+
+    it('--json on an empty list prints [] rather than the human prose', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({ id: 'req-1', ok: true, ts: 0, data: [] })
+
+      expect(await runCli(['repos', '--json'], deps)).toBe(EXIT_OK)
+      expect(stdoutText(deps)).toBe('[]')
+    })
+
+    it('--json=false falls back to the human table (only the literal "true" is on)', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: [{ id: 'r1', org: 'acme', name: 'api', base: 'main' }],
+      })
+
+      expect(await runCli(['repos', '--json=false'], deps)).toBe(EXIT_OK)
+      const out = stdoutText(deps)
+      expect(out).toContain('acme/api')
+      expect(() => JSON.parse(out)).toThrow()
+    })
   })
 
   describe('agents (TASK-CIOEQ)', () => {
@@ -552,6 +637,41 @@ describe('runCli', () => {
 
       expect(code).toBe(EXIT_FAILED)
       expect(stderrText(deps)).toContain('timed out')
+    })
+
+    it('--json prints the raw array, including fields the table drops', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      const data = [
+        {
+          tid: 'TASK-A',
+          title: 'Fix the thing',
+          status: 'running',
+          repo: 'acme/api',
+          sessionId: 's1',
+          branch: 'task-a-fix',
+          prUrl: null,
+          outcome: null,
+        },
+      ]
+      channel.respond({ id: 'req-1', ok: true, ts: 0, data })
+
+      expect(await runCli(['agents', '--json'], deps)).toBe(EXIT_OK)
+      const out = stdoutText(deps)
+      expect(JSON.parse(out)).toEqual(data)
+      expect(out).toContain('"sessionId"')
+      expect(out).toContain('"branch"')
+      expect(out).toContain('"prUrl"')
+      expect(out).toContain('"outcome"')
+    })
+
+    it('--json on an empty list prints [] rather than the human prose', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({ id: 'req-1', ok: true, ts: 0, data: [] })
+
+      expect(await runCli(['agents', '--json'], deps)).toBe(EXIT_OK)
+      expect(stdoutText(deps)).toBe('[]')
     })
   })
 

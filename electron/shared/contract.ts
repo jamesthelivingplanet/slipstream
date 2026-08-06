@@ -61,6 +61,21 @@ export interface SchedulerPolicy {
   maxConcurrent: number // 0 = unlimited: every start fires immediately (pre-FLO-95 behavior)
 }
 export const DEFAULT_SCHEDULER_POLICY: SchedulerPolicy = { maxConcurrent: 0 }
+/** Agent-spawn policy (Phase 1 of the agent-spawn safety change). An agent
+ *  can ask the daemon (via agentSpawnService.ts) to launch a sibling agent,
+ *  and that sibling can do the same — with no cap, a single runaway prompt
+ *  loop can recurse or fan out without bound. Each spawned agent costs a
+ *  real live PTY, a worktree checkout on disk, and a claimed port, so an
+ *  unbounded spawn tree is a resource-exhaustion risk, not just a UI
+ *  annoyance. `maxDepth` bounds how many spawn-generations deep a tree can
+ *  grow; `maxChildrenPerSession` bounds how many direct children any single
+ *  session can spawn. Both use the same `0 = unlimited` convention as
+ *  SchedulerPolicy.maxConcurrent above. */
+export interface SpawnPolicy {
+  maxDepth: number // 0 = unlimited
+  maxChildrenPerSession: number // 0 = unlimited
+}
+export const DEFAULT_SPAWN_POLICY: SpawnPolicy = { maxDepth: 3, maxChildrenPerSession: 10 }
 /** Result of an out-of-band self-test of the agent-facing `slipstream` CLI
  *  (electron/cli/slipstream.ts). Never run inside an agent session — see
  *  CliHealthParams / checkSlipstreamCli — so it adds no agent context. */

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 
-import { createAgentSpawnService } from './agentSpawnService.js'
+import { createAgentSpawnService, writeSpawnPolicy } from './agentSpawnService.js'
 import type { AgentSpawnDeps, AgentSpawnScheduler } from './agentSpawnService.js'
+import type { IConfigStore } from './configStore.js'
 import type { LaunchDeps, LaunchRequest } from './sessionLauncher.js'
 import type { AgentResponse } from './agentRequestSentinel.js'
 import type {
@@ -14,7 +15,19 @@ import type {
   RepoDTO,
   SessionDTO,
   SessionOutcomeDTO,
+  SpawnPolicy,
 } from '../shared/contract.js'
+
+/** Minimal in-memory IConfigStore fake, same shape as the other stores below. */
+function makeConfigStore(): IConfigStore {
+  const map = new Map<string, string>()
+  return {
+    get: (key) => map.get(key),
+    set: (key, value) => {
+      map.set(key, value)
+    },
+  }
+}
 
 function makeRepo(overrides: Partial<RepoDTO> = {}): RepoDTO {
   return {
@@ -46,6 +59,7 @@ function makeSession(overrides: Partial<SessionDTO> = {}): SessionDTO {
 interface Fakes {
   emitter: EventEmitter
   sessionStore: ISessionStore
+  config: IConfigStore
   repoList: RepoDTO[]
   outcomeMap: Map<string, SessionOutcomeDTO>
   responses: Record<string, AgentResponse[]>
@@ -164,18 +178,21 @@ function makeFakes(opts: { withScheduler?: boolean } = {}): Fakes {
       }
     : undefined
 
+  const config = makeConfigStore()
+
   const deps: AgentSpawnDeps = {
     sessions,
     sessionStore,
     repos,
     outcomeStore,
+    config,
     launchDeps,
     scheduler,
     dataDir: '/data',
     writeResponse,
   }
 
-  return { emitter, sessionStore, repoList, outcomeMap, responses, scheduler, deps }
+  return { emitter, sessionStore, config, repoList, outcomeMap, responses, scheduler, deps }
 }
 
 /** Emit an agentRequest and wait for its response to land — the handler runs
@@ -473,6 +490,189 @@ describe('agentSpawnService — agents', () => {
       expect(child1.outcome).toEqual({ result: 'success', summary: 'Shipped it' })
       const child2 = data.find((a) => a.sessionId === 'child-2')!
       expect(child2.outcome).toBeUndefined()
+    }
+    service.dispose()
+  })
+})
+
+describe('agentSpawnService — spawn policy (depth/fan-out caps)', () => {
+  function setPolicy(fakes: Fakes, policy: SpawnPolicy): void {
+    writeSpawnPolicy(fakes.config, policy)
+  }
+
+  it('spawns normally when under both the depth and fan-out caps (defaults)', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.sessionStore.upsert(makeSession()) // parent-1, depth 0, no children yet
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = {
+      id: 'req-depth-ok',
+      kind: 'new-agent',
+      ts: Date.now(),
+      repo: 'acme/api',
+      title: 'Do the thing',
+      prompt: 'go',
+    }
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('rejects with ok:false when the depth cap is reached', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    // root (depth 0) -> parent-1 (depth 1). Requesting a new agent from
+    // parent-1 would create a session at depth 2, over a maxDepth of 1.
+    fakes.sessionStore.upsert(makeSession({ id: 'root' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1', parentId: 'root' }))
+    fakes.repoList.push(makeRepo())
+    setPolicy(fakes, { maxDepth: 1, maxChildrenPerSession: 10 })
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = {
+      id: 'req-depth-reject',
+      kind: 'new-agent',
+      ts: Date.now(),
+      repo: 'acme/api',
+      title: 'Do the thing',
+      prompt: 'go',
+    }
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toMatch(/spawn depth limit reached/i)
+    expect(fakes.scheduler!.submit).not.toHaveBeenCalled()
+    service.dispose()
+  })
+
+  it('rejects with ok:false when the fan-out cap is reached', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'child-a', parentId: 'parent-1' }))
+    fakes.repoList.push(makeRepo())
+    setPolicy(fakes, { maxDepth: 3, maxChildrenPerSession: 1 })
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = {
+      id: 'req-fanout-reject',
+      kind: 'new-agent',
+      ts: Date.now(),
+      repo: 'acme/api',
+      title: 'Do the thing',
+      prompt: 'go',
+    }
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toMatch(/spawn limit reached/i)
+    expect(fakes.scheduler!.submit).not.toHaveBeenCalled()
+    service.dispose()
+  })
+
+  it('maxDepth: 0 means unlimited — a deep chain still spawns', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    // Build a chain 5 generations deep.
+    fakes.sessionStore.upsert(makeSession({ id: 'gen-0' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'gen-1', parentId: 'gen-0' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'gen-2', parentId: 'gen-1' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'gen-3', parentId: 'gen-2' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'gen-4', parentId: 'gen-3' }))
+    fakes.repoList.push(makeRepo())
+    setPolicy(fakes, { maxDepth: 0, maxChildrenPerSession: 10 })
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = {
+      id: 'req-unlimited-depth',
+      kind: 'new-agent',
+      ts: Date.now(),
+      repo: 'acme/api',
+      title: 'Do the thing',
+      prompt: 'go',
+    }
+    const res = await emitAndWaitForResponse(fakes, 'gen-4', req)
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('maxChildrenPerSession: 0 means unlimited — many existing children still spawns', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1' }))
+    for (let i = 0; i < 20; i++) {
+      fakes.sessionStore.upsert(makeSession({ id: `child-${i}`, parentId: 'parent-1' }))
+    }
+    fakes.repoList.push(makeRepo())
+    setPolicy(fakes, { maxDepth: 3, maxChildrenPerSession: 0 })
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = {
+      id: 'req-unlimited-fanout',
+      kind: 'new-agent',
+      ts: Date.now(),
+      repo: 'acme/api',
+      title: 'Do the thing',
+      prompt: 'go',
+    }
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('a parentId cycle terminates (bounded walk) instead of hanging, and never throws', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    // A cyclic parentId chain: a -> b -> a -> ... Corrupt data, but the walk
+    // must be bounded (MAX_DEPTH_WALK) rather than looping forever.
+    fakes.sessionStore.upsert(makeSession({ id: 'cycle-a', parentId: 'cycle-b' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'cycle-b', parentId: 'cycle-a' }))
+    fakes.repoList.push(makeRepo())
+    // Default policy (maxDepth: 3) — the bounded walk will report a depth
+    // well over this, so the request is expected to be rejected, not hung.
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = {
+      id: 'req-cycle',
+      kind: 'new-agent',
+      ts: Date.now(),
+      repo: 'acme/api',
+      title: 'Do the thing',
+      prompt: 'go',
+    }
+    expect(() => fakes.emitter.emit('agentRequest', 'cycle-a', req)).not.toThrow()
+    const res = await emitAndWaitForResponse(fakes, 'cycle-a', req)
+
+    expect(res.ok).toBe(false)
+    service.dispose()
+  })
+
+  it('reports the parent real depth, not the (lowered) configured cap, in the rejection message', async () => {
+    const fakes = makeFakes({ withScheduler: true })
+    // A chain exactly 3 generations deep: root -> gen-1 -> gen-2 -> gen-3.
+    fakes.sessionStore.upsert(makeSession({ id: 'root' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'gen-1', parentId: 'root' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'gen-2', parentId: 'gen-1' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'gen-3', parentId: 'gen-2' }))
+    fakes.repoList.push(makeRepo())
+    // Cap lowered to 1 *after* this tree already exists at depth 3 — the
+    // rejection must state the real depth (3), never the cap (1).
+    setPolicy(fakes, { maxDepth: 1, maxChildrenPerSession: 10 })
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = {
+      id: 'req-message-accuracy',
+      kind: 'new-agent',
+      ts: Date.now(),
+      repo: 'acme/api',
+      title: 'Do the thing',
+      prompt: 'go',
+    }
+    const res = await emitAndWaitForResponse(fakes, 'gen-3', req)
+
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.error).toContain('already 3 levels deep')
+      expect(res.error).not.toContain('already 1 levels deep')
     }
     service.dispose()
   })

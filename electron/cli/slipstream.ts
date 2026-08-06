@@ -147,6 +147,15 @@ ${renderUsageCommandBlock()}
 
 Exit codes: ${renderExitCodes(', ')}.`
 
+/**
+ * Flags that may appear bare (`--json`, no following value) and still parse.
+ * The parser is value-required by design — that strictness is what catches a
+ * dropped `--message` (a bare `--message` before another `--flag` or end of
+ * args is a usage error, not a silent empty string) — so this is a narrow,
+ * explicit exception per flag rather than a general loosening of the parser.
+ */
+const BOOLEAN_FLAGS = new Set(['json'])
+
 /** Hand-rolled flag parser: `--flag value` and `--flag=value`; the rest are positionals. */
 export function parseArgs(
   args: string[],
@@ -160,9 +169,16 @@ export function parseArgs(
       if (eq !== -1) {
         flags[arg.slice(2, eq)] = arg.slice(eq + 1)
       } else {
+        const name = arg.slice(2)
         const value = args[i + 1]
-        if (value === undefined || value.startsWith('--')) return null
-        flags[arg.slice(2)] = value
+        if (value === undefined || value.startsWith('--')) {
+          if (BOOLEAN_FLAGS.has(name)) {
+            flags[name] = 'true'
+            continue
+          }
+          return null
+        }
+        flags[name] = value
         i++
       }
     } else {
@@ -258,6 +274,9 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
   const parsed = parseArgs(rest)
   if (!parsed) return usageError(deps, 'malformed flags (every --flag needs a value)')
   const { flags, positionals } = parsed
+  // Only the literal string 'true' turns JSON mode on — `--json=false` (and
+  // any other value) is OFF, matching the flag's documented on/off contract.
+  const wantsJson = flags['json'] === 'true'
 
   try {
     switch (command) {
@@ -358,6 +377,13 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
           ...(flags['agent'] ? { agent: flags['agent'] } : {}),
         }
         return await sendAndAwait(deps, 'new-agent', payload, 60_000, (data) => {
+          // --json prints the raw response object (sessionId, tid, title,
+          // branch, repo, status) — an agent consuming this to chain a
+          // follow-up wants the exact fields, not the prose sentence.
+          if (wantsJson) {
+            deps.stdout(JSON.stringify(data, null, 2))
+            return
+          }
           const d = data as { tid: string; sessionId: string; branch: string; repo: string }
           deps.stdout(
             `Spawned agent ${d.tid} (session ${d.sessionId}) on branch \`${d.branch}\` in ${d.repo}.\n` +
@@ -368,6 +394,12 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
 
       case 'repos': {
         return await sendAndAwait(deps, 'repos', {}, 15_000, (data) => {
+          // --json prints the raw array (includes `id`, which the table
+          // drops) so a consuming agent can parse fields instead of columns.
+          if (wantsJson) {
+            deps.stdout(JSON.stringify(data, null, 2))
+            return
+          }
           const rows = data as Array<{ org: string; name: string; base: string }>
           if (rows.length === 0) {
             deps.stdout('No repositories registered.')
@@ -384,6 +416,12 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
 
       case 'agents': {
         return await sendAndAwait(deps, 'agents', {}, 15_000, (data) => {
+          // --json prints the raw array (includes `sessionId`, `branch`,
+          // `prUrl`, `outcome` — all dropped by the table) unparsed.
+          if (wantsJson) {
+            deps.stdout(JSON.stringify(data, null, 2))
+            return
+          }
           const rows = data as Array<{ tid: string; title: string; status: string; repo: string }>
           if (rows.length === 0) {
             deps.stdout('No agents spawned from this session yet — try `slipstream new-agent`.')
