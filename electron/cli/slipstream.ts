@@ -154,7 +154,7 @@ Exit codes: ${renderExitCodes(', ')}.`
  * args is a usage error, not a silent empty string) — so this is a narrow,
  * explicit exception per flag rather than a general loosening of the parser.
  */
-const BOOLEAN_FLAGS = new Set(['json'])
+const BOOLEAN_FLAGS = new Set(['json', 'all'])
 
 /** Hand-rolled flag parser: `--flag value` and `--flag=value`; the rest are positionals. */
 export function parseArgs(
@@ -204,6 +204,74 @@ function renderTable(headers: string[], rows: string[][]): string {
       .join('  ')
       .trimEnd()
   return [renderRow(headers), ...rows.map(renderRow)].join('\n')
+}
+
+/** One event line from a `--tid` detail response's `events` array. */
+interface AgentEventLine {
+  kind: AgentEventKind
+  message?: string
+  path?: string
+  ts: number
+}
+
+/** Shape of a single-agent `agents --tid <tid>` detail response. */
+interface AgentDetail {
+  sessionId: string
+  tid: string
+  title: string
+  status: string
+  branch: string
+  repo: string
+  depth: number
+  prUrl?: string
+  outcome?: { result: OutcomeResult; summary: string; details?: string }
+  events: AgentEventLine[]
+}
+
+/**
+ * Render the `--tid` detail view. Unlike the list table this is a single
+ * record with an optional multi-line details blob and a variable-length
+ * event log, neither of which fits table columns — so it's a labeled block
+ * instead, with field labels padded to the widest label (mirroring
+ * renderTable's alignment) so values line up.
+ */
+function renderAgentDetail(d: AgentDetail): string {
+  const lines: string[] = [`${d.tid} — ${d.title}`]
+  const fields: [string, string][] = [
+    ['Status', d.status],
+    ['Repo', d.repo],
+    ['Branch', d.branch],
+    ['Session', d.sessionId],
+    ['Depth', String(d.depth)],
+  ]
+  if (d.prUrl) fields.push(['PR', d.prUrl])
+  // 'Outcome' isn't in `fields` (it's conditionally appended below) but must
+  // still line up with the fields above it, so it's folded into the width.
+  const labelWidth = Math.max(...fields.map(([label]) => label.length), 'Outcome'.length)
+  const labeled = (label: string, value: string): string =>
+    `${(label + ':').padEnd(labelWidth + 1)} ${value}`
+  for (const [label, value] of fields) lines.push(labeled(label, value))
+
+  if (d.outcome) {
+    lines.push(labeled('Outcome', `${d.outcome.result} — ${d.outcome.summary}`))
+    if (d.outcome.details) {
+      lines.push('Details:')
+      // Indent every line of the blob (not just the first) so a multi-line
+      // details string stays visually nested under its heading.
+      for (const line of d.outcome.details.split('\n')) lines.push(`  ${line}`)
+    }
+  }
+
+  // Omitted entirely (heading included) when empty — an agent with no
+  // checkpoints/artifacts/approvals yet shouldn't print an empty section.
+  if (d.events.length > 0) {
+    lines.push('Events:')
+    for (const e of d.events) {
+      const ts = new Date(e.ts).toISOString()
+      lines.push(`  ${e.kind}${e.message ? `: ${e.message}` : ''} (${ts})`)
+    }
+  }
+  return lines.join('\n')
 }
 
 /**
@@ -415,23 +483,52 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       }
 
       case 'agents': {
-        return await sendAndAwait(deps, 'agents', {}, 15_000, (data) => {
-          // --json prints the raw array (includes `sessionId`, `branch`,
-          // `prUrl`, `outcome` — all dropped by the table) unparsed.
+        const wantsAll = flags['all'] === 'true'
+        const tid = flags['tid']
+        // A detail view of one agent (--tid) and a whole-subtree listing
+        // (--all) are different, incompatible requests — one returns a
+        // single object, the other an array — so combining them is a usage
+        // error rather than an ambiguous "which one wins" guess.
+        if (wantsAll && tid) {
+          return usageError(deps, '--all and --tid cannot be combined')
+        }
+        const payload: Record<string, unknown> = tid ? { tid } : wantsAll ? { all: true } : {}
+        return await sendAndAwait(deps, 'agents', payload, 15_000, (data) => {
+          // --json prints the raw payload (list or detail object) unparsed —
+          // includes `sessionId`, `branch`, `prUrl`, `outcome`/`events`, all
+          // dropped or reshaped by the human renderers below.
           if (wantsJson) {
             deps.stdout(JSON.stringify(data, null, 2))
             return
           }
-          const rows = data as Array<{ tid: string; title: string; status: string; repo: string }>
+          if (tid) {
+            deps.stdout(renderAgentDetail(data as AgentDetail))
+            return
+          }
+          const rows = data as Array<{
+            tid: string
+            title: string
+            status: string
+            repo: string
+            depth: number
+          }>
           if (rows.length === 0) {
             deps.stdout('No agents spawned from this session yet — try `slipstream new-agent`.')
             return
           }
+          // --all adds a DEPTH column (direct child = 1); the default list
+          // keeps today's exact table so existing scripts/tests parsing it
+          // don't break.
           deps.stdout(
-            renderTable(
-              ['TID', 'TITLE', 'STATUS', 'REPO'],
-              rows.map((r) => [r.tid, r.title, r.status, r.repo]),
-            ),
+            wantsAll
+              ? renderTable(
+                  ['TID', 'TITLE', 'STATUS', 'REPO', 'DEPTH'],
+                  rows.map((r) => [r.tid, r.title, r.status, r.repo, String(r.depth)]),
+                )
+              : renderTable(
+                  ['TID', 'TITLE', 'STATUS', 'REPO'],
+                  rows.map((r) => [r.tid, r.title, r.status, r.repo]),
+                ),
           )
         })
       }

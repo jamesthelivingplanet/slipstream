@@ -673,6 +673,181 @@ describe('runCli', () => {
       expect(await runCli(['agents', '--json'], deps)).toBe(EXIT_OK)
       expect(stdoutText(deps)).toBe('[]')
     })
+
+    it('--all sends { all: true } and adds a DEPTH column to the table', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: [
+          { tid: 'TASK-A', title: 'Fix the thing', status: 'running', repo: 'acme/api', depth: 1 },
+          { tid: 'TASK-B', title: 'Sub-agent', status: 'running', repo: 'acme/api', depth: 2 },
+        ],
+      })
+
+      const code = await runCli(['agents', '--all'], deps)
+
+      expect(code).toBe(EXIT_OK)
+      expect(deps.sendRequest).toHaveBeenCalledWith('agents', { all: true })
+      const out = stdoutText(deps)
+      const headerLine = out.split('\n')[0]
+      // Column order matters (DEPTH last), not exact padding widths.
+      expect(headerLine.indexOf('TID')).toBeLessThan(headerLine.indexOf('TITLE'))
+      expect(headerLine.indexOf('TITLE')).toBeLessThan(headerLine.indexOf('STATUS'))
+      expect(headerLine.indexOf('STATUS')).toBeLessThan(headerLine.indexOf('REPO'))
+      expect(headerLine.indexOf('REPO')).toBeLessThan(headerLine.indexOf('DEPTH'))
+    })
+
+    it('--all with an empty list keeps the existing empty-list prose', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({ id: 'req-1', ok: true, ts: 0, data: [] })
+
+      expect(await runCli(['agents', '--all'], deps)).toBe(EXIT_OK)
+      expect(stdoutText(deps)).toContain('No agents spawned')
+    })
+
+    it('the default (no --all) table is unchanged: no DEPTH column', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: [{ tid: 'TASK-A', title: 'Fix the thing', status: 'running', repo: 'acme/api' }],
+      })
+
+      expect(await runCli(['agents'], deps)).toBe(EXIT_OK)
+      expect(deps.sendRequest).toHaveBeenCalledWith('agents', {})
+      const out = stdoutText(deps)
+      const headerLine = out.split('\n')[0]
+      expect(headerLine).toContain('TID')
+      expect(headerLine).toContain('TITLE')
+      expect(headerLine).toContain('STATUS')
+      expect(headerLine).toContain('REPO')
+      expect(headerLine).not.toContain('DEPTH')
+      expect(out).not.toContain('DEPTH')
+    })
+
+    it('--tid sends { tid } and renders a labeled detail block', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: {
+          sessionId: 's1',
+          tid: 'TASK-A',
+          title: 'Fix the thing',
+          status: 'running',
+          branch: 'task-a-fix',
+          repo: 'acme/api',
+          depth: 1,
+          prUrl: 'https://example.com/mr/1',
+          outcome: { result: 'success', summary: 'shipped it', details: 'line one\nline two' },
+          events: [
+            { kind: 'checkpoint', message: 'tests green', ts: 1000 },
+            { kind: 'artifact', message: 'report', path: '/a/report.md', ts: 2000 },
+          ],
+        },
+      })
+
+      const code = await runCli(['agents', '--tid', 'TASK-A'], deps)
+
+      expect(code).toBe(EXIT_OK)
+      expect(deps.sendRequest).toHaveBeenCalledWith('agents', { tid: 'TASK-A' })
+      const out = stdoutText(deps)
+      expect(out).toContain('TASK-A')
+      expect(out).toContain('Fix the thing')
+      expect(out).toContain('Status:')
+      expect(out).toContain('Repo:')
+      expect(out).toContain('Branch:')
+      expect(out).toContain('Session:')
+      expect(out).toContain('Depth:')
+      expect(out).toContain('PR:')
+      expect(out).toContain('https://example.com/mr/1')
+      expect(out).toContain('Outcome:')
+      expect(out).toContain('success — shipped it')
+      expect(out).toContain('Details:')
+      expect(out).toContain('line one')
+      expect(out).toContain('line two')
+      expect(out).toContain('Events:')
+      expect(out).toContain('checkpoint: tests green')
+    })
+
+    it('--tid detail with no prUrl omits the PR line', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: {
+          sessionId: 's1',
+          tid: 'TASK-A',
+          title: 'Fix the thing',
+          status: 'running',
+          branch: 'task-a-fix',
+          repo: 'acme/api',
+          depth: 1,
+          events: [],
+        },
+      })
+
+      expect(await runCli(['agents', '--tid', 'TASK-A'], deps)).toBe(EXIT_OK)
+      expect(stdoutText(deps)).not.toContain('PR:')
+    })
+
+    it('--tid detail with no events omits the Events section entirely', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      channel.respond({
+        id: 'req-1',
+        ok: true,
+        ts: 0,
+        data: {
+          sessionId: 's1',
+          tid: 'TASK-A',
+          title: 'Fix the thing',
+          status: 'running',
+          branch: 'task-a-fix',
+          repo: 'acme/api',
+          depth: 1,
+          events: [],
+        },
+      })
+
+      expect(await runCli(['agents', '--tid', 'TASK-A'], deps)).toBe(EXIT_OK)
+      expect(stdoutText(deps)).not.toContain('Events:')
+    })
+
+    it('--tid with --json prints the raw detail object', async () => {
+      const channel = makeFakeChannel()
+      const deps = makeDeps(channel.deps)
+      const data = {
+        sessionId: 's1',
+        tid: 'TASK-A',
+        title: 'Fix the thing',
+        status: 'running',
+        branch: 'task-a-fix',
+        repo: 'acme/api',
+        depth: 1,
+        events: [],
+      }
+      channel.respond({ id: 'req-1', ok: true, ts: 0, data })
+
+      expect(await runCli(['agents', '--tid', 'TASK-A', '--json'], deps)).toBe(EXIT_OK)
+      expect(JSON.parse(stdoutText(deps))).toEqual(data)
+    })
+
+    it('--all combined with --tid is a usage error and sends no request', async () => {
+      const deps = makeDeps()
+      expect(await runCli(['agents', '--all', '--tid', 'TASK-A'], deps)).toBe(EXIT_USAGE)
+      expect(deps.sendRequest).not.toHaveBeenCalled()
+    })
   })
 
   it('unknown command is a usage error naming the command', async () => {

@@ -15,6 +15,9 @@ specifically (schema versioning, build stamping, release flow).
   cap (`spawn.policy`, defaults 3 and 10) so an agent tree cannot grow unbounded.
 - `slipstream repos`, `slipstream agents` and `slipstream new-agent` accept `--json` for
   machine-readable output.
+- `slipstream agents --all` lists the whole spawned-agent subtree, not just direct children.
+- `slipstream agents --tid <tid>` shows one agent in full: outcome details, PR url and
+  recent checkpoints.
 
 ### Fixed
 

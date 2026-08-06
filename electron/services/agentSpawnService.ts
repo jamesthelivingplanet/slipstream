@@ -58,8 +58,10 @@ import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 import type {
+  AgentEventKind,
   AgentRequest,
   BackendKind,
+  IAgentEventStore,
   IOutcomeStore,
   IRepoRegistry,
   ISessionManager,
@@ -143,6 +145,9 @@ export interface AgentSpawnDeps {
   sessionStore: ISessionStore
   repos: Pick<IRepoRegistry, 'list'>
   outcomeStore: Pick<IOutcomeStore, 'get'>
+  /** Backs the `agents --tid` detail view's `events` field (Phase 3 daemon
+   *  half). */
+  agentEventStore: Pick<IAgentEventStore, 'list'>
   /** Backs the spawn depth/fan-out caps (see class doc + readSpawnPolicy).
    *  A leaf dependency, not a peer service — see the type-only import above. */
   config: IConfigStore
@@ -225,8 +230,19 @@ interface AgentListItem {
   status: SessionDTO['status']
   branch: string
   repo: string
+  /** Generation count relative to the REQUESTING session (direct child = 1,
+   *  grandchild = 2, ...) — not an absolute spawn-tree depth. */
+  depth: number
   prUrl?: string
   outcome?: { result: string; summary: string }
+}
+
+/** `agents --tid <tid>` detail response: the same fields as a list row, plus
+ *  the outcome `details` (deliberately omitted from list rows to keep that
+ *  response small) and recent agent events. */
+interface AgentDetailItem extends Omit<AgentListItem, 'outcome'> {
+  outcome?: { result: string; summary: string; details?: string }
+  events: Array<{ kind: AgentEventKind; message?: string; path?: string; ts: number }>
 }
 
 function isOwnedBy(row: { ownerId?: string }, ownerId: string): boolean {
@@ -264,8 +280,65 @@ function depthOf(sessionStore: ISessionStore, sessionId: string): number {
   return depth
 }
 
+/** Bounds the generation-by-generation subtree walk in `collectSubtree`
+ *  below, same rationale as `MAX_DEPTH_WALK`: a real spawn tree is capped by
+ *  `spawn.policy` (default maxDepth 3) and will never get remotely this
+ *  deep — this exists purely so a corrupted/cyclic `parentId` graph can't
+ *  hang the daemon walking outward forever. */
+const MAX_SUBTREE_GENERATIONS = 64
+
+/** Every descendant of `rootSessionId`, found by repeatedly matching
+ *  `parentId` outward one generation at a time (BFS), with `depth` recorded
+ *  RELATIVE to `rootSessionId` (direct child = 1, grandchild = 2, ...) — not
+ *  the absolute spawn-tree depth `depthOf` computes.
+ *
+ *  Cycle-safe: `visited` stops a session from being walked into twice (a
+ *  corrupted `parentId` cycle would otherwise loop the frontier forever),
+ *  and the generation count is separately bounded by
+ *  `MAX_SUBTREE_GENERATIONS` as a second, independent guard.
+ *
+ *  Filtered to rows owned by `ownerId`. Ancestry already implies ownership
+ *  (a session inherits its owner at spawn time — see handleNewAgent), so
+ *  this filter should never actually exclude anything in practice, but the
+ *  identity seam (IDENTITY-SEAM.md) says every read gets scoped by owner
+ *  regardless of what an invariant elsewhere promises — belt and suspenders
+ *  against a future bug upstream of this function. */
+function collectSubtree(
+  sessionStore: ISessionStore,
+  rootSessionId: string,
+  ownerId: string,
+): Array<{ session: SessionDTO; depth: number }> {
+  const everything = sessionStore.list()
+  const visited = new Set<string>([rootSessionId])
+  const results: Array<{ session: SessionDTO; depth: number }> = []
+
+  let frontier = [rootSessionId]
+  let depth = 0
+  while (frontier.length > 0 && depth < MAX_SUBTREE_GENERATIONS) {
+    depth += 1
+    const nextFrontier: string[] = []
+    for (const s of everything) {
+      if (!s.parentId || visited.has(s.id) || !frontier.includes(s.parentId)) continue
+      visited.add(s.id)
+      nextFrontier.push(s.id)
+      if (isOwnedBy(s, ownerId)) results.push({ session: s, depth })
+    }
+    frontier = nextFrontier
+  }
+  return results
+}
+
 export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService {
-  const { sessions, sessionStore, repos, outcomeStore, launchDeps, scheduler, config } = deps
+  const {
+    sessions,
+    sessionStore,
+    repos,
+    outcomeStore,
+    agentEventStore,
+    launchDeps,
+    scheduler,
+    config,
+  } = deps
   const now = deps.now ?? Date.now
   const rawWriteResponse = deps.writeResponse ?? defaultWriteResponse(deps.dataDir)
   const readResponses = deps.readResponses ?? defaultReadResponses(deps.dataDir)
@@ -303,14 +376,62 @@ export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService
     respond(parentSessionId, ok(req.id, data))
   }
 
-  async function handleAgents(parentSessionId: string, req: AgentRequest): Promise<void> {
-    const children = sessionStore.list().filter((s) => s.parentId === parentSessionId)
+  async function handleAgents(
+    parentSessionId: string,
+    req: AgentRequest,
+    ownerId: string,
+  ): Promise<void> {
     const allRepos = await repos.list()
     const repoLabel = (repoId: string): string => {
       const r = allRepos.find((r) => r.id === repoId)
       return r ? `${r.org}/${r.name}` : repoId
     }
-    const data: AgentListItem[] = children.map((s) => {
+
+    const subtree = collectSubtree(sessionStore, parentSessionId, ownerId)
+
+    const tid = req.tid?.trim()
+    if (tid) {
+      // Detail mode: search the WHOLE subtree regardless of `all` — a detail
+      // lookup on a grandchild must work even without also passing `all`.
+      const matches = subtree.filter((row) => row.session.tid === tid)
+      if (matches.length === 0) {
+        respond(parentSessionId, err(req.id, `No agent with tid ${tid} spawned from this session.`))
+        return
+      }
+      // tids are randomly minted (mintTid), so a collision across a subtree
+      // is possible in principle, if unlikely — pick the most recently
+      // created match rather than erroring or picking arbitrarily.
+      const match = matches.reduce((latest, row) =>
+        row.session.createdAt > latest.session.createdAt ? row : latest,
+      )
+      const s = match.session
+      const outcome = outcomeStore.get(s.id)
+      // Capped to the last 20, oldest-to-newest: the whole response is one
+      // NDJSON line, and an unbounded event history would bloat it.
+      const events = agentEventStore.list(s.id).slice(-20)
+      const detail: AgentDetailItem = {
+        sessionId: s.id,
+        tid: s.tid,
+        title: s.title,
+        status: s.status,
+        branch: s.branch,
+        repo: repoLabel(s.repoId),
+        depth: match.depth,
+        prUrl: s.prUrl,
+        outcome: outcome
+          ? { result: outcome.result, summary: outcome.summary, details: outcome.details }
+          : undefined,
+        events: events.map((e) => ({ kind: e.kind, message: e.message, path: e.path, ts: e.ts })),
+      }
+      respond(parentSessionId, ok(req.id, detail))
+      return
+    }
+
+    // List mode: direct children only by default; the whole subtree when
+    // `all === true` (today's shape plus `depth` — nothing else changes,
+    // existing tests pin the rest of this).
+    const rows = req.all === true ? subtree : subtree.filter((row) => row.depth === 1)
+    const data: AgentListItem[] = rows.map(({ session: s, depth }) => {
       const outcome = outcomeStore.get(s.id)
       return {
         sessionId: s.id,
@@ -319,6 +440,7 @@ export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService
         status: s.status,
         branch: s.branch,
         repo: repoLabel(s.repoId),
+        depth,
         prUrl: s.prUrl,
         outcome: outcome ? { result: outcome.result, summary: outcome.summary } : undefined,
       }
@@ -445,7 +567,7 @@ export function createAgentSpawnService(deps: AgentSpawnDeps): AgentSpawnService
         if (req.kind === 'repos') {
           await handleRepos(parentSessionId, req, ownerId)
         } else if (req.kind === 'agents') {
-          await handleAgents(parentSessionId, req)
+          await handleAgents(parentSessionId, req, ownerId)
         } else if (req.kind === 'new-agent') {
           await handleNewAgent(parentSessionId, req, ownerId)
         } else {

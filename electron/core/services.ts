@@ -188,6 +188,7 @@ export function createServices(root: string): IpcDeps {
     sessionStore,
     repos: deps.repos,
     outcomeStore,
+    agentEventStore,
     config: configStore,
     launchDeps: deps,
     scheduler: deps.scheduler,

@@ -8,11 +8,13 @@ import type { LaunchDeps, LaunchRequest } from './sessionLauncher.js'
 import type { AgentResponse } from './agentRequestSentinel.js'
 import type {
   AgentRequest,
+  IAgentEventStore,
   ISessionManager,
   ISessionStore,
   IOutcomeStore,
   IRepoRegistry,
   RepoDTO,
+  SessionAgentEventDTO,
   SessionDTO,
   SessionOutcomeDTO,
   SpawnPolicy,
@@ -62,6 +64,7 @@ interface Fakes {
   config: IConfigStore
   repoList: RepoDTO[]
   outcomeMap: Map<string, SessionOutcomeDTO>
+  eventsMap: Map<string, SessionAgentEventDTO[]>
   responses: Record<string, AgentResponse[]>
   scheduler?: AgentSpawnScheduler
   deps: AgentSpawnDeps
@@ -98,6 +101,11 @@ function makeFakes(opts: { withScheduler?: boolean } = {}): Fakes {
   const outcomeMap = new Map<string, SessionOutcomeDTO>()
   const outcomeStore: Pick<IOutcomeStore, 'get'> = {
     get: (id) => outcomeMap.get(id),
+  }
+
+  const eventsMap = new Map<string, SessionAgentEventDTO[]>()
+  const agentEventStore: Pick<IAgentEventStore, 'list'> = {
+    list: (id) => eventsMap.get(id) ?? [],
   }
 
   const responses: Record<string, AgentResponse[]> = {}
@@ -185,6 +193,7 @@ function makeFakes(opts: { withScheduler?: boolean } = {}): Fakes {
     sessionStore,
     repos,
     outcomeStore,
+    agentEventStore,
     config,
     launchDeps,
     scheduler,
@@ -192,7 +201,17 @@ function makeFakes(opts: { withScheduler?: boolean } = {}): Fakes {
     writeResponse,
   }
 
-  return { emitter, sessionStore, config, repoList, outcomeMap, responses, scheduler, deps }
+  return {
+    emitter,
+    sessionStore,
+    config,
+    repoList,
+    outcomeMap,
+    eventsMap,
+    responses,
+    scheduler,
+    deps,
+  }
 }
 
 /** Emit an agentRequest and wait for its response to land — the handler runs
@@ -455,7 +474,7 @@ describe('agentSpawnService — idempotency across a daemon restart (TASK-CIOEQ)
 })
 
 describe('agentSpawnService — agents', () => {
-  it('returns only sessions with matching parentId, including outcome when present', async () => {
+  it('returns only sessions with matching parentId, including outcome when present, each at depth 1', async () => {
     const fakes = makeFakes()
     fakes.sessionStore.upsert(makeSession({ id: 'parent-1', ownerId: 'local' }))
     fakes.sessionStore.upsert(
@@ -483,15 +502,257 @@ describe('agentSpawnService — agents', () => {
     if (res.ok) {
       const data = res.data as Array<{
         sessionId: string
+        depth: number
         outcome?: { result: string; summary: string }
       }>
       expect(data.map((a) => a.sessionId).sort()).toEqual(['child-1', 'child-2'])
+      expect(data.every((a) => a.depth === 1)).toBe(true)
       const child1 = data.find((a) => a.sessionId === 'child-1')!
       expect(child1.outcome).toEqual({ result: 'success', summary: 'Shipped it' })
       const child2 = data.find((a) => a.sessionId === 'child-2')!
       expect(child2.outcome).toBeUndefined()
     }
     service.dispose()
+  })
+
+  it('`all: true` returns the whole subtree, including grandchildren at the correct depth', async () => {
+    const fakes = makeFakes()
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1', ownerId: 'local' }))
+    fakes.sessionStore.upsert(
+      makeSession({ id: 'child-1', parentId: 'parent-1', ownerId: 'local' }),
+    )
+    fakes.sessionStore.upsert(
+      makeSession({ id: 'grandchild-1', parentId: 'child-1', ownerId: 'local' }),
+    )
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = { id: 'req-all', kind: 'agents', ts: Date.now(), all: true }
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      const data = res.data as Array<{ sessionId: string; depth: number }>
+      const byId = new Map(data.map((a) => [a.sessionId, a.depth]))
+      expect(byId.get('child-1')).toBe(1)
+      expect(byId.get('grandchild-1')).toBe(2)
+    }
+    service.dispose()
+  })
+
+  it('without `all`, the subtree walk terminates on a parentId cycle instead of hanging', async () => {
+    const fakes = makeFakes()
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1', ownerId: 'local' }))
+    // A cyclic parentId chain hanging off parent-1: cycle-a -> cycle-b ->
+    // cycle-a ... corrupt data, but the walk must be bounded, never hang.
+    fakes.sessionStore.upsert(makeSession({ id: 'cycle-a', parentId: 'cycle-b', ownerId: 'local' }))
+    fakes.sessionStore.upsert(makeSession({ id: 'cycle-b', parentId: 'cycle-a', ownerId: 'local' }))
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = { id: 'req-cycle-list', kind: 'agents', ts: Date.now(), all: true }
+    expect(() => fakes.emitter.emit('agentRequest', 'parent-1', req)).not.toThrow()
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+    expect(res.ok).toBe(true)
+    service.dispose()
+  })
+
+  it('excludes a row owned by a different owner even if it is parented into the subtree', async () => {
+    const fakes = makeFakes()
+    fakes.sessionStore.upsert(makeSession({ id: 'parent-1', ownerId: 'local' }))
+    fakes.sessionStore.upsert(
+      makeSession({ id: 'foreign-child', parentId: 'parent-1', ownerId: 'someone-else' }),
+    )
+    fakes.repoList.push(makeRepo())
+    const service = createAgentSpawnService(fakes.deps)
+
+    const req: AgentRequest = { id: 'req-foreign', kind: 'agents', ts: Date.now() }
+    const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+    expect(res.ok).toBe(true)
+    if (res.ok) {
+      const data = res.data as Array<{ sessionId: string }>
+      expect(data.map((a) => a.sessionId)).toEqual([])
+    }
+    service.dispose()
+  })
+
+  describe('detail mode (--tid)', () => {
+    it('returns outcome details and events for a direct child', async () => {
+      const fakes = makeFakes()
+      fakes.sessionStore.upsert(makeSession({ id: 'parent-1', ownerId: 'local' }))
+      fakes.sessionStore.upsert(
+        makeSession({
+          id: 'child-1',
+          tid: 'TASK-CHILD',
+          parentId: 'parent-1',
+          ownerId: 'local',
+          prUrl: 'https://example.com/pr/1',
+        }),
+      )
+      fakes.outcomeMap.set('child-1', {
+        sessionId: 'child-1',
+        result: 'success',
+        summary: 'Shipped it',
+        details: 'Long-form notes about what happened.',
+        reportedAt: Date.now(),
+      })
+      fakes.eventsMap.set('child-1', [
+        { sessionId: 'child-1', kind: 'checkpoint', message: 'started', ts: 1 },
+        { sessionId: 'child-1', kind: 'checkpoint', message: 'finished', ts: 2 },
+      ])
+      fakes.repoList.push(makeRepo())
+      const service = createAgentSpawnService(fakes.deps)
+
+      const req: AgentRequest = {
+        id: 'req-detail',
+        kind: 'agents',
+        ts: Date.now(),
+        tid: 'TASK-CHILD',
+      }
+      const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+      expect(res.ok).toBe(true)
+      if (res.ok) {
+        const data = res.data as {
+          sessionId: string
+          depth: number
+          prUrl?: string
+          outcome?: { result: string; summary: string; details?: string }
+          events: Array<{ kind: string; message?: string; ts: number }>
+        }
+        expect(data.sessionId).toBe('child-1')
+        expect(data.depth).toBe(1)
+        expect(data.prUrl).toBe('https://example.com/pr/1')
+        expect(data.outcome).toEqual({
+          result: 'success',
+          summary: 'Shipped it',
+          details: 'Long-form notes about what happened.',
+        })
+        expect(data.events).toEqual([
+          { kind: 'checkpoint', message: 'started', path: undefined, ts: 1 },
+          { kind: 'checkpoint', message: 'finished', path: undefined, ts: 2 },
+        ])
+      }
+      service.dispose()
+    })
+
+    it('caps events at the last 20, oldest-to-newest', async () => {
+      const fakes = makeFakes()
+      fakes.sessionStore.upsert(makeSession({ id: 'parent-1', ownerId: 'local' }))
+      fakes.sessionStore.upsert(
+        makeSession({ id: 'child-1', tid: 'TASK-MANY', parentId: 'parent-1', ownerId: 'local' }),
+      )
+      const events: SessionAgentEventDTO[] = []
+      for (let i = 0; i < 25; i++) {
+        events.push({ sessionId: 'child-1', kind: 'checkpoint', message: `evt-${i}`, ts: i })
+      }
+      fakes.eventsMap.set('child-1', events)
+      fakes.repoList.push(makeRepo())
+      const service = createAgentSpawnService(fakes.deps)
+
+      const req: AgentRequest = {
+        id: 'req-cap',
+        kind: 'agents',
+        ts: Date.now(),
+        tid: 'TASK-MANY',
+      }
+      const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+      expect(res.ok).toBe(true)
+      if (res.ok) {
+        const data = res.data as { events: Array<{ message?: string; ts: number }> }
+        expect(data.events).toHaveLength(20)
+        expect(data.events[0].message).toBe('evt-5') // oldest kept
+        expect(data.events[19].message).toBe('evt-24') // newest
+        expect(data.events.map((e) => e.ts)).toEqual(
+          [...data.events.map((e) => e.ts)].sort((a, b) => a - b),
+        )
+      }
+      service.dispose()
+    })
+
+    it('finds a grandchild without `all` being set', async () => {
+      const fakes = makeFakes()
+      fakes.sessionStore.upsert(makeSession({ id: 'parent-1', ownerId: 'local' }))
+      fakes.sessionStore.upsert(
+        makeSession({ id: 'child-1', parentId: 'parent-1', ownerId: 'local' }),
+      )
+      fakes.sessionStore.upsert(
+        makeSession({
+          id: 'grandchild-1',
+          tid: 'TASK-GRAND',
+          parentId: 'child-1',
+          ownerId: 'local',
+        }),
+      )
+      fakes.repoList.push(makeRepo())
+      const service = createAgentSpawnService(fakes.deps)
+
+      const req: AgentRequest = {
+        id: 'req-grandchild',
+        kind: 'agents',
+        ts: Date.now(),
+        tid: 'TASK-GRAND',
+        // deliberately no `all`
+      }
+      const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+      expect(res.ok).toBe(true)
+      if (res.ok) {
+        const data = res.data as { sessionId: string; depth: number }
+        expect(data.sessionId).toBe('grandchild-1')
+        expect(data.depth).toBe(2)
+      }
+      service.dispose()
+    })
+
+    it('answers ok:false for an unknown tid', async () => {
+      const fakes = makeFakes()
+      fakes.sessionStore.upsert(makeSession({ id: 'parent-1', ownerId: 'local' }))
+      fakes.sessionStore.upsert(
+        makeSession({ id: 'child-1', parentId: 'parent-1', ownerId: 'local' }),
+      )
+      fakes.repoList.push(makeRepo())
+      const service = createAgentSpawnService(fakes.deps)
+
+      const req: AgentRequest = {
+        id: 'req-unknown-tid',
+        kind: 'agents',
+        ts: Date.now(),
+        tid: 'TASK-NOPE',
+      }
+      const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+      expect(res.ok).toBe(false)
+      if (!res.ok) expect(res.error).toMatch(/no agent with tid TASK-NOPE/i)
+      service.dispose()
+    })
+
+    it('returns an empty events array for a session with no events', async () => {
+      const fakes = makeFakes()
+      fakes.sessionStore.upsert(makeSession({ id: 'parent-1', ownerId: 'local' }))
+      fakes.sessionStore.upsert(
+        makeSession({ id: 'child-1', tid: 'TASK-QUIET', parentId: 'parent-1', ownerId: 'local' }),
+      )
+      fakes.repoList.push(makeRepo())
+      const service = createAgentSpawnService(fakes.deps)
+
+      const req: AgentRequest = {
+        id: 'req-no-events',
+        kind: 'agents',
+        ts: Date.now(),
+        tid: 'TASK-QUIET',
+      }
+      const res = await emitAndWaitForResponse(fakes, 'parent-1', req)
+
+      expect(res.ok).toBe(true)
+      if (res.ok) {
+        const data = res.data as { events: unknown[] }
+        expect(data.events).toEqual([])
+      }
+      service.dispose()
+    })
   })
 })
 

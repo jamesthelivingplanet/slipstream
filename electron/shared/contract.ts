@@ -433,7 +433,11 @@ export type AgentRequestKind = 'new-agent' | 'repos' | 'agents'
 /** Structural shape of one parsed requests.ndjson line. `repo`/`title`/
  *  `prompt`/`agent` only apply to kind 'new-agent'; `agent` is a raw,
  *  unvalidated BackendKind string — the consumer validates it against
- *  BACKEND_KINDS. See agentRequestSentinel.ts for the precise per-kind types. */
+ *  BACKEND_KINDS. `all`/`tid` only apply to kind 'agents': `all` widens the
+ *  listing from direct children to the whole spawned-agent subtree; `tid`
+ *  switches from a listing to a single-agent detail lookup by tid, searched
+ *  across the whole subtree regardless of `all`. See agentRequestSentinel.ts
+ *  for the precise per-kind types. */
 export interface AgentRequest {
   id: string
   kind: AgentRequestKind
@@ -442,6 +446,8 @@ export interface AgentRequest {
   title?: string
   prompt?: string
   agent?: string
+  all?: boolean
+  tid?: string
 }
 
 /* ───────── Chat view (TASK-FPH60) ─────────

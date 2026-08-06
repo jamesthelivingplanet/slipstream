@@ -43,11 +43,18 @@ export interface ReposRequestLine {
   ts: number
 }
 
-/** List sibling agent sessions spawned from the requesting session. */
+/** List sibling agent sessions spawned from the requesting session. `all`
+ *  widens the listing from direct children to the whole spawned-agent
+ *  subtree (unset/false = direct children only, today's default behavior).
+ *  `tid` switches from a listing to a single-agent detail lookup by tid,
+ *  searched across the whole subtree regardless of `all` — a detail lookup
+ *  on a grandchild must still work without also passing `all`. */
 export interface AgentsRequestLine {
   id: string
   kind: 'agents'
   ts: number
+  all?: boolean
+  tid?: string
 }
 
 export type AgentRequest = NewAgentRequestLine | ReposRequestLine | AgentsRequestLine
@@ -90,8 +97,21 @@ function parseRequestLine(line: string): AgentRequest | null {
   const ts = obj['ts']
   if (typeof ts !== 'number' || !Number.isFinite(ts)) return null
 
-  if (kind === 'repos' || kind === 'agents') {
+  if (kind === 'repos') {
     return { id, kind, ts }
+  }
+
+  if (kind === 'agents') {
+    // Extra fields (`all`/`tid`) were previously dropped silently here — the
+    // bare `{ id, kind, ts }` return above discarded anything else the CLI
+    // wrote to requests.ndjson before the daemon ever saw it. Stay lenient in
+    // this module's established style: a malformed `all`/`tid` is just
+    // ignored (falls back to today's direct-children listing), never a parse
+    // failure for the whole line.
+    const result: AgentsRequestLine = { id, kind: 'agents', ts }
+    if (obj['all'] === true) result.all = true
+    if (typeof obj['tid'] === 'string' && obj['tid'].length > 0) result.tid = obj['tid']
+    return result
   }
 
   // kind === 'new-agent'

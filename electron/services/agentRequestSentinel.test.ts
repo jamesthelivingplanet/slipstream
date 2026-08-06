@@ -105,6 +105,38 @@ describe('parseAgentRequests', () => {
     const parsed = parseAgentRequests(raw)
     expect(parsed).toEqual([{ id: 'r1', kind: 'agents', ts }])
   })
+
+  describe('kind agents — all/tid pass-through', () => {
+    it('passes through `all: true`', () => {
+      const ts = Date.now()
+      const raw = JSON.stringify({ id: 'r1', kind: 'agents', ts, all: true })
+      expect(parseAgentRequests(raw)).toEqual([{ id: 'r1', kind: 'agents', ts, all: true }])
+    })
+
+    it('passes through `tid`', () => {
+      const ts = Date.now()
+      const raw = JSON.stringify({ id: 'r1', kind: 'agents', ts, tid: 'TASK-ABCDE' })
+      expect(parseAgentRequests(raw)).toEqual([{ id: 'r1', kind: 'agents', ts, tid: 'TASK-ABCDE' }])
+    })
+
+    it('carries neither field when both are absent', () => {
+      const ts = Date.now()
+      const raw = JSON.stringify({ id: 'r1', kind: 'agents', ts })
+      expect(parseAgentRequests(raw)).toEqual([{ id: 'r1', kind: 'agents', ts }])
+    })
+
+    it('ignores a non-boolean `all`', () => {
+      const ts = Date.now()
+      const raw = JSON.stringify({ id: 'r1', kind: 'agents', ts, all: 'yes' })
+      expect(parseAgentRequests(raw)).toEqual([{ id: 'r1', kind: 'agents', ts }])
+    })
+
+    it('ignores an empty-string `tid`', () => {
+      const ts = Date.now()
+      const raw = JSON.stringify({ id: 'r1', kind: 'agents', ts, tid: '' })
+      expect(parseAgentRequests(raw)).toEqual([{ id: 'r1', kind: 'agents', ts }])
+    })
+  })
 })
 
 describe('parseAgentResponses', () => {

@@ -162,10 +162,11 @@ export const SLIPSTREAM_COMMANDS: readonly SlipstreamCommandSpec[] = [
   {
     command: 'agents',
     invocation: 'slipstream agents',
-    synopsis: 'agents [--json]',
+    synopsis: 'agents [--all] [--tid <tid>]',
+    usageCont: '[--json]',
     requiredCell: '—',
-    optionalCell: '`--json`',
-    effect: 'lists the agents you spawned and their status',
+    optionalCell: '`--all`, `--tid`, `--json`',
+    effect: 'lists spawned agents (with --all, the whole subtree); --tid shows one in full',
   },
   {
     command: 'help',
