@@ -9,6 +9,13 @@ specifically (schema versioning, build stamping, release flow).
 
 ## [Unreleased]
 
+### Fixed
+
+- The daemon now pins the per-user tool directories (`~/.local/bin`,
+  `~/.local/share/mise/shims`) onto its `PATH` in `scripts/serve-with-env.sh`, so agent
+  spawns no longer fail with exit 1 when systemd starts `slipstream.service` before the
+  desktop session imports the login environment (e.g. after a reboot).
+
 ## [0.11.0] - 2026-07-31
 
 ### Added
