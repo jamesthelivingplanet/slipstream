@@ -13,7 +13,11 @@ import type {
   UsageTokens,
 } from '../../electron/shared/contract.js'
 import type { SlipstreamApi } from '../../electron/shared/contract.js'
-import { DEFAULT_GC_POLICY, DEFAULT_SCHEDULER_POLICY } from '../../electron/shared/contract.js'
+import {
+  DEFAULT_GC_POLICY,
+  DEFAULT_SCHEDULER_POLICY,
+  DEFAULT_SPAWN_POLICY,
+} from '../../electron/shared/contract.js'
 
 export const hasBackend = typeof window !== 'undefined' && !!window.slipstream
 
@@ -232,6 +236,12 @@ export const getSchedulerPolicy = call('getSchedulerPolicy', () =>
 )
 
 export const setSchedulerPolicy = call('setSchedulerPolicy', NO_BACKEND)
+
+// ── Agent-spawn depth/fan-out caps (read-only) ──────────────────────────────
+
+export const getSpawnPolicy = call('getSpawnPolicy', () =>
+  Promise.resolve({ ...DEFAULT_SPAWN_POLICY }),
+)
 
 // ── MCP status ───────────────────────────────────────────────────────────
 

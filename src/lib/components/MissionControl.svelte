@@ -43,8 +43,10 @@
     resumeSession,
     handoffSession,
     checkAgentCli,
+    getSpawnPolicy,
   } from '../ipc'
   import { extractAsk, formatWait, suggestedReplies } from '../missionControl'
+  import { buildDepthIndex, isAtDepthLimit, isAtFanoutLimit, spawnedLabel } from '../spawnCaps'
   import { formatCost, formatTokens, dayKeyFromMs } from '../../../electron/shared/usageFormat.js'
   import { pushToast } from '../toast'
   import { statusBucket } from '../types'
@@ -53,6 +55,7 @@
     UsageSummary,
     SessionUsage,
     PrStatusDTO,
+    SpawnPolicy,
   } from '../../../electron/shared/contract.js'
   import Streamlines from './Streamlines.svelte'
   import AgentSelector from './AgentSelector.svelte'
@@ -202,6 +205,13 @@
     return chips
   }
 
+  // Session `status` events fire on every PTY chunk, not just on a real
+  // change, so `$sessions` updates continuously even on an idle screen (see
+  // "status flaps by design" in CLAUDE.md). Building the depth index here,
+  // once per `$sessions` change, keeps `atDepthLimit` an O(1) lookup per
+  // row instead of an O(n) walk per row (O(n^2) per render pass).
+  $: depthIndex = buildDepthIndex($sessions)
+
   $: needsSessions = $sessions.filter((s) => statusBucket(s.status) === 'needs')
   $: runningSessions = $sessions.filter((s) => statusBucket(s.status) === 'running')
   $: doneSessions = $sessions.filter((s) => statusBucket(s.status) === 'done')
@@ -221,6 +231,18 @@
     $sessions.length === 0 &&
     $tickets.length === 0
 
+  /** Fetch the spawn-cap policy once. Caps rarely (if ever) change while
+   *  Mission Control is open, so — unlike usage/PR status — there's no
+   *  polling interval, just a single guarded fetch on mount. */
+  async function refreshSpawnPolicy(): Promise<void> {
+    if (!hasBackend) return
+    try {
+      spawnPolicy = await getSpawnPolicy()
+    } catch {
+      // leave spawnPolicy null — chip helpers fall back to plain rendering
+    }
+  }
+
   onMount(() => {
     tickTimer = setInterval(() => (now = Date.now()), 30_000)
     refreshUsage()
@@ -229,6 +251,7 @@
     refreshAllPrStatuses()
     // 60s alongside the usage timer; the backend TTL-caches per prUrl so this stays cheap.
     prTimer = setInterval(refreshAllPrStatuses, 60_000)
+    refreshSpawnPolicy()
   })
   onDestroy(() => {
     clearInterval(tickTimer)
@@ -345,6 +368,43 @@
     if (!s.id) return 0
     return $sessions.filter((x) => x.parentId === s.id).length
   }
+
+  /** Spawn-cap policy (depth/fan-out caps a `slipstream new-agent` request
+   *  is checked against), fetched once on mount. Stays `null` in plain-
+   *  browser design mode (no `hasBackend`) or if the fetch fails — every
+   *  chip helper below treats `null` as "policy unavailable" and falls back
+   *  to today's plain rendering rather than showing a half-filled cap. */
+  let spawnPolicy: SpawnPolicy | null = null
+
+  /** Text for a session's "spawned" chip: "{n}/{max} spawned" once the
+   *  fan-out cap is known and enforced, else the original plain "{n}
+   *  spawned" (unlimited cap, or policy not yet available). */
+  function spawnChipText(s: Session): string {
+    const n = spawnedCount(s)
+    return spawnPolicy ? spawnedLabel(n, spawnPolicy.maxChildrenPerSession) : `${n} spawned`
+  }
+
+  /** True when `s` has spawned as many (or more) children as the fan-out cap
+   *  allows — the daemon will refuse this session's next `slipstream
+   *  new-agent` request. False whenever the policy isn't known yet. */
+  function atFanoutLimit(s: Session): boolean {
+    if (!spawnPolicy) return false
+    return isAtFanoutLimit(spawnedCount(s), spawnPolicy.maxChildrenPerSession)
+  }
+
+  /** True when `s` sits at (or past) the spawn depth cap — it can spawn no
+   *  further descendants. False whenever the policy isn't known yet. */
+  function atDepthLimit(s: Session): boolean {
+    if (!spawnPolicy || !s.id) return false
+    return isAtDepthLimit(depthIndex.get(s.id) ?? 0, spawnPolicy.maxDepth)
+  }
+
+  // Explanatory `title`s for the two at-limit chips — kept as constants so
+  // the three row layouts below can't drift into slightly different wording.
+  const FANOUT_LIMIT_TITLE =
+    'This session has reached its spawn fan-out cap — further "slipstream new-agent" requests from it are refused.'
+  const DEPTH_LIMIT_TITLE =
+    'This session has reached the spawn depth limit and cannot spawn further agents.'
 
   /** Mirrors NewAgentDialog's ticket → prompt convention so launching from here
    *  is equivalent to picking the ticket in the New Agent dialog. The agent
@@ -561,7 +621,15 @@
                     <span class="add">+{s.add}</span>
                     <span class="del">−{s.del}</span>
                     {#if spawnedCount(s) > 0}
-                      <span class="chip mono">{spawnedCount(s)} spawned</span>
+                      <span
+                        class="chip mono"
+                        class:at-limit={atFanoutLimit(s)}
+                        title={atFanoutLimit(s) ? FANOUT_LIMIT_TITLE : undefined}
+                        >{spawnChipText(s)}</span
+                      >
+                    {/if}
+                    {#if atDepthLimit(s)}
+                      <span class="chip mono at-limit" title={DEPTH_LIMIT_TITLE}>depth limit</span>
                     {/if}
                     <span class="go" class:err={s.status === 'errored'}>Answer →</span>
                   </div>
@@ -637,7 +705,15 @@
                     >
                   {/if}
                   {#if spawnedCount(s) > 0}
-                    <span class="chip mono">{spawnedCount(s)} spawned</span>
+                    <span
+                      class="chip mono"
+                      class:at-limit={atFanoutLimit(s)}
+                      title={atFanoutLimit(s) ? FANOUT_LIMIT_TITLE : undefined}
+                      >{spawnChipText(s)}</span
+                    >
+                  {/if}
+                  {#if atDepthLimit(s)}
+                    <span class="chip mono at-limit" title={DEPTH_LIMIT_TITLE}>depth limit</span>
                   {/if}
                   {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
                   {#if s.status === 'detached' || s.status === 'queued'}
@@ -821,7 +897,15 @@
                     >
                   {/if}
                   {#if spawnedCount(s) > 0}
-                    <span class="chip mono">{spawnedCount(s)} spawned</span>
+                    <span
+                      class="chip mono"
+                      class:at-limit={atFanoutLimit(s)}
+                      title={atFanoutLimit(s) ? FANOUT_LIMIT_TITLE : undefined}
+                      >{spawnChipText(s)}</span
+                    >
+                  {/if}
+                  {#if atDepthLimit(s)}
+                    <span class="chip mono at-limit" title={DEPTH_LIMIT_TITLE}>depth limit</span>
                   {/if}
                   {#if s.agentKind}<span class="chip mono">{s.agentKind}</span>{/if}
                   {#if costFor(s)}
@@ -1269,6 +1353,13 @@
     background: hsl(var(--muted) / 0.6);
     color: hsl(var(--muted-foreground));
     flex: 0 0 auto;
+  }
+  /* Spawn-cap warning modifier (fan-out chip at its cap, and the depth-limit
+   * chip): reuses the same --st-needs (amber/warning) token as the
+   * .pr-chip.pr-needs "CI …" chip below, not a new ad-hoc color. */
+  .chip.at-limit {
+    color: hsl(var(--st-needs));
+    background: hsl(var(--st-needs) / 0.12);
   }
   /* TASK-CIOEQ: the "↳ spawned by" chip on running/landed rows — truncate so
    * a long parent title can't blow out the row layout. */

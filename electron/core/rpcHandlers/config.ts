@@ -11,6 +11,7 @@ import { GIT_PROVIDERS } from '../../services/gitProviders/registry.js'
 import { parseAgentArgs } from '../../shared/agentCli.js'
 import { readGcPolicy, writeGcPolicy } from '../../services/sessionReaper.js'
 import { readSchedulerPolicy, writeSchedulerPolicy } from '../../services/sessionScheduler.js'
+import { readSpawnPolicy } from '../../services/agentSpawnService.js'
 import type { RpcContext } from '../rpcContext.js'
 import type { ChannelHandlerMap } from './types.js'
 
@@ -113,6 +114,10 @@ export function createConfigHandlers(deps: IpcDeps, _ctx: RpcContext): ChannelHa
       writeSchedulerPolicy(deps.config, args[0] as SchedulerPolicy)
       void deps.scheduler?.drain() // raising the cap frees slots immediately
       return undefined
+    },
+
+    [IPC.getSpawnPolicy]: async () => {
+      return readSpawnPolicy(deps.config)
     },
   }
 }

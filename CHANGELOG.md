@@ -20,6 +20,9 @@ specifically (schema versioning, build stamping, release flow).
   recent checkpoints.
 - `slipstream agents --wait [--timeout <s>]` blocks until the spawned agents reach a terminal
   state, giving an agent a fan-in primitive instead of a poll loop.
+- Mission Control now shows spawn-cap state on agent rows: how many agents a session has
+  spawned against the configured fan-out cap, and a marker when a session has hit the spawn
+  depth limit and can no longer spawn.
 
 ### Fixed
 

@@ -1092,6 +1092,14 @@ export interface SlipstreamApi {
   getSchedulerPolicy(): Promise<SchedulerPolicy>
   setSchedulerPolicy(policy: SchedulerPolicy): Promise<void>
 
+  /** Read-only: the current agent-spawn depth/fan-out caps (SpawnPolicy,
+   *  above). No setter is exposed here — Phase 1 of the agent-spawn safety
+   *  change only surfaces the caps so the UI (Mission Control) can show a
+   *  session's spawn-tree depth/fan-out against them; the policy itself is
+   *  still configured via the `spawn.policy` config key directly, not
+   *  through a renderer-facing setter. */
+  getSpawnPolicy(): Promise<SpawnPolicy>
+
   /** Out-of-band self-test of the agent-facing `slipstream` CLI: spawns it
    *  directly (`slipstream help`) outside of any agent session, so it never
    *  adds anything to an agent's context. */
@@ -1252,6 +1260,7 @@ export const IPC = {
   setGcPolicy: 'gc:setPolicy',
   getSchedulerPolicy: 'scheduler:getPolicy',
   setSchedulerPolicy: 'scheduler:setPolicy',
+  getSpawnPolicy: 'spawn:getPolicy',
   getCliStatus: 'cli:status',
   getDiagnostics: 'diag:get',
   checkAgentCli: 'agent:checkCli',
