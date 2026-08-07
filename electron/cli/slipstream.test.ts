@@ -848,6 +848,281 @@ describe('runCli', () => {
       expect(await runCli(['agents', '--all', '--tid', 'TASK-A'], deps)).toBe(EXIT_USAGE)
       expect(deps.sendRequest).not.toHaveBeenCalled()
     })
+
+    describe('--wait', () => {
+      it('returns EXIT_OK as soon as all watched agents are terminal', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        channel.respond({
+          id: 'req-1',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix the thing', status: 'done', repo: 'acme/api' }],
+        })
+
+        const code = await runCli(['agents', '--wait'], deps)
+
+        expect(code).toBe(EXIT_OK)
+        expect(deps.sendRequest).toHaveBeenCalledTimes(1)
+        expect(stdoutText(deps)).toContain('Wait complete: 1 agent finished.')
+      })
+
+      it('keeps waiting while an agent is running/queued/idle until a later poll is terminal', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        channel.respond({
+          id: 'req-1',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'running', repo: 'acme/api' }],
+        })
+        channel.respond({
+          id: 'req-2',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'queued', repo: 'acme/api' }],
+        })
+        channel.respond({
+          id: 'req-3',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'idle', repo: 'acme/api' }],
+        })
+        channel.respond({
+          id: 'req-4',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'done', repo: 'acme/api' }],
+        })
+
+        const code = await runCli(['agents', '--wait'], deps)
+
+        expect(code).toBe(EXIT_OK)
+        expect(deps.sendRequest).toHaveBeenCalledTimes(4)
+        expect(stdoutText(deps)).toContain('Wait complete: 1 agent finished.')
+      })
+
+      it('CRITICAL: a `needs` status alone never ends the wait, but a later terminal status does', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        channel.respond({
+          id: 'req-1',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'needs', repo: 'acme/api' }],
+        })
+        channel.respond({
+          id: 'req-2',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'needs', repo: 'acme/api' }],
+        })
+        channel.respond({
+          id: 'req-3',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'done', repo: 'acme/api' }],
+        })
+
+        const code = await runCli(['agents', '--wait'], deps)
+
+        expect(code).toBe(EXIT_OK)
+        expect(deps.sendRequest).toHaveBeenCalledTimes(3)
+      })
+
+      it('CRITICAL: a `needs` status alone times out rather than being treated as terminal', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        // Every poll reports `needs` — never resolves on its own.
+        channel.respond({
+          id: 'req-1',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'needs', repo: 'acme/api' }],
+        })
+        channel.respond({
+          id: 'req-2',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'needs', repo: 'acme/api' }],
+        })
+
+        const code = await runCli(['agents', '--wait', '--timeout', '10'], deps)
+
+        expect(code).toBe(EXIT_FAILED)
+        expect(stderrText(deps)).toContain('TASK-A (needs)')
+      })
+
+      it.each(['done', 'errored', 'interrupted', 'reaped'])(
+        '"%s" individually counts as terminal',
+        async (status) => {
+          const channel = makeFakeChannel()
+          const deps = makeDeps(channel.deps)
+          channel.respond({
+            id: 'req-1',
+            ok: true,
+            ts: 0,
+            data: [{ tid: 'TASK-A', title: 'Fix', status, repo: 'acme/api' }],
+          })
+
+          const code = await runCli(['agents', '--wait'], deps)
+
+          expect(code).toBe(EXIT_OK)
+          expect(deps.sendRequest).toHaveBeenCalledTimes(1)
+        },
+      )
+
+      it('honours the overall --timeout and reports the unfinished agent and its status', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        channel.respond({
+          id: 'req-1',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'running', repo: 'acme/api' }],
+        })
+        channel.respond({
+          id: 'req-2',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'running', repo: 'acme/api' }],
+        })
+        channel.respond({
+          id: 'req-3',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'running', repo: 'acme/api' }],
+        })
+
+        const code = await runCli(['agents', '--wait', '--timeout', '10'], deps)
+
+        expect(code).toBe(EXIT_FAILED)
+        expect(stderrText(deps)).toContain('TASK-A (running)')
+        expect(stderrText(deps)).toContain('timed out')
+      })
+
+      it('a transient per-request timeout mid-wait does not abort the outer loop', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        // No response queued for req-1 at all: requestAndPoll's own inner 15s
+        // window elapses with nothing matching — that must not abort the
+        // outer --wait loop. req-2 IS queued, so the next outer poll succeeds.
+        channel.respond({
+          id: 'req-2',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'done', repo: 'acme/api' }],
+        })
+
+        const code = await runCli(['agents', '--wait'], deps)
+
+        expect(code).toBe(EXIT_OK)
+        expect(deps.sendRequest).toHaveBeenCalledTimes(2)
+      })
+
+      it('a daemon ok:false response mid-wait fails promptly without further polling', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        channel.respond({ id: 'req-1', ok: false, ts: 0, error: 'Unknown tid: TASK-A' })
+
+        const code = await runCli(['agents', '--wait', '--tid', 'TASK-A'], deps)
+
+        expect(code).toBe(EXIT_FAILED)
+        expect(stderrText(deps)).toContain('Unknown tid: TASK-A')
+        expect(deps.sendRequest).toHaveBeenCalledTimes(1)
+      })
+
+      it('an empty watch set returns EXIT_OK immediately with no further polling', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        channel.respond({ id: 'req-1', ok: true, ts: 0, data: [] })
+
+        const code = await runCli(['agents', '--wait'], deps)
+
+        expect(code).toBe(EXIT_OK)
+        expect(stdoutText(deps)).toContain('No agents to wait on.')
+        expect(deps.sendRequest).toHaveBeenCalledTimes(1)
+      })
+
+      it('--wait --all sends { all: true }', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        channel.respond({
+          id: 'req-1',
+          ok: true,
+          ts: 0,
+          data: [{ tid: 'TASK-A', title: 'Fix', status: 'done', repo: 'acme/api', depth: 1 }],
+        })
+
+        const code = await runCli(['agents', '--wait', '--all'], deps)
+
+        expect(code).toBe(EXIT_OK)
+        expect(deps.sendRequest).toHaveBeenCalledWith('agents', { all: true })
+      })
+
+      it('--wait --tid sends { tid } and the final output includes the detail block', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        channel.respond({
+          id: 'req-1',
+          ok: true,
+          ts: 0,
+          data: {
+            sessionId: 's1',
+            tid: 'TASK-A',
+            title: 'Fix the thing',
+            status: 'done',
+            branch: 'task-a-fix',
+            repo: 'acme/api',
+            depth: 1,
+            events: [],
+          },
+        })
+
+        const code = await runCli(['agents', '--wait', '--tid', 'TASK-A'], deps)
+
+        expect(code).toBe(EXIT_OK)
+        expect(deps.sendRequest).toHaveBeenCalledWith('agents', { tid: 'TASK-A' })
+        const out = stdoutText(deps)
+        expect(out).toContain('Status:')
+        expect(out).toContain('Repo:')
+      })
+
+      it('--timeout without --wait is a usage error and sends no request', async () => {
+        const deps = makeDeps()
+        expect(await runCli(['agents', '--timeout', '10'], deps)).toBe(EXIT_USAGE)
+        expect(deps.sendRequest).not.toHaveBeenCalled()
+      })
+
+      it('a non-numeric --timeout with --wait is a usage error', async () => {
+        const deps = makeDeps()
+        expect(await runCli(['agents', '--wait', '--timeout', 'abc'], deps)).toBe(EXIT_USAGE)
+        expect(deps.sendRequest).not.toHaveBeenCalled()
+      })
+
+      it.each(['0', '-5'])(
+        'a non-positive --timeout (%s) with --wait is a usage error',
+        async (timeout) => {
+          const deps = makeDeps()
+          expect(await runCli(['agents', '--wait', '--timeout', timeout], deps)).toBe(EXIT_USAGE)
+          expect(deps.sendRequest).not.toHaveBeenCalled()
+        },
+      )
+
+      it('--wait --json on success prints only raw JSON, never "Wait complete"', async () => {
+        const channel = makeFakeChannel()
+        const deps = makeDeps(channel.deps)
+        const data = [{ tid: 'TASK-A', title: 'Fix', status: 'done', repo: 'acme/api' }]
+        channel.respond({ id: 'req-1', ok: true, ts: 0, data })
+
+        const code = await runCli(['agents', '--wait', '--json'], deps)
+
+        expect(code).toBe(EXIT_OK)
+        const out = stdoutText(deps)
+        expect(out).not.toContain('Wait complete')
+        expect(JSON.parse(out)).toEqual(data)
+      })
+    })
   })
 
   it('unknown command is a usage error naming the command', async () => {

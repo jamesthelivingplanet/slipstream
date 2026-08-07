@@ -163,10 +163,12 @@ export const SLIPSTREAM_COMMANDS: readonly SlipstreamCommandSpec[] = [
     command: 'agents',
     invocation: 'slipstream agents',
     synopsis: 'agents [--all] [--tid <tid>]',
-    usageCont: '[--json]',
+    usageCont: '[--json] [--wait] [--timeout <s>]',
     requiredCell: '—',
-    optionalCell: '`--all`, `--tid`, `--json`',
-    effect: 'lists spawned agents (with --all, the whole subtree); --tid shows one in full',
+    optionalCell: '`--all`, `--tid`, `--json`, `--wait`, `--timeout <s>`',
+    effect:
+      'lists spawned agents (with --all, the whole subtree); --tid shows one in full; ' +
+      '--wait blocks until the watched agent(s) finish',
   },
   {
     command: 'help',

@@ -49,6 +49,26 @@ const VALID_OUTCOME_RESULTS: OutcomeResult[] = ['success', 'partial', 'failure']
 const MAX_SUMMARY_LEN = 4000
 const MAX_DETAILS_LEN = 32000
 
+/**
+ * Statuses at which a session has stopped working — the "stop waiting" set
+ * for `agents --wait`'s fan-in loop (Phase 4). `needs` is deliberately
+ * excluded, for two independent reasons:
+ *
+ * 1. Session status flaps by design (see this repo's CLAUDE.md gotcha
+ *    "Session status flaps by design" and docs/ARCHITECTURE.md's session-
+ *    status-pipeline section): the `status` event fires on every PTY chunk,
+ *    not on change, so an idle TUI's heuristic ping-pongs `needs`<->`running`
+ *    every few seconds as it repaints. Treating `needs` as terminal would
+ *    make `--wait` return early on a perfectly healthy, still-working agent.
+ * 2. A genuine `needs` means the agent is blocked on a HUMAN, not on work
+ *    completing, so it will not resolve itself by waiting longer. `--wait`
+ *    must keep polling through it; `--timeout` is what bounds that case.
+ */
+const TERMINAL_STATUSES = new Set(['done', 'errored', 'interrupted', 'reaped'])
+
+/** Default `--timeout` for `agents --wait`, in seconds: 30 minutes. */
+const DEFAULT_WAIT_TIMEOUT_SECONDS = 1800
+
 export interface CliDeps {
   cwd: string
   dataDir: string
@@ -154,7 +174,7 @@ Exit codes: ${renderExitCodes(', ')}.`
  * args is a usage error, not a silent empty string) — so this is a narrow,
  * explicit exception per flag rather than a general loosening of the parser.
  */
-const BOOLEAN_FLAGS = new Set(['json', 'all'])
+const BOOLEAN_FLAGS = new Set(['json', 'all', 'wait'])
 
 /** Hand-rolled flag parser: `--flag value` and `--flag=value`; the rest are positionals. */
 export function parseArgs(
@@ -274,6 +294,16 @@ function renderAgentDetail(d: AgentDetail): string {
   return lines.join('\n')
 }
 
+/** Outcome of a single send-request-then-poll round trip (see `requestAndPoll`
+ *  below): the daemon answered ok (with its `data`), the daemon answered with
+ *  ok:false (a deterministic failure — won't change on retry), or no matching
+ *  response arrived before the deadline (a transient condition — the daemon
+ *  may just be busy or mid-restart). Callers that retry (the `--wait` loop)
+ *  need to tell these apart; a single-shot caller (`sendAndAwait`) collapses
+ *  both failure kinds into the same exit code. */
+type RequestOutcome =
+  { kind: 'success'; data: unknown } | { kind: 'error'; message: string } | { kind: 'timeout' }
+
 /**
  * Send a new-agent/repos/agents request and poll `responses.ndjson` for the
  * matching id (TASK-CIOEQ). The CLI has no daemon auth token and is
@@ -281,7 +311,36 @@ function renderAgentDetail(d: AgentDetail): string {
  * agent-spawn channel is request/response-over-files instead: append a line
  * to requests.ndjson, then poll responses.ndjson every ~150ms until the
  * daemon (agentSpawnService.ts) answers by id or the deadline passes.
+ *
+ * Returns a discriminated result rather than rendering or exiting itself, so
+ * it can serve both a single request/response call site (`sendAndAwait`,
+ * below) and `agents --wait`'s loop (`waitForAgents`), which needs the raw
+ * data back to inspect statuses and re-issues this per poll interval.
  */
+async function requestAndPoll(
+  deps: CliDeps,
+  kind: 'new-agent' | 'repos' | 'agents',
+  payload: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<RequestOutcome> {
+  const id = await deps.sendRequest(kind, payload)
+  const deadline = deps.now() + timeoutMs
+  for (;;) {
+    const responses = await deps.readResponses()
+    const match = responses.find((r) => r.id === id)
+    if (match) {
+      if (match.ok) return { kind: 'success', data: match.data }
+      return { kind: 'error', message: match.error }
+    }
+    if (deps.now() >= deadline) return { kind: 'timeout' }
+    await deps.sleep(150)
+  }
+}
+
+/** Single request/response call site: send, poll, then either render the
+ *  success data via `onSuccess` or print an error and fail — today's exact
+ *  behavior for new-agent/repos/agents, now implemented on top of the shared
+ *  `requestAndPoll` core. */
 async function sendAndAwait(
   deps: CliDeps,
   kind: 'new-agent' | 'repos' | 'agents',
@@ -289,27 +348,166 @@ async function sendAndAwait(
   timeoutMs: number,
   onSuccess: (data: unknown) => void,
 ): Promise<number> {
-  const id = await deps.sendRequest(kind, payload)
-  const deadline = deps.now() + timeoutMs
-  for (;;) {
-    const responses = await deps.readResponses()
-    const match = responses.find((r) => r.id === id)
-    if (match) {
-      if (match.ok) {
-        onSuccess(match.data)
-        return EXIT_OK
-      }
-      deps.stderr(match.error)
+  const result = await requestAndPoll(deps, kind, payload, timeoutMs)
+  switch (result.kind) {
+    case 'success':
+      onSuccess(result.data)
+      return EXIT_OK
+    case 'error':
+      deps.stderr(result.message)
       return EXIT_FAILED
-    }
-    if (deps.now() >= deadline) {
+    case 'timeout':
       deps.stderr(
         `slipstream: timed out waiting ${Math.round(timeoutMs / 1000)}s for a response to '${kind}'. ` +
           'The app may be busy or unreachable — try again shortly.',
       )
       return EXIT_FAILED
+  }
+}
+
+/** Render an `agents` response the same way regardless of whether it came
+ *  from the plain (non-wait) path or `--wait`'s final success — kept as one
+ *  function so the two paths can never drift in what they print for the same
+ *  payload shape. */
+function renderAgentsResponse(
+  deps: CliDeps,
+  data: unknown,
+  tid: string | undefined,
+  wantsAll: boolean,
+  wantsJson: boolean,
+): void {
+  // --json prints the raw payload (list or detail object) unparsed —
+  // includes `sessionId`, `branch`, `prUrl`, `outcome`/`events`, all
+  // dropped or reshaped by the human renderers below.
+  if (wantsJson) {
+    deps.stdout(JSON.stringify(data, null, 2))
+    return
+  }
+  if (tid) {
+    deps.stdout(renderAgentDetail(data as AgentDetail))
+    return
+  }
+  const rows = data as Array<{
+    tid: string
+    title: string
+    status: string
+    repo: string
+    depth: number
+  }>
+  if (rows.length === 0) {
+    deps.stdout('No agents spawned from this session yet — try `slipstream new-agent`.')
+    return
+  }
+  // --all adds a DEPTH column (direct child = 1); the default list keeps
+  // today's exact table so existing scripts/tests parsing it don't break.
+  deps.stdout(
+    wantsAll
+      ? renderTable(
+          ['TID', 'TITLE', 'STATUS', 'REPO', 'DEPTH'],
+          rows.map((r) => [r.tid, r.title, r.status, r.repo, String(r.depth)]),
+        )
+      : renderTable(
+          ['TID', 'TITLE', 'STATUS', 'REPO'],
+          rows.map((r) => [r.tid, r.title, r.status, r.repo]),
+        ),
+  )
+}
+
+/** Pull the tid → status pairs to watch out of an `agents` response. `--tid`
+ *  returns a single detail object; the list/`--all` paths return an array —
+ *  either way the wait loop only cares about tid and status. */
+function extractStatuses(data: unknown, tid: string | undefined): Map<string, string> {
+  const statuses = new Map<string, string>()
+  if (tid) {
+    const d = data as AgentDetail
+    statuses.set(d.tid, d.status)
+  } else {
+    const rows = data as Array<{ tid: string; status: string }>
+    for (const r of rows) statuses.set(r.tid, r.status)
+  }
+  return statuses
+}
+
+/**
+ * `agents --wait`'s fan-in loop (Phase 4): re-query `agents` with the same
+ * payload every 5s until every watched agent reaches a status in
+ * TERMINAL_STATUSES, or the overall `--timeout` (default 30 min) elapses.
+ *
+ * Poll interval is 5s, not `requestAndPoll`'s 150ms single-response poll:
+ * every re-query appends a line to requests.ndjson, an append-only log the
+ * daemon replays in full on every restart (agentRequestSentinel.ts) — a
+ * tight loop here would bloat a file that gets re-read on every daemon
+ * start, for no benefit (an agent that finishes a few seconds before we
+ * notice doesn't matter to whatever is fanning in).
+ */
+async function waitForAgents(
+  deps: CliDeps,
+  payload: Record<string, unknown>,
+  tid: string | undefined,
+  wantsAll: boolean,
+  wantsJson: boolean,
+  timeoutMs: number,
+): Promise<number> {
+  const WAIT_POLL_MS = 5_000
+  const deadline = deps.now() + timeoutMs
+  let lastStatuses = new Map<string, string>()
+
+  for (;;) {
+    const result = await requestAndPoll(deps, 'agents', payload, 15_000)
+
+    if (result.kind === 'error') {
+      // Deterministic for this request shape (e.g. an unknown --tid) and
+      // will never resolve by retrying — stop immediately instead of
+      // re-asking the same failing question every 5s for the full
+      // --timeout (default 30 minutes).
+      deps.stderr(result.message)
+      return EXIT_FAILED
     }
-    await deps.sleep(150)
+
+    if (result.kind === 'success') {
+      lastStatuses = extractStatuses(result.data, tid)
+
+      // Nothing to watch (no children spawned at all) — waiting out the
+      // timeout for an empty set would just be a pointless pause.
+      if (lastStatuses.size === 0) {
+        if (wantsJson) {
+          deps.stdout(JSON.stringify(result.data, null, 2))
+        } else {
+          deps.stdout('No agents to wait on.')
+        }
+        return EXIT_OK
+      }
+
+      const allTerminal = [...lastStatuses.values()].every((s) => TERMINAL_STATUSES.has(s))
+      if (allTerminal) {
+        const n = lastStatuses.size
+        if (!wantsJson) {
+          deps.stdout(`Wait complete: ${n} agent${n === 1 ? '' : 's'} finished.`)
+        }
+        renderAgentsResponse(deps, result.data, tid, wantsAll, wantsJson)
+        return EXIT_OK
+      }
+    }
+    // result.kind === 'timeout' here means this individual re-query's own
+    // 15s response window elapsed with no answer — transient (the daemon may
+    // be briefly busy or mid-restart), never conflated with the overall
+    // --timeout deadline checked below. Do not abort; fall through and retry.
+
+    if (deps.now() >= deadline) {
+      const unfinished = [...lastStatuses.entries()]
+        .filter(([, status]) => !TERMINAL_STATUSES.has(status))
+        .map(([t, status]) => `${t} (${status})`)
+        .join(', ')
+      deps.stderr(
+        `slipstream: timed out after ${Math.round(timeoutMs / 1000)}s waiting for agents to finish. ` +
+          `Still not finished: ${unfinished || 'unknown'}. ` +
+          'An agent showing `needs` is waiting on a human, not on work completing, and will not ' +
+          'finish on its own — it will not resolve by waiting longer.',
+      )
+      return EXIT_FAILED
+    }
+
+    await deps.sleep(WAIT_POLL_MS)
   }
 }
 
@@ -485,6 +683,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
       case 'agents': {
         const wantsAll = flags['all'] === 'true'
         const tid = flags['tid']
+        const wantsWait = flags['wait'] === 'true'
         // A detail view of one agent (--tid) and a whole-subtree listing
         // (--all) are different, incompatible requests — one returns a
         // single object, the other an array — so combining them is a usage
@@ -492,44 +691,33 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         if (wantsAll && tid) {
           return usageError(deps, '--all and --tid cannot be combined')
         }
+
+        // --timeout only bounds the --wait loop below; without --wait there
+        // is no loop for it to bound, so it's a usage error rather than a
+        // silently-ignored flag.
+        if (flags['timeout'] !== undefined && !wantsWait) {
+          return usageError(deps, '--timeout requires --wait')
+        }
+        let waitTimeoutMs = DEFAULT_WAIT_TIMEOUT_SECONDS * 1000
+        if (wantsWait && flags['timeout'] !== undefined) {
+          const seconds = Number(flags['timeout'])
+          if (!Number.isFinite(seconds) || seconds <= 0) {
+            return usageError(
+              deps,
+              `invalid --timeout: ${flags['timeout']} (must be a positive number of seconds)`,
+            )
+          }
+          waitTimeoutMs = seconds * 1000
+        }
+
         const payload: Record<string, unknown> = tid ? { tid } : wantsAll ? { all: true } : {}
+
+        if (wantsWait) {
+          return await waitForAgents(deps, payload, tid, wantsAll, wantsJson, waitTimeoutMs)
+        }
+
         return await sendAndAwait(deps, 'agents', payload, 15_000, (data) => {
-          // --json prints the raw payload (list or detail object) unparsed —
-          // includes `sessionId`, `branch`, `prUrl`, `outcome`/`events`, all
-          // dropped or reshaped by the human renderers below.
-          if (wantsJson) {
-            deps.stdout(JSON.stringify(data, null, 2))
-            return
-          }
-          if (tid) {
-            deps.stdout(renderAgentDetail(data as AgentDetail))
-            return
-          }
-          const rows = data as Array<{
-            tid: string
-            title: string
-            status: string
-            repo: string
-            depth: number
-          }>
-          if (rows.length === 0) {
-            deps.stdout('No agents spawned from this session yet — try `slipstream new-agent`.')
-            return
-          }
-          // --all adds a DEPTH column (direct child = 1); the default list
-          // keeps today's exact table so existing scripts/tests parsing it
-          // don't break.
-          deps.stdout(
-            wantsAll
-              ? renderTable(
-                  ['TID', 'TITLE', 'STATUS', 'REPO', 'DEPTH'],
-                  rows.map((r) => [r.tid, r.title, r.status, r.repo, String(r.depth)]),
-                )
-              : renderTable(
-                  ['TID', 'TITLE', 'STATUS', 'REPO'],
-                  rows.map((r) => [r.tid, r.title, r.status, r.repo]),
-                ),
-          )
+          renderAgentsResponse(deps, data, tid, wantsAll, wantsJson)
         })
       }
 

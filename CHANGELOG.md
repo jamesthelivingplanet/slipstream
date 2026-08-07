@@ -18,6 +18,8 @@ specifically (schema versioning, build stamping, release flow).
 - `slipstream agents --all` lists the whole spawned-agent subtree, not just direct children.
 - `slipstream agents --tid <tid>` shows one agent in full: outcome details, PR url and
   recent checkpoints.
+- `slipstream agents --wait [--timeout <s>]` blocks until the spawned agents reach a terminal
+  state, giving an agent a fan-in primitive instead of a poll loop.
 
 ### Fixed
 
